@@ -70,6 +70,10 @@ aes-gcm = "0.10"
 sha2 = "0.10"
 rand = "0.9"
 
+# 检索
+jieba-rs = "0.4"
+pgvector = { version = "0.4", features = ["sqlx"] }
+
 # 测试
 testcontainers = "0.24"
 

@@ -119,15 +119,15 @@ async fn provider_roundtrip_and_usage_accounting() {
 
     // 记账
     registry
-        .record_usage(
-            "mock",
-            "bge-m3",
-            Purpose::Embed.as_str(),
-            resp.input_tokens,
-            0,
-            resp.latency_ms,
-            None,
-        )
+        .record_usage(&agent_memory_llm::types::UsageMeta {
+            provider: "mock".into(),
+            model: "bge-m3".into(),
+            purpose: Purpose::Embed.as_str().into(),
+            input_tokens: resp.input_tokens,
+            output_tokens: 0,
+            latency_ms: resp.latency_ms,
+            job_id: None,
+        })
         .await;
     let summary = registry
         .usage_summary(chrono::Utc::now() - chrono::Duration::hours(1))

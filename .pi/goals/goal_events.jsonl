@@ -3,3 +3,16 @@
 {"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-0","at":"2026-08-19T10:46:02.735Z"}
 {"type":"task_complete","goalId":"mszyrq72-4tcahn","taskId":"phase-0","evidence":"commit b79e67f：compose 全栈构建并启动，/health→{\"status\":\"ok\"}、/ready→{\"status\":\"ready\",\"migration_version\":1}（容器内自动迁移）；CI 三 job 全套配置（fmt/clippy/test + lint/tsc/build + docker build）；testcontainers 集成测试 migra","at":"2026-08-19T11:13:50.859Z"}
 {"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-1","at":"2026-08-19T11:14:14.807Z"}
+{"type":"goal_resumed","goalId":"mszyrq72-4tcahn","reason":"user","at":"2026-08-19T12:11:56.473Z"}
+{"type":"goal_resumed","goalId":"mszyrq72-4tcahn","reason":"user","at":"2026-08-19T12:16:14.330Z"}
+{"type":"goal_resumed","goalId":"mszyrq72-4tcahn","reason":"user","at":"2026-08-19T12:17:14.783Z"}
+{"type":"auditor_toggled","goalId":"mszyrq72-4tcahn","enabled":false,"at":"2026-08-19T12:18:06.795Z"}
+{"type":"auditor_toggled","goalId":"mszyrq72-4tcahn","enabled":true,"at":"2026-08-19T12:18:07.803Z"}
+{"type":"auditor_toggled","goalId":"mszyrq72-4tcahn","enabled":false,"at":"2026-08-19T12:18:08.371Z"}
+{"type":"auditor_toggled","goalId":"mszyrq72-4tcahn","enabled":true,"at":"2026-08-19T12:18:08.909Z"}
+{"type":"goal_focused","goalId":"mszyrq72-4tcahn","reason":"selected","at":"2026-08-19T12:19:58.937Z"}
+{"type":"goal_focused","goalId":"mszyrq72-4tcahn","reason":"selected","at":"2026-08-19T12:20:18.302Z"}
+{"type":"goal_resumed","goalId":"mszyrq72-4tcahn","reason":"user","at":"2026-08-19T12:20:23.569Z"}
+{"type":"task_complete","goalId":"mszyrq72-4tcahn","taskId":"phase-1","evidence":"commit 55292a7 + 4064366：①迁移——10 份迁移在干净 testcontainers PG 应用+幂等重放，16 表存在性/vector(1024)列型/状态机 CHECK/幂等键唯一约束集成测试绿；②jobs 全生命周期——入队→抢占(SKIP LOCKED)→成功/退避重试→dead/永久failed/复活/僵尸回收/幂等去重/Runner 真执行 5 项集成测试绿；③","at":"2026-08-19T12:20:33.689Z"}
+{"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-2","at":"2026-08-19T12:22:05.266Z"}
+{"type":"goal_paused","goalId":"mszyrq72-4tcahn","reason":"user","status":"paused","at":"2026-08-19T13:35:24.077Z"}

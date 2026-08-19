@@ -216,29 +216,29 @@ pub async fn test_provider(
             let mut parts = Vec::new();
             if let Some(Ok(r)) = c {
                 registry
-                    .record_usage(
-                        &name,
-                        &r.model,
-                        "test",
-                        r.input_tokens,
-                        r.output_tokens,
-                        r.latency_ms,
-                        None,
-                    )
+                    .record_usage(&agent_memory_llm::types::UsageMeta {
+                        provider: name.clone(),
+                        model: r.model.clone(),
+                        purpose: "test".into(),
+                        input_tokens: r.input_tokens,
+                        output_tokens: r.output_tokens,
+                        latency_ms: r.latency_ms,
+                        job_id: None,
+                    })
                     .await;
                 parts.push(format!("chat {}ms", r.latency_ms));
             }
             if let Some(Ok(r)) = e {
                 registry
-                    .record_usage(
-                        &name,
-                        &r.model,
-                        "test",
-                        r.input_tokens,
-                        0,
-                        r.latency_ms,
-                        None,
-                    )
+                    .record_usage(&agent_memory_llm::types::UsageMeta {
+                        provider: name.clone(),
+                        model: r.model.clone(),
+                        purpose: "test".into(),
+                        input_tokens: r.input_tokens,
+                        output_tokens: 0,
+                        latency_ms: r.latency_ms,
+                        job_id: None,
+                    })
                     .await;
                 parts.push(format!(
                     "embed {}ms×{}维",

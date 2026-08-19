@@ -8,8 +8,8 @@
 |---|---|---|---|---|
 | 0 | 项目地基 | — | **Done** (2026-10) | [phases/phase-0-foundation.md](phases/phase-0-foundation.md) |
 | 1 | 核心底座 | 0 | **Done** (2026-10) | [phases/phase-1-core-infra.md](phases/phase-1-core-infra.md) |
-| 2 | 记忆域（Chat Memory L0–L3） | 1 | **Next** | [phases/phase-2-memory.md](phases/phase-2-memory.md) |
-| 3 | 知识域（Knowledge） | 1 | Not started | [phases/phase-3-knowledge.md](phases/phase-3-knowledge.md) |
+| 2 | 记忆域（Chat Memory L0–L3） | 1 | **Done** (2026-10) | [phases/phase-2-memory.md](phases/phase-2-memory.md) |
+| 3 | 知识域（Knowledge） | 1 | **Next** | [phases/phase-3-knowledge.md](phases/phase-3-knowledge.md) |
 | 4 | Wiki 域 | 1 | Not started | [phases/phase-4-wiki.md](phases/phase-4-wiki.md) |
 | 5 | CodeGraph 桥 | 1 | Not started | [phases/phase-5-codegraph.md](phases/phase-5-codegraph.md) |
 | 6 | Web 控制台 | 2–5 | Not started | [phases/phase-6-web.md](phases/phase-6-web.md) |
@@ -19,6 +19,12 @@
 
 ## Done
 
+- **Phase 2 记忆域**（2026-10）：search（jieba 预分词 + pgvector + RRF 融合）+
+  distill（extract/arbitrate/organize/persona/consolidate 五阶段链 + 版本化提示词 +
+  LLM I/O 全量记入 job_events）+ core MemoryService（L0 写入/防抖触发/检索/context 包/
+  atoms 治理/画像历史回滚）+ /memory/* 12 端点。
+  真 LLM e2e 全断言通过（矛盾 supersede + 画像 v1→v2 + 三层 context 引用链），
+  途中修 5 个真 bug，见 [evidence/README.md](evidence/README.md)
 - **Phase 1 核心底座**（2026-10）：10 份迁移（16 表全域 schema 定版）+ jobs 任务系统
   （抢占/退避重试/僵尸回收/幂等/事件/Runner）+ llm 出口（provider 抽象/AES-GCM 密钥加密/
   purpose 路由/用量记账）+ 鉴权（opaque 会话 + API key scopes）+ OpenAPI 快照。
@@ -34,7 +40,7 @@
 
 ## Next
 
-- Phase 2 记忆域（[phases/phase-2-memory.md](phases/phase-2-memory.md)）
+- Phase 3 知识域（[phases/phase-3-knowledge.md](phases/phase-3-knowledge.md)）
 
 ## Deferred
 

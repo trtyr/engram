@@ -18,6 +18,11 @@ pub struct JobContext {
 }
 
 impl JobContext {
+    /// 域表连接池（与队列同池）。
+    pub fn pool(&self) -> &sqlx::PgPool {
+        self.queue.pool()
+    }
+
     /// 更新进度（n/total 等）。
     pub async fn progress(&self, progress: serde_json::Value) -> Result<(), JobError> {
         self.queue.progress(self.job.id, progress).await

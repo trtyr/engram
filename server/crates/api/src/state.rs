@@ -35,4 +35,16 @@ impl AppState {
         self.master_key = key.filter(|s| !s.is_empty()).map(MasterKey);
         self
     }
+
+    /// LLM 注册表（master_key 缺省时用占位密钥——仅查询用量等不涉密操作可用）。
+    pub fn registry(&self) -> agent_memory_llm::ProviderRegistry {
+        let hex = self
+            .master_key
+            .as_ref()
+            .map(|m| m.0.clone())
+            .unwrap_or_else(|| "00".repeat(32));
+        let cipher = agent_memory_llm::KeyCipher::from_hex_master(&hex)
+            .expect("主密钥格式恒合法（占位 64 hex）");
+        agent_memory_llm::ProviderRegistry::new(self.pool.clone(), cipher)
+    }
 }

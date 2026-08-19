@@ -32,8 +32,18 @@ async fn main() -> anyhow::Result<()> {
     let version = agent_memory_storage::current_version(&pool).await?;
     tracing::info!(migration_version = ?version, "迁移就绪");
 
-    // 4. 任务 runner（Phase 1：占位注册表；Phase 2 起注册真实 handler）
-    // TODO(phase-2): Runner::new(pool.clone(), RunnerConfig::default()).register(...).start()
+    // 4. 任务 runner：注册蒸馏链 handler
+    let runner = agent_memory_distill::register_handlers(
+        agent_memory_jobs::Runner::new(pool.clone(), agent_memory_jobs::RunnerConfig::default()),
+        agent_memory_distill::gateway_llm(
+            pool.clone(),
+            agent_memory_llm::KeyCipher::from_hex_master(
+                &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
+            )
+            .expect("主密钥格式恒合法"),
+        ),
+    );
+    let runner_handle = runner.start();
 
     // 5. HTTP 服务
     let state = AppState::new(pool)
@@ -45,10 +55,12 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "HTTP 监听");
 
-    // 6. 优雅停机（容器 SIGTERM）
+    // 6. 优雅停机（容器 SIGTERM）：先等 HTTP 再停 runner
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    runner_handle.shutdown();
+    runner_handle.join().await;
     Ok(())
 }
 

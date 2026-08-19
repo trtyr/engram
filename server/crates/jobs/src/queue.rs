@@ -17,6 +17,11 @@ impl JobQueue {
         Self { pool }
     }
 
+    /// 内部连接池（handler 直接操作域表用）。
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     /// 入队。幂等键命中时返回既有任务（不重复入队）。
     pub async fn enqueue(&self, template: JobTemplate) -> Result<Job, JobError> {
         // 幂等键先查（任何非终态或已成功的同键任务都直接复用）

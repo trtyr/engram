@@ -1,4 +1,4 @@
-//! jobs 测试基建。
+//! search 测试基建。
 
 use sqlx::PgPool;
 use testcontainers::core::WaitFor;
@@ -30,9 +30,10 @@ pub async fn connect_with_retry(url: &str) -> anyhow::Result<PgPool> {
     for _ in 0..30 {
         if let Ok(pool) =
             agent_memory_storage::connect_pool(&agent_memory_storage::PoolConfig::new(url)).await
-            && sqlx::query("SELECT 1").execute(&pool).await.is_ok()
         {
-            return Ok(pool);
+            if sqlx::query("SELECT 1").execute(&pool).await.is_ok() {
+                return Ok(pool);
+            }
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }

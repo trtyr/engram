@@ -190,11 +190,11 @@ async fn runner_executes_registered_handler() {
     // 轮询等待执行完成
     let mut done = None;
     for _ in 0..100 {
-        if let Some(j) = queue.get(job.id).await.unwrap() {
-            if j.status == JobStatus::Succeeded {
-                done = Some(j);
-                break;
-            }
+        if let Some(j) = queue.get(job.id).await.unwrap()
+            && j.status == JobStatus::Succeeded
+        {
+            done = Some(j);
+            break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

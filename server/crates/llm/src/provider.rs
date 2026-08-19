@@ -229,11 +229,14 @@ pub struct ProviderRegistry {
 /// DB 行。
 #[derive(Debug, sqlx::FromRow)]
 struct ProviderRow {
+    #[allow(dead_code, reason = "SELECT * 伴随字段")]
     id: Uuid,
     name: String,
     base_url: String,
     api_key_encrypted: Vec<u8>,
+    #[allow(dead_code, reason = "SELECT * 伴随字段")]
     models: sqlx::types::Json<Vec<ModelInfo>>,
+    #[allow(dead_code, reason = "SELECT * 伴随字段")]
     is_default: bool,
 }
 
@@ -283,28 +286,63 @@ impl ProviderRegistry {
         )))
     }
 
-    /// 记账（失败静默——记账故障不该影响业务，但要留日志）。
-    pub async fn record_usage(
+    /// 按用途解析 (provider, model)：路由链优先；回退默认 provider 中
+    /// **具备对应能力**的模型（Embed→embedding 能力，chat 用途→非 embedding）。
+    pub async fn resolve(
         &self,
-        provider: &str,
-        model: &str,
-        purpose: &str,
-        input_tokens: i64,
-        output_tokens: i64,
-        latency_ms: i64,
-        job_id: Option<Uuid>,
-    ) {
+        purpose: crate::types::Purpose,
+    ) -> Result<(std::sync::Arc<OpenAiCompatProvider>, String), LlmError> {
+        let table = crate::router::PurposeRouter::new(self.pool_for_test())
+            .table()
+            .await?;
+        for rule in table.chain(purpose) {
+            if let Ok(p) = self.get(&rule.provider).await {
+                return Ok((p, rule.model.clone()));
+            }
+        }
+        // 默认 provider + 按能力选模型
+        type DefaultRow = (String, String, Vec<u8>, sqlx::types::Json<Vec<ModelInfo>>);
+        let row: Option<DefaultRow> =
+            sqlx::query_as(
+                "SELECT name, base_url, api_key_encrypted, models FROM llm_providers WHERE is_default = true LIMIT 1",
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| LlmError::Transient(e.to_string()))?;
+        let Some((name, base_url, enc, models)) = row else {
+            return Err(LlmError::NotConfigured("未配置任何 LLM provider".into()));
+        };
+        let want_embed = purpose == crate::types::Purpose::Embed;
+        let model = models
+            .0
+            .iter()
+            .find(|m| {
+                let has_emb = m.capabilities.iter().any(|c| c == "embedding");
+                want_embed == has_emb
+            })
+            .or_else(|| models.0.first())
+            .map(|m| m.id.clone())
+            .ok_or_else(|| LlmError::NotConfigured(format!("provider {name} 未配置模型")))?;
+        let api_key = self.cipher.decrypt(&enc)?;
+        Ok((
+            Arc::new(OpenAiCompatProvider::new(name, base_url, api_key)),
+            model,
+        ))
+    }
+
+    /// 记账（失败静默——记账故障不该影响业务，但要留日志）。
+    pub async fn record_usage(&self, u: &crate::types::UsageMeta) {
         let res = sqlx::query(
             "INSERT INTO llm_usage (provider, model, purpose, input_tokens, output_tokens, latency_ms, job_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
-        .bind(provider)
-        .bind(model)
-        .bind(purpose)
-        .bind(input_tokens)
-        .bind(output_tokens)
-        .bind(latency_ms as i32)
-        .bind(job_id)
+        .bind(&u.provider)
+        .bind(&u.model)
+        .bind(&u.purpose)
+        .bind(u.input_tokens)
+        .bind(u.output_tokens)
+        .bind(u.latency_ms as i32)
+        .bind(u.job_id)
         .execute(&self.pool)
         .await;
         if let Err(e) = res {

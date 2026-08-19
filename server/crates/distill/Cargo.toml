@@ -6,3 +6,21 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+agent-memory-jobs = { path = "../jobs" }
+agent-memory-llm = { path = "../llm" }
+agent-memory-search = { path = "../search" }
+
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+pgvector.workspace = true
+
+[dev-dependencies]
+testcontainers.workspace = true
+anyhow.workspace = true
+agent-memory-storage = { path = "../storage" }

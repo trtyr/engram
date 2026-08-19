@@ -6,3 +6,17 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+sqlx.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+uuid.workspace = true
+jieba-rs.workspace = true
+pgvector.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+testcontainers.workspace = true
+anyhow.workspace = true
+agent-memory-storage = { path = "../storage" }
+tokio.workspace = true

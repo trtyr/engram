@@ -2,4 +2,7 @@
 //!
 //! 依赖方向（见 docs/plantree/baseline/module-map.md）：
 //! `api → core → (storage, llm, jobs, search, distill, wiki-engine, cg-bridge)`
-//! core 不被 storage/llm/jobs 等基础 crate 依赖。
+
+pub mod memory;
+
+pub use memory::{MemoryService, SearchResponse};

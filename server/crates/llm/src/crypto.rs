@@ -34,7 +34,7 @@ impl KeyCipher {
     pub fn encrypt(&self, plaintext: &str) -> Result<Vec<u8>, LlmError> {
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.key));
         let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        rand::rng().fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
         let ct = cipher
             .encrypt(
@@ -78,7 +78,7 @@ pub fn sha256_hex(input: &str) -> String {
 }
 
 fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return None;
     }
     (0..hex.len())

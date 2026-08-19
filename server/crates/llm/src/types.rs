@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// 调用用途（路由键）。档位见 topics/llm-providers.md。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -121,6 +122,18 @@ pub struct UsageRecord {
     pub latency_ms: i32,
     pub job_id: Option<uuid::Uuid>,
     pub ts: DateTime<Utc>,
+}
+
+/// 记账参数（record_usage 入参）。
+#[derive(Debug, Clone)]
+pub struct UsageMeta {
+    pub provider: String,
+    pub model: String,
+    pub purpose: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub latency_ms: i64,
+    pub job_id: Option<Uuid>,
 }
 
 /// LLM 错误分类（jobs 重试策略消费）。

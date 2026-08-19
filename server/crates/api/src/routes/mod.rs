@@ -4,6 +4,7 @@ pub mod auth_api;
 pub mod health;
 pub mod jobs_api;
 pub mod llm_api;
+pub mod memory_api;
 
 use crate::state::AppState;
 use axum::middleware::from_fn_with_state;
@@ -22,6 +23,12 @@ use utoipa::OpenApi;
         llm_api::create_provider, llm_api::list_providers, llm_api::test_provider,
         llm_api::get_routing, llm_api::put_routing, llm_api::usage,
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
+        memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
+        memory_api::erase_session, memory_api::trigger_distill,
+        memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
+        memory_api::list_scenarios, memory_api::get_scenario,
+        memory_api::get_persona, memory_api::persona_history, memory_api::persona_rollback,
+        memory_api::search, memory_api::context,
     ),
 )]
 struct ApiDoc;
@@ -58,7 +65,34 @@ pub fn router(state: AppState) -> Router {
             "/settings/api-keys/{id}/revoke",
             post(llm_api::revoke_api_key),
         )
-        .route("/llm/usage", get(llm_api::usage));
+        .route("/llm/usage", get(llm_api::usage))
+        .route(
+            "/memory/sessions",
+            post(memory_api::write_session).get(memory_api::list_sessions),
+        )
+        .route(
+            "/memory/sessions/{id}",
+            get(memory_api::get_session).delete(memory_api::erase_session),
+        )
+        .route("/memory/distill", post(memory_api::trigger_distill))
+        .route(
+            "/memory/atoms",
+            get(memory_api::list_atoms).post(memory_api::create_atom),
+        )
+        .route(
+            "/memory/atoms/{id}",
+            axum::routing::patch(memory_api::update_atom),
+        )
+        .route("/memory/scenarios", get(memory_api::list_scenarios))
+        .route("/memory/scenarios/{id}", get(memory_api::get_scenario))
+        .route("/memory/persona", get(memory_api::get_persona))
+        .route("/memory/persona/history", get(memory_api::persona_history))
+        .route(
+            "/memory/persona/rollback",
+            post(memory_api::persona_rollback),
+        )
+        .route("/memory/search", post(memory_api::search))
+        .route("/memory/context", get(memory_api::context));
 
     Router::new()
         .merge(public)

@@ -2,17 +2,17 @@
   "version": 3,
   "id": "mszyrq72-4tcahn",
   "objective": "在 /Users/trtyr/Documents/Code/Rust/agent-memory 构建「agent-memory」单用户 AI 长期记忆平台（Rust axum + React/Vite + PostgreSQL/pgvector + Docker 交付），按 docs/plantree/plans/agent-memory-platform/ 的八阶段路线（Phase 0 地基 → 1 核心底座 → 2 记忆域 → 3 知识域 → 4 Wiki → 5 CodeGraph 桥 → 6 Web 控制台 → 7 交付发布）执行，一次达到成熟产品标准（决策 D0008，不做 demo）：四类记忆资产（Chat Memory L0–L3 分层蒸馏 / Knowledge / Wiki / CodeGraph 代理）、内置 LLM 蒸馏管道、纯 HTTP API + Web 管理控制台，每阶段出口门禁（fmt/clippy/test/tsc/e2e/compose 可用）全绿并留验证证据。",
-  "status": "active",
-  "autoContinue": true,
+  "status": "paused",
+  "autoContinue": false,
   "usage": {
-    "tokensUsed": 344119,
-    "activeSeconds": 2181
+    "tokensUsed": 738702,
+    "activeSeconds": 6677
   },
   "sisyphus": false,
   "createdAt": "2026-08-19T10:43:52.286Z",
-  "updatedAt": "2026-08-19T11:21:55.085Z",
+  "updatedAt": "2026-08-19T13:35:24.078Z",
   "activePath": ".pi/goals/active_goal_2026081918435228_mszyrq72-4tcahn.md",
-  "revision": 122,
+  "revision": 235,
   "taskList": {
     "tasks": [
       {
@@ -27,7 +27,9 @@
         "id": "phase-1",
         "title": "Phase 1 核心底座（schema/jobs/llm/鉴权）",
         "verificationContract": "fake job 全生命周期集成测试绿；真实 provider test 连通且 embedding 被记账；API key 401/403 行为测试绿；全部迁移干净 PG 可重放",
-        "status": "pending"
+        "status": "complete",
+        "completedAt": "2026-08-19T12:20:33.680Z",
+        "evidence": "commit 55292a7 + 4064366：①迁移——10 份迁移在干净 testcontainers PG 应用+幂等重放，16 表存在性/vector(1024)列型/状态机 CHECK/幂等键唯一约束集成测试绿；②jobs 全生命周期——入队→抢占(SKIP LOCKED)→成功/退避重试→dead/永久failed/复活/僵尸回收/幂等去重/Runner 真执行 5 项集成测试绿；③"
       },
       {
         "id": "phase-2",
@@ -69,7 +71,8 @@
     "blockCompletion": false,
     "proposedAt": "2026-08-19T10:44:14.446Z"
   },
-  "currentTaskId": "phase-1"
+  "currentTaskId": "phase-2",
+  "stopReason": "user"
 }
 
 # Goal Prompt
@@ -78,16 +81,16 @@
 
 ## Progress
 
-- Status: running
-- Auto-continue: on
+- Status: paused
+- Auto-continue: off
 - Sisyphus mode: no
-- Time spent: 36m21s
-- Tokens used: 344K (344,119) tokens
+- Time spent: 1h51m17s
+- Tokens used: 739K (738,702) tokens
 ## Tasks
 
 <!-- blockCompletion: false -->
 - [x] phase-0: Phase 0 项目地基（workspace/compose/CI 骨架） — evidence: commit b79e67f：compose 全栈构建并启动，/health→{"status":"ok"}、/ready→{"status":"ready","migration_version":1}（容器内自动迁移）；CI 三 job 全套配置（fmt/clippy/test + lint/tsc/build + docker build）；testcontainers 集成测试 migra
-- [ ] phase-1: Phase 1 核心底座（schema/jobs/llm/鉴权） — contract: fake job 全生命周期集成测试绿；真实 provider test 连通且 embedding 被记账；API key 401/403 行为测试绿；全部迁移干净 PG 可重放
+- [x] phase-1: Phase 1 核心底座（schema/jobs/llm/鉴权） — evidence: commit 55292a7 + 4064366：①迁移——10 份迁移在干净 testcontainers PG 应用+幂等重放，16 表存在性/vector(1024)列型/状态机 CHECK/幂等键唯一约束集成测试绿；②jobs 全生命周期——入队→抢占(SKIP LOCKED)→成功/退避重试→dead/永久failed/复活/僵尸回收/幂等去重/Runner 真执行 5 项集成测试绿；③
 - [ ] phase-2: Phase 2 记忆域（L0–L3 蒸馏闭环） — contract: 真 LLM e2e 脚本跑通写入→蒸馏→supersede→画像更新且 history 可 diff；/memory/context 三层结构引用链完整；mock provider 单测覆盖解析重试/仲裁三分支/版本化
 - [ ] phase-3: Phase 3 知识域（摄取+检索） — contract: PDF/md/URL 摄取到 ready 且中文检索命中；SSRF 测试集全部拒绝；损坏文件不阻塞队列；重复上传秒回已有 id
 - [ ] phase-4: Phase 4 Wiki 域（两步 ingest+lint） — contract: 两篇相关中文文档 ingest 产出互链页面且不重复建页；human 页覆盖产生 proposal；lint 对注入的死链/孤儿全报出；sha 重复 ingest 秒跳过

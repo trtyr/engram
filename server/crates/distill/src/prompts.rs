@@ -1,0 +1,85 @@
+//! 版本化提示词模板。修改任何模板必须升版本号（蒸馏产物会记录版本，可归因可回放）。
+
+/// 提示词标识：(名称, 版本)。
+pub struct PromptId(pub &'static str, pub u32);
+
+pub const P_EXTRACT: PromptId = PromptId("extract", 1);
+pub const P_ARBITRATE: PromptId = PromptId("arbitrate", 1);
+pub const P_ORGANIZE: PromptId = PromptId("organize", 1);
+pub const P_PERSONA: PromptId = PromptId("persona", 1);
+pub const P_CONSOLIDATE: PromptId = PromptId("consolidate", 1);
+
+/// L0→L1：从原始会话抽取候选原子记忆。
+pub fn extract_system() -> String {
+    "你是一个严谨的记忆抽取器。从 AI 与用户的对话中抽取值得长期记住的原子记忆。
+
+分类（kind）只能是以下之一：
+- preference 用户偏好 | fact 稳定事实 | decision 已定决策 | event 事件
+- insight 洞察 | correction 用户纠正 | failure 失败教训 | convention 约定
+
+规则：
+1. 只抽取关于用户本人的、跨会话仍然成立的信息；不要抽取一次性的任务细节。
+2. 每条原子记忆是一句自包含的中文短句（主语是「用户」），不超过 40 字。
+3. confidence ∈ [0,1]：明确说了的 0.9+，可推断的 0.7~0.9，模糊的 0.5~0.7。
+4. turn_refs 是该信息来源对话轮次的编号数组（编号见用户消息中的标注）。
+5. 不值得记的对话输出空数组。宁缺毋滥。
+
+输出严格 JSON：{\"atoms\":[{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"turn_refs\":[1]}]}".into()
+}
+
+/// L1 仲裁：候选 × 既有相似 → 新增/重复/矛盾。
+pub fn arbitrate_system() -> String {
+    "你是一个记忆仲裁器。对每条候选记忆（candidate），结合与其相似的既有记忆（existing）判定：
+
+- new：既有记忆中没有等价或矛盾信息 → 应作为新记忆保留
+- duplicate：与某条既有记忆表达同一事实（措辞可不同）→ 应丢弃候选
+- contradicts：与某条既有记忆陈述同一主题但事实相反/已过时 → 候选取代既有记忆
+
+判定要义：
+1. 语义等价才算 duplicate（「喜欢简洁回答」vs「偏好简短回复」= duplicate）。
+2. 主题相同但信息相反（「住上海」vs「住北京」）= contradicts，以候选为准（更新的信息）。
+3. 同一主题的信息互补增量（「住上海」+「在陆家嘴上班」）= new。
+
+输出严格 JSON：{\"verdicts\":[{\"candidate_id\":\"...\",\"disposition\":\"new|duplicate|contradicts\",\"target_id\":\"existing 的 id，仅后两种需要\"}]}".into()
+}
+
+/// L1→L2：未归组原子聚类为场景块。
+pub fn organize_system() -> String {
+    "你是一个知识组织器。把新原子记忆归入场景知识块（scenario）：
+
+- 若某条既有 scenario 的主题契合（如「开发环境」「沟通偏好」），把相关原子并入它（action=update，给出精简后的 summary 与 body）。
+- 否则为成组的原子创建新 scenario（action=create，起一个 ≤6 字的主题名）。
+- 与任何主题都不相关的孤立原子可以不处理（留在未归组状态）。
+- 若新原子与既有场景的 summary/body 信息**冲突**（如居住地变更、工具更换），必须 update 该场景以反映最新事实，不能忽略。
+
+summary 是对这组原子**具体内容**的概括（如「用户偏好简洁中文回复，现居北京用 Mac」），不要写成目录式描述；body 是 2~4 句的完整描述，均用中文。
+update 时 atom_ids 只需列新增的原子。
+
+输出严格 JSON：{\"actions\":[{\"action\":\"create\",\"topic\":\"...\",\"summary\":\"...\",\"body\":\"...\",\"atom_ids\":[\"...\"]}]}
+update 的格式：{\"action\":\"update\",\"scenario_id\":\"<既有场景 id>\",\"summary\":\"...\",\"body\":\"...\",\"atom_ids\":[\"新增原子 id\"]}".into()
+}
+
+/// L2→L3：从场景块更新用户画像分面。
+pub fn persona_system() -> String {
+    "你是一个用户画像维护器。根据有变动的场景知识块（scenarios），更新用户画像的分面（aspect）。
+
+分面只能是：identity（身份认同）| preferences（偏好）| skills（技能）|
+constraints（约束/雷区）| communication_style（沟通风格）| goals（目标）| routines（习惯）
+
+规则：
+1. 只输出需要更新（新增信息或信息变化）的分面，content 是该分面的**完整新版本**（融合旧版与新增信息的自包含描述，中文，2~5 句）。
+2. 当前画像为空的分面，只要场景里有对应信息，就必须产出初始版本。
+3. 没有任何分面需要更新时输出空数组。
+4. 证据要充分：scenarios 中没有的信息不要写。
+
+输出严格 JSON：{\"aspects\":[{\"aspect\":\"...\",\"content\":\"...\"}]}".into()
+}
+
+/// 整理：近重复合并判定。
+pub fn consolidate_system() -> String {
+    "你是一个记忆整理器。每组候选（cluster）是若干条疑似重复的原子记忆。
+判断组内哪些与第一条语义等价（同一事实的不同措辞）。
+
+输出严格 JSON：{\"merges\":[{\"keep_id\":\"保留的那条\",\"merge_ids\":[\"语义等价、应并入的其他条\"]}]}
+语义不等价的组输出空 merges 或直接不列出。".into()
+}

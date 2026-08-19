@@ -89,6 +89,12 @@ impl JobTemplate {
         self.idempotency_key = Some(key.into());
         self
     }
+
+    /// 延迟执行时间（定时/防抖）。
+    pub fn with_due(mut self, due_at: chrono::DateTime<chrono::Utc>) -> Self {
+        self.due_at = Some(due_at);
+        self
+    }
 }
 
 /// 执行错误分类（决定重试与否）。
