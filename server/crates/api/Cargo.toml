@@ -1,0 +1,25 @@
+[package]
+name = "agent-memory-api"
+description = "HTTP 层：路由、handler、DTO、OpenAPI、中间件"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "agent-memory-server"
+path = "src/main.rs"
+
+[dependencies]
+agent-memory-storage.workspace = true
+
+sqlx.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+utoipa.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true

@@ -1,0 +1,29 @@
+# Rust
+server/target/
+**/*.rs.bk
+
+# Node
+web/node_modules/
+web/dist/
+*.local
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Data volumes (runtime state)
+data/
+!data/.gitkeep
+
+# Test & coverage
+coverage/
+*.profraw
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# sqlx offline metadata is committed; nothing to ignore there

@@ -1,0 +1,8 @@
+[package]
+name = "agent-memory-jobs"
+description = "任务系统：PG-backed 队列、worker、调度、事件"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

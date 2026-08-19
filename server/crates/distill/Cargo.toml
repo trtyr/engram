@@ -1,0 +1,8 @@
+[package]
+name = "agent-memory-distill"
+description = "蒸馏管道：L0→L1→L2→L3 编排、版本化提示词"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/api",
+    "crates/core",
+    "crates/storage",
+    "crates/llm",
+    "crates/jobs",
+    "crates/distill",
+    "crates/wiki-engine",
+    "crates/cg-bridge",
+    "crates/search",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/trtyr/agent-memory"
+
+[workspace.dependencies]
+# 内部 crates
+agent-memory-api = { path = "crates/api" }
+agent-memory-core = { path = "crates/core" }
+agent-memory-storage = { path = "crates/storage" }
+agent-memory-llm = { path = "crates/llm" }
+agent-memory-jobs = { path = "crates/jobs" }
+agent-memory-distill = { path = "crates/distill" }
+agent-memory-wiki-engine = { path = "crates/wiki-engine" }
+agent-memory-cg-bridge = { path = "crates/cg-bridge" }
+agent-memory-search = { path = "crates/search" }
+
+# 异步运行时与 HTTP
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "fs"] }
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 数据库
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "macros",
+    "migrate",
+    "uuid",
+    "chrono",
+    "json",
+] }
+
+# 可观测
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# API 文档
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+
+# 工具
+uuid = { version = "1", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+
+# 测试
+testcontainers = "0.24"
+
+[profile.release]
+lto = "thin"
+strip = true

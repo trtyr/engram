@@ -1,0 +1,8 @@
+[package]
+name = "agent-memory-wiki-engine"
+description = "Wiki 引擎：两步 ingest、wikilink、lint、图数据"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

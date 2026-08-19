@@ -1,0 +1,15 @@
+# 构建上下文瘦身（context = 仓库根）
+server/target/
+web/node_modules/
+web/dist/
+data/
+.git/
+.github/
+docs/
+*.md
+!README.md
+.env
+.env.*
+!.env.example
+deploy/.env
+.DS_Store

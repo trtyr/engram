@@ -1,0 +1,8 @@
+[package]
+name = "agent-memory-llm"
+description = "LLM 客户端：provider 抽象、模型路由、用量记账、密钥加密"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

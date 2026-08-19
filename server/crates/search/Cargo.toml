@@ -1,0 +1,8 @@
+[package]
+name = "agent-memory-search"
+description = "混合检索：FTS + 向量 + RRF 融合、预算控制"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
