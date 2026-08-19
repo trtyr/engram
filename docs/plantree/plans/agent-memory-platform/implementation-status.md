@@ -4,16 +4,16 @@
 
 ## Current Phase
 
-Phase 0 项目地基（接近完成，验证中）
+（Phase 0 已完成，待领 Phase 1）
 
 ## Last Landed
 
-- 2026-10: plan tree 全量落地（baseline 6 文件 + 8 phases + 10 topics + D0001–D0008 + Q1–Q7）
+- 2026-10 `b79e67f` Phase 0 项目地基：9-crate workspace + 前端壳 + compose 全栈 + CI。
+  出口门禁全绿，证据 [evidence/README.md](evidence/README.md)
 
 ## Active TODO
 
-- [ ] compose 构建 + 起栈验证（/health /ready 200）——构建后台运行中
-- [ ] 验证通过后：git 首次提交 + roadmap 标 Phase 0 Done + evidence 记录
+（进入 Phase 1 时更新：全量 schema 迁移 → jobs crate → llm crate → 鉴权 → OpenAPI 快照）
 
 ## Blocked By
 
@@ -21,11 +21,10 @@ Phase 0 项目地基（接近完成，验证中）
 
 ## Last Verified
 
-- `cargo fmt` + `cargo clippy --workspace --all-targets -D warnings`：0 警告（本地 2026-10）
-- `cargo test --workspace`：1 passed（testcontainers pgvector 容器 + 迁移 + 幂等重放）
-- `web`: `tsc --noEmit` 0 错误、`npm run build` 通过、oxlint 仅 shadcn 生成代码已知警告
-- 注意：本机 8080 被其他项目（cda-agent）占用，本地验证用 `AGENT_MEMORY_PORT=18080`
-- 注意：deploy/.env 是本地验证用临时文件（含测试密钥），已在 .gitignore，勿提交
+- 2026-10（Phase 0 出口）：fmt/clippy(-D warnings)/test 全绿；web tsc+build 绿；
+  compose 栈 `/health`→`{"status":"ok"}`、`/ready`→`{"status":"ready","migration_version":1}`、
+  `/openapi.json` 正常、404 统一错误体。本地端口 19180（8080/18080 被其他项目占用）
+- deploy/.env 为本地验证临时文件（gitignored），含测试密钥，勿提交
 
 ## Phase 0 交付物清单（对照 phases/phase-0-foundation.md）
 
