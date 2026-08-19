@@ -30,7 +30,7 @@ mod tests {
     #[test]
     fn single_list_preserved() {
         let a = vec![Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
-        let merged = rrf_merge(&[a.clone()], 60);
+        let merged = rrf_merge(std::slice::from_ref(&a), 60);
         assert_eq!(merged.len(), 3);
         assert_eq!(merged[0].0, a[0], "单列表保序");
     }

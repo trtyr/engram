@@ -55,7 +55,7 @@ pub async fn login(pool: &PgPool, password: &str, expect: &str) -> Result<String
     }
 
     let mut raw = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut raw);
+    rand::rng().fill_bytes(&mut raw);
     let token = format!("ams_{}", hex(&raw));
     let hash = sha256_hex(&token);
     let expires = Utc::now() + Duration::days(7);
@@ -105,7 +105,7 @@ pub async fn create_api_key(
         }
     }
     let mut raw = [0u8; 24];
-    rand::thread_rng().fill_bytes(&mut raw);
+    rand::rng().fill_bytes(&mut raw);
     let key = format!("amk_{}", hex(&raw));
     let id = Uuid::now_v7();
     sqlx::query(

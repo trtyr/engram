@@ -9,6 +9,13 @@ use agent_memory_llm::{KeyCipher, ProviderRegistry};
 use uuid::Uuid;
 
 /// 蒸馏用 LLM 能力（chat JSON + embedding）。
+/// chat_json 返回的 boxed future 形态。
+pub type ChatJsonFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, JobError>> + Send + 'a>>;
+/// embed 返回的 boxed future 形态。
+pub type EmbedFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Vec<f32>>, JobError>> + Send + 'a>>;
+
 pub trait DistillLlm: Send + Sync {
     /// 一次结构化对话：system+user → JSON 值。内部处理 JSON 解析重试（一次）。
     fn chat_json<'a>(

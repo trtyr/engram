@@ -147,7 +147,8 @@ pub async fn test_provider(
     let cipher = cipher_from(&state)?;
     let registry = ProviderRegistry::new(state.pool.clone(), cipher.clone());
 
-    let row: Option<(String, String, Vec<u8>, sqlx::types::Json<Vec<ModelInfo>>)> = sqlx::query_as(
+    type Row = (String, String, Vec<u8>, sqlx::types::Json<Vec<ModelInfo>>);
+    let row: Option<Row> = sqlx::query_as(
         "SELECT name, base_url, api_key_encrypted, models FROM llm_providers WHERE id = $1",
     )
     .bind(id)

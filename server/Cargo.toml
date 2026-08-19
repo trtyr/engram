@@ -32,7 +32,7 @@ agent-memory-search = { path = "crates/search" }
 
 # 异步运行时与 HTTP
 tokio = { version = "1", features = ["full"] }
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "fs"] }
 
@@ -73,6 +73,11 @@ rand = "0.9"
 # 检索
 jieba-rs = "0.4"
 pgvector = { version = "0.4", features = ["sqlx"] }
+
+# 文档解析（知识域）
+pdf-extract = "0.8"
+docx-rs = "0.4"
+scraper = "0.23"
 
 # 测试
 testcontainers = "0.24"

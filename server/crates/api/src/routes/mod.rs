@@ -3,6 +3,7 @@
 pub mod auth_api;
 pub mod health;
 pub mod jobs_api;
+pub mod knowledge_api;
 pub mod llm_api;
 pub mod memory_api;
 
@@ -29,6 +30,9 @@ use utoipa::OpenApi;
         memory_api::list_scenarios, memory_api::get_scenario,
         memory_api::get_persona, memory_api::persona_history, memory_api::persona_rollback,
         memory_api::search, memory_api::context,
+        knowledge_api::submit_url, knowledge_api::upload, knowledge_api::list_documents,
+        knowledge_api::get_document, knowledge_api::document_chunks,
+        knowledge_api::delete_document, knowledge_api::search,
     ),
 )]
 struct ApiDoc;
@@ -92,7 +96,21 @@ pub fn router(state: AppState) -> Router {
             post(memory_api::persona_rollback),
         )
         .route("/memory/search", post(memory_api::search))
-        .route("/memory/context", get(memory_api::context));
+        .route("/memory/context", get(memory_api::context))
+        .route(
+            "/knowledge/documents",
+            post(knowledge_api::submit_url).get(knowledge_api::list_documents),
+        )
+        .route("/knowledge/upload", post(knowledge_api::upload))
+        .route(
+            "/knowledge/documents/{id}",
+            get(knowledge_api::get_document).delete(knowledge_api::delete_document),
+        )
+        .route(
+            "/knowledge/documents/{id}/chunks",
+            get(knowledge_api::document_chunks),
+        )
+        .route("/knowledge/search", post(knowledge_api::search));
 
     Router::new()
         .merge(public)

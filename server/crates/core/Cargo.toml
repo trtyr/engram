@@ -21,8 +21,14 @@ uuid.workspace = true
 chrono.workspace = true
 pgvector.workspace = true
 utoipa.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+pdf-extract.workspace = true
+docx-rs.workspace = true
+scraper.workspace = true
 
 [dev-dependencies]
 testcontainers.workspace = true
 anyhow.workspace = true
 agent-memory-storage = { path = "../storage" }
+tempfile = "3"

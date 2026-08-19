@@ -311,7 +311,7 @@ impl MemoryService {
         };
         let content_changed = new_content != cur.content;
         let emb = if content_changed {
-            self.try_embed(&[new_content.clone()]).await
+            self.try_embed(std::slice::from_ref(&new_content)).await
         } else {
             None
         };

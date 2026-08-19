@@ -2,6 +2,27 @@
 
 按阶段归档验证证据。每条证据 = 何时、验证了什么、命令/输出摘要、结论。
 
+## Phase 3 — 知识域（2026-10 完成）
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| PDF/md/URL 摄取到 ready | ✅ | 真 e2e（本地二进制 + 真网关 embedding）：`async-rust.md`（多标题分块）、手工构造合法 PDF（正确 xref 偏移）、清华镜像站 URL（标题提取「清华大学开源软件镜像站」）三类全部 ready |
+| 中文检索命中 | ✅ | 「异步运行时 select 调度」命中 md 相关分块；「镜像 开源软件」命中 URL 文档；结果带 document_title + snippet + score |
+| SSRF 测试集全部拒绝 | ✅ | `ssrf_fetch_rejects_private_targets`：127.0.0.1 / 169.254.169.254（云元数据）/ 10.2.0.14（内网）/ file:// 协议 / localhost 域名（DNS→环回）全部拒绝；IP 分类单测覆盖 v4 12 类 + v6 6 类；DNS pinning（reqwest resolve）防 rebinding |
+| 损坏文件不阻塞队列 | ✅ | `html_ingest_and_corrupt_file_not_blocking`：损坏 PDF → failed（可读错误），后续文档照常 ready；e2e 中 GitHub 被墙 URL 同样 failed 不影响他者 |
+| 重复上传秒回已有 id | ✅ | sha256 幂等（name+ct+content）：单测 deduped=true + id 相同；e2e 重复上传返回 200 + 既有文档 |
+| 嵌入降级 | ✅ | 无 provider 时 chunks 标 embed_failed 但文档仍 ready（FTS 兜底）——单测（testcontainer 无网关配置）与 e2e（真网关）双路径验证 |
+
+### e2e 中发现并修复的真 bug
+
+1. **URL 文档 raw_path NULL 解码崩**：query_as 把 nullable 列按 String 解码 → 改 `Option<String>`
+2. **摄取限流自锁**：throttle 把 pending 也计数，3 文档互相挤死重试到 dead → 移除 per-kind 限流（Runner 并发已全局约束），单用户规模正确取舍
+3. **extracted 临时文件目录不存在**：写入前未 create_dir_all → 修复
+
+### 支持格式实测
+
+md/txt（直读）· PDF（pdf-extract，要求合法 xref）· HTML（scraper：非 script/style 元素直接文本子节点，script 天然排除）· DOCX（docx-rs：段落 + 表格）· URL（SSRF 防护 + 重定向逐跳复检 ≤3 + 20MB/30s 限制）
+
 ## Phase 2 — 记忆域（2026-10 完成）
 
 | 门 | 结果 | 证据 |

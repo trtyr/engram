@@ -73,7 +73,6 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?
         .into_iter()
-        .map(|(id, content)| (id, content))
         .collect();
 
         writeln!(user, "候选[{}]: id={} 内容={}", i, c.id, c.content).ok();

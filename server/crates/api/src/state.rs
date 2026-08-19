@@ -15,6 +15,7 @@ pub struct AppState {
     pub pool: PgPool,
     pub admin_password: Option<AdminPassword>,
     pub master_key: Option<MasterKey>,
+    pub data_dir: std::path::PathBuf,
 }
 
 impl AppState {
@@ -23,7 +24,13 @@ impl AppState {
             pool,
             admin_password: None,
             master_key: None,
+            data_dir: "./data".into(),
         }
+    }
+
+    pub fn with_data_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.data_dir = dir.into();
+        self
     }
 
     pub fn with_admin_password(mut self, password: Option<String>) -> Self {

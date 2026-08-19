@@ -16,8 +16,7 @@ use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_memory(p: &Principal) -> Result<(), ApiError> {
-    require_scope(p, "memory").map_err(ApiError::from)
-}
+    require_scope(p, "memory")}
 
 fn me(e: MemoryError) -> ApiError {
     match e {

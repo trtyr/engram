@@ -15,6 +15,8 @@ pub struct Config {
     /// 密钥加密主密钥（Phase 1 LLM provider key 加密用）。
     #[allow(dead_code, reason = "Phase 1 密钥加密消费")]
     pub master_key: Option<String>,
+    /// 运行时数据目录（uploads/wiki-sources/codegraph）。
+    pub data_dir: std::path::PathBuf,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -58,6 +60,9 @@ impl Config {
             port,
             admin_password,
             master_key,
+            data_dir: std::env::var("AGENT_MEMORY_DATA_DIR")
+                .unwrap_or_else(|_| "./data".into())
+                .into(),
         })
     }
 }

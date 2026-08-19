@@ -3,6 +3,9 @@
 //! 依赖方向（见 docs/plantree/baseline/module-map.md）：
 //! `api → core → (storage, llm, jobs, search, distill, wiki-engine, cg-bridge)`
 
+pub mod knowledge;
 pub mod memory;
+
+pub use knowledge::{ChunkHit, DocumentDto, KnowledgeService};
 
 pub use memory::{MemoryService, SearchResponse};

@@ -9,7 +9,6 @@ use agent_memory_llm::router::{PurposeRouter, RouteRule, RoutingTable};
 use agent_memory_llm::types::{EmbedRequest, Purpose};
 use axum::Json;
 use axum::routing::post;
-use std::net::SocketAddr;
 
 /// 起 mock OpenAI 兼容端点（/v1/chat/completions + /v1/embeddings）。
 /// 返回 base_url。
@@ -43,7 +42,7 @@ async fn start_mock_llm() -> String {
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    format!("http://{}", SocketAddr::from(addr))
+    format!("http://{}", addr)
 }
 
 async fn setup() -> (
@@ -67,7 +66,7 @@ async fn setup() -> (
 
 #[tokio::test]
 async fn provider_roundtrip_and_usage_accounting() {
-    let (_c, registry, router) = setup().await;
+    let (_c, registry, _router) = setup().await;
     let pool = registry_pool(&registry);
 
     let base_url = start_mock_llm().await;

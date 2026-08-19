@@ -32,10 +32,20 @@ async fn main() -> anyhow::Result<()> {
     let version = agent_memory_storage::current_version(&pool).await?;
     tracing::info!(migration_version = ?version, "迁移就绪");
 
-    // 4. 任务 runner：注册蒸馏链 handler
+    // 4. 任务 runner：注册蒸馏链 + 知识摄取 handler
     let runner = agent_memory_distill::register_handlers(
         agent_memory_jobs::Runner::new(pool.clone(), agent_memory_jobs::RunnerConfig::default()),
         agent_memory_distill::gateway_llm(
+            pool.clone(),
+            agent_memory_llm::KeyCipher::from_hex_master(
+                &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
+            )
+            .expect("主密钥格式恒合法"),
+        ),
+    );
+    let runner = agent_memory_core::knowledge::register_handlers(
+        runner,
+        agent_memory_llm::ProviderRegistry::new(
             pool.clone(),
             agent_memory_llm::KeyCipher::from_hex_master(
                 &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
@@ -48,7 +58,8 @@ async fn main() -> anyhow::Result<()> {
     // 5. HTTP 服务
     let state = AppState::new(pool)
         .with_admin_password(cfg.admin_password.clone())
-        .with_master_key(cfg.master_key.clone());
+        .with_master_key(cfg.master_key.clone())
+        .with_data_dir(cfg.data_dir.clone());
     let app = routes::router(state).layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], cfg.port));
