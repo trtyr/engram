@@ -2,7 +2,7 @@
  * 应用壳：登录守卫 + 侧边栏七域导航。
  */
 import { NavLink, Route, Routes, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, getToken, setToken } from '@/lib/api'
 import Dashboard from '@/features/Dashboard'
 import Memory from '@/features/Memory'
@@ -23,7 +23,7 @@ const NAV = [
   { to: '/settings', label: 'Settings' },
 ] as const
 
-function Login() {
+function Login({ onAuthed }: { onAuthed: () => void }) {
   const [pw, setPw] = useState('')
   const [err, setErr] = useState('')
   const nav = useNavigate()
@@ -36,6 +36,7 @@ function Login() {
           try {
             const r = await api.post<{ token: string }>('/auth/login', { password: pw })
             setToken(r.token)
+            onAuthed()
             nav('/', { replace: true })
           } catch (ex) {
             setErr(ex instanceof Error ? ex.message : '登录失败')
@@ -61,19 +62,28 @@ function Login() {
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null)
+
+  // 探活（挂载时一次）：401/网络失败 → 登录页
   useEffect(() => {
     if (!getToken()) {
       setAuthed(false)
       return
     }
-    api
-      .get('/jobs?limit=1')
-      .then(() => setAuthed(true))
-      .catch(() => setAuthed(false))
+    let cancelled = false
+    fetch('/jobs?limit=1', { headers: { authorization: `Bearer ${getToken()}` } })
+      .then((r) => !cancelled && setAuthed(r.ok))
+      .catch(() => !cancelled && setAuthed(false))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 登录成功的状态上抛（Login 组件 prop）
+  const onAuthed = useCallback(() => setAuthed(true), [])
+
   if (authed === null) return <div className="min-h-screen" />
-  if (!authed) return <Login />
+  if (!authed) return <Login onAuthed={onAuthed} />
 
   return (
     <div className="flex min-h-screen">

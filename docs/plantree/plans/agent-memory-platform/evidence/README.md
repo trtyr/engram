@@ -2,6 +2,22 @@
 
 按阶段归档验证证据。每条证据 = 何时、验证了什么、命令/输出摘要、结论。
 
+## Phase 6 — Web 控制台（2026-10 完成）
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| 浏览器全旅程 | ✅ | playwright（chromium，对本地真栈 19571）：登录 → Dashboard 统计卡 → Memory（sessions/atoms/scenarios/persona+回滚/search 五 tab）→ Knowledge（上传/URL/分块/检索）→ Wiki（页面/图谱/lint/提案）→ Jobs（筛选/事件/重跑）→ Settings（provider/路由/keys）→ 清 token 回登录页，1 test 全断言通过 |
+| vitest 关键组件 | ✅ | 5 项：StatusBadge 色调/未知回退、Empty、fmtTime、ApiError（code/retryable/message） |
+| OpenAPI 类型生成 CI 强制同步 | ✅ | `openapi-dump` bin（utoipa 程序化导出）→ `openapi-typescript` 生成 `api-schema.ts`（2287 行）→ CI `git diff --quiet` drift 检查（utoipa flatten→手工 PartialSchema、search 三处重名→operation_id 修复） |
+| 单端口静态资源服务 | ✅ | rust-embed 嵌入 web/dist + SPA fallback 路由：`GET /` 返回前端 HTML、`/memory` 等 SPA 路径回退 index.html、API 路由不受影响 |
+
+### e2e 中发现并修复的真 bug
+
+1. **登录后白屏**：App 探活 useEffect 只在挂载时跑，Login 成功后 authed 仍为 null 永渲空白 → 登录回调 prop 上抛 setAuthed(true)
+2. **401 死循环**：api client 401 时 `window.location.reload()` 与探活互相触发 → 改状态切换
+3. **sqlx::migrate! 增量缓存**：新增迁移文件不触发宏重扫（MIGRATOR 滞留 9 个）→ 触发重编译即修复（注意项记录）
+
+## Phase 5 — CodeGraph 桥（2026-10 完成）
 ## Phase 5 — CodeGraph 桥（2026-10 完成）
 
 | 门 | 结果 | 证据 |

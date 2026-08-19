@@ -12,7 +12,7 @@ use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_cg(p: &Principal) -> Result<(), ApiError> {
-    require_scope(p, "codegraph").map_err(ApiError::from)
+    require_scope(p, "codegraph")
 }
 
 fn ce(e: CgError) -> ApiError {

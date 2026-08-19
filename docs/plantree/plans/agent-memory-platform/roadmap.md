@@ -12,13 +12,17 @@
 | 3 | 知识域（Knowledge） | 1 | **Done** (2026-10) | [phases/phase-3-knowledge.md](phases/phase-3-knowledge.md) |
 | 4 | Wiki 域 | 1 | **Done** (2026-10) | [phases/phase-4-wiki.md](phases/phase-4-wiki.md) |
 | 5 | CodeGraph 桥 | 1 | **Done** (2026-10) | [phases/phase-5-codegraph.md](phases/phase-5-codegraph.md) |
-| 6 | Web 控制台 | 2–5 | **Next** | [phases/phase-6-web.md](phases/phase-6-web.md) |
-| 7 | 交付打磨与发布 | 6 | Not started | [phases/phase-7-release.md](phases/phase-7-release.md) |
+| 6 | Web 控制台 | 2–5 | **Done** (2026-10) | [phases/phase-6-web.md](phases/phase-6-web.md) |
+| 7 | 交付打磨与发布 | 6 | **Next** | [phases/phase-7-release.md](phases/phase-7-release.md) |
 
 注：2/3/4/5 相互独立，可乱序或穿插执行；6 依赖各域 API 稳定。
 
 ## Done
 
+- **Phase 6 Web 控制台**（2026-10）：七域完整 UI（Dashboard/Memory/Knowledge/Wiki/
+  CodeGraph/Jobs/Settings）+ 登录守卫 + rust-embed 单端口 SPA + OpenAPI 类型生成
+  CI drift 检查 + vitest 5 项 + playwright 全旅程。修 3 个真 bug（登录白屏/401 循环/
+  migrate 宏缓存），见 [evidence/README.md](evidence/README.md)
 - **Phase 5 CodeGraph 桥**（2026-10）：cg-bridge crate（CLI 子进程包装 + 版本 pin 1.5.0 +
   超时矩阵 + JSON 归一）+ 项目生命周期（注册/索引/同步/版本不匹配标记）+
   /codegraph/* 6 端点。真实仓库四类查询全通；修复测试容器泄漏根因（Drop 守卫），
@@ -52,7 +56,7 @@
 
 ## Next
 
-- Phase 6 Web 控制台（[phases/phase-6-web.md](phases/phase-6-web.md)）
+- Phase 7 交付打磨与发布（[phases/phase-7-release.md](phases/phase-7-release.md)）
 
 ## Deferred
 

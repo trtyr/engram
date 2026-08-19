@@ -38,7 +38,6 @@ async function req<T>(method: string, path: string, body?: unknown, raw = false)
   })
   if (resp.status === 401) {
     clearToken()
-    window.location.reload()
     throw new ApiError(401, 'unauthorized', '未认证', false)
   }
   if (!resp.ok) {

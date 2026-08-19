@@ -10,7 +10,7 @@ use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 ///
 /// ready 策略：PG 官方镜像 init 时会先起临时实例再重启，
 /// 故等待 ready 日志后再加缓冲秒数，配合连接层重试兜底。
-
+///
 /// 测试 PG 容器守卫：Drop 时后台 docker rm -f（防泄漏——曾累积 198 个僵尸容器压垮 daemon）。
 pub struct TestPg {
     pub container: ContainerAsync<GenericImage>,
