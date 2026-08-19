@@ -9,11 +9,13 @@
   pg_trgm 作为子串匹配补充；向量检索兜底语义召回。不引入 zhparser（免自编译扩展）。
 - **后果**：search crate 依赖 jieba-rs；tsv 列由应用层维护（无触发器）。
 
-## D0010 embedding 定为 bge-m3 / 1024 维（原 Q2）
+## D0010 embedding 定为 Qwen3-Embedding-8B / 1024 维（原 Q2）
 
-- **状态**：已确认（2026-10，schema 落地前定案）
-- **决策**：默认 embedding 模型 bge-m3（1024 维），全部 `vector(1024)`。
-  换模型属破坏性迁移（重新嵌入全量数据），路由层允许配其他模型但维度必须兼容。
+- **状态**：已确认（2026-10，schema 落地前定案；Phase 1 末按真实网关修订）
+- **决策**：存储统一 `vector(1024)`。默认 embedding 通道 Qwen3-Embedding-8B
+  （用户网关实际供给，原生 4096 维）以 matryoshka `dimensions=1024` 降维调用。
+  换模型属破坏性迁移（重新嵌入全量数据）；路由层允许配其他模型但维度必须 1024 兼容。
+- **修订记录**：初版倾向 bge-m3；真实网关探测（evidence Phase 1）后改为 Qwen3-Embedding-8B。
 
 
 ## D0011 管理员会话用 opaque token + PG 表（原 Q6）

@@ -64,6 +64,12 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 anyhow = "1"
 
+# LLM crate
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+aes-gcm = "0.10"
+sha2 = "0.10"
+rand = "0.9"
+
 # 测试
 testcontainers = "0.24"
 

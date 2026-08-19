@@ -34,6 +34,12 @@ pub enum ApiError {
     /// 资源不存在
     #[error("{0}")]
     NotFound(String),
+    /// 未认证（401）
+    #[error("{0}")]
+    Unauthorized(String),
+    /// 已认证但权限不足（403）
+    #[error("{0}")]
+    Forbidden(String),
     /// 数据库故障（可重试）
     #[error("存储层暂时不可用")]
     Database(#[source] sqlx::Error),
@@ -50,6 +56,8 @@ impl ApiError {
         match self {
             ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request", false),
             ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found", false),
+            ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized", false),
+            ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden", false),
             ApiError::Database(_) => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", true),
             ApiError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", true),
             ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", false),
@@ -84,6 +92,21 @@ impl IntoResponse for ApiError {
             },
         };
         (status, Json(body)).into_response()
+    }
+}
+
+impl From<agent_memory_jobs::types::JobError> for ApiError {
+    fn from(e: agent_memory_jobs::types::JobError) -> Self {
+        ApiError::Unavailable(e.to_string())
+    }
+}
+
+impl From<agent_memory_llm::types::LlmError> for ApiError {
+    fn from(e: agent_memory_llm::types::LlmError) -> Self {
+        match e {
+            agent_memory_llm::types::LlmError::NotConfigured(m) => ApiError::Unavailable(m),
+            other => ApiError::Unavailable(other.to_string()),
+        }
     }
 }
 

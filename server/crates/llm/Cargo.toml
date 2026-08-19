@@ -6,3 +6,22 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+aes-gcm.workspace = true
+sha2.workspace = true
+rand.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+testcontainers.workspace = true
+anyhow.workspace = true
+agent-memory-storage = { path = "../storage" }
+axum.workspace = true

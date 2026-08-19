@@ -1,25 +1,18 @@
-//! HTTP API 服务：平台对外唯一入口。
-//!
-//! 依赖方向：只依赖 core 的域服务（Phase 1 起）；本阶段直接使用 storage 的
-//! 池装配与迁移。
-
-mod config;
-mod error;
-mod routes;
-mod state;
+//! agent-memory 服务入口（薄壳：配置 → 池 → 迁移 → 路由 → 监听）。
 
 use std::net::SocketAddr;
 
+use agent_memory_api::config::Config;
+use agent_memory_api::routes;
+use agent_memory_api::state::AppState;
 use agent_memory_storage::PoolConfig;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use crate::state::AppState;
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 1. 配置
-    let cfg = config::Config::from_env()?;
+    let cfg = Config::from_env()?;
 
     // 2. 结构化 JSON 日志
     tracing_subscriber::fmt()
@@ -39,15 +32,20 @@ async fn main() -> anyhow::Result<()> {
     let version = agent_memory_storage::current_version(&pool).await?;
     tracing::info!(migration_version = ?version, "迁移就绪");
 
-    // 4. HTTP 服务
-    let state = AppState::new(pool);
+    // 4. 任务 runner（Phase 1：占位注册表；Phase 2 起注册真实 handler）
+    // TODO(phase-2): Runner::new(pool.clone(), RunnerConfig::default()).register(...).start()
+
+    // 5. HTTP 服务
+    let state = AppState::new(pool)
+        .with_admin_password(cfg.admin_password.clone())
+        .with_master_key(cfg.master_key.clone());
     let app = routes::router(state).layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], cfg.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "HTTP 监听");
 
-    // 5. 优雅停机（容器 SIGTERM）
+    // 6. 优雅停机（容器 SIGTERM）
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;

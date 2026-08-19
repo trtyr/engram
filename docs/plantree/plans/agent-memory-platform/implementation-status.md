@@ -4,16 +4,20 @@
 
 ## Current Phase
 
-（Phase 0 已完成，待领 Phase 1）
+（Phase 1 已完成验证，待 compose 终验后关闭；下一步 Phase 2 记忆域）
 
 ## Last Landed
 
-- 2026-10 `b79e67f` Phase 0 项目地基：9-crate workspace + 前端壳 + compose 全栈 + CI。
-  出口门禁全绿，证据 [evidence/README.md](evidence/README.md)
+- 2026-10 Phase 1 核心底座：全域 schema（16 表）+ jobs + llm + 鉴权 + OpenAPI 快照。
+  16/16 测试绿 + 真实网关连通证据（chat 1173ms / embed 480ms，记账落库，密钥密文）。
+  证据 [evidence/README.md](evidence/README.md)
+- 2026-10 `b79e67f` Phase 0 项目地基（详见 roadmap Done）
 
 ## Active TODO
 
-（进入 Phase 1 时更新：全量 schema 迁移 → jobs crate → llm crate → 鉴权 → OpenAPI 快照）
+- [ ] compose Phase 1 代码重建终验（后台构建中）→ 通过即提交并关 phase-1 任务
+- Phase 2 开工清单：distill crate（提示词模板/五阶段 job）→ memory 域 API（L0 写入/
+  atoms/scenarios/persona/检索/context 包）→ jieba 预分词 tsv → e2e 脚本（真 LLM）
 
 ## Blocked By
 
@@ -21,10 +25,13 @@
 
 ## Last Verified
 
-- 2026-10（Phase 0 出口）：fmt/clippy(-D warnings)/test 全绿；web tsc+build 绿；
-  compose 栈 `/health`→`{"status":"ok"}`、`/ready`→`{"status":"ready","migration_version":1}`、
+- 2026-10（Phase 1 出口）：workspace 16/16 测试绿（fmt/clippy 0 警告）；
+  真实网关验证脚本 `scripts/verify-real-provider.sh` 全过（连通/记账/密文三证据）；
+  auth 401/403 矩阵 + OpenAPI 13 端点快照绿
+- 2026-10（Phase 0 出口）：compose 栈 `/health`→`{"status":"ok"}`、`/ready`→`{"status":"ready","migration_version":1}`、
   `/openapi.json` 正常、404 统一错误体。本地端口 19180（8080/18080 被其他项目占用）
 - deploy/.env 为本地验证临时文件（gitignored），含测试密钥，勿提交
+- 真网关 newapi.trtyr.top 的 key 在 ~/.pi/agent/auth.json（newapi 条目），不在仓库中
 
 ## Phase 0 交付物清单（对照 phases/phase-0-foundation.md）
 

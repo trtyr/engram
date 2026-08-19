@@ -9,7 +9,7 @@ use uuid::Uuid;
 /// pending → running → succeeded
 ///              ↘ failed（永久错误终态）
 ///              ↘ dead（可重试错误重试耗尽；人工可复活）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type, Serialize, utoipa::ToSchema)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
@@ -21,16 +21,18 @@ pub enum JobStatus {
 }
 
 /// 任务行。
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize, utoipa::ToSchema)]
 pub struct Job {
     pub id: Uuid,
     pub kind: String,
+    #[schema(value_type = Object)]
     pub payload: sqlx::types::Json<Value>,
     pub status: JobStatus,
     pub attempts: i32,
     pub max_attempts: i32,
     pub idempotency_key: Option<String>,
     pub error: Option<String>,
+    #[schema(value_type = Option<Object>)]
     pub progress: Option<sqlx::types::Json<Value>>,
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
@@ -42,13 +44,14 @@ pub struct Job {
 }
 
 /// 任务事件。
-#[derive(Debug, Clone, sqlx::FromRow, Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, utoipa::ToSchema)]
 pub struct JobEvent {
     pub id: i64,
     pub job_id: Uuid,
     pub ts: DateTime<Utc>,
     pub level: String,
     pub message: String,
+    #[schema(value_type = Option<Object>)]
     pub data: Option<sqlx::types::Json<Value>>,
 }
 

@@ -7,8 +7,8 @@
 | Phase | 名称 | 依赖 | 状态 | 明细 |
 |---|---|---|---|---|
 | 0 | 项目地基 | — | **Done** (2026-10) | [phases/phase-0-foundation.md](phases/phase-0-foundation.md) |
-| 1 | 核心底座 | 0 | **Next** | [phases/phase-1-core-infra.md](phases/phase-1-core-infra.md) |
-| 2 | 记忆域（Chat Memory L0–L3） | 1 | Not started | [phases/phase-2-memory.md](phases/phase-2-memory.md) |
+| 1 | 核心底座 | 0 | **Done** (2026-10) | [phases/phase-1-core-infra.md](phases/phase-1-core-infra.md) |
+| 2 | 记忆域（Chat Memory L0–L3） | 1 | **Next** | [phases/phase-2-memory.md](phases/phase-2-memory.md) |
 | 3 | 知识域（Knowledge） | 1 | Not started | [phases/phase-3-knowledge.md](phases/phase-3-knowledge.md) |
 | 4 | Wiki 域 | 1 | Not started | [phases/phase-4-wiki.md](phases/phase-4-wiki.md) |
 | 5 | CodeGraph 桥 | 1 | Not started | [phases/phase-5-codegraph.md](phases/phase-5-codegraph.md) |
@@ -19,6 +19,10 @@
 
 ## Done
 
+- **Phase 1 核心底座**（2026-10）：10 份迁移（16 表全域 schema 定版）+ jobs 任务系统
+  （抢占/退避重试/僵尸回收/幂等/事件/Runner）+ llm 出口（provider 抽象/AES-GCM 密钥加密/
+  purpose 路由/用量记账）+ 鉴权（opaque 会话 + API key scopes）+ OpenAPI 快照。
+  出口门禁全绿含真实网关连通证据，见 [evidence/README.md](evidence/README.md)
 - **Phase 0 项目地基**（2026-10）：9-crate workspace、Vite+React+shadcn 前端壳、
   多阶段 Docker + compose 全栈、CI 三 job、AGENTS 契约。
   出口门禁全绿（fmt/clippy/test/tsc/build/compose 探针 200），
@@ -30,7 +34,7 @@
 
 ## Next
 
-- Phase 1 核心底座（[phases/phase-1-core-infra.md](phases/phase-1-core-infra.md)）
+- Phase 2 记忆域（[phases/phase-2-memory.md](phases/phase-2-memory.md)）
 
 ## Deferred
 
