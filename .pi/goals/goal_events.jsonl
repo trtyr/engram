@@ -2,3 +2,4 @@
 {"type":"task_list_set","goalId":"mszyrq72-4tcahn","taskCount":8,"blockCompletion":false,"at":"2026-08-19T10:44:14.446Z"}
 {"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-0","at":"2026-08-19T10:46:02.735Z"}
 {"type":"task_complete","goalId":"mszyrq72-4tcahn","taskId":"phase-0","evidence":"commit b79e67f：compose 全栈构建并启动，/health→{\"status\":\"ok\"}、/ready→{\"status\":\"ready\",\"migration_version\":1}（容器内自动迁移）；CI 三 job 全套配置（fmt/clippy/test + lint/tsc/build + docker build）；testcontainers 集成测试 migra","at":"2026-08-19T11:13:50.859Z"}
+{"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-1","at":"2026-08-19T11:14:14.807Z"}

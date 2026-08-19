@@ -5,14 +5,14 @@
   "status": "active",
   "autoContinue": true,
   "usage": {
-    "tokensUsed": 243235,
-    "activeSeconds": 1730
+    "tokensUsed": 344119,
+    "activeSeconds": 2181
   },
   "sisyphus": false,
   "createdAt": "2026-08-19T10:43:52.286Z",
-  "updatedAt": "2026-08-19T11:13:50.866Z",
+  "updatedAt": "2026-08-19T11:21:55.085Z",
   "activePath": ".pi/goals/active_goal_2026081918435228_mszyrq72-4tcahn.md",
-  "revision": 98,
+  "revision": 122,
   "taskList": {
     "tasks": [
       {
@@ -68,7 +68,8 @@
     ],
     "blockCompletion": false,
     "proposedAt": "2026-08-19T10:44:14.446Z"
-  }
+  },
+  "currentTaskId": "phase-1"
 }
 
 # Goal Prompt
@@ -80,8 +81,8 @@
 - Status: running
 - Auto-continue: on
 - Sisyphus mode: no
-- Time spent: 28m50s
-- Tokens used: 243K (243,235) tokens
+- Time spent: 36m21s
+- Tokens used: 344K (344,119) tokens
 ## Tasks
 
 <!-- blockCompletion: false -->
