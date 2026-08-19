@@ -17,6 +17,7 @@ struct Env {
     pool: sqlx::PgPool,
     queue: JobQueue,
     handle: agent_memory_jobs::RunnerHandle,
+    _pg: support::TestPg,
 }
 
 async fn setup(chats: Vec<serde_json::Value>) -> Env {
@@ -26,7 +27,6 @@ async fn setup(chats: Vec<serde_json::Value>) -> Env {
     agent_memory_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    std::mem::forget(container);
 
     let llm: Arc<MockLlm> = Arc::new(MockLlm::with_raw_chats(
         chats
@@ -55,6 +55,7 @@ async fn setup(chats: Vec<serde_json::Value>) -> Env {
         pool: pool.clone(),
         queue: JobQueue::new(pool),
         handle,
+        _pg: container,
     }
 }
 

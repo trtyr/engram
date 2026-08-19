@@ -8,12 +8,7 @@ use agent_memory_jobs::types::{FailOutcome, JobError, JobStatus, JobTemplate};
 use agent_memory_jobs::{JobQueue, Runner, RunnerConfig};
 use std::time::Duration;
 
-async fn setup() -> (
-    testcontainers::ContainerAsync<testcontainers::GenericImage>,
-    JobQueue,
-    sqlx::PgPool,
-    String,
-) {
+async fn setup() -> (support::TestPg, JobQueue, sqlx::PgPool, String) {
     let container = support::start_pgvector().await.expect("启动容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");

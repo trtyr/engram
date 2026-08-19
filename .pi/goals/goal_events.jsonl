@@ -21,3 +21,5 @@
 {"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-3","at":"2026-08-19T14:21:29.458Z"}
 {"type":"task_complete","goalId":"mszyrq72-4tcahn","taskId":"phase-3","evidence":"commit d9f6f2e：①PDF/md/URL 三类摄取到 ready——真 e2e（本地二进制+真网关 embedding）：async-rust.md 多标题分块、合法 PDF、清华镜像站 URL（标题正确提取）全部 ready；②中文检索命中——「异步运行时 select 调度」「镜像 开源软件」分别命中 md/URL 文档，结果带 document_title+snippet+sco","at":"2026-08-19T14:56:43.179Z"}
 {"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-4","at":"2026-08-19T14:56:50.604Z"}
+{"type":"task_complete","goalId":"mszyrq72-4tcahn","taskId":"phase-4","evidence":"commit d6eb921：①两篇相关中文文档互链零重复——真 LLM e2e（shanghai/deepseek-v4-flash）：文档一产 8 页（张三/pgvector/向量检索/余弦相似度等），文档二新建 HNSW/近似最近邻并 HNSW→向量检索 互链，既有页零重复（张三保持 v1）；mock 单测验证「向量检索」v1→v2 内容合并；②human 页 proposal——put_p","at":"2026-08-19T15:23:55.565Z"}
+{"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-5","at":"2026-08-19T15:24:13.878Z"}

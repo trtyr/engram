@@ -10,7 +10,31 @@ use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 ///
 /// ready 策略：PG 官方镜像 init 时会先起临时实例再重启，
 /// 故等待 ready 日志后再加缓冲秒数，配合连接层重试兜底。
-pub async fn start_pgvector() -> anyhow::Result<ContainerAsync<GenericImage>> {
+
+/// 测试 PG 容器守卫：Drop 时后台 docker rm -f（防泄漏——曾累积 198 个僵尸容器压垮 daemon）。
+pub struct TestPg {
+    pub container: ContainerAsync<GenericImage>,
+}
+
+impl std::ops::Deref for TestPg {
+    type Target = ContainerAsync<GenericImage>;
+    fn deref(&self) -> &Self::Target {
+        &self.container
+    }
+}
+
+impl Drop for TestPg {
+    fn drop(&mut self) {
+        let id = self.container.id().to_string();
+        let _ = std::process::Command::new("docker")
+            .args(["rm", "-f", &id])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+}
+
+pub async fn start_pgvector() -> anyhow::Result<TestPg> {
     let container = GenericImage::new("pgvector/pgvector", "pg17")
         .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
@@ -21,7 +45,7 @@ pub async fn start_pgvector() -> anyhow::Result<ContainerAsync<GenericImage>> {
         .with_env_var("POSTGRES_DB", "agent_memory")
         .start()
         .await?;
-    Ok(container)
+    Ok(TestPg { container })
 }
 
 /// 容器对应的连接 URL。

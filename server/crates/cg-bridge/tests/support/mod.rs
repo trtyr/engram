@@ -1,4 +1,4 @@
-//! distill 测试基建。
+//! cg-bridge 测试基建。
 
 use sqlx::PgPool;
 use testcontainers::core::WaitFor;

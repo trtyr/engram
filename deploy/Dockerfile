@@ -22,11 +22,13 @@ COPY server/ .
 RUN cargo build --release -p agent-memory-api
 
 ########## Stage 3: 运行时 ##########
-# debian-slim 而非 distroless：Phase 5 需要安装 codegraph（Node runtime）
-FROM debian:bookworm-slim AS runtime
+# debian-slim：需要 git + Node runtime（codegraph 自带 runtime 但通过 npm 安装更可 pin）
+FROM node:22-slim AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
+# codegraph CLI pin 版本（D0005；升级需重新验证 JSON 输出格式）
+RUN npm install -g @colbymchenry/codegraph@1.5.0 && codegraph version
 WORKDIR /app
 COPY --from=builder /build/target/release/agent-memory-server /usr/local/bin/agent-memory-server
 

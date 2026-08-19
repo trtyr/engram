@@ -91,21 +91,20 @@ async fn ssrf_fetch_rejects_private_targets() {
 use agent_memory_core::knowledge::{IngestSource, KnowledgeService};
 use agent_memory_llm::{KeyCipher, ProviderRegistry};
 
-async fn setup() -> (sqlx::PgPool, KnowledgeService) {
+async fn setup() -> (sqlx::PgPool, KnowledgeService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     agent_memory_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    std::mem::forget(container);
     let dir = tempfile::tempdir().unwrap();
     let registry = ProviderRegistry::new(
         pool.clone(),
         KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
     let svc = KnowledgeService::new(pool.clone(), registry, dir.keep());
-    (pool, svc)
+    (pool, svc, container)
 }
 
 /// 起 Runner 跑知识管道（无 LLM provider → embedding 全降级 FTS，仍 ready）。
@@ -147,7 +146,7 @@ async fn wait_ready(
 
 #[tokio::test]
 async fn md_ingest_to_ready_and_chinese_fts_search() {
-    let (pool, svc) = setup().await;
+    let (pool, svc, _pg) = setup().await;
     let handle = run_jobs(pool.clone()).await;
 
     let md = format!(
@@ -196,7 +195,7 @@ async fn md_ingest_to_ready_and_chinese_fts_search() {
 
 #[tokio::test]
 async fn html_ingest_and_corrupt_file_not_blocking() {
-    let (pool, svc) = setup().await;
+    let (pool, svc, _pg) = setup().await;
     let handle = run_jobs(pool.clone()).await;
 
     // HTML 摄取

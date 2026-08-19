@@ -11,14 +11,18 @@
 | 2 | 记忆域（Chat Memory L0–L3） | 1 | **Done** (2026-10) | [phases/phase-2-memory.md](phases/phase-2-memory.md) |
 | 3 | 知识域（Knowledge） | 1 | **Done** (2026-10) | [phases/phase-3-knowledge.md](phases/phase-3-knowledge.md) |
 | 4 | Wiki 域 | 1 | **Done** (2026-10) | [phases/phase-4-wiki.md](phases/phase-4-wiki.md) |
-| 5 | CodeGraph 桥 | 1 | **Next** | [phases/phase-5-codegraph.md](phases/phase-5-codegraph.md) |
-| 6 | Web 控制台 | 2–5 | Not started | [phases/phase-6-web.md](phases/phase-6-web.md) |
+| 5 | CodeGraph 桥 | 1 | **Done** (2026-10) | [phases/phase-5-codegraph.md](phases/phase-5-codegraph.md) |
+| 6 | Web 控制台 | 2–5 | **Next** | [phases/phase-6-web.md](phases/phase-6-web.md) |
 | 7 | 交付打磨与发布 | 6 | Not started | [phases/phase-7-release.md](phases/phase-7-release.md) |
 
 注：2/3/4/5 相互独立，可乱序或穿插执行；6 依赖各域 API 稳定。
 
 ## Done
 
+- **Phase 5 CodeGraph 桥**（2026-10）：cg-bridge crate（CLI 子进程包装 + 版本 pin 1.5.0 +
+  超时矩阵 + JSON 归一）+ 项目生命周期（注册/索引/同步/版本不匹配标记）+
+  /codegraph/* 6 端点。真实仓库四类查询全通；修复测试容器泄漏根因（Drop 守卫），
+  见 [evidence/README.md](evidence/README.md)
 - **Phase 4 Wiki 域**（2026-10）：两步 ingest（analysis→generation，提示词版本化）+
   wikilink 解析/链接图 + index/log 系统页 + human 页提案保护 + lint（死链/孤儿/
   重复实体/坏 frontmatter）+ /wiki/* 8 端点。真 LLM e2e 互链零重复 + proposal +
@@ -48,7 +52,7 @@
 
 ## Next
 
-- Phase 5 CodeGraph 桥（[phases/phase-5-codegraph.md](phases/phase-5-codegraph.md)）
+- Phase 6 Web 控制台（[phases/phase-6-web.md](phases/phase-6-web.md)）
 
 ## Deferred
 

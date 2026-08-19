@@ -1,6 +1,7 @@
 //! 路由注册与中间件装配。
 
 pub mod auth_api;
+pub mod codegraph_api;
 pub mod health;
 pub mod jobs_api;
 pub mod knowledge_api;
@@ -36,6 +37,9 @@ use utoipa::OpenApi;
         knowledge_api::delete_document, knowledge_api::search,
         wiki_api::ingest, wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
+        codegraph_api::register_project, codegraph_api::list_projects,
+        codegraph_api::get_project, codegraph_api::index_project,
+        codegraph_api::sync_project, codegraph_api::query,
     ),
 )]
 struct ApiDoc;
@@ -123,7 +127,21 @@ pub fn router(state: AppState) -> Router {
         .route("/wiki/graph", get(wiki_api::graph))
         .route("/wiki/lint", post(wiki_api::lint))
         .route("/wiki/proposals/apply", post(wiki_api::apply_proposal))
-        .route("/wiki/search", post(wiki_api::search));
+        .route("/wiki/search", post(wiki_api::search))
+        .route(
+            "/codegraph/projects",
+            post(codegraph_api::register_project).get(codegraph_api::list_projects),
+        )
+        .route("/codegraph/projects/{id}", get(codegraph_api::get_project))
+        .route(
+            "/codegraph/projects/{id}/index",
+            post(codegraph_api::index_project),
+        )
+        .route(
+            "/codegraph/projects/{id}/sync",
+            post(codegraph_api::sync_project),
+        )
+        .route("/codegraph/projects/{id}/query", post(codegraph_api::query));
 
     Router::new()
         .merge(public)

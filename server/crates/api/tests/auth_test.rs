@@ -10,19 +10,18 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::util::ServiceExt;
 
-async fn app() -> Router {
+async fn app() -> (Router, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     agent_memory_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    std::mem::forget(container); // 测试进程存活期间保容器
 
     let state = AppState::new(pool)
         .with_admin_password(Some("test-admin-pw".into()))
         .with_master_key(Some("ab".repeat(32)));
-    routes::router(state)
+    (routes::router(state), container)
 }
 
 async fn login_token(app: &Router) -> String {
@@ -86,7 +85,7 @@ async fn get_status(app: &Router, auth: Option<&str>, uri: &str) -> StatusCode {
 
 #[tokio::test]
 async fn auth_401_403_matrix() {
-    let app = app().await;
+    let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
     // 401：无凭证 / 坏凭证
@@ -169,7 +168,7 @@ async fn auth_401_403_matrix() {
 
 #[tokio::test]
 async fn openapi_snapshot() {
-    let app = app().await;
+    let (app, _pg) = app().await;
     let resp = app
         .clone()
         .oneshot(
@@ -213,6 +212,11 @@ async fn openapi_snapshot() {
         paths,
         vec![
             "/auth/login",
+            "/codegraph/projects",
+            "/codegraph/projects/{id}",
+            "/codegraph/projects/{id}/index",
+            "/codegraph/projects/{id}/query",
+            "/codegraph/projects/{id}/sync",
             "/health",
             "/jobs",
             "/jobs/{id}",

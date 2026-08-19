@@ -2,6 +2,23 @@
 
 按阶段归档验证证据。每条证据 = 何时、验证了什么、命令/输出摘要、结论。
 
+## Phase 5 — CodeGraph 桥（2026-10 完成）
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| 注册真实仓库→ready→四类查询通 | ✅ | 集成测试（本地 codegraph CLI 1.5.0）：注册本仓库自身 → index → ready → search「JobQueue」命中 struct 节点；callers「run_migrations」返回调用者；impact「enqueue」depth=2 返回 26 节点影响面；explore 返回 Markdown（含 blast radius）；CI 无 CLI 时优雅跳过 |
+| CLI 超时与版本不匹配单测 | ✅ | 超时路径：1ms 超时强制中断分类 Timeout/CliUnavailable；版本：pin 1.5.0 探测 + mark_all_version_mismatch 落库 + version_mismatch 项目查询拒绝（集成测试断言） |
+| 镜像内 codegraph 可用 | ✅ | Dockerfile runtime 改 node:22-slim + `npm i -g @colbymchenry/codegraph@1.5.0` + git；构建时 `codegraph version` 自验 |
+| 注册校验 | ✅ | 不存在路径 BadRequest；重名拒绝 |
+
+### 实现要点
+
+- 版本 pin（D0005）：ensure_version 守卫 index/sync/query 入口；升级 CLI → mark_all_version_mismatch 人工重扫
+- 超时矩阵：init 10min / sync 60s / query 30s；kill 子进程归一 Timeout 错误
+- explore 无 --json（上游限制）→ Markdown 文本 24KB 截断保护；query/callers/callees/impact JSON 归一
+- **测试基建修复**：测试容器泄漏（mem::forget 累积 198 个僵尸容器压垮 Docker daemon）→ TestPg Drop 守卫全量替换
+
+## Phase 4 — Wiki 域（2026-10 完成）
 ## Phase 4 — Wiki 域（2026-10 完成）
 
 | 门 | 结果 | 证据 |

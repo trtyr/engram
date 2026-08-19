@@ -11,14 +11,18 @@ use std::time::Duration;
 
 async fn setup(
     chats: Vec<serde_json::Value>,
-) -> (sqlx::PgPool, WikiService, agent_memory_jobs::RunnerHandle) {
+) -> (
+    sqlx::PgPool,
+    WikiService,
+    agent_memory_jobs::RunnerHandle,
+    support::TestPg,
+) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     agent_memory_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    std::mem::forget(container);
 
     let llm: LlmRef = Arc::new(MockLlm::with_raw_chats(
         chats
@@ -45,7 +49,7 @@ async fn setup(
     );
     // embed 也需要 handler 之外的 Llm —— WikiService 不直接调 LLM（嵌入在 job 内）
     let handle = runner.start();
-    (pool.clone(), WikiService::new(pool), handle)
+    (pool.clone(), WikiService::new(pool), handle, container)
 }
 
 async fn wait_jobs(pool: &sqlx::PgPool, kinds: &[&str]) {
@@ -76,7 +80,7 @@ async fn wait_jobs(pool: &sqlx::PgPool, kinds: &[&str]) {
 /// 核心链路：两篇相关文档先后 ingest → 互链 + 第二篇更新既有页不重复建。
 #[tokio::test]
 async fn two_docs_interlinked_no_duplicate() {
-    let (pool, wiki, handle) = setup(vec![
+    let (pool, wiki, handle, _pg) = setup(vec![
         // 文档1 分析
         json!({"entities": ["张三"], "concepts": ["向量检索"], "links": [], "conflicts": [], "source_title": "文档一"}),
         // 文档1 生成：新建 3 页（entity/concept/source），互链
@@ -169,7 +173,7 @@ async fn two_docs_interlinked_no_duplicate() {
 /// 人写页面不被 LLM 覆盖 → proposal。
 #[tokio::test]
 async fn human_page_produces_proposal_not_overwrite() {
-    let (pool, wiki, handle) = setup(vec![
+    let (pool, wiki, handle, _pg) = setup(vec![
         // 分析
         json!({"entities": ["张三"], "concepts": [], "links": [], "conflicts": [], "source_title": "文档"}),
         // 生成：试图写「张三」页（人写页）→ 提案
@@ -232,7 +236,7 @@ async fn human_page_produces_proposal_not_overwrite() {
 /// lint：注入死链 + 孤儿页 → 全部报出。
 #[tokio::test]
 async fn lint_reports_dead_links_and_orphans() {
-    let (pool, wiki, handle) = setup(vec![]).await;
+    let (pool, wiki, handle, _pg) = setup(vec![]).await;
 
     // 正常互链两页 + 一个死链 + 一个孤儿
     wiki.put_page("正常页A", "A", "内容链接 [[正常页B]]。")

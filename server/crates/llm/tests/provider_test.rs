@@ -45,11 +45,7 @@ async fn start_mock_llm() -> String {
     format!("http://{}", addr)
 }
 
-async fn setup() -> (
-    testcontainers::ContainerAsync<testcontainers::GenericImage>,
-    ProviderRegistry,
-    PurposeRouter,
-) {
+async fn setup() -> (support::TestPg, ProviderRegistry, PurposeRouter) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
