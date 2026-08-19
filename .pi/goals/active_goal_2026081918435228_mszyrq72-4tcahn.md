@@ -5,14 +5,14 @@
   "status": "active",
   "autoContinue": true,
   "usage": {
-    "tokensUsed": 1542656,
-    "activeSeconds": 12865
+    "tokensUsed": 1606298,
+    "activeSeconds": 15253
   },
   "sisyphus": false,
   "createdAt": "2026-08-19T10:43:52.286Z",
-  "updatedAt": "2026-08-19T16:05:57.909Z",
+  "updatedAt": "2026-08-19T16:46:21.629Z",
   "activePath": ".pi/goals/active_goal_2026081918435228_mszyrq72-4tcahn.md",
-  "revision": 446,
+  "revision": 508,
   "taskList": {
     "tasks": [
       {
@@ -59,7 +59,9 @@
         "id": "phase-5",
         "title": "Phase 5 CodeGraph 桥",
         "verificationContract": "compose 栈内注册真实仓库→ready→explore/callers/impact 查询通；CLI 超时与版本不匹配路径单测绿；镜像内 codegraph 可用",
-        "status": "pending"
+        "status": "complete",
+        "completedAt": "2026-08-19T16:06:29.774Z",
+        "evidence": "commit 88e6d77：①注册真实仓库→ready→查询通——集成测试：本仓库自身注册→index→ready→search「JobQueue」命中、callers「run_migrations」、impact「enqueue」26 节点、explore Markdown 全通（本地 codegraph CLI 1.5.0）；②CLI 超时与版本不匹配单测绿——1ms 强制超时分类、pin "
       },
       {
         "id": "phase-6",
@@ -77,7 +79,7 @@
     "blockCompletion": false,
     "proposedAt": "2026-08-19T10:44:14.446Z"
   },
-  "currentTaskId": "phase-5"
+  "currentTaskId": "phase-6"
 }
 
 # Goal Prompt
@@ -89,8 +91,8 @@
 - Status: running
 - Auto-continue: on
 - Sisyphus mode: no
-- Time spent: 3h34m25s
-- Tokens used: 1.5M (1,542,656) tokens
+- Time spent: 4h14m13s
+- Tokens used: 1.6M (1,606,298) tokens
 ## Tasks
 
 <!-- blockCompletion: false -->
@@ -99,7 +101,7 @@
 - [x] phase-2: Phase 2 记忆域（L0–L3 蒸馏闭环） — evidence: commit b596db8：①真 LLM e2e——本地二进制+PG，shanghai/deepseek-v4-flash 两轮蒸馏：轮1「住上海」入库，轮2「搬到北京」→旧原子 superseded(superseded_by 链)、「开发环境」场景 v2、identity 画像 v1(上海)→v2(北京)，history 双版本可 diff；②/memory/context?query=用户
 - [x] phase-3: Phase 3 知识域（摄取+检索） — evidence: commit d9f6f2e：①PDF/md/URL 三类摄取到 ready——真 e2e（本地二进制+真网关 embedding）：async-rust.md 多标题分块、合法 PDF、清华镜像站 URL（标题正确提取）全部 ready；②中文检索命中——「异步运行时 select 调度」「镜像 开源软件」分别命中 md/URL 文档，结果带 document_title+snippet+sco
 - [x] phase-4: Phase 4 Wiki 域（两步 ingest+lint） — evidence: commit d6eb921：①两篇相关中文文档互链零重复——真 LLM e2e（shanghai/deepseek-v4-flash）：文档一产 8 页（张三/pgvector/向量检索/余弦相似度等），文档二新建 HNSW/近似最近邻并 HNSW→向量检索 互链，既有页零重复（张三保持 v1）；mock 单测验证「向量检索」v1→v2 内容合并；②human 页 proposal——put_p
-- [ ] phase-5: Phase 5 CodeGraph 桥 — contract: compose 栈内注册真实仓库→ready→explore/callers/impact 查询通；CLI 超时与版本不匹配路径单测绿；镜像内 codegraph 可用
+- [x] phase-5: Phase 5 CodeGraph 桥 — evidence: commit 88e6d77：①注册真实仓库→ready→查询通——集成测试：本仓库自身注册→index→ready→search「JobQueue」命中、callers「run_migrations」、impact「enqueue」26 节点、explore Markdown 全通（本地 codegraph CLI 1.5.0）；②CLI 超时与版本不匹配单测绿——1ms 强制超时分类、pin 
 - [ ] phase-6: Phase 6 Web 控制台（七域 UI） — contract: 浏览器对真栈完成全旅程（登录→各域写入→蒸馏→图谱→检索）；vitest 关键组件覆盖；OpenAPI 类型生成 CI 强制同步；单端口静态资源服务验证
 - [ ] phase-7: Phase 7 交付打磨与发布 — contract: 干净环境 clone→compose up→playwright e2e 全绿零手工干预；备份→恢复数据完整；AI-INTERFACE.md 交新 agent 会话仅凭文档完成 AI 视角闭环并留档
 

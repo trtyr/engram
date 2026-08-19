@@ -192,7 +192,7 @@ pub struct KnowledgeSearchRequest {
 }
 
 /// 知识混合检索（结果带文档引用 + 高亮片段）。
-#[utoipa::path(post, path = "/knowledge/search",
+#[utoipa::path(post, path = "/knowledge/search", operation_id = "knowledge_search",
     request_body = KnowledgeSearchRequest,
     responses((status = 200, body = [ChunkHit])))]
 pub async fn search(

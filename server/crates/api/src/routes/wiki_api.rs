@@ -197,7 +197,7 @@ pub struct WikiSearchRequest {
 }
 
 /// Wiki 页面检索。
-#[utoipa::path(post, path = "/wiki/search",
+#[utoipa::path(post, path = "/wiki/search", operation_id = "wiki_search",
     request_body = WikiSearchRequest,
     responses((status = 200, body = [WikiPageDto])))]
 pub async fn search(

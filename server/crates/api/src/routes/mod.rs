@@ -42,7 +42,7 @@ use utoipa::OpenApi;
         codegraph_api::sync_project, codegraph_api::query,
     ),
 )]
-struct ApiDoc;
+pub(crate) struct ApiDoc;
 
 pub fn router(state: AppState) -> Router {
     let public = Router::new()
@@ -146,9 +146,16 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(public)
         .merge(authed.layer(from_fn_with_state(state.clone(), crate::auth::bearer_auth)))
+        // SPA 静态资源兜底（API 路由未命中时 → web/dist）
+        .fallback_service(axum::routing::any(crate::web_assets::static_handler))
         .with_state(state)
 }
 
 async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {
     Json(ApiDoc::openapi())
+}
+
+/// OpenAPI 文档（程序化访问，openapi-dump bin 用）。
+pub fn openapi() -> utoipa::openapi::OpenApi {
+    ApiDoc::openapi()
 }

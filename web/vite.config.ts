@@ -1,5 +1,5 @@
-
-import { defineConfig } from 'vite'
+/// <reference types="vitest" />
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -15,6 +15,19 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:8080',
+      '/auth': 'http://localhost:8080',
+      '/jobs': 'http://localhost:8080',
+      '/memory': 'http://localhost:8080',
+      '/knowledge': 'http://localhost:8080',
+      '/wiki': 'http://localhost:8080',
+      '/codegraph': 'http://localhost:8080',
+      '/settings': 'http://localhost:8080',
+      '/llm': 'http://localhost:8080',
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test-setup.ts'],
   },
 })

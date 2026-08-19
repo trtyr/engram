@@ -311,7 +311,7 @@ pub struct SearchRequest {
     pub max_items: Option<i64>,
 }
 
-#[utoipa::path(post, path = "/memory/search",
+#[utoipa::path(post, path = "/memory/search", operation_id = "memory_search",
     request_body = SearchRequest,
     responses((status = 200, body = SearchResponse)))]
 pub async fn search(

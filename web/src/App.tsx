@@ -1,9 +1,18 @@
-import { NavLink, Route, Routes } from 'react-router-dom'
-
 /**
- * 应用壳：侧边栏七域导航（Phase 6 逐步充实各域页面）。
- * 域清单与 docs/plantree/plans/agent-memory-platform/topics/frontend.md 一致。
+ * 应用壳：登录守卫 + 侧边栏七域导航。
  */
+import { NavLink, Route, Routes, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { api, getToken, setToken } from '@/lib/api'
+import Dashboard from '@/features/Dashboard'
+import Memory from '@/features/Memory'
+import Knowledge from '@/features/Knowledge'
+import Wiki from '@/features/Wiki'
+import CodeGraph from '@/features/CodeGraph'
+import Jobs from '@/features/Jobs'
+import Settings from '@/features/Settings'
+import { Button } from '@/components/ui/button'
+
 const NAV = [
   { to: '/', label: 'Dashboard' },
   { to: '/memory', label: 'Memory' },
@@ -14,19 +23,60 @@ const NAV = [
   { to: '/settings', label: 'Settings' },
 ] as const
 
-const STUB: Record<string, string> = {
-  '/': '统计与用量总览（Phase 6a）',
-  '/memory': '会话 / 原子 / 场景 / 画像（Phase 6b）',
-  '/knowledge': '文档摄取与检索（Phase 6c）',
-  '/wiki': '页面 / 图谱 / Lint（Phase 6d）',
-  '/codegraph': '项目注册与查询（Phase 6e）',
-  '/jobs': '任务队列与事件（Phase 6e）',
-  '/settings': 'LLM / API Key / 参数（Phase 6e）',
+function Login() {
+  const [pw, setPw] = useState('')
+  const [err, setErr] = useState('')
+  const nav = useNavigate()
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <form
+        className="w-72 space-y-4 rounded-lg border p-6"
+        onSubmit={async (e) => {
+          e.preventDefault()
+          try {
+            const r = await api.post<{ token: string }>('/auth/login', { password: pw })
+            setToken(r.token)
+            nav('/', { replace: true })
+          } catch (ex) {
+            setErr(ex instanceof Error ? ex.message : '登录失败')
+          }
+        }}
+      >
+        <h1 className="text-lg font-semibold">agent-memory</h1>
+        <input
+          type="password"
+          className="w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+          placeholder="管理员密码"
+          value={pw}
+          onChange={(e) => setPw(e.target.value)}
+        />
+        {err && <p className="text-sm text-red-400">{err}</p>}
+        <Button className="w-full" type="submit">
+          登录
+        </Button>
+      </form>
+    </div>
+  )
 }
 
 export default function App() {
+  const [authed, setAuthed] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!getToken()) {
+      setAuthed(false)
+      return
+    }
+    api
+      .get('/jobs?limit=1')
+      .then(() => setAuthed(true))
+      .catch(() => setAuthed(false))
+  }, [])
+
+  if (authed === null) return <div className="min-h-screen" />
+  if (!authed) return <Login />
+
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen">
       <aside className="flex w-52 shrink-0 flex-col gap-1 border-r p-4">
         <h1 className="mb-4 px-2 text-lg font-semibold">agent-memory</h1>
         {NAV.map((item) => (
@@ -41,21 +91,17 @@ export default function App() {
           </NavLink>
         ))}
       </aside>
-      <main className="flex-1 p-8">
+      <main className="flex-1 overflow-auto p-8">
         <Routes>
-          {NAV.map((item) => (
-            <Route key={item.to} path={item.to} element={<Stub label={STUB[item.to]} />} />
-          ))}
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/memory" element={<Memory />} />
+          <Route path="/knowledge" element={<Knowledge />} />
+          <Route path="/wiki" element={<Wiki />} />
+          <Route path="/codegraph" element={<CodeGraph />} />
+          <Route path="/jobs" element={<Jobs />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
-    </div>
-  )
-}
-
-function Stub({ label }: { label: string }) {
-  return (
-    <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
-      {label} — 骨架占位，Phase 6 实现。
     </div>
   )
 }

@@ -14,12 +14,22 @@ pub struct RouteRule {
 }
 
 /// 路由表（全部 purpose）。
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+/// serde 用 flatten（wire 形态 {purpose: [...]}）；utoipa 侧声明为自由对象
+/// （flatten 的 $ref 形态 openapi-typescript 无法解析）。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RoutingTable {
     /// purpose → 有序回退链（第一个为主选）
     #[serde(flatten)]
     pub routes: HashMap<String, Vec<RouteRule>>,
 }
+
+impl utoipa::PartialSchema for RoutingTable {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::Schema> {
+        utoipa::openapi::Object::new().into()
+    }
+}
+
+impl utoipa::ToSchema for RoutingTable {}
 
 impl RoutingTable {
     /// 某 purpose 的回退链（无配置 → 空，由调用方走默认 provider）。
