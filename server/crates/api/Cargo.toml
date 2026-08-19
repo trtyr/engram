@@ -18,6 +18,7 @@ agent-memory-jobs.workspace = true
 agent-memory-llm.workspace = true
 agent-memory-core.workspace = true
 agent-memory-distill.workspace = true
+agent-memory-wiki-engine.workspace = true
 
 sqlx.workspace = true
 axum.workspace = true

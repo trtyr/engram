@@ -2,6 +2,22 @@
 
 按阶段归档验证证据。每条证据 = 何时、验证了什么、命令/输出摘要、结论。
 
+## Phase 4 — Wiki 域（2026-10 完成）
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| 两篇相关中文文档互链且不重复建页 | ✅ | 真 LLM e2e（shanghai/deepseek-v4-flash）：文档一「向量检索入门」→ 张三/pgvector/向量检索/余弦相似度等 8 页；文档二「HNSW 索引原理」→ 新建 HNSW/近似最近邻并 `HNSW → 向量检索` 互链，既有页零重复零误升级（张三 v1 保持）；mock 单测断言「向量检索」v1→v2 合并、未涉页不动 |
+| human 页覆盖产生 proposal | ✅ | mock 单测：put_page(origin=human) → ingest 试图写同 slug → 页面 v1 内容不变 + job_events 产生提案事件（含 proposal_content）→ apply_proposal 合入 v2 |
+| lint 报出死链/孤儿 | ✅ | 单测：注入 [[不存在的页面]] 死链 + 无入链孤儿页 → dead_link/orphan 全报出，正常互链页零误报；系统页豁免 frontmatter 检查（真 e2e 中修正的误报） |
+| sha 重复 ingest 秒跳过 | ✅ | API 实测：同文本二次 ingest → `{skipped:true}` 立即返回（无新 job） |
+
+### 实现要点
+
+- 两步 ingest（Karpathy 模式）：wiki_analyze（实体/概念/关联/矛盾分析）→ wiki_generate（建页/更新/提案），提示词版本化 P_WIKI_ANALYSIS/GENERATION v1
+- wikilink 解析器（含 `[[slug|显示名]]` 形态与中文 slug 规则）
+- index/log 系统页自动维护；链接图（from_slug/to_slug/weight）
+- 全程 LLM I/O 落 job_events（复用 Phase 2 可观测基建）
+
 ## Phase 3 — 知识域（2026-10 完成）
 
 | 门 | 结果 | 证据 |

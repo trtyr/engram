@@ -16,7 +16,8 @@ use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_knowledge(p: &Principal) -> Result<(), ApiError> {
-    require_scope(p, "knowledge")}
+    require_scope(p, "knowledge")
+}
 
 fn ke(e: KnowledgeError) -> ApiError {
     match e {

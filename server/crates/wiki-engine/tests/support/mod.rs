@@ -1,4 +1,4 @@
-//! jobs 测试基建：复用 pgvector 容器启动逻辑。
+//! wiki-engine 测试基建。
 
 use sqlx::PgPool;
 use testcontainers::core::WaitFor;

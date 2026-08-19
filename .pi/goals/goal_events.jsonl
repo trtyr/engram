@@ -19,3 +19,5 @@
 {"type":"goal_resumed","goalId":"mszyrq72-4tcahn","reason":"user","at":"2026-08-19T14:20:46.170Z"}
 {"type":"task_complete","goalId":"mszyrq72-4tcahn","taskId":"phase-2","evidence":"commit b596db8：①真 LLM e2e——本地二进制+PG，shanghai/deepseek-v4-flash 两轮蒸馏：轮1「住上海」入库，轮2「搬到北京」→旧原子 superseded(superseded_by 链)、「开发环境」场景 v2、identity 画像 v1(上海)→v2(北京)，history 双版本可 diff；②/memory/context?query=用户","at":"2026-08-19T14:21:06.576Z"}
 {"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-3","at":"2026-08-19T14:21:29.458Z"}
+{"type":"task_complete","goalId":"mszyrq72-4tcahn","taskId":"phase-3","evidence":"commit d9f6f2e：①PDF/md/URL 三类摄取到 ready——真 e2e（本地二进制+真网关 embedding）：async-rust.md 多标题分块、合法 PDF、清华镜像站 URL（标题正确提取）全部 ready；②中文检索命中——「异步运行时 select 调度」「镜像 开源软件」分别命中 md/URL 文档，结果带 document_title+snippet+sco","at":"2026-08-19T14:56:43.179Z"}
+{"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-4","at":"2026-08-19T14:56:50.604Z"}

@@ -242,6 +242,13 @@ async fn openapi_snapshot() {
             "/settings/llm/providers",
             "/settings/llm/providers/{id}/test",
             "/settings/llm/routing",
+            "/wiki/graph",
+            "/wiki/ingest",
+            "/wiki/lint",
+            "/wiki/pages",
+            "/wiki/pages/{slug}",
+            "/wiki/proposals/apply",
+            "/wiki/search",
         ],
         "API 端点集合发生变化时必须同步更新快照"
     );

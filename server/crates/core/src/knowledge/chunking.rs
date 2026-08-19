@@ -34,10 +34,9 @@ fn split_by_headings(text: &str) -> Vec<String> {
     let mut sections: Vec<String> = Vec::new();
     let mut current = String::new();
     for line in text.lines() {
-        if line.starts_with("#")
-            && !current.trim().is_empty() {
-                sections.push(std::mem::take(&mut current));
-            }
+        if line.starts_with("#") && !current.trim().is_empty() {
+            sections.push(std::mem::take(&mut current));
+        }
         current.push_str(line);
         current.push('\n');
     }

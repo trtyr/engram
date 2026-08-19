@@ -105,13 +105,14 @@ pub async fn list_providers(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ProviderDto>>, ApiError> {
     require_admin(&principal)?;
-    let rows: Vec<(
+    type ProvRow = (
         Uuid,
         String,
         String,
         sqlx::types::Json<Vec<ModelInfo>>,
         bool,
-    )> = sqlx::query_as(
+    );
+    let rows: Vec<ProvRow> = sqlx::query_as(
         "SELECT id, name, base_url, models, is_default FROM llm_providers ORDER BY created_at",
     )
     .fetch_all(&state.pool)
@@ -359,7 +360,16 @@ pub async fn list_api_keys(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ApiKeyDto>>, ApiError> {
     require_admin(&principal)?;
-    let rows: Vec<(Uuid, String, String, sqlx::types::Json<Vec<String>>, chrono::DateTime<chrono::Utc>, Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+    type KeyRow = (
+        Uuid,
+        String,
+        String,
+        sqlx::types::Json<Vec<String>>,
+        chrono::DateTime<chrono::Utc>,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    );
+    let rows: Vec<KeyRow> = sqlx::query_as(
         "SELECT id, name, key_prefix, scopes, created_at, last_used_at, revoked_at FROM api_keys ORDER BY created_at DESC",
     )
     .fetch_all(&state.pool)

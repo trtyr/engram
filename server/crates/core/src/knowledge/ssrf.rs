@@ -136,9 +136,10 @@ pub async fn safe_fetch(
 
         // 大小限制（Content-Length 预检 + 流式读封顶）
         if let Some(len) = resp.content_length()
-            && len as usize > max_bytes {
-                return Err(FetchError::TooLarge);
-            }
+            && len as usize > max_bytes
+        {
+            return Err(FetchError::TooLarge);
+        }
         let content_type = resp
             .headers()
             .get(reqwest::header::CONTENT_TYPE)

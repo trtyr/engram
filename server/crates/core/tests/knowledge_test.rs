@@ -136,9 +136,10 @@ async fn wait_ready(
 ) -> agent_memory_core::knowledge::DocumentDto {
     for _ in 0..300 {
         if let Ok(doc) = svc.get_document(id).await
-            && matches!(doc.status.as_str(), "ready" | "failed") {
-                return doc;
-            }
+            && matches!(doc.status.as_str(), "ready" | "failed")
+        {
+            return doc;
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("文档 {id} 摄取超时");

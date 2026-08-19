@@ -90,11 +90,12 @@ fn parse_docx(bytes: &[u8]) -> Result<String, ParseError> {
             }
             docx_rs::DocumentChild::Table(t) => {
                 for tc in &t.rows {
-                    if let docx_rs::TableChild::TableRow(row) = tc {
+                    let docx_rs::TableChild::TableRow(row) = tc;
+                    {
                         let cells: Vec<String> = row
                             .cells
                             .iter()
-                            .filter_map(|cc| match cc {
+                            .map(|cc| match cc {
                                 docx_rs::TableRowChild::TableCell(c) => {
                                     let texts: Vec<String> = c
                                         .children
@@ -106,7 +107,7 @@ fn parse_docx(bytes: &[u8]) -> Result<String, ParseError> {
                                             _ => None,
                                         })
                                         .collect();
-                                    Some(texts.join(" "))
+                                    texts.join(" ")
                                 }
                             })
                             .collect();

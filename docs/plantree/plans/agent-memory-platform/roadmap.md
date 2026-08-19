@@ -10,8 +10,8 @@
 | 1 | 核心底座 | 0 | **Done** (2026-10) | [phases/phase-1-core-infra.md](phases/phase-1-core-infra.md) |
 | 2 | 记忆域（Chat Memory L0–L3） | 1 | **Done** (2026-10) | [phases/phase-2-memory.md](phases/phase-2-memory.md) |
 | 3 | 知识域（Knowledge） | 1 | **Done** (2026-10) | [phases/phase-3-knowledge.md](phases/phase-3-knowledge.md) |
-| 4 | Wiki 域 | 1 | **Next** | [phases/phase-4-wiki.md](phases/phase-4-wiki.md) |
-| 5 | CodeGraph 桥 | 1 | Not started | [phases/phase-5-codegraph.md](phases/phase-5-codegraph.md) |
+| 4 | Wiki 域 | 1 | **Done** (2026-10) | [phases/phase-4-wiki.md](phases/phase-4-wiki.md) |
+| 5 | CodeGraph 桥 | 1 | **Next** | [phases/phase-5-codegraph.md](phases/phase-5-codegraph.md) |
 | 6 | Web 控制台 | 2–5 | Not started | [phases/phase-6-web.md](phases/phase-6-web.md) |
 | 7 | 交付打磨与发布 | 6 | Not started | [phases/phase-7-release.md](phases/phase-7-release.md) |
 
@@ -19,6 +19,10 @@
 
 ## Done
 
+- **Phase 4 Wiki 域**（2026-10）：两步 ingest（analysis→generation，提示词版本化）+
+  wikilink 解析/链接图 + index/log 系统页 + human 页提案保护 + lint（死链/孤儿/
+  重复实体/坏 frontmatter）+ /wiki/* 8 端点。真 LLM e2e 互链零重复 + proposal +
+  lint + sha 幂等全过，见 [evidence/README.md](evidence/README.md)
 - **Phase 3 知识域**（2026-10）：摄取管道三步链（parse→chunk→embed）+ SSRF 安全抓取
   （DNS pinning/逐跳复检/私网全拒/20MB 30s）+ 四格式解析（md/pdf/docx/html）+
   sha256 幂等 + 嵌入降级 FTS + /knowledge/* 7 端点。真 e2e 三类文档 ready +
@@ -44,7 +48,7 @@
 
 ## Next
 
-- Phase 4 Wiki 域（[phases/phase-4-wiki.md](phases/phase-4-wiki.md)）
+- Phase 5 CodeGraph 桥（[phases/phase-5-codegraph.md](phases/phase-5-codegraph.md)）
 
 ## Deferred
 

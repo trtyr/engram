@@ -66,9 +66,10 @@ impl KnowledgeService {
     /// 提交摄取（上传字节或 URL）。sha 命中返回 (既有id, true)。
     pub async fn submit(&self, source: IngestSource) -> Result<(Uuid, bool), KnowledgeError> {
         if let IngestSource::Bytes { content, .. } = &source
-            && content.len() > 50 * 1024 * 1024 {
-                return Err(KnowledgeError::BadRequest("文件超过 50MB 上限".into()));
-            }
+            && content.len() > 50 * 1024 * 1024
+        {
+            return Err(KnowledgeError::BadRequest("文件超过 50MB 上限".into()));
+        }
         pipeline::enqueue_ingest(&self.queue, &self.registry, &self.data_dir, source).await
     }
 
@@ -127,9 +128,10 @@ impl KnowledgeService {
         .ok_or_else(|| KnowledgeError::NotFound(format!("文档 {id} 不存在")))?;
         let (raw_path,) = row;
         if let Some(path) = raw_path
-            && !path.is_empty() {
-                let _ = tokio::fs::remove_file(&path).await;
-            }
+            && !path.is_empty()
+        {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
         let _ = tokio::fs::remove_file(
             self.data_dir
                 .join("uploads")

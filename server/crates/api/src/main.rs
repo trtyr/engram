@@ -53,6 +53,16 @@ async fn main() -> anyhow::Result<()> {
             .expect("主密钥格式恒合法"),
         ),
     );
+    let runner = agent_memory_wiki_engine::ingest::register_handlers(
+        runner,
+        agent_memory_distill::gateway_llm(
+            pool.clone(),
+            agent_memory_llm::KeyCipher::from_hex_master(
+                &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
+            )
+            .expect("主密钥格式恒合法"),
+        ),
+    );
     let runner_handle = runner.start();
 
     // 5. HTTP 服务
