@@ -1,10 +1,11 @@
 # Implementation Status — agent-memory-platform
 
-> 仅 `In Progress` 阶段的操作交接。权威路线见 [roadmap.md](roadmap.md)。
+> **全计划完成（2026-08-20）**：八阶段交付，v0.1.0 tag，独立完成审计批准。
+> 后续工作见 [roadmap.md](roadmap.md) Deferred 与 ../../ideas/inbox.md。
 
 ## Current Phase
 
-（Phase 1 已完成验证，待 compose 终验后关闭；下一步 Phase 2 记忆域）
+（无——计划完成）
 
 ## Last Landed
 
