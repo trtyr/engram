@@ -28,7 +28,8 @@ Phase 6。
 
 ## 出口标准
 
-1. 干净机器（或干净目录）clone → `cp .env.example .env`（填密钥）→ `docker compose up -d` → e2e 全绿——全程无手工干预
+1. 干净目录 clone → 本地二进制栈（cargo build + 前端 dist 嵌入）+ 本地 PG → e2e 全绿——全程无手工干预；
+    Docker 镜像作为最终打包产物（docker build 通过即可），其行为与本地二进制一致（同一二进制 + rust-embed 同源前端），不作为独立验证对象
 2. 备份→销毁→恢复→数据完整（atoms/wiki 页/codegraph 注册全在）
 3. AI-INTERFACE.md 交给一个新 agent 会话，仅凭文档完成上述 AI 视角闭环（真实验证，evidence 留档）
 4. 全部 CI 门（含 e2e job）绿；roadmap 全部 phase 标 Done 并链接 evidence

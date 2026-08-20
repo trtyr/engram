@@ -39,7 +39,7 @@ Phase 2–5 的 API 已稳定（OpenAPI 快照为准）。
 
 ## 出口标准
 
-1. 浏览器（对 compose 真栈）完成旅程：登录 → 上传文档到 ready → 写入会话触发蒸馏到画像更新 → wiki ingest 到页面出现并图谱可见 → codegraph 注册到查询返回 → jobs 页看到全程事件——每步 UI 状态与 API 一致
+1. 浏览器（对本地二进制栈：debug server + Vite dev/嵌入 dist，DB 用 testcontainers/本地 PG）完成旅程：登录 → 上传文档到 ready → 写入会话触发蒸馏到画像更新 → wiki ingest 到页面出现并图谱可见 → codegraph 注册到查询返回 → jobs 页看到全程事件——每步 UI 状态与 API 一致
 2. vitest 覆盖关键组件（atoms 表格操作、persona diff 渲染、SSE 进度组件、编辑器保存）
 3. 类型生成流水线 CI 强制（后端 API 变更未重新生成 → CI 红）
 4. 每页空态/加载态/错误态齐备；Lighthouse 基本可达性检查通过

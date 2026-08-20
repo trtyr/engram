@@ -22,7 +22,24 @@ export default function Knowledge() {
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Knowledge</h1>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div
+        className="flex flex-wrap items-center gap-2 rounded-lg border-2 border-dashed p-4 transition-colors hover:border-accent"
+        data-testid="dropzone"
+        onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-accent') }}
+        onDragLeave={(e) => { e.currentTarget.classList.remove('border-accent') }}
+        onDrop={async (e) => {
+          e.preventDefault()
+          e.currentTarget.classList.remove('border-accent')
+          const f = e.dataTransfer.files?.[0]
+          if (!f) return
+          try {
+            await api.upload('/knowledge/upload', f)
+            load()
+          } catch (ex) {
+            setErr(ex instanceof Error ? ex.message : '上传失败')
+          }
+        }}
+      >
         <input ref={fileRef} type="file" className="hidden" onChange={async (e) => {
           const f = e.target.files?.[0]
           if (!f) return

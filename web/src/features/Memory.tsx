@@ -124,6 +124,9 @@ function Atoms() {
   const [kind, setKind] = useState('')
   const [review, setReview] = useState(false)
   const [err, setErr] = useState('')
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [superseding, setSuperseding] = useState<string | null>(null)
   useEffect(() => {
     const p = new URLSearchParams({ limit: '200' })
     if (kind) p.set('kind', kind)
@@ -148,6 +151,32 @@ function Atoms() {
           仅人审
         </label>
       </div>
+      {superseding && (
+        <div className="rounded-lg border border-orange-500/40 bg-orange-500/10 p-4" data-testid="supersede-panel">
+          <p className="mb-2 text-sm font-medium">supersede：输入取代旧记忆的新事实</p>
+          <form
+            className="flex gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              const old = rows?.find((r) => r.id === superseding)
+              // 平台语义：新增新事实（人审），旧条手工归档——矛盾仲裁由蒸馏管道自动处理，
+              // 这里人工路径提供等价操作（create + archive 一步完成）
+              await api.post('/memory/atoms', { kind: old?.kind ?? 'fact', content: draft, confidence: 0.95 })
+              await api.patch(`/memory/atoms/${superseding}`, { status: 'archived' })
+              setSuperseding(null)
+              setDraft('')
+              const p = new URLSearchParams({ limit: '200' })
+              if (kind) p.set('kind', kind)
+              if (review) p.set('needs_review', 'true')
+              setRows(await api.get<Atom[]>(`/memory/atoms?${p}`))
+            }}
+          >
+            <input data-testid="supersede-input" className="flex-1 rounded border bg-transparent px-3 py-1.5 text-sm" placeholder="新事实（取代旧条目）" value={draft} onChange={(e) => setDraft(e.target.value)} />
+            <Button size="sm" type="submit" data-testid="supersede-submit">取代</Button>
+            <Button size="sm" variant="ghost" type="button" onClick={() => setSuperseding(null)}>取消</Button>
+          </form>
+        </div>
+      )}
       {rows.length === 0 ? (
         <Empty text="暂无原子" />
       ) : (
@@ -167,25 +196,64 @@ function Atoms() {
               <tr key={a.id} className="border-b">
                 <td className="py-1.5 pr-4">{a.kind}</td>
                 <td className="pr-4">
-                  {a.needs_review && <span className="mr-1 rounded bg-orange-500/20 px-1 text-xs text-orange-400">人审</span>}
-                  {a.content}
+                  {editing === a.id ? (
+                    <span className="flex items-center gap-1">
+                      <input
+                        data-testid={`atom-edit-${a.id}`}
+                        className="w-72 rounded border bg-transparent px-2 py-0.5 text-sm"
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') {
+                            await api.patch(`/memory/atoms/${a.id}`, { content: draft })
+                            setEditing(null)
+                            const p = new URLSearchParams({ limit: '200' })
+                            if (kind) p.set('kind', kind)
+                            if (review) p.set('needs_review', 'true')
+                            setRows(await api.get<Atom[]>(`/memory/atoms?${p}`))
+                          }
+                          if (e.key === 'Escape') setEditing(null)
+                        }}
+                      />
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>取消</Button>
+                    </span>
+                  ) : (
+                    <span
+                      data-testid={`atom-content-${a.id}`}
+                      onDoubleClick={() => { setEditing(a.id); setDraft(a.content) }}
+                      title="双击编辑"
+                      className="cursor-text"
+                    >
+                      {a.needs_review && <span className="mr-1 rounded bg-orange-500/20 px-1 text-xs text-orange-400">人审</span>}
+                      {a.content}
+                    </span>
+                  )}
                 </td>
                 <td className="pr-4">{a.confidence.toFixed(2)}</td>
                 <td className="pr-4">
                   <StatusBadge status={a.status} />
+                  {a.superseded_by && <span className="ml-1 text-xs text-muted-foreground">→ {a.superseded_by.slice(0, 8)}</span>}
                 </td>
                 <td className="pr-4">{a.hit_count}</td>
-                <td className="text-right">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={async () => {
-                      await api.patch(`/memory/atoms/${a.id}`, { status: 'archived' })
-                      setRows(rows.filter((r) => r.id !== a.id))
-                    }}
-                  >
-                    归档
-                  </Button>
+                <td className="text-right whitespace-nowrap">
+                  {a.status === 'active' && (
+                    <>
+                      <Button variant="ghost" size="sm" className="mr-1" data-testid={`atom-supersede-${a.id}`} onClick={() => setSuperseding(a.id)}>
+                        supersede
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        data-testid={`atom-archive-${a.id}`}
+                        onClick={async () => {
+                          await api.patch(`/memory/atoms/${a.id}`, { status: 'archived' })
+                          setRows(rows.filter((r) => r.id !== a.id))
+                        }}
+                      >
+                        归档
+                      </Button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}

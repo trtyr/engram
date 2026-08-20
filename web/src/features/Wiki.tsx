@@ -1,6 +1,8 @@
 /** Wiki 域：页面浏览 / Markdown 渲染 / 人工编辑 / 图谱 / Lint / 提案。 */
 import { useEffect, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import WikiGraph from '@/components/WikiGraph'
+import WikiMarkdown from '@/components/WikiMarkdown'
+import { useSearchParams } from 'react-router-dom'
 import { api, type GraphDto, type LintReport, type WikiPage } from '@/lib/api'
 import { Empty, ErrorBox, Spinner, fmtTime } from '@/components/ui-bits'
 import { Button } from '@/components/ui/button'
@@ -36,10 +38,18 @@ function PagesPane() {
   const [ingestText, setIngestText] = useState('')
   const [ingestTitle, setIngestTitle] = useState('')
   const [msg, setMsg] = useState('')
+  const [params] = useSearchParams()
   const load = () => api.get<WikiPage[]>('/wiki/pages?limit=100').then(setPages).catch(() => {})
   useEffect(() => {
     load()
   }, [])
+  // ?page= 深链（wikilink 跳转）
+  useEffect(() => {
+    const slug = params.get('page')
+    if (slug) {
+      api.get<WikiPage>(`/wiki/pages/${encodeURIComponent(slug)}`).then(setOpen).catch(() => {})
+    }
+  }, [params])
   if (!pages) return <Spinner />
 
   return (
@@ -126,9 +136,7 @@ function PagesPane() {
                 编辑
               </Button>
             </div>
-            <article className="prose prose-sm prose-invert max-w-none">
-              <ReactMarkdown>{open.content}</ReactMarkdown>
-            </article>
+            <WikiMarkdown content={open.content} onNavigateSlug={() => {}} />
           </div>
         )}
       </div>
@@ -142,31 +150,7 @@ function GraphPane() {
     api.get<GraphDto>('/wiki/graph').then(setG).catch(() => {})
   }, [])
   if (!g) return <Spinner />
-  if (g.nodes.length === 0) return <Empty text="图谱为空（ingest 后生成）" />
-  // 轻量文本渲染：邻接表（sigma.js 在有真实数据量后引入）
-  const bySlug = new Map(g.nodes.map((n) => [n.slug, n]))
-  const outMap = new Map<string, string[]>()
-  for (const e of g.edges) {
-    outMap.set(e.from_slug, [...(outMap.get(e.from_slug) ?? []), e.to_slug])
-  }
-  return (
-    <div className="space-y-2">
-      {g.nodes
-        .filter((n) => n.page_type !== 'index' && n.page_type !== 'log')
-        .map((n) => (
-          <div key={n.slug} className="rounded-lg border p-3 text-sm">
-            <p className="font-medium">
-              {n.title} <span className="text-xs text-muted-foreground">({n.page_type})</span>
-            </p>
-            {(outMap.get(n.slug) ?? []).length > 0 && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                → {(outMap.get(n.slug) ?? []).map((s) => bySlug.get(s)?.title ?? s).join(' · ')}
-              </p>
-            )}
-          </div>
-        ))}
-    </div>
-  )
+  return <WikiGraph graph={g} />
 }
 
 function LintPane() {
