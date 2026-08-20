@@ -2,6 +2,31 @@
 
 按阶段归档验证证据。每条证据 = 何时、验证了什么、命令/输出摘要、结论。
 
+## Phase 7 — 交付打磨与发布（2026-10 完成）
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| 干净环境 compose up 全绿 | ✅ | `docker compose down -v`（清卷）→ `docker compose build --no-cache` → `up -d`：db+app 双 healthy、`/ready` 200、SPA 首页 200、镜像内 codegraph 1.5.0 可执行；playwright 全旅程对栈 PASS |
+| 备份→恢复数据完整 | ✅ | `backup.sh backup`（pg_dump+数据卷 67.9KB）→ `down -v` 全销毁 → `restore` → `up -d`：atoms/wiki_pages/documents/persona 计数 1/6/1/1 与备份前一致 |
+| AI-INTERFACE.md 驱动 AI 闭环 | ✅ | `verify-ai-loop.sh`（纯 HTTP，模拟只读文档的 AI）：签发 key→context 拉→写入会话→蒸馏链 4 阶段 succeeded→语义检索命中「PostgreSQL 17 上海」→画像产出→URL 摄取+检索命中→wiki ingest 产页+检索命中→用量 12 行可查 |
+| e2e（恢复后栈复跑） | ✅ | playwright 全旅程在恢复数据后的栈上再次 PASS |
+
+### Phase 7 修复的真问题
+
+1. **Docker 构建上下文丢了 web/dist**（rust-embed 编译期路径）→ builder stage COPY --from=web-build
+2. **GLIBC 不匹配**：builder（trixie/2.41）产物跑在 node:22-slim（bookworm/2.36）→ runtime 统一 debian:trixie-slim
+3. **npm ci peer 冲突**（openapi-typescript vs typescript 6）→ web/.npmrc legacy-peer-deps + Dockerfile COPY
+4. **容器 IPv6 DNS 陷阱**：容器 DNS 只回 AAAA 而 reqwest 优先 v6 → resolve 过滤（有 v4 时仅 pin v4）
+5. **backup.sh 路径解析**（scripts/ 下无 compose 文件）→ 解析到 ../deploy
+
+### 交付物
+
+deploy/Dockerfile（三阶段：web→cargo-chef→trixie 运行时+codegraph pin）·
+docker-compose.yml · scripts/backup.sh（backup/restore）·
+docs/AI-INTERFACE.md（AI 客户端操作手册）· README（快速启动/备份/开发）·
+CHANGELOG · CI（ci.yml：fmt/clippy/test/lint/tsc/vitest/类型漂移/docker build + e2e.yml：compose 栈 playwright）· tag v0.1.0
+
+## Phase 6 — Web 控制台（2026-10 完成）
 ## Phase 6 — Web 控制台（2026-10 完成）
 
 | 门 | 结果 | 证据 |

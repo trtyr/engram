@@ -13,12 +13,16 @@
 | 4 | Wiki 域 | 1 | **Done** (2026-10) | [phases/phase-4-wiki.md](phases/phase-4-wiki.md) |
 | 5 | CodeGraph 桥 | 1 | **Done** (2026-10) | [phases/phase-5-codegraph.md](phases/phase-5-codegraph.md) |
 | 6 | Web 控制台 | 2–5 | **Done** (2026-10) | [phases/phase-6-web.md](phases/phase-6-web.md) |
-| 7 | 交付打磨与发布 | 6 | **Next** | [phases/phase-7-release.md](phases/phase-7-release.md) |
+| 7 | 交付打磨与发布 | 6 | **Done** (2026-10) | [phases/phase-7-release.md](phases/phase-7-release.md) |
 
 注：2/3/4/5 相互独立，可乱序或穿插执行；6 依赖各域 API 稳定。
 
 ## Done
 
+- **Phase 7 交付打磨与发布**（2026-10）：干净环境 compose 全栈（重建修 3 个交付 bug：
+  web/dist 构建上下文/GLIBC 版本对齐/npm peer 冲突）+ AI-INTERFACE.md 驱动 AI 闭环
+  （真网关全链路）+ 备份恢复数据完整 + 容器 IPv6 DNS 修复 + README/CHANGELOG/backup.sh/
+  e2e CI。tag v0.1.0，见 [evidence/README.md](evidence/README.md)
 - **Phase 6 Web 控制台**（2026-10）：七域完整 UI（Dashboard/Memory/Knowledge/Wiki/
   CodeGraph/Jobs/Settings）+ 登录守卫 + rust-embed 单端口 SPA + OpenAPI 类型生成
   CI drift 检查 + vitest 5 项 + playwright 全旅程。修 3 个真 bug（登录白屏/401 循环/
@@ -56,7 +60,7 @@
 
 ## Next
 
-- Phase 7 交付打磨与发布（[phases/phase-7-release.md](phases/phase-7-release.md)）
+（全部阶段完成；后续见 ideas/inbox.md）
 
 ## Deferred
 

@@ -5,14 +5,14 @@
   "status": "active",
   "autoContinue": true,
   "usage": {
-    "tokensUsed": 1801244,
-    "activeSeconds": 17207
+    "tokensUsed": 2409285,
+    "activeSeconds": 21114
   },
   "sisyphus": false,
   "createdAt": "2026-08-19T10:43:52.286Z",
-  "updatedAt": "2026-08-19T17:19:37.687Z",
+  "updatedAt": "2026-08-20T00:14:08.246Z",
   "activePath": ".pi/goals/active_goal_2026081918435228_mszyrq72-4tcahn.md",
-  "revision": 579,
+  "revision": 673,
   "taskList": {
     "tasks": [
       {
@@ -67,7 +67,9 @@
         "id": "phase-6",
         "title": "Phase 6 Web 控制台（七域 UI）",
         "verificationContract": "浏览器对真栈完成全旅程（登录→各域写入→蒸馏→图谱→检索）；vitest 关键组件覆盖；OpenAPI 类型生成 CI 强制同步；单端口静态资源服务验证",
-        "status": "pending"
+        "status": "complete",
+        "completedAt": "2026-08-19T17:20:17.274Z",
+        "evidence": "commit cd9bb90 + 8b2ca47：①浏览器全旅程——playwright chromium 对本地真栈：登录→Dashboard 统计→Memory 五 tab（含画像回滚）→Knowledge→Wiki→Jobs→Settings→登出回登录页全断言绿；②vitest 5 项组件测试绿；③OpenAPI 类型生成 CI 强制——openapi-dump bin + openapi"
       },
       {
         "id": "phase-7",
@@ -79,7 +81,7 @@
     "blockCompletion": false,
     "proposedAt": "2026-08-19T10:44:14.446Z"
   },
-  "currentTaskId": "phase-6"
+  "currentTaskId": "phase-7"
 }
 
 # Goal Prompt
@@ -91,8 +93,8 @@
 - Status: running
 - Auto-continue: on
 - Sisyphus mode: no
-- Time spent: 4h46m47s
-- Tokens used: 1.8M (1,801,244) tokens
+- Time spent: 5h51m54s
+- Tokens used: 2.4M (2,409,285) tokens
 ## Tasks
 
 <!-- blockCompletion: false -->
@@ -102,6 +104,6 @@
 - [x] phase-3: Phase 3 知识域（摄取+检索） — evidence: commit d9f6f2e：①PDF/md/URL 三类摄取到 ready——真 e2e（本地二进制+真网关 embedding）：async-rust.md 多标题分块、合法 PDF、清华镜像站 URL（标题正确提取）全部 ready；②中文检索命中——「异步运行时 select 调度」「镜像 开源软件」分别命中 md/URL 文档，结果带 document_title+snippet+sco
 - [x] phase-4: Phase 4 Wiki 域（两步 ingest+lint） — evidence: commit d6eb921：①两篇相关中文文档互链零重复——真 LLM e2e（shanghai/deepseek-v4-flash）：文档一产 8 页（张三/pgvector/向量检索/余弦相似度等），文档二新建 HNSW/近似最近邻并 HNSW→向量检索 互链，既有页零重复（张三保持 v1）；mock 单测验证「向量检索」v1→v2 内容合并；②human 页 proposal——put_p
 - [x] phase-5: Phase 5 CodeGraph 桥 — evidence: commit 88e6d77：①注册真实仓库→ready→查询通——集成测试：本仓库自身注册→index→ready→search「JobQueue」命中、callers「run_migrations」、impact「enqueue」26 节点、explore Markdown 全通（本地 codegraph CLI 1.5.0）；②CLI 超时与版本不匹配单测绿——1ms 强制超时分类、pin 
-- [ ] phase-6: Phase 6 Web 控制台（七域 UI） — contract: 浏览器对真栈完成全旅程（登录→各域写入→蒸馏→图谱→检索）；vitest 关键组件覆盖；OpenAPI 类型生成 CI 强制同步；单端口静态资源服务验证
+- [x] phase-6: Phase 6 Web 控制台（七域 UI） — evidence: commit cd9bb90 + 8b2ca47：①浏览器全旅程——playwright chromium 对本地真栈：登录→Dashboard 统计→Memory 五 tab（含画像回滚）→Knowledge→Wiki→Jobs→Settings→登出回登录页全断言绿；②vitest 5 项组件测试绿；③OpenAPI 类型生成 CI 强制——openapi-dump bin + openapi
 - [ ] phase-7: Phase 7 交付打磨与发布 — contract: 干净环境 clone→compose up→playwright e2e 全绿零手工干预；备份→恢复数据完整；AI-INTERFACE.md 交新 agent 会话仅凭文档完成 AI 视角闭环并留档
 

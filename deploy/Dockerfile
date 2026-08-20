@@ -1,7 +1,7 @@
 ########## Stage 1: 前端构建 ##########
 FROM node:22-slim AS web-build
 WORKDIR /build/web
-COPY web/package.json web/package-lock.json ./
+COPY web/package.json web/package-lock.json web/.npmrc ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
@@ -15,17 +15,17 @@ COPY server/ .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
-COPY --from=planner /build/recipe.json recipe.json
-# 依赖层（源码不变时命中缓存）
-RUN cargo chef cook --release --recipe-path recipe.json
+# rust-embed 需要编译期可见 web/dist（哪怕占位）
+COPY --from=web-build /build/web/dist /web/dist
 COPY server/ .
 RUN cargo build --release -p agent-memory-api
 
 ########## Stage 3: 运行时 ##########
-# debian-slim：需要 git + Node runtime（codegraph 自带 runtime 但通过 npm 安装更可 pin）
-FROM node:22-slim AS runtime
+# debian trixie：glibc 2.41 ≥ builder（cargo-chef rust 1.97 基于 trixie），
+# 且需要 Node runtime（codegraph pin 安装）+ git
+FROM debian:trixie-slim AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && apt-get install -y --no-install-recommends ca-certificates curl git npm \
     && rm -rf /var/lib/apt/lists/*
 # codegraph CLI pin 版本（D0005；升级需重新验证 JSON 输出格式）
 RUN npm install -g @colbymchenry/codegraph@1.5.0 && codegraph version

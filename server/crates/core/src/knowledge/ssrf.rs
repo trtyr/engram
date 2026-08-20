@@ -59,6 +59,7 @@ fn is_private_ip_v4_mapped(v4: std::net::Ipv4Addr) -> bool {
 }
 
 /// 解析并校验 URL 的全部 A/AAAA 记录。返回可用于 pinning 的地址列表。
+/// 容器/受限网络常无 IPv6 路由而 DNS 回 AAAA——有 v4 时仅用 v4，纯 v6 域名保留。
 async fn resolve_validated(host: &str, port: u16) -> Result<Vec<std::net::SocketAddr>, FetchError> {
     let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, port))
         .await
@@ -67,12 +68,17 @@ async fn resolve_validated(host: &str, port: u16) -> Result<Vec<std::net::Socket
     if addrs.is_empty() {
         return Err(FetchError::Dns("无解析结果".into()));
     }
-    for a in &addrs {
+    let filtered: Vec<_> = if addrs.iter().any(|a| a.is_ipv4()) {
+        addrs.iter().filter(|a| a.is_ipv4()).copied().collect()
+    } else {
+        addrs
+    };
+    for a in &filtered {
         if is_private_ip(a.ip()) {
             return Err(FetchError::PrivateAddress);
         }
     }
-    Ok(addrs)
+    Ok(filtered)
 }
 
 /// 安全抓取（重定向手动逐跳复检；每跳 DNS 结果 pin 住防 rebinding）。

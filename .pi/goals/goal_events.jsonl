@@ -25,3 +25,5 @@
 {"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-5","at":"2026-08-19T15:24:13.878Z"}
 {"type":"task_complete","goalId":"mszyrq72-4tcahn","taskId":"phase-5","evidence":"commit 88e6d77：①注册真实仓库→ready→查询通——集成测试：本仓库自身注册→index→ready→search「JobQueue」命中、callers「run_migrations」、impact「enqueue」26 节点、explore Markdown 全通（本地 codegraph CLI 1.5.0）；②CLI 超时与版本不匹配单测绿——1ms 强制超时分类、pin ","at":"2026-08-19T16:06:29.774Z"}
 {"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-6","at":"2026-08-19T16:06:40.245Z"}
+{"type":"task_complete","goalId":"mszyrq72-4tcahn","taskId":"phase-6","evidence":"commit cd9bb90 + 8b2ca47：①浏览器全旅程——playwright chromium 对本地真栈：登录→Dashboard 统计→Memory 五 tab（含画像回滚）→Knowledge→Wiki→Jobs→Settings→登出回登录页全断言绿；②vitest 5 项组件测试绿；③OpenAPI 类型生成 CI 强制——openapi-dump bin + openapi","at":"2026-08-19T17:20:17.275Z"}
+{"type":"task_started","goalId":"mszyrq72-4tcahn","taskId":"phase-7","at":"2026-08-19T17:20:28.028Z"}
