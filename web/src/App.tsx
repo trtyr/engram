@@ -28,7 +28,7 @@ function Login({ onAuthed }: { onAuthed: () => void }) {
   const [err, setErr] = useState('')
   const nav = useNavigate()
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <main className="flex min-h-screen items-center justify-center">
       <form
         className="w-72 space-y-4 rounded-lg border p-6"
         onSubmit={async (e) => {
@@ -56,7 +56,7 @@ function Login({ onAuthed }: { onAuthed: () => void }) {
           登录
         </Button>
       </form>
-    </div>
+    </main>
   )
 }
 

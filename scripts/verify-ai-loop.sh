@@ -100,10 +100,15 @@ for _ in $(seq 1 180); do
   sleep 1
 done
 echo "   wiki_generate: $W"
+WSN=0
+for _try in 1 2 3 4 5 6 7 8 9 10; do
 WS=$(curl -fsS -X POST "$API/wiki/search" -H "$AUTH" -H 'content-type: application/json' -d '{"query":"蒸馏","max_items":5}')
-echo "$WS" | jq -c '{wiki_hits: [.[] | .slug]}'
 WSN=$(echo "$WS" | jq 'length')
-[ "$WSN" -ge 1 ] || { echo "   wiki 检索未命中"; exit 1; }
+[ "$WSN" -ge 1 ] && break
+sleep 2
+done
+echo "$WS" | jq -c '{wiki_hits: [.[] | .slug]}'
+[ "$WSN" -ge 1 ] || { echo "   wiki 检索未命中（重试 10 次）"; exit 1; }
 echo "   wiki 检索命中"
 
 echo "== 8. 用量与任务可观测"

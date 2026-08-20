@@ -13,17 +13,11 @@ export default defineConfig({
   },
   // 开发时后端在 :8080（compose 或 cargo run）
   server: {
-    proxy: {
-      '/api': 'http://localhost:8080',
-      '/auth': 'http://localhost:8080',
-      '/jobs': 'http://localhost:8080',
-      '/memory': 'http://localhost:8080',
-      '/knowledge': 'http://localhost:8080',
-      '/wiki': 'http://localhost:8080',
-      '/codegraph': 'http://localhost:8080',
-      '/settings': 'http://localhost:8080',
-      '/llm': 'http://localhost:8080',
-    },
+    proxy: Object.fromEntries(
+      ['/api', '/auth', '/jobs', '/memory', '/knowledge', '/wiki', '/codegraph', '/settings', '/llm'].map(
+        (p) => [p, process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080'],
+      ),
+    ),
   },
   test: {
     environment: 'jsdom',

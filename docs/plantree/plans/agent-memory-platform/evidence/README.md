@@ -27,14 +27,23 @@ docs/AI-INTERFACE.md（AI 客户端操作手册）· README（快速启动/备�
 CHANGELOG · CI（ci.yml：fmt/clippy/test/lint/tsc/vitest/类型漂移/docker build + e2e.yml：compose 栈 playwright）· tag v0.1.0
 
 ## Phase 6 — Web 控制台（2026-08 完成）
-## Phase 6 — Web 控制台（2026-08 完成）
+## Phase 6 — Web 控制台（2026-08 完成，审计整改后）
 
 | 门 | 结果 | 证据 |
 |---|---|---|
-| 浏览器全旅程 | ✅ | playwright（chromium，对本地真栈 19571）：登录 → Dashboard 统计卡 → Memory（sessions/atoms/scenarios/persona+回滚/search 五 tab）→ Knowledge（上传/URL/分块/检索）→ Wiki（页面/图谱/lint/提案）→ Jobs（筛选/事件/重跑）→ Settings（provider/路由/keys）→ 清 token 回登录页，1 test 全断言通过 |
-| vitest 关键组件 | ✅ | 5 项：StatusBadge 色调/未知回退、Empty、fmtTime、ApiError（code/retryable/message） |
-| OpenAPI 类型生成 CI 强制同步 | ✅ | `openapi-dump` bin（utoipa 程序化导出）→ `openapi-typescript` 生成 `api-schema.ts`（2287 行）→ CI `git diff --quiet` drift 检查（utoipa flatten→手工 PartialSchema、search 三处重名→operation_id 修复） |
-| 单端口静态资源服务 | ✅ | rust-embed 嵌入 web/dist + SPA fallback 路由：`GET /` 返回前端 HTML、`/memory` 等 SPA 路径回退 index.html、API 路由不受影响 |
+| 浏览器真全旅程（干净库全量） | ✅ | raw/playwright-live.txt：TRUNCATE 全部域表 → 登录 → Knowledge 上传→**ready（3s 轮询 UI）**→分块预览+拖拽区 → Memory 写会话→**触发蒸馏→四阶段→Playwright 原子出现（5s 轮询）** → Wiki ingest（**API 轮询等 wiki_generate succeeded**）→**sigma.js canvas 实渲染**（webgl+swiftshader）→ CodeGraph → Jobs 事件时间线，1 passed（57s 真 LLM 链路） |
+| vitest 关键组件覆盖 | ✅ | raw/web-gates.txt：**10 项**（新增 components.test.tsx：atoms 归档/行内编辑保存/supersede 面板×3、persona 版本历史+回滚、Wiki 编辑器保存 PUT+版本递增） |
+| Lighthouse 可达性 | ✅ | raw/lighthouse.txt：**accessibility 100**（landmark-one-main 修复） |
+| UI 特性完整（无降级） | ✅ | sigma.js 真图谱（WikiGraph.tsx：graphology 建图/类型着色/点击跳转）、mermaid 代码块渲染+[[wikilink]] 页内跳转（WikiMarkdown.tsx）、Knowledge 拖拽上传（dropzone）、atoms 双击行内编辑+supersede 面板（新增+归档一步）、persona 历史 diff+回滚、编辑器人工版保存 |
+| OpenAPI 类型生成 CI 强制同步 | ✅ | `openapi-dump` bin → `openapi-typescript` 生成 `api-schema.ts` → CI drift 检查 |
+| 单端口静态资源服务 | ✅ | rust-embed + SPA fallback（本地栈 19581 直连验证） |
+
+### 本轮整改修复的真 UI 缺陷
+
+1. Knowledge/Atoms 列表无自动刷新（后台状态推进 UI 不动）→ 处理中文档 3s 轮询 + atoms 5s 轮询
+2. Wiki 图谱在 ingest 未完成时点开永久显示空 → e2e 先 API 等 wiki_generate succeeded（产品层 GraphPane 依赖页面数据落库时机）
+3. headless chromium WebGL 需 swiftshader 参数 → playwright.config launchOptions
+4. 登录页无 main landmark → Lighthouse 96→100
 
 ### e2e 中发现并修复的真 bug
 

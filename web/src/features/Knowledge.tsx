@@ -17,6 +17,12 @@ export default function Knowledge() {
   useEffect(() => {
     load()
   }, [])
+  // 存在处理中文档时轮询刷新（状态推进可视化；全部终态后停）
+  useEffect(() => {
+    if (!docs?.some((d) => ['pending', 'parsing', 'chunking', 'embedding'].includes(d.status))) return
+    const t = setInterval(load, 3000)
+    return () => clearInterval(t)
+  }, [docs])
 
   return (
     <div className="space-y-6">

@@ -1,7 +1,7 @@
-# playwright 全旅程（对 compose 栈 19180）@ 2026-08-20T12:25:49Z
-$ cd web && E2E_BASE=http://127.0.0.1:19180 E2E_ADMIN_PW=release-admin npx playwright test --reporter=list
-Running 1 test using 1 worker
+# playwright 真全旅程（干净库全量，本地二进制栈 19581，真 LLM）@ 2026-08-20T16:00:45Z
+$ TRUNCATE 全部域表 → E2E_BASE=http://localhost:19581 E2E_ADMIN_PW=dev-admin npx playwright test journey
+# 覆盖：登录→Knowledge 上传→ready→分块+拖拽区→Memory 写会话→蒸馏四阶段→原子→Wiki ingest（API 等 wiki_generate succeeded）→sigma canvas 实渲染→CodeGraph→Jobs 事件时间线
 
-  ✓  1 e2e/journey.spec.ts:9:1 › 全旅程：登录 → Dashboard → Memory → Knowledge → Wiki → Jobs → Settings (1.0s)
+  ✓  1 e2e/journey.spec.ts:26:1 › 真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图谱、codegraph->查询 (57.3s)
 
-  1 passed (1.7s)
+  1 passed (1.0m)

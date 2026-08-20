@@ -1,15 +1,17 @@
-# AI 视角闭环（纯 HTTP，真网关，无代理）@ 2026-08-20T12:20:36Z
-$ AGENT_MEMORY_GW_URL=https://newapi.trtyr.top AGENT_MEMORY_GW_KEY=<redacted> ./scripts/verify-ai-loop.sh http://127.0.0.1:19180 release-admin
+# AI 视角闭环（纯 HTTP，真网关，本地栈）@ 2026-08-20T16:16:35Z
+$ AGENT_MEMORY_GW_URL=https://newapi.trtyr.top AGENT_MEMORY_GW_KEY=<redacted> ./scripts/verify-ai-loop.sh http://localhost:19581 dev-admin
 == 0. 管理员准备（配置 provider + 签发 key）
    provider 已存在（1 个）
    key 已签发（模拟交给 AI 客户端）
 == 1. 会话开始：拉上下文
-{"l3":1,"l2":1,"l1":1,"meta":{"chars_used":226,"truncated":false,"query":null}}
+{"l3":1,"l2":2,"l1":2,"meta":{"chars_used":648,"truncated":false,"query":null}}
 == 2. 写入会话（含可蒸馏事实）
-{"id":"01a01f1d-b900-79d3-b32a-e75c9a1b8652","distill_status":"pending"}
+{"id":"01a01ff5-c558-7e91-9106-5fa25436bb43","distill_status":"pending"}
 == 3. 触发蒸馏并等待（四阶段）
    arbitrate_atoms: succeeded
    extract_atoms: succeeded
+   distill_persona: succeeded
+   organize_scenarios: succeeded
    arbitrate_atoms: succeeded
    extract_atoms: succeeded
    distill_persona: succeeded
@@ -18,7 +20,7 @@ $ AGENT_MEMORY_GW_URL=https://newapi.trtyr.top AGENT_MEMORY_GW_KEY=<redacted> ./
    extract_atoms: succeeded
    蒸馏四阶段全部 succeeded
 == 4. 检索验证（语义命中）
-{"l1_hits":["用户的生产环境数据库是 PostgreSQL 17，部署在上海区。"]}
+{"l1_hits":["用户的生产环境数据库是 PostgreSQL 17，部署在上海区","用户的浏览器自动化工具是 Playwright"]}
    语义检索命中
 == 5. 二次上下文（画像应含新信息）
 {"l3":[{"aspect":"preferences","has_content":true}]}
@@ -28,8 +30,8 @@ $ AGENT_MEMORY_GW_URL=https://newapi.trtyr.top AGENT_MEMORY_GW_KEY=<redacted> ./
    知识检索命中
 == 7. Wiki ingest + 查询
    wiki_generate: succeeded
-{"wiki_hits":["分层蒸馏"]}
+{"wiki_hits":["分层蒸馏","蒸馏管道"]}
    wiki 检索命中
 == 8. 用量与任务可观测
-{"rows":16,"tokens":4805}
+{"rows":20,"tokens":7229}
 AI 视角闭环 ALL OK

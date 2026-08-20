@@ -127,11 +127,19 @@ function Atoms() {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [superseding, setSuperseding] = useState<string | null>(null)
-  useEffect(() => {
+  const load = () => {
     const p = new URLSearchParams({ limit: '200' })
     if (kind) p.set('kind', kind)
     if (review) p.set('needs_review', 'true')
     api.get<Atom[]>(`/memory/atoms?${p}`).then(setRows).catch((e) => setErr(e.message))
+  }
+  useEffect(() => {
+    load()
+  }, [kind, review])
+  // 蒸馏后台进行时轮询（有 pending 会话即可能有新原子；全部处理完则停）
+  useEffect(() => {
+    const t = setInterval(load, 5000)
+    return () => clearInterval(t)
   }, [kind, review])
   if (err) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />

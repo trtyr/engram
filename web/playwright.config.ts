@@ -6,6 +6,9 @@ export default defineConfig({
   timeout: 60_000,
   retries: 0,
   use: {
-    baseURL: process.env.E2E_BASE ?? 'http://127.0.0.1:19571',
+    baseURL: process.env.E2E_BASE ?? 'http://127.0.0.1:19581',
+    launchOptions: {
+      args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'],
+    },
   },
 })

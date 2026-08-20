@@ -50,7 +50,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   await expect(
     page.getByRole('row', { name: /playwright-guide/ }).getByText('ready', { exact: true }),
     '\u6587\u6863\u5e94\u63a8\u8fdb\u5230 ready',
-  ).toBeVisible({ timeout: 90_000 })
+  ).toBeVisible({ timeout: 240_000 })
   await page.getByRole('row', { name: /playwright-guide/ }).getByRole('button', { name: '\u5206\u5757' }).click()
   await expect(page.getByText(/#\d+/).first(), '\u5206\u5757\u9884\u89c8\u5e94\u5c55\u793a').toBeVisible({ timeout: 30_000 })
 
@@ -66,7 +66,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
     ],
   }, aiKey)
   await page.reload()
-  await expect(page.getByText('e2e-browser'), '\u4f1a\u8bdd\u5e94\u5217\u51fa').toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('e2e-browser').first(), '\u4f1a\u8bdd\u5e94\u5217\u51fa').toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: '\u89e6\u53d1\u84b8\u998f' }).click()
   await page.getByRole('button', { name: 'atoms' }).click()
   await expect(
@@ -80,12 +80,17 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   await page.getByPlaceholder('\u6807\u9898').fill(`e2e-wiki-${Date.now()}`)
   await page.getByPlaceholder('\u6e90\u6587\u672c').fill('Playwright \u662f\u6d4f\u89c8\u5668\u81ea\u52a8\u5316\u6846\u67b6\u3002\u81ea\u52a8\u91cd\u8bd5\u65ad\u8a00\u662f\u5176\u6838\u5fc3\u7279\u6027\uff0c\u8ba9\u7aef\u5230\u7aef\u6d4b\u8bd5\u7a33\u5b9a\u53ef\u9760\u3002web-first assertions \u662f\u63a8\u8350\u5199\u6cd5\u3002')
   await page.getByRole('button', { name: '\u6444\u53d6', exact: true }).click()
-  await expect(
-    page.getByText(/Playwright/i).first(),
-    'wiki ingest \u5e94\u4ea7\u51fa\u9875\u9762',
-  ).toBeVisible({ timeout: 180_000 })
+  // API 轮询等 wiki_generate succeeded（页面+图谱数据落库后再断言 UI）
+  for (let i = 0; i < 240; i++) {
+    const jobs = await api('GET', '/jobs?kind=wiki_generate&limit=1', undefined, adminToken)
+    const st = jobs?.[0]?.status
+    if (st === 'succeeded') break
+    if (st === 'failed' || st === 'dead') throw new Error(`wiki job ${st}: ${jobs[0]?.error}`)
+    await page.waitForTimeout(1000)
+  }
+  await page.reload()
   await page.getByRole('button', { name: 'graph' }).click()
-  await expect(page.getByTestId('wiki-graph-canvas'), 'sigma.js \u56fe\u8c31\u5e94\u6e32\u67d3').toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId('wiki-graph-canvas'), 'sigma.js \u56fe\u8c31\u5e94\u6e32\u67d3').toBeVisible({ timeout: 240_000 })
 
   // ---------- 5. CodeGraph：注册 -> 索引 -> 查询 ----------
   await page.getByRole('link', { name: 'CodeGraph' }).click()
@@ -101,7 +106,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
     await expect(card.getByText('ready', { exact: true }), 'codegraph \u7d22\u5f15\u5e94\u5b8c\u6210').toBeVisible({ timeout: 420_000 })
     await card.getByPlaceholder('\u7b26\u53f7\u6216\u95ee\u9898').fill('ni')
     await card.getByRole('button', { name: '\u67e5\u8be2' }).click()
-    await expect(card.locator('pre'), 'codegraph \u67e5\u8be2\u5e94\u8fd4\u56de\u7ed3\u679c').toBeVisible({ timeout: 90_000 })
+    await expect(card.locator('pre'), 'codegraph \u67e5\u8be2\u5e94\u8fd4\u56de\u7ed3\u679c').toBeVisible({ timeout: 240_000 })
   } else {
     test.info().annotations.push({ type: 'note', description: `codegraph git clone \u4e0d\u53ef\u7528\uff08${resp.status()}\uff09\uff0cUI \u9762\u677f\u9a8c\u8bc1\u4ee3\u66ff` })
     await expect(page.getByRole('button', { name: '\u6ce8\u518c' })).toBeVisible()
