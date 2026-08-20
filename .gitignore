@@ -16,6 +16,9 @@ web/dist/
 data/
 !data/.gitkeep
 
+# pi 本地会话状态
+.pi/
+
 # Test & coverage
 coverage/
 *.profraw
@@ -25,5 +28,3 @@ coverage/
 .idea/
 .vscode/
 *.swp
-
-# sqlx offline metadata is committed; nothing to ignore there
