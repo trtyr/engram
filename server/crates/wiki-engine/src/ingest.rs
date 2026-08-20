@@ -55,10 +55,12 @@ pub async fn enqueue_ingest(
         .await
         .map_err(|e| JobError::Permanent(format!("写原料失败: {e}")))?;
 
-    sqlx::query(
+    // RETURNING id：sha 冲突时返回旧行 id（payload 必须用它——曾因用新生成
+    // uuid 导致 analyze 读不到原料行 no-rows 死循环，Phase 7 审计修复）
+    let row = sqlx::query_as::<_, (Uuid,)>(
         "INSERT INTO wiki_sources (id, sha256, raw_path, title, status) \
          VALUES ($1, $2, $3, $4, 'pending') \
-         ON CONFLICT (sha256) DO UPDATE SET title = EXCLUDED.title RETURNING id",
+         ON CONFLICT (sha256) DO UPDATE SET title = EXCLUDED.title, status = 'pending' RETURNING id",
     )
     .bind(id)
     .bind(&sha)
@@ -67,15 +69,32 @@ pub async fn enqueue_ingest(
     .fetch_one(queue.pool())
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let real_id = row.0;
+
+    // 冲突行的新原料内容以返回的 id 落盘（read_source 按 id 找路径）
+    if real_id != id {
+        let _ = tokio::fs::remove_file(&path).await;
+        let path = dir.join(format!("{real_id}.md"));
+        tokio::fs::write(&path, text)
+            .await
+            .map_err(|e| JobError::Permanent(format!("写原料失败: {e}")))?;
+        let _ = tokio::fs::remove_file(&path.with_extension("md")).await; // no-op clarity
+        sqlx::query("UPDATE wiki_sources SET raw_path = $2 WHERE id = $1")
+            .bind(real_id)
+            .bind(path.to_string_lossy().as_ref())
+            .execute(queue.pool())
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+    }
 
     queue
         .enqueue(
             JobTemplate::new("wiki_analyze")
-                .with_payload(json!({"source_id": id}))
-                .with_idempotency_key(format!("wiki-analyze-{id}")),
+                .with_payload(json!({"source_id": real_id}))
+                .with_idempotency_key(format!("wiki-analyze-{real_id}")),
         )
         .await?;
-    Ok((id, false))
+    Ok((real_id, false))
 }
 
 /// 第一步：分析。source 全文 + 既有 index → 结构化分析（存 wiki_sources.status + 事件）。

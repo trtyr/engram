@@ -1,28 +1,35 @@
-# AI 视角闭环（纯 HTTP，真网关）@ 2026-08-20T00:24:03Z
-$ ./scripts/verify-ai-loop.sh http://127.0.0.1:19180 release-admin
-== 0. 管理员准备（签发 key）
-   key 签发 ✓（模拟交给 AI 客户端）
+# AI 视角闭环（纯 HTTP，真网关，无代理）@ 2026-08-20T12:20:36Z
+$ AGENT_MEMORY_GW_URL=https://newapi.trtyr.top AGENT_MEMORY_GW_KEY=<redacted> ./scripts/verify-ai-loop.sh http://127.0.0.1:19180 release-admin
+== 0. 管理员准备（配置 provider + 签发 key）
+   provider 已存在（1 个）
+   key 已签发（模拟交给 AI 客户端）
 == 1. 会话开始：拉上下文
-{"l3":1,"l2":1,"l1":1,"meta":{"chars_used":343,"truncated":false,"query":null}}
+{"l3":1,"l2":1,"l1":1,"meta":{"chars_used":226,"truncated":false,"query":null}}
 == 2. 写入会话（含可蒸馏事实）
-{"id":"01a01c8d-b119-7ed2-9053-23e34fbb2f70","distill_status":"pending"}
-== 3. 触发蒸馏并等待
-  arbitrate_atoms: succeeded
-  extract_atoms: succeeded
-  arbitrate_atoms: succeeded
-  extract_atoms: succeeded
-  distill_persona: succeeded
-  organize_scenarios: succeeded
-  arbitrate_atoms: succeeded
-  extract_atoms: succeeded
+{"id":"01a01f1d-b900-79d3-b32a-e75c9a1b8652","distill_status":"pending"}
+== 3. 触发蒸馏并等待（四阶段）
+   arbitrate_atoms: succeeded
+   extract_atoms: succeeded
+   arbitrate_atoms: succeeded
+   extract_atoms: succeeded
+   distill_persona: succeeded
+   organize_scenarios: succeeded
+   arbitrate_atoms: succeeded
+   extract_atoms: succeeded
+   蒸馏四阶段全部 succeeded
 == 4. 检索验证（语义命中）
-{"l1_hits":["用户的生产环境数据库是 PostgreSQL 17，部署在上海区"]}
+{"l1_hits":["用户的生产环境数据库是 PostgreSQL 17，部署在上海区。"]}
+   语义检索命中
 == 5. 二次上下文（画像应含新信息）
-{"l3":[{"aspect":"constraints","has_content":true}]}
+{"l3":[{"aspect":"preferences","has_content":true}]}
 == 6. 知识摄取（URL）+ 检索
-["清华大学开源软件镜像站 | Tsinghua Open Source Mirror","清华大学开源软件镜像站 | Tsinghua Open Source Mirror"]
+   摄取状态: ready
+{"doc_hits":["清华大学开源软件镜像站 | Tsinghua Open Source Mirror","清华大学开源软件镜像站 | Tsinghua Open Source Mirror"]}
+   知识检索命中
 == 7. Wiki ingest + 查询
-[]
+   wiki_generate: succeeded
+{"wiki_hits":["分层蒸馏"]}
+   wiki 检索命中
 == 8. 用量与任务可观测
-{"rows":15,"tokens":4511}
+{"rows":16,"tokens":4805}
 AI 视角闭环 ALL OK

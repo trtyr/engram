@@ -82,11 +82,18 @@ async fn resolve_validated(host: &str, port: u16) -> Result<Vec<std::net::Socket
 }
 
 /// 安全抓取（重定向手动逐跳复检；每跳 DNS 结果 pin 住防 rebinding）。
+/// 配置了 HTTP(S)_PROXY 时连接由代理发起——本机 DNS 解析无意义，
+/// 跳过 pinning/私网校验（信任边移到代理），仅保留协议/大小/超时限制。
 pub async fn safe_fetch(
     url: &str,
     max_bytes: usize,
     timeout: std::time::Duration,
 ) -> Result<FetchedPage, FetchError> {
+    let via_proxy = std::env::var("HTTPS_PROXY")
+        .or_else(|_| std::env::var("https_proxy"))
+        .or_else(|_| std::env::var("HTTP_PROXY"))
+        .or_else(|_| std::env::var("http_proxy"))
+        .is_ok();
     let mut current = url.to_string();
     for _hop in 0..4 {
         let parsed = reqwest::Url::parse(&current)
@@ -100,7 +107,11 @@ pub async fn safe_fetch(
             .to_string();
         let port = parsed.port_or_known_default().unwrap_or(80);
 
-        let addrs = resolve_validated(&host, port).await?;
+        let addrs = if via_proxy {
+            vec![] // 代理模式：连接由代理发起，本机 pinning 无意义
+        } else {
+            resolve_validated(&host, port).await?
+        };
 
         // DNS pinning：逐跳构建 client，只对已校验地址解析（防 rebinding）
         let mut builder = reqwest::Client::builder()

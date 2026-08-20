@@ -23,6 +23,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # 宿主运行 Clash TUN（fake-ip 198.18/15）时容器 DNS 解析被污染，
+    # SSRF 防护会正确拒绝 fake-ip 地址。此环境给容器配代理即可恢复外网摄取：
+    #   HTTPS_PROXY=http://host.docker.internal:7892（按本机 Clash 端口改）。
+    # 常规环境无需任何设置。
     environment:
       AGENT_MEMORY_DATABASE_URL: postgres://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-agent_memory}
       AGENT_MEMORY_PORT: "8080"
