@@ -1,0 +1,19 @@
+# git 状态与 tag @ 2026-08-20T00:31:26Z
+$ git log --oneline -3 && git tag -l && git status --short（应仅剩 .pi/ goal 元数据，已被 .gitignore 排除后为空）
+5d018de feat(phase-7): 交付发布 — 干净环境全绿 + AI 闭环 + 备份恢复 + v0.1.0
+8b2ca47 fix(phase-6): 全旅程 e2e 通过 — 登录白屏/401 循环/migrate 宏缓存三 bug 修复
+cd9bb90 feat(phase-6): Web 控制台 — 七域 UI + 单端口 SPA + 类型生成 + vitest
+v0.1.0
+--- status:
+ M .pi/.goals-pool-snapshot.json
+ M .pi/goals/.goal-ledger-checkpoint.json
+ M .pi/goals/active_goal_2026081918435228_mszyrq72-4tcahn.md
+ M .pi/goals/goal_events.jsonl
+ M docs/plantree/README.md
+ M docs/plantree/plans/agent-memory-platform/decisions/README.md
+ M docs/plantree/plans/agent-memory-platform/evidence/README.md
+ M docs/plantree/plans/agent-memory-platform/implementation-status.md
+ M docs/plantree/plans/agent-memory-platform/roadmap.md
+ M web/vite.config.ts
+?? docs/plantree/plans/agent-memory-platform/evidence/raw/
+--- status 退出码 0 且无输出 = 干净

@@ -1,0 +1,11 @@
+# cargo test --workspace @ 2026-08-20T00:21:17Z
+$ cargo test --workspace 2>&1 | tail
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+$ cargo clippy --workspace --all-targets 2>&1 | grep -cE '^warning:|^error:'
+0
+
+$ cargo fmt --check; echo exit=0
+fmt exit=0

@@ -2,7 +2,7 @@
 
 按阶段归档验证证据。每条证据 = 何时、验证了什么、命令/输出摘要、结论。
 
-## Phase 7 — 交付打磨与发布（2026-10 完成）
+## Phase 7 — 交付打磨与发布（2026-08 完成）
 
 | 门 | 结果 | 证据 |
 |---|---|---|
@@ -26,8 +26,8 @@ docker-compose.yml · scripts/backup.sh（backup/restore）·
 docs/AI-INTERFACE.md（AI 客户端操作手册）· README（快速启动/备份/开发）·
 CHANGELOG · CI（ci.yml：fmt/clippy/test/lint/tsc/vitest/类型漂移/docker build + e2e.yml：compose 栈 playwright）· tag v0.1.0
 
-## Phase 6 — Web 控制台（2026-10 完成）
-## Phase 6 — Web 控制台（2026-10 完成）
+## Phase 6 — Web 控制台（2026-08 完成）
+## Phase 6 — Web 控制台（2026-08 完成）
 
 | 门 | 结果 | 证据 |
 |---|---|---|
@@ -42,8 +42,8 @@ CHANGELOG · CI（ci.yml：fmt/clippy/test/lint/tsc/vitest/类型漂移/docker b
 2. **401 死循环**：api client 401 时 `window.location.reload()` 与探活互相触发 → 改状态切换
 3. **sqlx::migrate! 增量缓存**：新增迁移文件不触发宏重扫（MIGRATOR 滞留 9 个）→ 触发重编译即修复（注意项记录）
 
-## Phase 5 — CodeGraph 桥（2026-10 完成）
-## Phase 5 — CodeGraph 桥（2026-10 完成）
+## Phase 5 — CodeGraph 桥（2026-08 完成）
+## Phase 5 — CodeGraph 桥（2026-08 完成）
 
 | 门 | 结果 | 证据 |
 |---|---|---|
@@ -59,8 +59,8 @@ CHANGELOG · CI（ci.yml：fmt/clippy/test/lint/tsc/vitest/类型漂移/docker b
 - explore 无 --json（上游限制）→ Markdown 文本 24KB 截断保护；query/callers/callees/impact JSON 归一
 - **测试基建修复**：测试容器泄漏（mem::forget 累积 198 个僵尸容器压垮 Docker daemon）→ TestPg Drop 守卫全量替换
 
-## Phase 4 — Wiki 域（2026-10 完成）
-## Phase 4 — Wiki 域（2026-10 完成）
+## Phase 4 — Wiki 域（2026-08 完成）
+## Phase 4 — Wiki 域（2026-08 完成）
 
 | 门 | 结果 | 证据 |
 |---|---|---|
@@ -76,7 +76,7 @@ CHANGELOG · CI（ci.yml：fmt/clippy/test/lint/tsc/vitest/类型漂移/docker b
 - index/log 系统页自动维护；链接图（from_slug/to_slug/weight）
 - 全程 LLM I/O 落 job_events（复用 Phase 2 可观测基建）
 
-## Phase 3 — 知识域（2026-10 完成）
+## Phase 3 — 知识域（2026-08 完成）
 
 | 门 | 结果 | 证据 |
 |---|---|---|
@@ -97,7 +97,7 @@ CHANGELOG · CI（ci.yml：fmt/clippy/test/lint/tsc/vitest/类型漂移/docker b
 
 md/txt（直读）· PDF（pdf-extract，要求合法 xref）· HTML（scraper：非 script/style 元素直接文本子节点，script 天然排除）· DOCX（docx-rs：段落 + 表格）· URL（SSRF 防护 + 重定向逐跳复检 ≤3 + 20MB/30s 限制）
 
-## Phase 2 — 记忆域（2026-10 完成）
+## Phase 2 — 记忆域（2026-08 完成）
 
 | 门 | 结果 | 证据 |
 |---|---|---|
@@ -122,7 +122,7 @@ md/txt（直读）· PDF（pdf-extract，要求合法 xref）· HTML（scraper�
 - 复现：`scripts/verify-memory-e2e.sh <base_url> <key> shanghai/deepseek-v4-flash Qwen/Qwen3-Embedding-8B`
   （脚本已更新为两轮蒸馏模式；本地手动验证记录见上）
 
-## Phase 1 — 核心底座（2026-10 完成）
+## Phase 1 — 核心底座（2026-08 完成）
 
 | 门 | 结果 | 证据 |
 |---|---|---|
@@ -142,7 +142,7 @@ md/txt（直读）· PDF（pdf-extract，要求合法 xref）· HTML（scraper�
   传 dimensions=1024 适配存储层 vector(1024)（D0010 修订：默认 embedding 通道 = Qwen3-Embedding-8B@1024）
 - 真网关：https://newapi.trtyr.top（用户 newapi，key 不落仓库，仅运行时注入）
 
-## Phase 0 — 项目地基（2026-10 完成）
+## Phase 0 — 项目地基（2026-08 完成）
 
 | 门 | 结果 | 证据 |
 |---|---|---|

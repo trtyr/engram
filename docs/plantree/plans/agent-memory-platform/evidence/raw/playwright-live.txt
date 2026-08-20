@@ -1,0 +1,8 @@
+# playwright 全旅程（对 compose 栈 19180）@ 2026-08-20T00:23:50Z
+$ E2E_BASE=http://127.0.0.1:19180 E2E_ADMIN_PW=release-admin npx playwright test --reporter=list
+
+Running 1 test using 1 worker
+
+  ✓  1 e2e/journey.spec.ts:9:1 › 全旅程：登录 → Dashboard → Memory → Knowledge → Wiki → Jobs → Settings (1.0s)
+
+  1 passed (1.8s)

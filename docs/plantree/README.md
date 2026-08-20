@@ -39,7 +39,7 @@ docs/plantree/
 
 | Plan | Status | Current Phase | Last Landed | Next Target |
 |---|---|---|---|---|
-| [agent-memory-platform](plans/agent-memory-platform/README.md) | **Done** (v0.1.0) | 全部 8 阶段 | Phase 7 发布完成 (2026-10) | — |
+| [agent-memory-platform](plans/agent-memory-platform/README.md) | **Done** (v0.1.0) | 全部 8 阶段 | Phase 7 发布完成 (2026-08) | — |
 
 ## 如何读本树
 

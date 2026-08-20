@@ -1,0 +1,14 @@
+# compose 栈终态验证 @ 2026-08-20T00:23:37Z
+$ docker compose ps
+NAME                 IMAGE                    COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+agent-memory-app-1   agent-memory-app         "agent-memory-server"    app       12 minutes ago   Up 12 minutes (healthy)   0.0.0.0:19180->8080/tcp, [::]:19180->8080/tcp
+agent-memory-db-1    pgvector/pgvector:pg17   "docker-entrypoint.s…"   db        12 minutes ago   Up 12 minutes (healthy)   5432/tcp
+
+$ curl /ready && curl / (SPA) && docker exec codegraph version
+{"status":"ready","migration_version":11}
+<!doctype html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta nam
+1.5.0

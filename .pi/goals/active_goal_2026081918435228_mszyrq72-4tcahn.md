@@ -5,14 +5,14 @@
   "status": "active",
   "autoContinue": true,
   "usage": {
-    "tokensUsed": 2409285,
-    "activeSeconds": 21114
+    "tokensUsed": 2434858,
+    "activeSeconds": 22142
   },
   "sisyphus": false,
   "createdAt": "2026-08-19T10:43:52.286Z",
-  "updatedAt": "2026-08-20T00:14:08.246Z",
+  "updatedAt": "2026-08-20T00:31:26.961Z",
   "activePath": ".pi/goals/active_goal_2026081918435228_mszyrq72-4tcahn.md",
-  "revision": 673,
+  "revision": 691,
   "taskList": {
     "tasks": [
       {
@@ -75,13 +75,14 @@
         "id": "phase-7",
         "title": "Phase 7 交付打磨与发布",
         "verificationContract": "干净环境 clone→compose up→playwright e2e 全绿零手工干预；备份→恢复数据完整；AI-INTERFACE.md 交新 agent 会话仅凭文档完成 AI 视角闭环并留档",
-        "status": "pending"
+        "status": "complete",
+        "completedAt": "2026-08-20T00:14:46.441Z",
+        "evidence": "commit 5d018de + tag v0.1.0：①干净环境——down -v 清卷→no-cache build→up：db+app healthy、/ready 200、SPA 200、镜像内 codegraph 1.5.0，playwright 全旅程对 compose 栈 PASS（修 3 个交付 bug：web/dist 构建上下文/GLIBC trixie 对齐/npm .npm"
       }
     ],
     "blockCompletion": false,
     "proposedAt": "2026-08-19T10:44:14.446Z"
-  },
-  "currentTaskId": "phase-7"
+  }
 }
 
 # Goal Prompt
@@ -93,8 +94,8 @@
 - Status: running
 - Auto-continue: on
 - Sisyphus mode: no
-- Time spent: 5h51m54s
-- Tokens used: 2.4M (2,409,285) tokens
+- Time spent: 6h09m02s
+- Tokens used: 2.4M (2,434,858) tokens
 ## Tasks
 
 <!-- blockCompletion: false -->
@@ -105,5 +106,5 @@
 - [x] phase-4: Phase 4 Wiki 域（两步 ingest+lint） — evidence: commit d6eb921：①两篇相关中文文档互链零重复——真 LLM e2e（shanghai/deepseek-v4-flash）：文档一产 8 页（张三/pgvector/向量检索/余弦相似度等），文档二新建 HNSW/近似最近邻并 HNSW→向量检索 互链，既有页零重复（张三保持 v1）；mock 单测验证「向量检索」v1→v2 内容合并；②human 页 proposal——put_p
 - [x] phase-5: Phase 5 CodeGraph 桥 — evidence: commit 88e6d77：①注册真实仓库→ready→查询通——集成测试：本仓库自身注册→index→ready→search「JobQueue」命中、callers「run_migrations」、impact「enqueue」26 节点、explore Markdown 全通（本地 codegraph CLI 1.5.0）；②CLI 超时与版本不匹配单测绿——1ms 强制超时分类、pin 
 - [x] phase-6: Phase 6 Web 控制台（七域 UI） — evidence: commit cd9bb90 + 8b2ca47：①浏览器全旅程——playwright chromium 对本地真栈：登录→Dashboard 统计→Memory 五 tab（含画像回滚）→Knowledge→Wiki→Jobs→Settings→登出回登录页全断言绿；②vitest 5 项组件测试绿；③OpenAPI 类型生成 CI 强制——openapi-dump bin + openapi
-- [ ] phase-7: Phase 7 交付打磨与发布 — contract: 干净环境 clone→compose up→playwright e2e 全绿零手工干预；备份→恢复数据完整；AI-INTERFACE.md 交新 agent 会话仅凭文档完成 AI 视角闭环并留档
+- [x] phase-7: Phase 7 交付打磨与发布 — evidence: commit 5d018de + tag v0.1.0：①干净环境——down -v 清卷→no-cache build→up：db+app healthy、/ready 200、SPA 200、镜像内 codegraph 1.5.0，playwright 全旅程对 compose 栈 PASS（修 3 个交付 bug：web/dist 构建上下文/GLIBC trixie 对齐/npm .npm
 
