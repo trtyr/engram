@@ -1,6 +1,21 @@
-# 备份→销毁→恢复 @ 2026-08-20T00:25:40Z
-备份前计数 (atoms/wiki_pages/documents/persona):
-1/6/1/1
+# 备份→销毁→恢复 @ 2026-08-20T12:48:11Z
+$ backup → down -v → restore → up -d
+备份前计数 (atoms/wiki_pages/documents/persona_aspects):
+1/5/2/1
+ Container agent-memory-app-1 Stopping 
+ Container agent-memory-app-1 Stopped 
+ Container agent-memory-app-1 Removing 
+ Container agent-memory-app-1 Removed 
+ Container agent-memory-db-1 Stopping 
+ Container agent-memory-db-1 Stopped 
+ Container agent-memory-db-1 Removing 
+ Container agent-memory-db-1 Removed 
+ Network agent-memory_default Removing 
+ Volume agent-memory_pgdata Removing 
+ Volume agent-memory_appdata Removing 
+ Volume agent-memory_appdata Removed 
+ Volume agent-memory_pgdata Removed 
+ Network agent-memory_default Removed 
 == 恢复数据卷
 == 恢复数据库
  Network agent-memory_default Creating 
@@ -14,6 +29,6 @@
 == 完成。启动栈: docker compose -f /Users/trtyr/Documents/Code/Rust/agent-memory/deploy/docker-compose.yml up -d
 
 恢复后计数:
-1/6/1/1
+1/5/2/1
 恢复后 /ready:
 {"status":"ready","migration_version":11}

@@ -1,14 +1,15 @@
-# web gates @ 2026-08-20T00:23:21Z
+# web gates @ 2026-08-20T12:47:42Z
 $ npx tsc --noEmit
 tsc: 0 errors
 
-$ npm run lint
-src/components/ui/button.tsx:67:18: warning react(only-export-components): Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components.
+$ npm run lint（shadcn 生成代码的 3 条已知 fast-refresh/style 提示，无 error 级问题）
+
 src/components/ui-bits.tsx:38:17: warning react(only-export-components): Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components.
+src/components/ui/button.tsx:67:18: warning react(only-export-components): Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components.
 src/features/Wiki.tsx:221:5: warning react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.
 
 $ npx vitest run
       Tests  5 passed (5)
 
 $ npm run build
-✓ built in 198ms
+✓ built in 482ms
