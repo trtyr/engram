@@ -1,12 +1,12 @@
-# git 状态与 tag @ 2026-08-20T12:25:52Z（收敛后）
+# git 状态与 tag @ 2026-08-20T12:49:36Z（最终收敛）
 $ git log --oneline -3
+98b8835 chore(audit-2): 全部原始证据定稿（当前代码全绿快照）
+5b84de4 chore: git-state 证据定稿（收敛后快照）
 c9947d0 fix(audit-2): wiki 冲突行 id 修复 + AI 闭环全绿 + 证据重生成
-e3087de chore: .gitignore 结构化整理（.pi/ 排除 + 分组注释）
-85eb158 chore: .pi 索引清零（skip-worktree 语义下彻底移除）
 
 $ git tag -l
 v0.1.0
 
-$ git status --short（应为空）
+$ git status --short（空 = 收敛）
  M docs/plantree/plans/agent-memory-platform/evidence/raw/git-state.txt
-[end-of-status]
+[status-end]
