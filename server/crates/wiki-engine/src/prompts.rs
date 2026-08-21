@@ -20,7 +20,8 @@ pub fn analysis_system() -> String {
 实体/概念名用中文（保留英文专有名词），≤12 字。宁缺毋滥：只在文中**反复出现或为核心主题**时列出。
 
 输出严格 JSON：
-{\"entities\":[\"...\"],\"concepts\":[\"...\"],\"links\":[{\"slug\":\"既有页\",\"reason\":\"为何相关\"}],\"conflicts\":[{\"slug\":\"既有页\",\"issue\":\"矛盾点\"}],\"source_title\":\"建议的源摘要页标题\"}".into()
+{\"entities\":[\"...\"],\"concepts\":[\"...\"],\"links\":[{\"slug\":\"既有页\",\"reason\":\"为何相关\"}],\"conflicts\":[{\"slug\":\"既有页\",\"issue\":\"矛盾点\"}],\"source_title\":\"建议的源摘要页标题\",\"reviews\":[{\"kind\":\"create_page|deep_research|skip|flag\",\"title\":\"...\",\"reason\":\"为何需要人审\",\"suggested_slug\":\"建议页名（可空）\",\"search_queries\":[\"预生成检索词\"]}]}
+reviews 说明：kind 只能是 create_page（值得为它建独立页）/deep_research（知识缺口需检索补充）/skip（内容存疑建议跳过）/flag（其他需人判断）；没有则空数组。".into()
 }
 
 /// 第二步：按分析产出页面。

@@ -15,7 +15,7 @@ async fn migrations_apply_on_clean_pgvector() {
 
     // 版本可查（当前 9 份迁移）
     let version = agent_memory_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(11), "0001-0011 迁移应已应用");
+    assert_eq!(version, Some(12), "0001-0012 迁移应已应用");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")
@@ -58,6 +58,8 @@ async fn all_domain_tables_exist_with_columns() {
         "wiki_links",
         "cg_projects",
         "settings",
+        "wiki_review_items",
+        "wiki_insight_dismissals",
     ];
     for table in expected_tables {
         let exists: bool = sqlx::query_scalar(

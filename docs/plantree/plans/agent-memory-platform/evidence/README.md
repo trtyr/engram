@@ -2,6 +2,18 @@
 
 按阶段归档验证证据。每条证据 = 何时、验证了什么、命令/输出摘要、结论。
 
+## Wiki 对齐 llm_wiki（2026-08-21 完成）
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| 迁移 + purpose | ✅ | 0007 扩展 synthesis/comparison/queries/purpose 四页型；0012 新表 wiki_review_items + wiki_insight_dismissals；purpose CRUD API + PUT 204 + 读取验证；ingest 两步注入 purpose（分析+生成） |
+| overview + 级联删除 | ✅ | overview.md 每次 ingest 后重生成（页面列表可见）；级联删除实测：删「蒸馏管道问答」source → 摘要页 distillation-pipeline-source 整页删 + 共享页 distillation-pipeline 摘源保留 + 死链清理 2 条 + index 同步（7→删后页面一致）；修两个真 bug（jsonb_array_length INT4 解码、COALESCE sha256 类型） |
+| Review + queries 闭环 | ✅ | ingest 后 LLM flag 产出 deep_research/create_page 两项（预定义动作+预生成检索词）；resolve 204 + 剩余计数减一；queries 存档：POST archive → wiki_generate succeeded → 新页面产出 |
+| 4 信号 + Louvain + 洞察 | ✅ | relevance_score 纯函数 6 用例（全命中 9.5/AA 封顶/零信号）+ adamic_adar；Louvain 修 ΔQ 震荡 bug（Python 对照 3 轮收敛）+ 两簇/凝聚度/空图单测；graph 返回 community 字段（7/7 节点）+ communities 数组；insights 端点：4 意外连接/孤立页/稀疏社区/桥节点 + dismiss 204 后 4→3 |
+| 前端 | ✅ | WikiGraph 社区/type 双着色切换（12 色调色板+凝聚度图例）+ 洞察卡片联动高亮；InsightsPanel（点击高亮/dismiss/reset）；ReviewQueue（预定义动作组+检索词展示）；Memory 检索一键存档；SourcesPane 级联删除确认+cascade report；vitest 14 项（新增 4：洞察渲染联动 dismiss/review 动作/空态） |
+| 全门禁 | ✅ | cargo 56 passed / 0 failed（新增 8 单测）；vitest 14 passed；tsc 0；build 0 错误；playwright 干净库全旅程 1 passed（1.1 分钟）；lighthouse accessibility 100 |
+
+## Phase 7 — 交付打磨与发布（2026-08 完成）
 ## Phase 7 — 交付打磨与发布（2026-08 完成）
 
 | 门 | 结果 | 证据 |

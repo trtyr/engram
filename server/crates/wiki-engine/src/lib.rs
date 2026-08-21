@@ -4,10 +4,16 @@
 //! 设计文档：docs/plantree/plans/agent-memory-platform/topics/wiki-engine.md
 //! 模式：Karpathy LLM-wiki（原料不可变，LLM 增量维护，人负责纠偏）。
 
+pub mod cascade;
+pub mod community;
 pub mod ingest;
+pub mod insights;
 pub mod lint;
 pub mod markup;
 pub mod prompts;
+pub mod purpose;
+pub mod relevance;
+pub mod review;
 pub mod service;
 
 pub use lint::LintReport;

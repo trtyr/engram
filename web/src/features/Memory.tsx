@@ -363,6 +363,7 @@ function PersonaView() {
 
 function SearchPane() {
   const [q, setQ] = useState('')
+  const [archiveMsg, setArchiveMsg] = useState('')
   const [r, setR] = useState<{ l1: { id: string; snippet: string; score: number }[]; l2: { id: string; title: string | null; snippet: string }[]; l3: Persona[] } | null>(null)
   const [err, setErr] = useState('')
   return (
@@ -384,6 +385,29 @@ function SearchPane() {
       {err && <ErrorBox msg={err} />}
       {r && (
         <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium">检索结果</h3>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="archive-query"
+              onClick={async () => {
+                try {
+                  await api.post('/wiki/queries/archive', {
+                    title: `检索：${q}`,
+                    question: q,
+                    answer: r.l1.map((h) => h.snippet).join('\n\n'),
+                  })
+                  setArchiveMsg('已存档到 wiki 并触发再摄取')
+                } catch (ex) {
+                  setArchiveMsg(ex instanceof Error ? ex.message : '存档失败')
+                }
+              }}
+            >
+              存档到 wiki
+            </Button>
+          </div>
+          {archiveMsg && <p className="text-xs text-muted-foreground">{archiveMsg}</p>}
           <section>
             <h3 className="mb-1 text-sm font-medium">L1 原子（{r.l1.length}）</h3>
             {r.l1.map((h) => (

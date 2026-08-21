@@ -51,6 +51,17 @@ pub struct WikiPageDto {
 pub struct GraphDto {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
+    /// Louvain 社区信息（id → 凝聚度）
+    #[serde(default)]
+    pub communities: Vec<CommunityInfo>,
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct CommunityInfo {
+    pub id: usize,
+    #[serde(default)]
+    pub size: usize,
+    pub cohesion: f64,
 }
 
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
@@ -58,6 +69,9 @@ pub struct GraphNode {
     pub slug: String,
     pub title: String,
     pub page_type: String,
+    /// Louvain 社区 id（着色切换用）
+    #[serde(default)]
+    pub community: usize,
 }
 
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
@@ -159,7 +173,7 @@ impl WikiService {
         Ok(row)
     }
 
-    /// 链接图（节点 = 页面，边 = wikilink）。
+    /// 链接图（节点 = 页面，边 = wikilink；含 Louvain 社区 + 凝聚度）。
     pub async fn graph(&self) -> Result<GraphDto, WikiError> {
         let nodes: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type FROM wiki_pages",
@@ -170,10 +184,27 @@ impl WikiService {
             sqlx::query_as("SELECT from_slug, to_slug, weight FROM wiki_links")
                 .fetch_all(&self.pool)
                 .await?;
+        // 社区发现
+        let node_slugs: Vec<String> = nodes.iter().map(|(s, _, _)| s.clone()).collect();
+        let e64: Vec<(String, String, f64)> = edges
+            .iter()
+            .map(|(f, t, w)| (f.clone(), t.clone(), *w as f64))
+            .collect();
+        let comms = crate::community::louvain_communities(&node_slugs, &e64);
+        let cohesion = crate::community::community_cohesion(&node_slugs, &e64, &comms);
         Ok(GraphDto {
+            communities: cohesion
+                .into_iter()
+                .map(|(id, cohesion)| CommunityInfo {
+                    id,
+                    size: 0,
+                    cohesion,
+                })
+                .collect(),
             nodes: nodes
                 .into_iter()
                 .map(|(slug, title, page_type)| GraphNode {
+                    community: comms.get(slug.as_str()).copied().unwrap_or(0),
                     slug,
                     title,
                     page_type,
@@ -227,5 +258,96 @@ impl WikiService {
             )
             .await?;
         Ok(())
+    }
+
+    // ---------- purpose（wiki 灵魂） ----------
+
+    pub async fn get_purpose(&self) -> Result<Option<crate::purpose::Purpose>, WikiError> {
+        crate::purpose::get_purpose(&self.pool)
+            .await
+            .map_err(WikiError::from)
+    }
+
+    pub async fn set_purpose(&self, p: &crate::purpose::Purpose) -> Result<(), WikiError> {
+        crate::purpose::set_purpose(&self.pool, p)
+            .await
+            .map_err(WikiError::from)
+    }
+
+    // ---------- Review ----------
+
+    pub async fn reviews(&self) -> Result<Vec<crate::review::ReviewItem>, WikiError> {
+        crate::review::list_open(&self.pool)
+            .await
+            .map_err(WikiError::from)
+    }
+
+    pub async fn review_resolve(
+        &self,
+        id: Uuid,
+        action: Option<&str>,
+        dismiss: bool,
+    ) -> Result<(), WikiError> {
+        crate::review::resolve(&self.pool, id, action, dismiss)
+            .await
+            .map_err(WikiError::from)
+    }
+
+    // ---------- queries 页型闭环 ----------
+
+    /// 检索结果/问答 → 存档为 queries 页 → 自动再摄取（提取实体概念入网络）。
+    pub async fn archive_query(
+        &self,
+        title: &str,
+        question: &str,
+        answer: &str,
+    ) -> Result<bool, WikiError> {
+        let ts = chrono::Utc::now().format("%Y-%m-%d");
+        let content = format!(
+            "# {title}\n\n**问**：{question}\n\n**答**：{answer}\n\n（来源：检索存档 {ts}）"
+        );
+        self.ingest(title, &content).await
+    }
+
+    // ---------- 级联删除 ----------
+
+    pub async fn delete_source_cascade(
+        &self,
+        source_id: Uuid,
+    ) -> Result<crate::cascade::CascadeReport, WikiError> {
+        crate::cascade::cascade_delete_source(&self.pool, source_id)
+            .await
+            .map_err(WikiError::from)
+    }
+
+    // ---------- 图洞察 ----------
+
+    pub async fn insights(&self) -> Result<crate::insights::InsightsReport, WikiError> {
+        crate::insights::compute_insights(&self.pool)
+            .await
+            .map_err(WikiError::from)
+    }
+
+    pub async fn insight_dismiss(&self, key: &str) -> Result<(), WikiError> {
+        crate::insights::dismiss(&self.pool, key)
+            .await
+            .map_err(WikiError::from)
+    }
+
+    pub async fn insight_reset(&self) -> Result<(), WikiError> {
+        crate::insights::reset_dismissals(&self.pool)
+            .await
+            .map_err(WikiError::from)
+    }
+
+    /// 供 API 列出可删的 sources。
+    pub async fn list_sources(
+        &self,
+    ) -> Result<Vec<(Uuid, Option<String>, String, String)>, WikiError> {
+        Ok(sqlx::query_as(
+            "SELECT id, title, status, sha256 FROM wiki_sources ORDER BY created_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?)
     }
 }

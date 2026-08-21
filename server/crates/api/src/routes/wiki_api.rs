@@ -1,5 +1,9 @@
 //! Wiki 域端点（wiki scope）。
 
+use agent_memory_wiki_engine::cascade::CascadeReport;
+use agent_memory_wiki_engine::insights::InsightsReport;
+use agent_memory_wiki_engine::purpose::Purpose;
+use agent_memory_wiki_engine::review::ReviewItem;
 use agent_memory_wiki_engine::{LintReport, WikiError, WikiPageDto, WikiService};
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -212,4 +216,190 @@ pub async fn search(
             .await
             .map_err(we)?,
     ))
+}
+
+// ---------- purpose ----------
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct SetPurposeRequest {
+    pub goals: Vec<String>,
+    #[serde(default)]
+    pub key_questions: Vec<String>,
+    #[serde(default)]
+    pub scope: Vec<String>,
+    #[serde(default)]
+    pub thesis: Option<String>,
+}
+
+/// 读取 purpose（wiki 方向意图）。
+#[utoipa::path(get, path = "/wiki/purpose", responses((status = 200, body = Purpose)))]
+pub async fn get_purpose(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<Option<Purpose>>, ApiError> {
+    require_wiki(&principal)?;
+    Ok(Json(svc(&state).get_purpose().await.map_err(we)?))
+}
+
+/// 设置 purpose（ingest/query 时注入 LLM）。
+#[utoipa::path(put, path = "/wiki/purpose",
+    request_body = SetPurposeRequest,
+    responses((status = 204)))]
+pub async fn set_purpose(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<SetPurposeRequest>,
+) -> Result<StatusCode, ApiError> {
+    require_wiki(&principal)?;
+    svc(&state)
+        .set_purpose(&Purpose {
+            goals: req.goals,
+            key_questions: req.key_questions,
+            scope: req.scope,
+            thesis: req.thesis,
+        })
+        .await
+        .map_err(we)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------- review ----------
+
+#[utoipa::path(get, path = "/wiki/reviews", responses((status = 200, body = [ReviewItem])))]
+pub async fn list_reviews(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ReviewItem>>, ApiError> {
+    require_wiki(&principal)?;
+    Ok(Json(svc(&state).reviews().await.map_err(we)?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct ResolveReviewRequest {
+    pub action: Option<String>,
+    #[serde(default)]
+    pub dismiss: bool,
+}
+
+/// 处理 review 项（resolve / dismiss + 动作标签）。
+#[utoipa::path(post, path = "/wiki/reviews/{id}/resolve",
+    request_body = ResolveReviewRequest,
+    responses((status = 204)))]
+pub async fn resolve_review(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+    Json(req): Json<ResolveReviewRequest>,
+) -> Result<StatusCode, ApiError> {
+    require_wiki(&principal)?;
+    svc(&state)
+        .review_resolve(id, req.action.as_deref(), req.dismiss)
+        .await
+        .map_err(we)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------- queries 存档 ----------
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct ArchiveQueryRequest {
+    pub title: String,
+    pub question: String,
+    pub answer: String,
+}
+
+/// 检索结果/问答存档为 queries 页并自动再摄取。
+#[utoipa::path(post, path = "/wiki/queries/archive",
+    request_body = ArchiveQueryRequest,
+    responses((status = 202, body = IngestAccepted)))]
+pub async fn archive_query(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<ArchiveQueryRequest>,
+) -> Result<(StatusCode, Json<IngestAccepted>), ApiError> {
+    require_wiki(&principal)?;
+    let skipped = svc(&state)
+        .archive_query(&req.title, &req.question, &req.answer)
+        .await
+        .map_err(we)?;
+    Ok((StatusCode::ACCEPTED, Json(IngestAccepted { skipped })))
+}
+
+// ---------- sources（级联删除） ----------
+
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct WikiSourceDto {
+    pub id: uuid::Uuid,
+    pub title: Option<String>,
+    pub status: String,
+}
+
+#[utoipa::path(get, path = "/wiki/sources", responses((status = 200, body = [WikiSourceDto])))]
+pub async fn list_sources(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<WikiSourceDto>>, ApiError> {
+    require_wiki(&principal)?;
+    let rows = svc(&state).list_sources().await.map_err(we)?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(id, title, status, _)| WikiSourceDto { id, title, status })
+            .collect(),
+    ))
+}
+
+/// 级联删除 source（摘要页删 + 共享页摘源 + dead link 清理 + index 同步）。
+#[utoipa::path(delete, path = "/wiki/sources/{id}",
+    responses((status = 200, body = CascadeReport)))]
+pub async fn delete_source(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<uuid::Uuid>,
+) -> Result<Json<CascadeReport>, ApiError> {
+    require_wiki(&principal)?;
+    Ok(Json(
+        svc(&state).delete_source_cascade(id).await.map_err(we)?,
+    ))
+}
+
+// ---------- 图洞察 ----------
+
+/// 图洞察（意外连接/孤立页/稀疏社区/桥节点）+ 社区信息。
+#[utoipa::path(post, path = "/wiki/insights", responses((status = 200, body = InsightsReport)))]
+pub async fn insights(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<InsightsReport>, ApiError> {
+    require_wiki(&principal)?;
+    Ok(Json(svc(&state).insights().await.map_err(we)?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct DismissInsightRequest {
+    pub key: String,
+}
+
+/// dismiss 洞察（不再出现）。
+#[utoipa::path(post, path = "/wiki/insights/dismiss",
+    request_body = DismissInsightRequest,
+    responses((status = 204)))]
+pub async fn dismiss_insight(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<DismissInsightRequest>,
+) -> Result<StatusCode, ApiError> {
+    require_wiki(&principal)?;
+    svc(&state).insight_dismiss(&req.key).await.map_err(we)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 重置全部 dismiss。
+#[utoipa::path(post, path = "/wiki/insights/reset", responses((status = 204)))]
+pub async fn reset_insights(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiError> {
+    require_wiki(&principal)?;
+    svc(&state).insight_reset().await.map_err(we)?;
+    Ok(StatusCode::NO_CONTENT)
 }

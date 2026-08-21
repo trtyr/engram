@@ -37,6 +37,10 @@ use utoipa::OpenApi;
         knowledge_api::delete_document, knowledge_api::search,
         wiki_api::ingest, wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
+        wiki_api::get_purpose, wiki_api::set_purpose,
+        wiki_api::list_reviews, wiki_api::resolve_review,
+        wiki_api::archive_query, wiki_api::list_sources, wiki_api::delete_source,
+        wiki_api::insights, wiki_api::dismiss_insight, wiki_api::reset_insights,
         codegraph_api::register_project, codegraph_api::list_projects,
         codegraph_api::get_project, codegraph_api::index_project,
         codegraph_api::sync_project, codegraph_api::query,
@@ -128,6 +132,21 @@ pub fn router(state: AppState) -> Router {
         .route("/wiki/lint", post(wiki_api::lint))
         .route("/wiki/proposals/apply", post(wiki_api::apply_proposal))
         .route("/wiki/search", post(wiki_api::search))
+        .route(
+            "/wiki/purpose",
+            get(wiki_api::get_purpose).put(wiki_api::set_purpose),
+        )
+        .route("/wiki/reviews", get(wiki_api::list_reviews))
+        .route("/wiki/reviews/{id}/resolve", post(wiki_api::resolve_review))
+        .route("/wiki/queries/archive", post(wiki_api::archive_query))
+        .route("/wiki/sources", get(wiki_api::list_sources))
+        .route(
+            "/wiki/sources/{id}",
+            axum::routing::delete(wiki_api::delete_source),
+        )
+        .route("/wiki/insights", post(wiki_api::insights))
+        .route("/wiki/insights/dismiss", post(wiki_api::dismiss_insight))
+        .route("/wiki/insights/reset", post(wiki_api::reset_insights))
         .route(
             "/codegraph/projects",
             post(codegraph_api::register_project).get(codegraph_api::list_projects),

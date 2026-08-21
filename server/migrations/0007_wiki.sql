@@ -15,7 +15,7 @@ CREATE TABLE wiki_pages (
     slug        text NOT NULL UNIQUE,
     title       text NOT NULL,
     page_type   text NOT NULL CHECK (page_type IN
-                ('entity','concept','source','synthesis','comparison','overview','index','log')),
+                ('entity','concept','source','synthesis','comparison','queries','overview','index','log','purpose')),
     content     text NOT NULL,               -- Markdown
     frontmatter jsonb NOT NULL DEFAULT '{}', -- 含 sources[]
     origin      text NOT NULL DEFAULT 'llm' CHECK (origin IN ('llm','human')),

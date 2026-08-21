@@ -120,8 +120,11 @@ pub async fn analyze_job(
 
     let text = read_source(pool, source_id).await?;
     let index = read_index(pool).await?;
+    let purpose = crate::purpose::purpose_context(pool).await;
 
-    let user = format!("== 现有页面目录 ==\n{index}\n\n== 源文档 ==\n{text}");
+    let user = format!(
+        "== 知识库 Purpose（方向意图，分析时纳入考量）==\n{purpose}\n\n== 现有页面目录 ==\n{index}\n\n== 源文档 ==\n{text}"
+    );
     let out = agent_memory_distill::llm_port::chat_json_retrying(
         &ctx,
         llm.as_ref(),
@@ -133,6 +136,20 @@ pub async fn analyze_job(
     .await?;
 
     ctx.emit("分析完成", Some(out.clone())).await.ok();
+
+    // review flag 落库（llm_wiki 异步人审：不阻塞 ingest）
+    if let Some(flags) = out.get("reviews").and_then(|v| v.as_array()) {
+        let parsed: Vec<crate::review::LlmReviewFlag> = flags
+            .iter()
+            .filter_map(|f| serde_json::from_value(f.clone()).ok())
+            .collect();
+        if !parsed.is_empty() {
+            let n = crate::review::create_items(pool, source_id, &parsed)
+                .await?
+                .len();
+            ctx.emit(&format!("人审项 {n} 个已入队"), None).await.ok();
+        }
+    }
 
     // 链式入队生成
     ctx.enqueue_next(
@@ -177,8 +194,9 @@ pub async fn generate_job(
     let text = read_source(pool, source_id).await?;
     let existing_pages = read_index(pool).await?;
 
+    let purpose = crate::purpose::purpose_context(pool).await;
     let user = format!(
-        "== 分析结果 ==\n{}\n\n== 源文档 ==\n{}\n\n== 既有页面集合（已存在，勿重建）==\n{}",
+        "== 知识库 Purpose（方向意图，写作风格与侧重纳入考量）==\n{purpose}\n\n== 分析结果 ==\n{}\n\n== 源文档 ==\n{}\n\n== 既有页面集合（已存在，勿重建）==\n{}",
         serde_json::to_string_pretty(&analysis).unwrap_or_default(),
         text,
         existing_pages
@@ -320,6 +338,15 @@ pub async fn generate_job(
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
+    // overview.md 重生成 + 4 信号权重重算（llm_wiki：每次 ingest 后全局状态更新）
+    if created + updated > 0 {
+        rebuild_overview_page(pool).await?;
+        let n = crate::relevance::rebuild_weights(pool).await?;
+        ctx.emit(&format!("相关性权重更新 {n} 条边"), None)
+            .await
+            .ok();
+    }
+
     ctx.emit(
         &format!("Wiki 生成：新建 {created} / 更新 {updated} / 提案 {proposals}"),
         Some(json!({"created": created, "updated": updated, "proposals": proposals})),
@@ -407,22 +434,7 @@ async fn update_index_and_log(
     updated: usize,
     proposals: usize,
 ) -> Result<(), JobError> {
-    // index：全部页面目录
-    let pages: Vec<(String, String)> = sqlx::query_as(
-        "SELECT slug, COALESCE(frontmatter->>'title', slug) FROM wiki_pages \
-         WHERE page_type NOT IN ('index','log') ORDER BY updated_at DESC LIMIT 300",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| JobError::Retryable(e.to_string()))?;
-    let index_md = format!(
-        "# 知识库索引\n\n{}\n",
-        pages
-            .iter()
-            .map(|(s, t)| format!("- [[{s}]] — {t}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
+    rebuild_index_page(pool).await?;
 
     // log：append 一行（存 latest 系统页；全量历史靠 job_events）
     let log_line = format!(
@@ -443,9 +455,50 @@ async fn update_index_and_log(
         log_line
     );
 
-    upsert_system_page(pool, "index", "index", "索引", &index_md).await?;
     upsert_system_page(pool, "log", "log", "日志", &log_md).await?;
     let _ = source_id;
+    Ok(())
+}
+
+/// 重建 index 系统页（cascade 删除后同步复用）。
+pub async fn rebuild_index_page(pool: &sqlx::PgPool) -> Result<(), JobError> {
+    let pages: Vec<(String, String)> = sqlx::query_as(
+        "SELECT slug, COALESCE(frontmatter->>'title', slug) FROM wiki_pages \
+         WHERE page_type NOT IN ('index','log') ORDER BY updated_at DESC LIMIT 300",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let index_md = format!(
+        "# 知识库索引\n\n{}\n",
+        pages
+            .iter()
+            .map(|(s, t)| format!("- [[{s}]] — {t}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    upsert_system_page(pool, "index", "index", "索引", &index_md).await?;
+    Ok(())
+}
+
+/// 重建 overview 系统页：全局摘要（每页一行标题+summary），ingest 后调用。
+pub async fn rebuild_overview_page(pool: &sqlx::PgPool) -> Result<(), JobError> {
+    let pages: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT slug, COALESCE(frontmatter->>'title', slug), left(content, 120)          FROM wiki_pages WHERE page_type NOT IN ('index','log','overview')          ORDER BY updated_at DESC LIMIT 100",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let body = pages
+        .iter()
+        .map(|(slug, title, excerpt)| format!("## [[{slug}]] {title}\n\n{excerpt}…"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let overview_md = format!(
+        "# Overview\n\n知识库当前包含 {} 个页面。\n\n{body}\n",
+        pages.len()
+    );
+    upsert_system_page(pool, "overview", "overview", "总览", &overview_md).await?;
     Ok(())
 }
 

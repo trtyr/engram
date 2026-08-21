@@ -166,6 +166,18 @@ async fn two_docs_interlinked_no_duplicate() {
         .unwrap();
     assert!(skipped3, "同 sha 应跳过");
 
+    // queries 存档闭环：archive_query → wiki_analyze 入队（自动再摄取产页）
+    let skipped_q = wiki
+        .archive_query(
+            "向量检索问答",
+            "什么是向量检索？",
+            "向量检索是在高维空间寻找最近邻的技术。",
+        )
+        .await
+        .unwrap();
+    assert!(!skipped_q, "queries 存档应触发摄取");
+    wait_jobs(&pool, &["wiki_analyze"]).await;
+
     handle.shutdown();
     handle.join().await;
 }

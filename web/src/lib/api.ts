@@ -171,8 +171,9 @@ export interface WikiPage {
   updated_at: string
 }
 export interface GraphDto {
-  nodes: { slug: string; title: string; page_type: string }[]
+  nodes: { slug: string; title: string; page_type: string; community?: number }[]
   edges: { from_slug: string; to_slug: string; weight: number }[]
+  communities?: { id: number; top_slug?: string; size?: number; cohesion: number }[]
 }
 export interface LintReport {
   issues: { rule: string; slug: string; detail: string }[]

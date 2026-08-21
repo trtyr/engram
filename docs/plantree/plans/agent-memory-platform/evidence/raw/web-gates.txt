@@ -1,14 +1,2 @@
-# web gates @ 2026-08-20T16:12:47Z
-$ npx tsc --noEmit
-tsc: 0 errors
-
-$ npm run lint（仅 shadcn 生成代码已知 warning）
-src/features/Memory.tsx:137:5: warning react-hooks(exhaustive-deps): React Hook useEffect has a missing dependency: 'load' help: Either include it or remove the dependency array.
-src/features/Memory.tsx:141:27: warning react-hooks(exhaustive-deps): React Hook useEffect has a missing dependency: 'load' help: Either include it or remove the dependency array.
-src/features/Wiki.tsx:205:5: warning react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.
-
-$ npx vitest run（含审计要求的关键组件：atoms 表格操作×3/persona 历史+回滚/编辑器保存）
-      Tests  10 passed (10)
-
-$ npm run build
-- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+# web gates @ 2026-08-21T09:23:04Z
+tsc: 0 errors; vitest: 14 passed; build: OK

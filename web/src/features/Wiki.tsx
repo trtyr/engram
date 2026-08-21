@@ -1,13 +1,15 @@
 /** Wiki 域：页面浏览 / Markdown 渲染 / 人工编辑 / 图谱 / Lint / 提案。 */
 import { useEffect, useState } from 'react'
 import WikiGraph from '@/components/WikiGraph'
+import InsightsPanel from '@/components/InsightsPanel'
+import ReviewQueue from '@/components/ReviewQueue'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { useSearchParams } from 'react-router-dom'
 import { api, type GraphDto, type LintReport, type WikiPage } from '@/lib/api'
 import { Empty, ErrorBox, Spinner, fmtTime } from '@/components/ui-bits'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'pages' | 'graph' | 'lint' | 'proposals'
+type Tab = 'pages' | 'graph' | 'insights' | 'lint' | 'proposals' | 'sources'
 
 export default function Wiki() {
   const [tab, setTab] = useState<Tab>('pages')
@@ -15,7 +17,7 @@ export default function Wiki() {
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Wiki</h1>
       <div className="flex gap-2">
-        {(['pages', 'graph', 'lint', 'proposals'] as Tab[]).map((t) => (
+        {(['pages', 'graph', 'insights', 'lint', 'proposals', 'sources'] as Tab[]).map((t) => (
           <Button key={t} variant={tab === t ? 'default' : 'outline'} size="sm" onClick={() => setTab(t)}>
             {t}
           </Button>
@@ -23,8 +25,10 @@ export default function Wiki() {
       </div>
       {tab === 'pages' && <PagesPane />}
       {tab === 'graph' && <GraphPane />}
+      {tab === 'insights' && <GraphWithInsights />}
       {tab === 'lint' && <LintPane />}
-      {tab === 'proposals' && <ProposalsPane />}
+      {tab === 'proposals' && <ReviewAndProposals />}
+      {tab === 'sources' && <SourcesPane />}
     </div>
   )
 }
@@ -144,13 +148,122 @@ function PagesPane() {
   )
 }
 
-function GraphPane() {
+function GraphPane({ highlightSlugs }: { highlightSlugs?: string[] }) {
   const [g, setG] = useState<GraphDto | null>(null)
   useEffect(() => {
     api.get<GraphDto>('/wiki/graph').then(setG).catch(() => {})
   }, [])
   if (!g) return <Spinner />
-  return <WikiGraph graph={g} />
+  return <WikiGraph graph={g} highlightSlugs={highlightSlugs} />
+}
+
+/** 图谱 + 洞察面板联动（点击洞察卡高亮图谱节点） */
+function GraphWithInsights() {
+  const [g, setG] = useState<GraphDto | null>(null)
+  const [highlight, setHighlight] = useState<string[] | null>(null)
+  useEffect(() => {
+    api.get<GraphDto>('/wiki/graph').then(setG).catch(() => {})
+  }, [])
+  if (!g) return <Spinner />
+  return (
+    <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
+      <div>
+        <h2 className="mb-2 text-sm font-medium">图谱（点击洞察卡联动高亮）</h2>
+        <WikiGraph graph={g} highlightSlugs={highlight ?? undefined} />
+      </div>
+      <div>
+        <h2 className="mb-2 text-sm font-medium">洞察</h2>
+        <InsightsPanel onHighlight={setHighlight} />
+      </div>
+    </div>
+  )
+}
+
+/** Review 队列 + 人工页提案合流 */
+function ReviewAndProposals() {
+  return (
+    <div className="space-y-6">
+      <section>
+        <h2 className="mb-2 text-sm font-medium">人审队列</h2>
+        <ReviewQueue />
+      </section>
+      <section>
+        <h2 className="mb-2 text-sm font-medium">人工页更新提案</h2>
+        <ProposalsPane />
+      </section>
+    </div>
+  )
+}
+
+/** sources 管理（级联删除） */
+function SourcesPane() {
+  const [rows, setRows] = useState<{ id: string; title: string | null; status: string }[] | null>(null)
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [report, setReport] = useState<{ deleted_pages: string[]; updated_shared: string[]; cleaned_links: number } | null>(null)
+  const load = () => api.get<{ id: string; title: string | null; status: string }[]>('/wiki/sources').then(setRows).catch(() => {})
+  useEffect(() => {
+    load()
+  }, [])
+  if (!rows) return <Spinner />
+  return (
+    <div className="space-y-3" data-testid="sources-pane">
+      {rows.length === 0 ? (
+        <Empty text="暂无原料" />
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="text-left text-muted-foreground">
+            <tr className="border-b">
+              <th className="py-1.5 pr-4">标题</th>
+              <th className="pr-4">状态</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="border-b">
+                <td className="py-1.5 pr-4">{r.title ?? '(未命名)'}</td>
+                <td className="pr-4">{r.status}</td>
+                <td className="text-right">
+                  {confirming === r.id ? (
+                    <span className="inline-flex gap-1">
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        data-testid={`confirm-delete-${r.id}`}
+                        onClick={async () => {
+                          const rep = await api.del<typeof report>(`/wiki/sources/${r.id}`)
+                          setReport(rep)
+                          setConfirming(null)
+                          load()
+                        }}
+                      >
+                        确认级联删除
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                        取消
+                      </Button>
+                    </span>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setConfirming(r.id)}>
+                      删除
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {report && (
+        <div className="rounded-lg border p-3 text-xs" data-testid="cascade-report">
+          <p className="font-medium">级联删除报告：</p>
+          <p>整页删除：{report.deleted_pages.length}（{report.deleted_pages.join(', ')}）</p>
+          <p>共享页摘源：{report.updated_shared.length}（{report.updated_shared.join(', ')}）</p>
+          <p>清理死链：{report.cleaned_links} 条</p>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function LintPane() {
