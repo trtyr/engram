@@ -114,7 +114,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
 
   // ---------- 6. Jobs：事件时间线 ----------
   await page.getByRole('link', { name: 'Jobs' }).click()
-  await expect(page.getByRole('combobox')).toBeVisible()
+  await expect(page.getByRole('combobox').first()).toBeVisible()
   await page.locator('tbody tr').first().click()
   await expect(page.getByText(/\u4efb\u52a1|\u5165\u961f/).first(), '\u4e8b\u4ef6\u65f6\u95f4\u7ebf\u5e94\u5c55\u793a').toBeVisible({ timeout: 15_000 })
 })

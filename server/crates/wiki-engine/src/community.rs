@@ -121,10 +121,9 @@ pub fn community_cohesion(
     for (from, to, w) in edges {
         if let (Some(&ca), Some(&cb)) =
             (communities.get(from.as_str()), communities.get(to.as_str()))
+            && ca == cb
         {
-            if ca == cb {
-                *intra.entry(ca).or_default() += w;
-            }
+            *intra.entry(ca).or_default() += w;
         }
     }
     let mut out = HashMap::new();

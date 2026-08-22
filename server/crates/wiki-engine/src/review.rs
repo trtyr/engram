@@ -76,12 +76,12 @@ pub async fn create_items(
 }
 
 pub async fn list_open(pool: &PgPool) -> Result<Vec<ReviewItem>, JobError> {
-    Ok(sqlx::query_as::<_, ReviewItem>(
+    sqlx::query_as::<_, ReviewItem>(
         "SELECT * FROM wiki_review_items WHERE status = 'open' ORDER BY created_at DESC LIMIT 200",
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| JobError::Retryable(e.to_string()))?)
+    .map_err(|e| JobError::Retryable(e.to_string()))
 }
 
 /// 处理（resolve/dismiss + 动作标签）。

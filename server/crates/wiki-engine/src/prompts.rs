@@ -21,7 +21,8 @@ pub fn analysis_system() -> String {
 
 输出严格 JSON：
 {\"entities\":[\"...\"],\"concepts\":[\"...\"],\"links\":[{\"slug\":\"既有页\",\"reason\":\"为何相关\"}],\"conflicts\":[{\"slug\":\"既有页\",\"issue\":\"矛盾点\"}],\"source_title\":\"建议的源摘要页标题\",\"reviews\":[{\"kind\":\"create_page|deep_research|skip|flag\",\"title\":\"...\",\"reason\":\"为何需要人审\",\"suggested_slug\":\"建议页名（可空）\",\"search_queries\":[\"预生成检索词\"]}]}
-reviews 说明：kind 只能是 create_page（值得为它建独立页）/deep_research（知识缺口需检索补充）/skip（内容存疑建议跳过）/flag（其他需人判断）；没有则空数组。".into()
+reviews 说明：kind 只能是 create_page（值得为它建独立页）/deep_research（知识缺口需检索补充）/skip（内容存疑建议跳过）/flag（其他需人判断）；没有则空数组。
+purpose_suggestion 说明：若本源内容提示知识库的 purpose 应调整（如新的研究方向/新关键问题），输出 {\"goals\": [...], \"key_questions\": [...], \"reason\": \"...\"}；无需调整则 null。".into()
 }
 
 /// 第二步：按分析产出页面。
@@ -33,10 +34,12 @@ pub fn generation_system() -> String {
    - 已在既有页面集合（existing_pages）中的**不要重建**——把更新内容并入该页（version+1 的完整新内容）。
    - 页面格式：第一行 `# 标题`，正文 3~8 句中文描述，相关处用 [[页面名]] 互链。
 2. 生成 source 页（page_type=source）：文档摘要（2~4 句）+ 关键要点列表，链接到相关实体/概念页。
-3. 每页内容自包含（读者不需要先读其他页也能懂大意）。
-4. frontmatter 的 sources 由系统填充，你只写正文。
+3. **跨源综合**（page_type=synthesis）：当本源与既有页面集合存在多个相关实体/概念时，生成一个综合页——梳理多源观点的共性与分歧，[[互链]] 相关页面。
+4. **对比分析**（page_type=comparison）：当 analysis.conflicts 非空或本源与既有页面存在不同视角时，生成对比页——逐维度对比双方观点，[[互链]] 冲突涉及的页面。
+5. 每页内容自包含（读者不需要先读其他页也能懂大意）。
+6. frontmatter 的 sources 由系统填充，你只写正文。
 
 输出严格 JSON：
-{\"pages\":[{\"slug\":\"页面名\",\"page_type\":\"entity|concept|source\",\"title\":\"标题\",\"content\":\"markdown 正文（含 [[互链]]）\"}]}
+{\"pages\":[{\"slug\":\"页面名\",\"page_type\":\"entity|concept|source|synthesis|comparison\",\"title\":\"标题\",\"content\":\"markdown 正文（含 [[互链]]）\"}]}
 只输出需要新建或更新的页面；无变化的不输出。".into()
 }

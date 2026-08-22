@@ -203,16 +203,16 @@ pub struct WikiSearchRequest {
 /// Wiki 页面检索。
 #[utoipa::path(post, path = "/wiki/search", operation_id = "wiki_search",
     request_body = WikiSearchRequest,
-    responses((status = 200, body = [WikiPageDto])))]
+    responses((status = 200, body = Object)))]
 pub async fn search(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Json(req): Json<WikiSearchRequest>,
-) -> Result<Json<Vec<WikiPageDto>>, ApiError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     require_wiki(&principal)?;
     Ok(Json(
         svc(&state)
-            .search(&req.query, req.max_items.unwrap_or(20))
+            .search_with_purpose(&req.query, req.max_items.unwrap_or(20))
             .await
             .map_err(we)?,
     ))

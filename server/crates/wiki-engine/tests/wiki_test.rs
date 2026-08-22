@@ -83,11 +83,13 @@ async fn two_docs_interlinked_no_duplicate() {
     let (pool, wiki, handle, _pg) = setup(vec![
         // 文档1 分析
         json!({"entities": ["张三"], "concepts": ["向量检索"], "links": [], "conflicts": [], "source_title": "文档一"}),
-        // 文档1 生成：新建 3 页（entity/concept/source），互链
+        // 文档1 生成：新建 3 页 + synthesis（跨源综合）+ comparison（对比）
         json!({"pages": [
             {"slug": "张三", "page_type": "entity", "title": "张三", "content": "# 张三\n\n张三是向量检索研究者，参见 [[向量检索]]。"},
             {"slug": "向量检索", "page_type": "concept", "title": "向量检索", "content": "# 向量检索\n\n向量检索是 [[张三]] 的研究方向。"},
             {"slug": "文档一", "page_type": "source", "title": "文档一", "content": "# 文档一\n\n来源摘要，涉及 [[张三]] 与 [[向量检索]]。"},
+            {"slug": "检索方法综合", "page_type": "synthesis", "title": "检索方法综合", "content": "# 检索方法综合\n\n综合 [[向量检索]] 的多源观点：张三的量化方法与其他流派在精度/速度上各有取舍。"},
+            {"slug": "量化方法对比", "page_type": "comparison", "title": "量化方法对比", "content": "# 量化方法对比\n\n[[张三]] 的量化方法 vs 传统方法：精度相当但速度快 3 倍。"},
         ]}),
         // 文档2 分析：发现与既有页关联
         json!({"entities": [], "concepts": ["近似搜索"], "links": [{"slug": "向量检索", "reason": "近似搜索是向量检索的子方向"}], "conflicts": [], "source_title": "文档二"}),
@@ -112,7 +114,17 @@ async fn two_docs_interlinked_no_duplicate() {
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     let pages = wiki.list_pages(None, 50).await.unwrap();
-    assert!(pages.len() >= 4, "3 内容页 + index: {}", pages.len()); // 3 + index
+    // 3 内容页 + synthesis + comparison + index
+    assert!(
+        pages.len() >= 6,
+        "应含 synthesis/comparison: {}",
+        pages.len()
+    );
+    let synth = wiki.get_page("检索方法综合").await.unwrap();
+    assert_eq!(synth.page_type, "synthesis", "synthesis 页型应真实产出");
+    assert!(synth.content.contains("[[向量检索]]"), "综合页应互链");
+    let comp = wiki.get_page("量化方法对比").await.unwrap();
+    assert_eq!(comp.page_type, "comparison", "comparison 页型应真实产出");
     let vec_page = wiki.get_page("向量检索").await.unwrap();
     assert_eq!(vec_page.version, 1);
 
@@ -176,6 +188,10 @@ async fn two_docs_interlinked_no_duplicate() {
         .await
         .unwrap();
     assert!(!skipped_q, "queries 存档应触发摄取");
+    // queries 页型直接落库（不依赖 LLM 生成）
+    let qpage = wiki.get_page("query-向量检索问答").await.unwrap();
+    assert_eq!(qpage.page_type, "queries", "存档应产 queries 页型");
+    assert!(qpage.content.contains("**问**"), "queries 页应含问答结构");
     wait_jobs(&pool, &["wiki_analyze"]).await;
 
     handle.shutdown();

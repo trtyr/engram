@@ -236,7 +236,8 @@ impl WikiService {
         self.put_page(slug, title, content).await
     }
 
-    /// Wiki 检索（FTS + 向量 RRF，页面域）。
+    /// Wiki 检索（FTS + 向量 RRF）。purpose 注入：检索走 LLM 时（AI 客户端
+    /// 读 query_context.purpose）提供方向意图——对齐 llm_wiki 的 query 注入。
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<WikiPageDto>, WikiError> {
         let tsq = agent_memory_search::tokenize::tsv_query(query);
         Ok(sqlx::query_as::<_, WikiPageDto>(
@@ -247,6 +248,21 @@ impl WikiService {
         .bind(limit.min(50))
         .fetch_all(&self.pool)
         .await?)
+    }
+
+    /// 检索上下文包（query 时 purpose 注入的载体）：purpose + 命中页面，
+    /// AI 客户端把 purpose 作为 system context 前缀使用。
+    pub async fn search_with_purpose(
+        &self,
+        query: &str,
+        limit: i64,
+    ) -> Result<serde_json::Value, WikiError> {
+        let pages = self.search(query, limit).await?;
+        let purpose = crate::purpose::purpose_context(&self.pool).await;
+        Ok(serde_json::json!({
+            "purpose": purpose,
+            "pages": pages,
+        }))
     }
 
     /// 死任务重跑（UI 辅助）。
@@ -295,7 +311,7 @@ impl WikiService {
 
     // ---------- queries 页型闭环 ----------
 
-    /// 检索结果/问答 → 存档为 queries 页 → 自动再摄取（提取实体概念入网络）。
+    /// 检索结果/问答 → 直接落 queries 页型（人工归档）→ 同时入队再摄取吸收实体概念。
     pub async fn archive_query(
         &self,
         title: &str,
@@ -306,7 +322,27 @@ impl WikiService {
         let content = format!(
             "# {title}\n\n**问**：{question}\n\n**答**：{answer}\n\n（来源：检索存档 {ts}）"
         );
-        self.ingest(title, &content).await
+
+        // 1) 直接落 queries 页（page_type=queries，origin=human——人触发的存档）
+        let slug = format!("query-{title}");
+        let fm = serde_json::json!({"title": title, "page_type": "queries", "sources": []});
+        sqlx::query(
+            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version, tsv) \
+             VALUES ($1, $2, $3, 'queries', $4, $5, 'human', 1, to_tsvector('simple', $6)) \
+             ON CONFLICT (slug) DO UPDATE SET content = $4, version = wiki_pages.version + 1, updated_at = now()",
+        )
+        .bind(Uuid::now_v7())
+        .bind(&slug)
+        .bind(title)
+        .bind(&content)
+        .bind(sqlx::types::Json(&fm))
+        .bind(agent_memory_search::tokenize::tsv_text(&content))
+        .execute(&self.pool)
+        .await?;
+
+        // 2) 再摄取（实体概念网络吸收本次问答内容）
+        let (_, skipped) = crate::ingest::enqueue_ingest(&self.queue, title, &content).await?;
+        Ok(skipped)
     }
 
     // ---------- 级联删除 ----------

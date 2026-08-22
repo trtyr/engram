@@ -151,6 +151,24 @@ pub async fn analyze_job(
         }
     }
 
+    // purpose 建议（llm_wiki：LLM 可建议更新 purpose——经人审队列，不直接改）
+    if let Some(sugg) = out.get("purpose_suggestion").filter(|v| v.is_object()) {
+        let pid = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO wiki_review_items (id, kind, payload, search_queries, source_id) \
+             VALUES ($1, 'flag', $2, '[]'::jsonb, $3)",
+        )
+        .bind(pid)
+        .bind(sqlx::types::Json(sugg))
+        .bind(source_id)
+        .execute(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        ctx.emit("purpose 更新建议已入人审队列", Some(sugg.clone()))
+            .await
+            .ok();
+    }
+
     // 链式入队生成
     ctx.enqueue_next(
         JobTemplate::new("wiki_generate")

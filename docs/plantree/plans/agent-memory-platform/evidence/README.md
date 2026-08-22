@@ -2,16 +2,18 @@
 
 按阶段归档验证证据。每条证据 = 何时、验证了什么、命令/输出摘要、结论。
 
-## Wiki 对齐 llm_wiki（2026-08-21 完成）
+## Wiki 对齐 llm_wiki（2026-08-21 完成，审计整改后）
 
 | 门 | 结果 | 证据 |
 |---|---|---|
-| 迁移 + purpose | ✅ | 0007 扩展 synthesis/comparison/queries/purpose 四页型；0012 新表 wiki_review_items + wiki_insight_dismissals；purpose CRUD API + PUT 204 + 读取验证；ingest 两步注入 purpose（分析+生成） |
-| overview + 级联删除 | ✅ | overview.md 每次 ingest 后重生成（页面列表可见）；级联删除实测：删「蒸馏管道问答」source → 摘要页 distillation-pipeline-source 整页删 + 共享页 distillation-pipeline 摘源保留 + 死链清理 2 条 + index 同步（7→删后页面一致）；修两个真 bug（jsonb_array_length INT4 解码、COALESCE sha256 类型） |
-| Review + queries 闭环 | ✅ | ingest 后 LLM flag 产出 deep_research/create_page 两项（预定义动作+预生成检索词）；resolve 204 + 剩余计数减一；queries 存档：POST archive → wiki_generate succeeded → 新页面产出 |
-| 4 信号 + Louvain + 洞察 | ✅ | relevance_score 纯函数 6 用例（全命中 9.5/AA 封顶/零信号）+ adamic_adar；Louvain 修 ΔQ 震荡 bug（Python 对照 3 轮收敛）+ 两簇/凝聚度/空图单测；graph 返回 community 字段（7/7 节点）+ communities 数组；insights 端点：4 意外连接/孤立页/稀疏社区/桥节点 + dismiss 204 后 4→3 |
-| 前端 | ✅ | WikiGraph 社区/type 双着色切换（12 色调色板+凝聚度图例）+ 洞察卡片联动高亮；InsightsPanel（点击高亮/dismiss/reset）；ReviewQueue（预定义动作组+检索词展示）；Memory 检索一键存档；SourcesPane 级联删除确认+cascade report；vitest 14 项（新增 4：洞察渲染联动 dismiss/review 动作/空态） |
-| 全门禁 | ✅ | cargo 56 passed / 0 failed（新增 8 单测）；vitest 14 passed；tsc 0；build 0 错误；playwright 干净库全旅程 1 passed（1.1 分钟）；lighthouse accessibility 100 |
+| 迁移 + purpose（含 query 注入 + LLM 建议更新） | ✅ | 0007 扩展四页型；0012 新表；purpose CRUD + ingest 两步注入；**query 注入**：/wiki/search 返回 {purpose, pages}（实测 purpose_has_goals:true）；**LLM 建议更新**：analysis prompt 输出 purpose_suggestion → 落 review 人审队列（kind=flag，不直接改，人审后手动 PUT） |
+| overview + 级联删除 | ✅ | overview 每次 ingest 后重生成；级联删除实测：整页删+共享摘源+死链清理 2 条+index 同步；修两真 bug |
+| 三页型真实生成路径 | ✅ | **generation prompt 明确规则 3/4**（synthesis：多相关实体时综合页，comparison：conflicts 非空或不同视角时对比页），page_type 枚举扩展 entity\|concept\|source\|synthesis\|comparison；**实测**：ingest 产 synthesis-对齐能力与知识库结构 页（page_type=synthesis）；mock e2e 断言 synthesis/comparison 页型+互链内容 |
+| queries 闭环（真实 queries 页型） | ✅ | archive_query **直接落 page_type='queries' 页**（origin=human，**问**：结构验证 has_q:true）+ 同时入队再摄取吸收实体概念；实测：query-对齐问答 页 queries 类型 |
+| Review + queries 闭环 | ✅ | ingest 后 LLM flag 产出（预定义动作+预生成检索词）；resolve 204；purpose_suggestion 也走 review |
+| 4 信号 + Louvain + 洞察 | ✅ | 纯函数 6 用例 + AA；Louvain 修 ΔQ 震荡 bug；graph 返回社区；insights 四类 + dismiss |
+| 前端 | ✅ | 社区/type 双着色 + 洞察联动高亮 + ReviewQueue + 级联删除 UI + 检索存档按钮 |
+| 全门禁 | ✅ | cargo 56 passed / 0 failed；vitest 14 passed；tsc 0；build 0 错误；playwright 1 passed；lighthouse 100 |
 
 ## Phase 7 — 交付打磨与发布（2026-08 完成）
 ## Phase 7 — 交付打磨与发布（2026-08 完成）

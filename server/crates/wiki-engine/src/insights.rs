@@ -89,7 +89,7 @@ pub async fn compute_insights(pool: &PgPool) -> Result<InsightsReport, JobError>
             })
             .collect()
     };
-    community_info.sort_by(|a, b| b.size.cmp(&a.size));
+    community_info.sort_by_key(|c| std::cmp::Reverse(c.size));
 
     let mut insights: Vec<Insight> = Vec::new();
 
@@ -120,7 +120,7 @@ pub async fn compute_insights(pool: &PgPool) -> Result<InsightsReport, JobError>
             }
             let members: Vec<String> = nodes
                 .iter()
-                .filter(|n| comms.get(n.as_str()) == Some(&(c.id as usize)))
+                .filter(|n| comms.get(n.as_str()) == Some(&{ c.id }))
                 .cloned()
                 .collect();
             insights.push(Insight {
@@ -140,13 +140,13 @@ pub async fn compute_insights(pool: &PgPool) -> Result<InsightsReport, JobError>
     // 3. 桥节点（连接 3+ 社区）
     let mut node_communities: HashMap<&str, std::collections::HashSet<usize>> = HashMap::new();
     for (f, t, _) in &edges {
-        if let (Some(&cf), Some(&ct)) = (comms.get(f.as_str()), comms.get(t.as_str())) {
-            if cf != ct {
-                node_communities.entry(f.as_str()).or_default().insert(cf);
-                node_communities.entry(f.as_str()).or_default().insert(ct);
-                node_communities.entry(t.as_str()).or_default().insert(cf);
-                node_communities.entry(t.as_str()).or_default().insert(ct);
-            }
+        if let (Some(&cf), Some(&ct)) = (comms.get(f.as_str()), comms.get(t.as_str()))
+            && cf != ct
+        {
+            node_communities.entry(f.as_str()).or_default().insert(cf);
+            node_communities.entry(f.as_str()).or_default().insert(ct);
+            node_communities.entry(t.as_str()).or_default().insert(cf);
+            node_communities.entry(t.as_str()).or_default().insert(ct);
         }
     }
     for (slug, cs) in node_communities {

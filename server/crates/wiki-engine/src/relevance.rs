@@ -203,6 +203,6 @@ mod tests {
         let aa = adamic_adar(&a, &b, deg);
         assert!((aa - 1.0 / 3.0_f64.ln()).abs() < 1e-9);
         // 无共同邻居
-        assert!(adamic_adar(&a, &vec!["z".to_string()], deg) == 0.0);
+        assert!(adamic_adar(&a, &["z".to_string()], deg) == 0.0);
     }
 }
