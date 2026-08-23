@@ -25,7 +25,10 @@ pub struct ErrorBody {
 }
 
 /// API 层错误。变体即错误分类；新增类别时同步更新 code。
-#[allow(dead_code, reason = "Phase 0 仅实现错误体契约，各变体随阶段启用")]
+#[allow(
+    dead_code,
+    reason = "Database/Internal 变体经 From 转换构造，无直接构造点"
+)]
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     /// 请求参数不合法（不重试）

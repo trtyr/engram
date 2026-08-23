@@ -23,6 +23,9 @@ data/
 coverage/
 *.profraw
 
+# Playwright 运行元数据（.last-run.json 曾被误提交，已不再跟踪）
+test-results/
+
 # OS / editor
 .DS_Store
 .idea/

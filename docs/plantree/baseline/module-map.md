@@ -1,6 +1,7 @@
-# Module Map — 目标模块地图
+# Module Map — 实际模块地图
 
-> 现状：新项目，本文为目标架构。落地后随实际结构调整。
+> 现状：八阶段全部落地（v0.1.0）。本文件已按实际结构调整过——目标架构期间
+> api 仅经 core 访问域服务，落地后 wiki/codegraph 域由 api 直连（见「与目标架构的偏差」）。
 
 ## 仓库布局（monorepo）
 
@@ -29,14 +30,22 @@ agent-memory/
 └── docs/plantree/             # 本计划树
 ```
 
-## 依赖方向（单向）
+## 依赖方向（单向，实际）
 
-```
-api → core → (storage, llm, jobs, search, distill, wiki-engine, cg-bridge)
+以各 crate 的 Cargo.toml 为准（2026-08 初始化审计核实）：
+
+```text
+api → (storage, jobs, llm, core, distill, wiki-engine, cg-bridge)
+core → (jobs, llm, search, distill)
+storage → (sqlx only：pool 装配 + 迁移执行)
 ```
 
-- `api` 不直接摸 `storage`，必须过 `core` 各域服务。
-- `distill`/`wiki-engine` 依赖 `llm` + `jobs`，不依赖 `api`。
+- 域逻辑默认放 `core`：memory/knowledge 已在此（core 内含 sqlx 查询）。
+- **与目标架构的偏差**：目标为 `api → core → (各域)`，落地后 `api` 直接消费
+  `wiki-engine`（WikiService）与 `cg-bridge`（CgBridge），并直接依赖 `jobs`/`llm`/
+  `distill`/`storage`。`storage` 仅为 pool+迁移薄层，未建仓储抽象层。
+  已记录为开放项（open-questions.md 初始化审计节），收敛回 core 需重构，非紧急。
+- `llm`/`jobs` 不依赖任何内部 crate。
 - 禁止域间横向 import（`distill` 不 import `wiki-engine`）；跨域协作放 `core` 编排。
 
 ## 模块职责一句话
@@ -44,8 +53,8 @@ api → core → (storage, llm, jobs, search, distill, wiki-engine, cg-bridge)
 | 模块 | 职责 | 深模块接口要点 |
 |---|---|---|
 | api | HTTP 契约层 | 路由注册、DTO↔领域转换、统一错误体、OpenAPI |
-| core | 领域编排 | 各资产域服务（memory/knowledge/wiki/codegraph）+ 任务触发 |
-| storage | 持久化 | 仓储 trait + sqlx 实现、迁移、事务边界 |
+| core | 领域编排 | memory/knowledge 域服务（含 sqlx 查询）+ 任务触发 |
+| storage | 持久化薄层 | pool 装配 + 迁移执行（无仓储 trait，查询在 core/api 直接用 sqlx） |
 | llm | 模型访问 | `trait Provider`、路由规则（任务类型→模型）、加密密钥、用量记账 |
 | jobs | 异步执行 | job 状态机、重试策略、事件流（SSE 源）、幂等键 |
 | distill | 蒸馏编排 | 提示词模板版本化、L0→L3 各阶段任务、consolidation |

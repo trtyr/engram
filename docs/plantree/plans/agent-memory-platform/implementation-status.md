@@ -16,9 +16,7 @@
 
 ## Active TODO
 
-- [ ] compose Phase 1 代码重建终验（后台构建中）→ 通过即提交并关 phase-1 任务
-- Phase 2 开工清单：distill crate（提示词模板/五阶段 job）→ memory 域 API（L0 写入/
-  atoms/scenarios/persona/检索/context 包）→ jieba 预分词 tsv → e2e 脚本（真 LLM）
+（无——计划完成，见 roadmap Done 与 evidence/）
 
 ## Blocked By
 
