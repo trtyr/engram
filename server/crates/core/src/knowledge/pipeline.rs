@@ -5,13 +5,13 @@ use agent_memory_jobs::types::{JobError, JobTemplate};
 use agent_memory_llm::ProviderRegistry;
 use agent_memory_llm::provider::LlmProvider as _;
 use agent_memory_llm::types::{EmbedRequest, Purpose};
+use agent_memory_parsing::parse_bytes;
 use agent_memory_search::tokenize::tsv_text;
 use serde_json::json;
 use std::path::PathBuf;
 use uuid::Uuid;
 
 use super::chunking::chunk_text;
-use super::parse::parse_bytes;
 
 /// 并发说明：管道并发由 RunnerConfig.concurrency（默认 4）全局约束，
 /// 不在 job 内做 per-kind 限流（单用户规模下解析快，避免互相挤死的重试风暴）。

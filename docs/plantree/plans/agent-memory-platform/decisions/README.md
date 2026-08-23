@@ -70,6 +70,8 @@
 
 - **状态**：已确认（用户，2026-08）
 - **决策**：后端 Rust：axum + sqlx + utoipa + tokio；monorepo `server/crates/*`（见 [baseline/module-map](../../../baseline/module-map.md)）。前端 React 19 + Vite + TypeScript + Tailwind + shadcn/ui + Zustand + TanStack Query，类型从 OpenAPI 生成。交付 Docker 多阶段单镜像 + compose。
+- **修订注记（2026-08，Q10）**：Zustand 声明于栈内但落地时 src 无任何引用（UI 状态用
+  React 本地 state + TanStack Query 已覆盖），已从 package.json 移除并同步 AGENTS.md 约定。
 
 ## D0007 单用户，无团队/多租户
 

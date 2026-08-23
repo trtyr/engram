@@ -10,7 +10,7 @@ agent-memory-jobs = { path = "../jobs" }
 agent-memory-llm = { path = "../llm" }
 agent-memory-search = { path = "../search" }
 agent-memory-distill = { path = "../distill" }
-agent-memory-core = { path = "../core" }
+agent-memory-parsing = { path = "../parsing" }
 
 sqlx.workspace = true
 tokio.workspace = true

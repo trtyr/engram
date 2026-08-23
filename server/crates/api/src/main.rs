@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
             .expect("主密钥格式恒合法"),
         ),
     );
-    let runner = agent_memory_wiki_engine::ingest::register_handlers(
+    let runner = agent_memory_core::wiki::ingest::register_handlers(
         runner,
         agent_memory_distill::gateway_llm(
             pool.clone(),

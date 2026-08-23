@@ -3,7 +3,6 @@
 //! 设计文档：docs/plantree/plans/agent-memory-platform/topics/knowledge-ingest.md
 
 pub mod chunking;
-pub mod parse;
 pub mod pipeline;
 pub mod ssrf;
 

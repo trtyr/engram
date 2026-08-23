@@ -1,0 +1,12 @@
+[package]
+name = "agent-memory-parsing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "文档解析：pdf / docx / html / md / txt → 纯文本（底层独立，core 与 wiki-engine 共用）"
+
+[dependencies]
+pdf-extract.workspace = true
+docx-rs.workspace = true
+scraper.workspace = true
+thiserror.workspace = true

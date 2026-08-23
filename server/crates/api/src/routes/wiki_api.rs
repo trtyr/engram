@@ -1,10 +1,7 @@
 //! Wiki 域端点（wiki scope）。
 
-use agent_memory_wiki_engine::cascade::CascadeReport;
-use agent_memory_wiki_engine::insights::InsightsReport;
-use agent_memory_wiki_engine::purpose::Purpose;
-use agent_memory_wiki_engine::review::ReviewItem;
-use agent_memory_wiki_engine::{LintReport, WikiError, WikiPageDto, WikiService};
+use agent_memory_core::wiki::{CascadeReport, InsightsReport, Purpose, ReviewItem};
+use agent_memory_core::wiki::{LintReport, WikiError, WikiPageDto, WikiService};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -150,11 +147,11 @@ pub async fn put_page(
 }
 
 #[utoipa::path(get, path = "/wiki/graph",
-    responses((status = 200, body = agent_memory_wiki_engine::service::GraphDto)))]
+    responses((status = 200, body = agent_memory_core::wiki::GraphDto)))]
 pub async fn graph(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-) -> Result<Json<agent_memory_wiki_engine::service::GraphDto>, ApiError> {
+) -> Result<Json<agent_memory_core::wiki::GraphDto>, ApiError> {
     require_wiki(&principal)?;
     Ok(Json(svc(&state).graph().await.map_err(we)?))
 }

@@ -36,16 +36,18 @@ npx openapi-typescript /tmp/openapi.json -o src/lib/api-schema.ts
 `docs/plantree/baseline/module-map.md`）：
 
 ```text
-api → (storage, jobs, llm, core, distill, wiki-engine, cg-bridge)
-core → (jobs, llm, search, distill)
+api → (storage, jobs, llm, core, distill)
+core → (jobs, llm, search, distill, parsing, wiki-engine, cg-bridge)
+wiki-engine → (jobs, llm, search, distill, parsing)
+parsing → (无内部依赖)
 storage → (sqlx only：pool 装配 + 迁移执行)
 ```
 
-- 域逻辑默认放 `core`（memory/knowledge 已在此）；wiki/codegraph 域由 `api` 直接消费
-  `wiki-engine`/`cg-bridge`——与「api 只经 core」的目标边界有偏差（历史演化，已记录，
-  收敛回 core 属开放项，见 open-questions.md 初始化审计节，非紧急）。
-- `storage` 只是 pool+迁移薄层，查询直接用 sqlx 写在 `core`/`api`（未建仓储抽象层）。
-- `llm`/`jobs` 保持底层独立，不依赖任何内部 crate。
+- 域逻辑统一放 `core`：memory/knowledge 服务 + wiki/codegraph 门面（`core::wiki` /
+  `core::codegraph` re-export），api 只经 core 访问域服务（Q9 已收敛，2026-08）。
+- 文档解析在独立底层 `parsing` crate（core 与 wiki-engine 共用，解开原依赖环）。
+- `storage` 是 pool+迁移薄层，查询直接用 sqlx 写在 `core`/`api`（未建仓储抽象层）。
+- `llm`/`jobs`/`parsing` 不依赖任何内部 crate。
 - 禁止域 crate 之间横向 import（如 `distill` → `wiki-engine`）；跨域编排放 `core`。
 - schema 只能改 `server/migrations/`（新增迁移文件，不改已应用的历史迁移）。
 
@@ -58,7 +60,8 @@ storage → (sqlx only：pool 装配 + 迁移执行)
 - sqlx：运行时 API（`query` / `query_as`），不用编译期 `query!` 宏——避免构建依赖 DATABASE_URL。
 - 提示词模板：代码内常量 + `PROMPT_VERSION`，修改必须升版本。
 - 前端：类型从 OpenAPI 生成到 `web/src/lib/api-schema.ts`（`npm run gen:api` 或上文的
-  openapi-dump 流程），禁止手写重复后端类型；服务端状态走 TanStack Query。
+  openapi-dump 流程），禁止手写重复后端类型；服务端状态走 TanStack Query，
+  UI 状态用 React 本地 state（zustand 曾声明于 D0006，落地未使用，2026-08 移除，见 Q10）。
 - 所有时间 ISO8601 UTC；ID 用 uuid v7。
 
 ## 质量门禁
@@ -71,8 +74,9 @@ storage → (sqlx only：pool 装配 + 迁移执行)
 
 ## 已知开放项（初始化审计 2026-08 记录，详见 open-questions.md）
 
-1. **cargo audit 3 漏洞**：lopdf 0.34（high 7.5，经 pdf-extract 进 core 的 PDF 解析，
-   升级 ≥0.42 可修）；tokio-tar（仅 testcontainers dev 依赖）；rsa（lockfile 孤儿）。
-2. **api → wiki-engine/cg-bridge 直连** vs 目标 core 边界（上节）。
-3. **zustand 未使用**（web/package.json 依赖，src 无引用）；`test-results/` 已入
-   .gitignore 且 `.last-run.json` 已移出跟踪（git rm --cached）。
+- **Q8（lopdf 高危）已解决 2026-08-23**：pdf-extract 0.8→0.12（lopdf ≥0.42）。
+  余下低风险：tokio-tar（仅 testcontainers dev）、rsa（lockfile 孤儿）、
+  ttf-parser unmaintained 警告（pdf-extract 0.12 传递依赖）。
+- **Q9（api→core 边界）已解决 2026-08-23**：parsing crate 解环 + core 门面（见上）。
+- **Q10（zustand）已解决 2026-08-23**：依赖移除 + D0006 注记。
+- **Q11（test-results/）已解决 2026-08-20**：gitignore + 移出跟踪。

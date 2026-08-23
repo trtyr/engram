@@ -10,6 +10,7 @@ members = [
     "crates/wiki-engine",
     "crates/cg-bridge",
     "crates/search",
+    "crates/parsing",
 ]
 
 [workspace.package]
@@ -29,6 +30,7 @@ agent-memory-distill = { path = "crates/distill" }
 agent-memory-wiki-engine = { path = "crates/wiki-engine" }
 agent-memory-cg-bridge = { path = "crates/cg-bridge" }
 agent-memory-search = { path = "crates/search" }
+agent-memory-parsing = { path = "crates/parsing" }
 
 # 异步运行时与 HTTP
 tokio = { version = "1", features = ["full"] }
@@ -75,7 +77,7 @@ jieba-rs = "0.4"
 pgvector = { version = "0.4", features = ["sqlx"] }
 
 # 文档解析（知识域）
-pdf-extract = "0.8"
+pdf-extract = "0.12"          # 内部 lopdf ≥0.42（RUSTSEC-2026-0187 修复）
 docx-rs = "0.4"
 scraper = "0.23"
 

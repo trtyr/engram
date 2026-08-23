@@ -28,15 +28,14 @@ JWT（无状态、登出麻烦）vs opaque token + PG 表（可吊销）。单�
 
 > 不属于原计划问题，是初始化审计发现、值得后续处理的开放项。拍板后同样移入 decisions。
 
-- **Q8 依赖漏洞**：`cargo audit` 3 漏洞——lopdf 0.34（RUSTSEC-2026-0187，high 7.5，
-  经 pdf-extract 进 core 的 PDF 解析，升级 pdf-extract 至用 lopdf ≥0.42 可修，生产依赖）；
-  tokio-tar（RUSTSEC-2025-0111，仅 testcontainers dev 依赖，不进镜像）；
-  rsa 0.9.10（RUSTSEC-2023-0071，lockfile 孤儿，无引用方）。另 3 个 unmaintained 警告
-  （fxhash/rand_os/rustls-pemfile，均为传递依赖）。
-- **Q9 api→域 crate 直连 vs core 边界**：实际依赖图为 api → (storage, jobs, llm, core,
-  distill, wiki-engine, cg-bridge)；目标「api 只经 core」未落地。收敛回 core 需重构
-  （wiki/codegraph 域），非紧急，已在 module-map.md 记录偏差。
-- **Q10 zustand 未使用**：web/package.json 声明但 src 无引用（D0006 选定，落地时未用上）。
-  清理或实际引入，二选一。
+- ~~**Q8 依赖漏洞**~~（**已解决 2026-08-23**）：lopdf 0.34（RUSTSEC-2026-0187，high 7.5）——
+  升级 pdf-extract 0.8.2 → 0.12.0（内部 lopdf 0.42），audit 复扫漏洞消失。
+  余下：tokio-tar（仅 testcontainers dev）、rsa（lockfile 孤儿，无引用方），
+  以及新增传递依赖 unmaintained 警告 ttf-parser（pdf-extract 0.12 引入，可接受权衡）。
+- ~~**Q9 api→域 crate 直连 vs core 边界**~~（**已解决 2026-08-23，路径 A**）：
+  新建底层 `parsing` crate 解开 wiki-engine→core 依赖环；core 新增 wiki/codegraph 门面；
+  api 不再 import wiki-engine/cg-bridge（grep 零匹配）。module-map/AGENTS.md 已同步。
+- ~~**Q10 zustand 未使用**~~（**已解决 2026-08-23**）：从 package.json/lockfile 移除
+  （src 零引用），AGENTS.md 约定与 D0006 加注记同步。
 - **Q11 test-results/ 跟踪**：根目录 `.last-run.json` 曾提交（Playwright 元数据），
   .gitignore 已加 `test-results/`，历史文件已 `git rm --cached` 移出跟踪（文件保留在磁盘）。

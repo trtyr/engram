@@ -1,4 +1,8 @@
-//! 文档解析：pdf / docx / html / md / txt → 纯文本（CPU 密集走 spawn_blocking）。
+//! 文档解析：pdf / docx / html / md / txt → 纯文本。
+//!
+//! 底层独立 crate（不依赖任何内部 crate）：`core` 知识域与 `wiki-engine`
+//! 摄取均经此解析，避免 wiki-engine 反向依赖 core（原 Q9 环）。CPU 密集调用由调用方
+//! 决定是否 spawn_blocking。
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError {

@@ -18,6 +18,15 @@
 implementation-status 清理历史 TODO · error.rs 过期注释。新增开放项 Q8–Q11（open-questions.md），
 提交 `043997c`。
 
+## Q8–Q10 技术债清理（2026-08-23，goal mt5kc1hd）
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| Q8 lopdf 高危漏洞 | ✅ 已修复 | pdf-extract 0.8.2 → 0.12.0（内部 lopdf 0.34 → 0.42）；cargo audit 复扫 RUSTSEC-2026-0187 消失（3 漏洞 → 2，余 rsa 孤儿 + tokio-tar dev-only）；PDF 解析测试（含 corrupt-pdf）全绿 |
+| Q9 api→core 边界收敛 | ✅ 路径 A 完成 | 新建 `parsing` crate（抽取文档解析）解开 wiki-engine→core 依赖环；core 新增 `wiki`/`codegraph` 门面；api 不再 import wiki-engine/cg-bridge（grep 零匹配）；module-map/AGENTS.md 同步 |
+| Q10 zustand 死依赖 | ✅ 已清理 | package.json + lockfile 移除（grep 0 匹配）；web lint/tsc/vitest(14)/build 全绿；AGENTS.md 约定 + D0006 注记同步 |
+| 全量门禁复跑 | ✅ | cargo 31 套件 56 passed / 0 failed；fmt/clippy 干净；web 四件套全绿 |
+
 ## Wiki 对齐 llm_wiki（2026-08-21 完成，审计整改后）
 
 | 门 | 结果 | 证据 |

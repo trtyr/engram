@@ -10,6 +10,9 @@ agent-memory-jobs = { path = "../jobs" }
 agent-memory-llm = { path = "../llm" }
 agent-memory-search = { path = "../search" }
 agent-memory-distill = { path = "../distill" }
+agent-memory-parsing = { path = "../parsing" }
+agent-memory-wiki-engine = { path = "../wiki-engine" }
+agent-memory-cg-bridge = { path = "../cg-bridge" }
 
 sqlx.workspace = true
 tokio.workspace = true
@@ -23,9 +26,7 @@ pgvector.workspace = true
 utoipa.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
-pdf-extract.workspace = true
-docx-rs.workspace = true
-scraper.workspace = true
+scraper.workspace = true   # URL 摄取提取 <title>（正文解析在 parsing crate）
 
 [dev-dependencies]
 testcontainers.workspace = true

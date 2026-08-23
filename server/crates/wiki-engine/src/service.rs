@@ -109,7 +109,7 @@ impl WikiService {
         name: &str,
         content_type: Option<&str>,
     ) -> Result<bool, WikiError> {
-        let text = agent_memory_core::knowledge::parse::parse_bytes(name, content_type, raw)
+        let text = agent_memory_parsing::parse_bytes(name, content_type, raw)
             .map_err(|e| WikiError::BadRequest(e.to_string()))?;
         let title: Option<String> = sqlx::query_scalar("SELECT title FROM documents WHERE id = $1")
             .bind(doc_id)
