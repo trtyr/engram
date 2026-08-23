@@ -14,7 +14,7 @@
 |---|---|
 | [roadmap.md](roadmap.md) | 路线图：八阶段总览与当前状态 |
 | [phases/](phases/) | 各阶段详细工作分解与验收标准 |
-| [decisions/README.md](decisions/README.md) | 已拍板决策（D0001–D0008） |
+| [decisions/README.md](decisions/README.md) | 已拍板决策（D0001–D0012） |
 | [open-questions.md](open-questions.md) | 未决问题 |
 | [topics/api-design.md](topics/api-design.md) | API 全目录与契约约定 |
 | [topics/memory-model.md](topics/memory-model.md) | L0–L3 记忆模型 |
@@ -35,4 +35,6 @@
 
 ## 状态
 
-Planning（规划完成，未开工）。开工后本文件只保留链接，状态见 roadmap.md。
+**Done（v0.1.0，2026-08-20 独立完成审计批准）**。八阶段全部交付，后续见
+roadmap.md Done 区、[open-questions.md](open-questions.md)（Q8–Q11 初始化审计项）与
+[evidence/README.md](evidence/README.md)。

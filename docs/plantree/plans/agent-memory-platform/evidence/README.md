@@ -2,6 +2,22 @@
 
 按阶段归档验证证据。每条证据 = 何时、验证了什么、命令/输出摘要、结论。
 
+## 初始化审计（/init 全量重新初始化，2026-08-20）
+
+| 门 | 结果 | 证据 |
+|---|---|---|
+| cargo test --workspace | ✅ 29 套件 56 测试 0 失败 | 真 PG testcontainers 重跑（提交 `043997c` 前） |
+| cargo fmt --check | ✅ 0 diff | rustc 1.97.1 |
+| cargo clippy --workspace --all-targets -D warnings | ✅ 0 警告 | |
+| web lint / tsc / vitest / build | ✅ 全绿（26s） | oxlint + TS 6.x + vitest + vite build |
+| npm audit | ✅ 0 漏洞 | |
+| cargo audit（472 crates） | ⚠️ 3 漏洞 + 3 unmaintained | lopdf 0.34（high 7.5，经 pdf-extract 进 core，升 ≥0.42 可修，生产依赖）/ tokio-tar（仅 testcontainers dev）/ rsa（lockfile 孤儿）→ Q8 |
+
+文档-实现漂移修正：AGENTS.md 刷新（api-schema.ts 路径、全量命令清单）· module-map 目标→实际架构
+（api 直连 wiki-engine/cg-bridge、storage 为 pool+迁移薄层、core 内含 sqlx 查询）·
+implementation-status 清理历史 TODO · error.rs 过期注释。新增开放项 Q8–Q11（open-questions.md），
+提交 `043997c`。
+
 ## Wiki 对齐 llm_wiki（2026-08-21 完成，审计整改后）
 
 | 门 | 结果 | 证据 |

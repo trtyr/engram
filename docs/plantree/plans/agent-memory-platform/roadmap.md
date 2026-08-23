@@ -19,6 +19,11 @@
 
 ## Done（v0.1.0 已发布并通过独立完成审计，2026-08-20）
 
+- **初始化审计（/init 全量重新初始化，2026-08-20，提交 `043997c`）**：v0.1.0 后的复核。
+  基线重跑全绿（56 测试 / fmt / clippy / web 四件套 / npm audit 0）+ cargo audit 3 漏洞
+  （lopdf high 可修等，→ Q8）；文档-实现漂移已修正（AGENTS.md、module-map 改为实际架构）；
+  新增开放项 Q8–Q11（[open-questions.md](open-questions.md)）。
+  证据 [evidence/README.md](evidence/README.md) 初始化审计节。
 - **审计批准**：独立审计员复现全部关键验证（48 测试亲自重跑、42 端点亲自拉取、
   四类资产源码级核实、服务在线探测），判定「成熟产品、非 demo」。
   证据链：evidence/raw/ 八份原始输出 + 审计报告。
