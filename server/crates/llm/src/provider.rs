@@ -323,14 +323,29 @@ impl LlmProvider for OpenAiCompatProvider {
 
     async fn embed(&self, req: EmbedRequest) -> Result<EmbedResponse, LlmError> {
         let started = std::time::Instant::now();
-        let mut body = serde_json::json!({ "model": req.model, "input": req.inputs });
+        let inputs = req.inputs.clone();
+        let mut body = serde_json::json!({ "model": req.model, "input": inputs });
         if let Some(d) = req.dimensions {
             body["dimensions"] = serde_json::json!(d);
         }
 
-        let resp = self
+        let mut resp = self
             .post_with_retry("/v1/embeddings", self.embed_timeout, &body)
             .await?;
+
+        // 兼容：部分上游（如硅基流动 bge-m3）不支持 dimensions 参数，4xx 时去掉重试一次，
+        // 靠模型默认维度（本项目统一 1024 维的模型默认即 1024）。
+        if req.dimensions.is_some() && resp.status().is_client_error() {
+            tracing::warn!(
+                status = %resp.status(),
+                model = %req.model,
+                "上游拒绝 dimensions 参数，去掉后重试"
+            );
+            let body_no_dim = serde_json::json!({ "model": req.model, "input": req.inputs });
+            resp = self
+                .post_with_retry("/v1/embeddings", self.embed_timeout, &body_no_dim)
+                .await?;
+        }
 
         let status = resp.status();
         if !status.is_success() {
