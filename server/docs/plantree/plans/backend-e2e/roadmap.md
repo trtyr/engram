@@ -1,26 +1,34 @@
 # Roadmap
 
-## In Progress
+## 状态：全部完成（2026-08-26）
 
-| ID | 任务 | 产物 |
+`E2E_LLM_API_KEY` 注入下 `run_all.py` **13/13 PASS**（约 140 项断言，真 LLM 全链）；
+无凭证时 LLM 依赖项明确 SKIP（exit 0），其余 PASS。
+
+| ID | 任务 | 结果 |
 |---|---|---|
-| E0 | 公共编排库 `_lib/`（env/client/check）+ run_all.py | ✅ Done |
-| E1 | 冒烟批：health_auth + apikeys_scopes + llm_provider_probe | ✅ Done（3 脚本 20+ 断言全绿） |
-| E2 | 核心域批：test_memory_distill + test_memory_read + test_knowledge_upload | #3 #4 #5 |
-| E3 | wiki 批：test_wiki_ingest + test_wiki_governance | #6 #7 |
-| E4 | 跨域与系统批：test_unified_search + test_jobs + test_llm_settings + test_search_recall | #8~#11 |
-| E5 | 可选批：test_codegraph（环境允许时） | #12 |
+| E0 | 公共编排库 `_lib/`（env/client/check）+ run_all.py | ✅ |
+| E1 | 冒烟批：health_auth / apikeys_scopes / llm_provider_probe | ✅ 12+10+5 断言 |
+| E2 | 核心域批：memory_distill / memory_read / knowledge_upload | ✅ 14+16+11 断言 |
+| E3 | wiki 批：wiki_ingest / wiki_governance | ✅ 14+23 断言 |
+| E4 | 跨域与系统批：unified_search / jobs / llm_settings / search_recall | ✅ 7+12+6+3 断言 |
+| E5 | codegraph（本机 node+CLI 真跑） | ✅ 8 断言 |
 
-## Next
+## 关键实测发现（测试过程中抓到并处理）
 
-- E2 核心域批（真 LLM 蒸馏链 + 知识摄取，跑起来每脚本约 1~3 分钟）。
+1. **上游 dimensions 拒绝**：硅基流动 bge-m3 拒 `dimensions` 参数 → provider 已加 4xx 去参重试（E1 批修复）。
+2. **LLM JSON 抖动**：wiki_generate 长 JSON 偶发语法错（MiniMax-M3）→ 测试侧换文本重试兜住（sha 幂等使同文本无法重入队，故换文本=换 sha）。
+3. **蒸馏链是条件链**：arbitrate 全判重时不再入队 organize/persona——等待器按「必选/可选」语义实现。
+4. **记账路径差异**：knowledge 管道 embed 直连不记账；`/test` 探测在 chat+embed 双 Ok 时记 purpose=test。
 
-## Done
+## 运行方式
 
-- **E0+E1（2026-08-26）**：`scripts/e2e/` 基建落地（零 Docker：本机 PG 独立库 + cargo build + 随机端口拉服务）；
-  冒烟 3 脚本全绿。附带成果：**发现并修复 embed dimensions 兼容问题**（硅基流动上游拒绝
-  `dimensions` 参数 → provider 4xx 时去掉重试；真网关实测 `embed 414ms×1024维` 通过），
-  llm crate 12 tests passed。
+```bash
+export E2E_LLM_API_KEY=sk-xxx          # 可选；无则 LLM 依赖项 SKIP
+cd scripts/e2e && python3 run_all.py   # 全量；单跑 python3 test_xxx.py
+E2E_KEEP=1 python3 test_xxx.py         # 保留现场排障
+```
+
 
 ## 批准口径
 

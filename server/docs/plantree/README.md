@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | [wiki-theory-integration](plans/wiki-theory-integration/README.md) | Done | status-update | theory.md + gap-analysis.md 已落 `docs/wiki/` | — |
 | [backend-enhancement](plans/backend-enhancement/README.md) | In Progress | P0 Done（审计通过） | R1~R5 落地，66 tests passed | P1（R6~R12）待用户启动 |
-| [backend-e2e](plans/backend-e2e/README.md) | Planning | shape-plan | — | 拿到 LLM 凭证后从 E0 开工（12 个测试脚本） |
+| [backend-e2e](plans/backend-e2e/README.md) | Done | 全量交付 | 13/13 脚本 PASS（约 140 断言，真 LLM 全链） | — |
 
 ## How to Read
 
