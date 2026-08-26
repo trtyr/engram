@@ -1,4 +1,0 @@
-# playwright 全旅程（本地栈 19596）@ 2026-08-22T06:45:27Z
-1 passed（含 synthesis 页产出路径）
-
-# lighthouse accessibility: 100

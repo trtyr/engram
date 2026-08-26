@@ -1,2 +1,0 @@
-# web gates @ 2026-08-21T09:23:04Z
-tsc: 0 errors; vitest: 14 passed; build: OK
