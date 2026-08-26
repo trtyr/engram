@@ -489,6 +489,15 @@ impl MemoryService {
             }
         };
 
+        // 有 query 时预计算 query 向量（L2/L1 共用，避免重复 embed）
+        let qv: Option<Vec<f32>> = match query {
+            Some(q) => self
+                .try_embed(&[q.to_string()])
+                .await
+                .and_then(|v| v.first().cloned()),
+            None => None,
+        };
+
         // L3 全量（很小）
         let persona: Vec<PersonaVersion> = self
             .persona()
@@ -499,10 +508,6 @@ impl MemoryService {
 
         // L2：有 query 按相关性，否则最近
         let scenarios = if let Some(q) = query {
-            let qv = self
-                .try_embed(&[q.to_string()])
-                .await
-                .and_then(|v| v.first().cloned());
             search_scenarios(&self.pool, q, qv.as_deref(), (budget_items as i64).max(3)).await?
         } else {
             self.list_scenarios((budget_items as i64).max(3) / 2)
@@ -533,14 +538,34 @@ impl MemoryService {
             }
         }
 
-        // L1 补充（预算剩余）
+        // L1 补充（预算剩余）：有 query 按语义相关（search_atoms），否则 hit_count
         let remaining = budget_items.saturating_sub(persona.len() + out_scenarios.len());
-        let atoms: Vec<AtomDto> = sqlx::query_as(
-            "SELECT * FROM atoms WHERE status = 'active' ORDER BY hit_count DESC, confidence DESC, created_at DESC LIMIT $1",
-        )
-        .bind(remaining as i64)
-        .fetch_all(&self.pool)
-        .await?;
+        let atoms: Vec<AtomDto> = match query {
+            Some(q) => {
+                let hits =
+                    search_atoms(&self.pool, q, qv.as_deref(), remaining as i64).await?;
+                let ids: Vec<Uuid> = hits.iter().map(|h| h.id).collect();
+                if ids.is_empty() {
+                    vec![]
+                } else {
+                    let mut by_id: std::collections::HashMap<Uuid, AtomDto> =
+                        sqlx::query_as::<_, AtomDto>("SELECT * FROM atoms WHERE id = ANY($1)")
+                            .bind(&ids)
+                            .fetch_all(&self.pool)
+                            .await?
+                            .into_iter()
+                            .map(|a| (a.id, a))
+                            .collect();
+                    ids.into_iter().filter_map(|id| by_id.remove(&id)).collect()
+                }
+            }
+            None => sqlx::query_as(
+                "SELECT * FROM atoms WHERE status = 'active' ORDER BY hit_count DESC, confidence DESC, created_at DESC LIMIT $1",
+            )
+            .bind(remaining as i64)
+            .fetch_all(&self.pool)
+            .await?,
+        };
         let mut out_atoms = Vec::new();
         for a in atoms {
             if count(&a.content, &mut chars_used, &mut truncated) {

@@ -25,6 +25,111 @@ pub trait LlmProvider: Send + Sync {
     fn name(&self) -> &str;
 }
 
+/// 熔断器状态。
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CircuitState {
+    Closed,
+    Open,
+    HalfOpen,
+}
+
+/// 简单熔断器：连续失败达阈值 → Open（快速失败），冷却后 → HalfOpen（试探一次）。
+#[derive(Debug)]
+struct CircuitBreaker {
+    state: CircuitState,
+    consecutive_failures: u32,
+    opened_at: Option<std::time::Instant>,
+    failure_threshold: u32,
+    cooldown: std::time::Duration,
+}
+
+impl Default for CircuitBreaker {
+    fn default() -> Self {
+        Self {
+            state: CircuitState::Closed,
+            consecutive_failures: 0,
+            opened_at: None,
+            failure_threshold: 5,
+            cooldown: std::time::Duration::from_secs(30),
+        }
+    }
+}
+
+impl CircuitBreaker {
+    /// 是否放行本次调用（Open 冷却期内快速失败；HalfOpen 只放行第一个试探请求）。
+    fn allow(&mut self) -> bool {
+        match self.state {
+            CircuitState::Closed => true,
+            CircuitState::Open => {
+                if self
+                    .opened_at
+                    .map(|t| t.elapsed() >= self.cooldown)
+                    .unwrap_or(true)
+                {
+                    self.state = CircuitState::HalfOpen;
+                    true
+                } else {
+                    false
+                }
+            }
+            // 试探请求未决期间：其余请求继续快速失败，避免半开瞬间放量冲击上游
+            CircuitState::HalfOpen => false,
+        }
+    }
+
+    fn record_success(&mut self) {
+        self.state = CircuitState::Closed;
+        self.consecutive_failures = 0;
+        self.opened_at = None;
+    }
+
+    fn record_failure(&mut self) {
+        self.consecutive_failures += 1;
+        if self.state == CircuitState::HalfOpen
+            || self.consecutive_failures >= self.failure_threshold
+        {
+            self.state = CircuitState::Open;
+            self.opened_at = Some(std::time::Instant::now());
+        }
+    }
+}
+
+/// 全局熔断器注册表（按 provider name 共享，跨 resolve 实例有效）。
+static CIRCUITS: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<std::sync::Mutex<CircuitBreaker>>>,
+    >,
+> = std::sync::LazyLock::new(|| {
+    std::sync::Mutex::new(std::collections::HashMap::new())
+});
+
+/// 解析 Retry-After 头：支持 delta-seconds（整数秒）与 HTTP-date（RFC 2822）两种形式。
+/// HTTP-date 已过期视为 0s（立即重试）；无法解析保守取 2s。
+fn retry_after_from_str(raw: &str) -> std::time::Duration {
+    let raw = raw.trim();
+    if let Ok(secs) = raw.parse::<u64>() {
+        return std::time::Duration::from_secs(secs);
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc2822(raw) {
+        let delta = dt.timestamp() - chrono::Utc::now().timestamp();
+        return if delta > 0 {
+            std::time::Duration::from_secs(delta as u64)
+        } else {
+            std::time::Duration::ZERO
+        };
+    }
+    std::time::Duration::from_secs(2)
+}
+
+/// 从响应头解析 Retry-After，缺省 2s。
+fn retry_after_secs(resp: &reqwest::Response) -> std::time::Duration {
+    resp.headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .map(retry_after_from_str)
+        .unwrap_or(std::time::Duration::from_secs(2))
+}
+
 /// OpenAI 兼容 HTTP provider（/v1/chat/completions + /v1/embeddings）。
 pub struct OpenAiCompatProvider {
     name: String,
@@ -35,6 +140,8 @@ pub struct OpenAiCompatProvider {
     chat_timeout: std::time::Duration,
     /// embed 超时（默认 30s）
     embed_timeout: std::time::Duration,
+    /// 熔断器（按 name 全局共享）
+    circuit: std::sync::Arc<std::sync::Mutex<CircuitBreaker>>,
 }
 
 impl OpenAiCompatProvider {
@@ -43,14 +150,67 @@ impl OpenAiCompatProvider {
         base_url: impl Into<String>,
         api_key: impl Into<String>,
     ) -> Self {
+        let name = name.into();
+        let circuit = CIRCUITS
+            .lock()
+            .unwrap()
+            .entry(name.clone())
+            .or_insert_with(|| std::sync::Arc::new(std::sync::Mutex::new(CircuitBreaker::default())))
+            .clone();
         Self {
-            name: name.into(),
+            name,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key: api_key.into(),
             http: reqwest::Client::new(),
             chat_timeout: std::time::Duration::from_secs(120),
             embed_timeout: std::time::Duration::from_secs(30),
+            circuit,
         }
+    }
+
+    /// 发送 POST 并处理熔断 + 429 Retry-After 退避（最多重试 2 次）。
+    async fn post_with_retry(
+        &self,
+        path: &str,
+        timeout: std::time::Duration,
+        body: &serde_json::Value,
+    ) -> Result<reqwest::Response, LlmError> {
+        if !self.circuit.lock().unwrap().allow() {
+            return Err(LlmError::Transient("熔断器打开，快速失败".into()));
+        }
+        let url = format!("{}{}", self.base_url, path);
+        let mut resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&self.api_key)
+            .timeout(timeout)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| {
+                self.circuit.lock().unwrap().record_failure();
+                classify_http_error(e.status())
+            })?;
+        for _ in 0..2 {
+            if resp.status().as_u16() != 429 {
+                break;
+            }
+            self.circuit.lock().unwrap().record_failure();
+            tokio::time::sleep(retry_after_secs(&resp)).await;
+            resp = self
+                .http
+                .post(&url)
+                .bearer_auth(&self.api_key)
+                .timeout(timeout)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| {
+                    self.circuit.lock().unwrap().record_failure();
+                    classify_http_error(e.status())
+                })?;
+        }
+        Ok(resp)
     }
 }
 
@@ -122,19 +282,14 @@ impl LlmProvider for OpenAiCompatProvider {
         }
 
         let resp = self
-            .http
-            .post(format!("{}/v1/chat/completions", self.base_url))
-            .bearer_auth(&self.api_key)
-            .timeout(self.chat_timeout)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| classify_http_error(e.status()))?;
+            .post_with_retry("/v1/chat/completions", self.chat_timeout, &body)
+            .await?;
 
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             tracing::warn!(status = %status, body = %text.chars().take(500).collect::<String>(), "LLM chat 失败");
+            self.circuit.lock().unwrap().record_failure();
             return Err(classify_http_error(Some(status)));
         }
 
@@ -156,6 +311,7 @@ impl LlmProvider for OpenAiCompatProvider {
             total_tokens: 0,
         });
 
+        self.circuit.lock().unwrap().record_success();
         Ok(ChatResponse {
             content,
             input_tokens: usage.prompt_tokens,
@@ -173,19 +329,14 @@ impl LlmProvider for OpenAiCompatProvider {
         }
 
         let resp = self
-            .http
-            .post(format!("{}/v1/embeddings", self.base_url))
-            .bearer_auth(&self.api_key)
-            .timeout(self.embed_timeout)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| classify_http_error(e.status()))?;
+            .post_with_retry("/v1/embeddings", self.embed_timeout, &body)
+            .await?;
 
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             tracing::warn!(status = %status, body = %text.chars().take(500).collect::<String>(), "LLM embed 失败");
+            self.circuit.lock().unwrap().record_failure();
             return Err(classify_http_error(Some(status)));
         }
 
@@ -206,6 +357,7 @@ impl LlmProvider for OpenAiCompatProvider {
             total_tokens: 0,
         });
 
+        self.circuit.lock().unwrap().record_success();
         Ok(EmbedResponse {
             embeddings,
             input_tokens: usage.total_tokens.max(usage.prompt_tokens),
@@ -362,5 +514,83 @@ impl ProviderRegistry {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| LlmError::Transient(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn breaker(threshold: u32, cooldown: std::time::Duration) -> CircuitBreaker {
+        CircuitBreaker {
+            state: CircuitState::Closed,
+            consecutive_failures: 0,
+            opened_at: None,
+            failure_threshold: threshold,
+            cooldown,
+        }
+    }
+
+    #[test]
+    fn circuit_opens_after_threshold_failures() {
+        let mut cb = breaker(3, std::time::Duration::from_secs(30));
+        cb.record_failure();
+        cb.record_failure();
+        assert!(cb.allow(), "未达阈值仍应放行");
+        cb.record_failure();
+        assert!(!cb.allow(), "达阈值后应熔断快速失败");
+    }
+
+    #[test]
+    fn circuit_half_opens_after_cooldown_and_closes_on_success() {
+        let mut cb = breaker(1, std::time::Duration::from_millis(1));
+        cb.record_failure();
+        assert!(!cb.allow(), "立即熔断");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert!(cb.allow(), "冷却后放行试探（HalfOpen）");
+        cb.record_success();
+        assert_eq!(cb.state, CircuitState::Closed);
+        assert!(cb.allow());
+    }
+
+    #[test]
+    fn circuit_success_resets_failure_count() {
+        let mut cb = breaker(5, std::time::Duration::from_secs(30));
+        cb.record_failure();
+        cb.record_failure();
+        cb.record_success();
+        assert_eq!(cb.consecutive_failures, 0);
+        assert_eq!(cb.state, CircuitState::Closed);
+    }
+
+    #[test]
+    fn circuit_half_open_admits_only_one_probe() {
+        let mut cb = breaker(1, std::time::Duration::from_millis(1));
+        cb.record_failure(); // → Open
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert!(cb.allow(), "冷却后放行第一个试探请求");
+        assert!(
+            !cb.allow(),
+            "试探未决期间其余请求应快速失败，不放行"
+        );
+        assert_eq!(cb.state, CircuitState::HalfOpen);
+        cb.record_success(); // 试探成功 → Closed
+        assert!(cb.allow(), "恢复 Closed 后正常放行");
+    }
+
+    #[test]
+    fn retry_after_supports_seconds_and_http_date() {
+        // delta-seconds
+        assert_eq!(retry_after_from_str("5"), std::time::Duration::from_secs(5));
+        assert_eq!(retry_after_from_str(" 5 "), std::time::Duration::from_secs(5));
+        // HTTP-date（RFC 2822）：未来 → 正秒数（2100 距今数十年，必然远大于 1e6 秒）
+        let future = retry_after_from_str("Fri, 01 Jan 2100 00:00:00 GMT");
+        assert!(future.as_secs() > 1_000_000, "future: {future:?}");
+        // HTTP-date：过去 → 0s（立即重试）；注意 RFC 2822 要求星期与日期一致（2000-01-01 是周六）
+        let past = retry_after_from_str("Sat, 01 Jan 2000 00:00:00 GMT");
+        assert_eq!(past, std::time::Duration::ZERO);
+        // 无法解析 → 保守 2s
+        assert_eq!(retry_after_from_str("soon"), std::time::Duration::from_secs(2));
+        assert_eq!(retry_after_from_str(""), std::time::Duration::from_secs(2));
     }
 }

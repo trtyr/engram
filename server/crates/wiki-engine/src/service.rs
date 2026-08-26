@@ -239,7 +239,7 @@ impl WikiService {
     /// Wiki 检索（FTS + 向量 RRF）。purpose 注入：检索走 LLM 时（AI 客户端
     /// 读 query_context.purpose）提供方向意图——对齐 llm_wiki 的 query 注入。
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<WikiPageDto>, WikiError> {
-        let tsq = agent_memory_search::tokenize::tsv_query(query);
+        let tsq = agent_memory_search::tokenize::tsv_query_smart(query, 3);
         Ok(sqlx::query_as::<_, WikiPageDto>(
             "SELECT * FROM wiki_pages, to_tsquery('simple', $1) q \
              WHERE tsv @@ q ORDER BY ts_rank(tsv, q) DESC LIMIT $2",

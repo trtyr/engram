@@ -4,7 +4,7 @@ use pgvector::Vector;
 use sqlx::{PgPool, QueryBuilder, Row};
 use uuid::Uuid;
 
-use crate::tokenize::tsv_query;
+use crate::tokenize::tsv_query_smart;
 
 /// 统一命中形态。
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
@@ -32,7 +32,7 @@ pub async fn search_atoms(
         "WITH fts AS (SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
          FROM atoms, to_tsquery('simple', ",
     );
-    qb.push_bind(tsv_query(query));
+    qb.push_bind(tsv_query_smart(query, 3));
     qb.push(") q WHERE status = 'active' AND tsv @@ q LIMIT 100) ");
 
     if has_vec {
@@ -87,7 +87,7 @@ pub async fn search_scenarios(
         "WITH fts AS (SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
          FROM scenarios, to_tsquery('simple', ",
     );
-    qb.push_bind(tsv_query(query));
+    qb.push_bind(tsv_query_smart(query, 3));
     qb.push(") q WHERE tsv @@ q LIMIT 100) ");
 
     if has_vec {

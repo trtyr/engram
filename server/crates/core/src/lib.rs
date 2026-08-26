@@ -6,9 +6,11 @@
 pub mod codegraph;
 pub mod knowledge;
 pub mod memory;
+pub mod unified;
 pub mod wiki;
 
 pub use codegraph::{CgBridge, CgError, CgProjectDto, QueryKind};
 pub use knowledge::{ChunkHit, DocumentDto, KnowledgeService};
 pub use memory::{MemoryService, SearchResponse};
+pub use unified::{UnifiedError, UnifiedHit, UnifiedSearch};
 pub use wiki::{LintReport, WikiError, WikiPageDto, WikiService};

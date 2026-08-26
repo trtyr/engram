@@ -47,9 +47,25 @@ pub fn tsv_text(text: &str) -> String {
     tokenize(text).join(" ")
 }
 
-/// 查询用：`&` 连接的 tsquery 串（AND 语义）。
+/// 查询用：`&` 连接的 tsquery 串（AND 语义，精确匹配）。
 pub fn tsv_query(text: &str) -> String {
     tokenize(text).join(" & ")
+}
+
+/// 查询用：`|` 连接的 tsquery 串（OR 语义，召回优先，长查询兜底）。
+pub fn tsv_query_or(text: &str) -> String {
+    tokenize(text).join(" | ")
+}
+
+/// 查询用：token 数 ≤ `max_and_tokens` 时用 AND（精确），超过用 OR（召回兜底）。
+/// 避免长查询因全 AND 命中而零召回。
+pub fn tsv_query_smart(text: &str, max_and_tokens: usize) -> String {
+    let tokens = tokenize(text);
+    if tokens.len() > max_and_tokens {
+        tokens.join(" | ")
+    } else {
+        tokens.join(" & ")
+    }
 }
 
 #[cfg(test)]
@@ -78,5 +94,17 @@ mod tests {
     fn query_and_text_forms() {
         assert!(tsv_text("你好世界").contains(' '));
         assert!(tsv_query("你好世界").contains('&'));
+    }
+
+    #[test]
+    fn or_and_smart_query_forms() {
+        // OR 语义：`|` 连接
+        assert!(tsv_query_or("你好世界").contains('|'));
+        // 短查询 → AND（精确）
+        assert!(tsv_query_smart("你好世界", 3).contains('&'));
+        // 长查询 → OR（召回兜底，避免全 AND 零召回）
+        let long = tsv_query_smart("用户偏好简洁的中文回答", 3);
+        assert!(long.contains('|'), "长查询应走 OR: {long}");
+        assert!(!long.contains('&'), "长查询不应走 AND: {long}");
     }
 }

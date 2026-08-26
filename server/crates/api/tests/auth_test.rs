@@ -241,6 +241,7 @@ async fn openapi_snapshot() {
             "/memory/sessions",
             "/memory/sessions/{id}",
             "/ready",
+            "/search",
             "/settings/api-keys",
             "/settings/api-keys/{id}/revoke",
             "/settings/llm/providers",

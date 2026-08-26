@@ -10,7 +10,7 @@ use agent_memory_jobs::JobQueue;
 use agent_memory_llm::ProviderRegistry;
 use agent_memory_llm::provider::LlmProvider as _;
 use agent_memory_llm::types::{EmbedRequest, Purpose};
-use agent_memory_search::tokenize::tsv_query;
+use agent_memory_search::tokenize::tsv_query_smart;
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, QueryBuilder, Row};
 use uuid::Uuid;
@@ -160,7 +160,7 @@ impl KnowledgeService {
             "WITH fts AS (SELECT c.id, ROW_NUMBER() OVER (ORDER BY ts_rank(c.tsv, q) DESC) AS rank \
              FROM chunks c, to_tsquery('simple', ",
         );
-        qb.push_bind(tsv_query(query));
+        qb.push_bind(tsv_query_smart(query, 3));
         qb.push(") q WHERE c.tsv @@ q LIMIT 200) ");
 
         if has_vec {

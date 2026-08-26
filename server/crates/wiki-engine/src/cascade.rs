@@ -5,6 +5,9 @@
 //! ① frontmatter sources[] 含该 source id（主路径）
 //! ② page_type='source' 且唯一来源 → 摘要页判定（整页删）
 //! ③ 共享 entity/concept 多源页 → 仅从 sources[] 移除该 source（保留页面）
+//!
+//! 所有写操作包进一个事务（R4）：删页/摘源/清 dead link/删 source 原子提交，
+//! 失败整体回滚；index.md 重建是派生数据，放在事务外幂等重算。
 
 use agent_memory_jobs::types::JobError;
 use sqlx::PgPool;
@@ -27,13 +30,19 @@ pub async fn cascade_delete_source(
     let mut report = CascadeReport::default();
     let sid = source_id.to_string();
 
+    // 事务包裹全部写操作，失败整体回滚
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+
     // 1. 引用了该 source 的全部页面（sources[] 数组包含）
     let linked: Vec<(Uuid, String, String)> = sqlx::query_as(
         "SELECT id, slug, page_type FROM wiki_pages \
          WHERE frontmatter->'sources' @> to_jsonb(ARRAY[$1::text])",
     )
     .bind(&sid)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
 
@@ -46,14 +55,14 @@ pub async fn cascade_delete_source(
             "SELECT jsonb_array_length(frontmatter->'sources') FROM wiki_pages WHERE id = $1",
         )
         .bind(id)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
         if page_type == "source" && source_count <= 1 {
             sqlx::query("DELETE FROM wiki_pages WHERE id = $1")
                 .bind(id)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;
             report.deleted_pages.push(slug.clone());
@@ -71,7 +80,7 @@ pub async fn cascade_delete_source(
             )
             .bind(id)
             .bind(&sid)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
             report.updated_shared.push(slug);
@@ -83,7 +92,7 @@ pub async fn cascade_delete_source(
         let remaining: Vec<(String, String)> = sqlx::query_as(
             "SELECT slug, content FROM wiki_pages WHERE page_type NOT IN ('index','log')",
         )
-        .fetch_all(pool)
+        .fetch_all(&mut *tx)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
@@ -101,22 +110,28 @@ pub async fn cascade_delete_source(
             sqlx::query("UPDATE wiki_pages SET content = $2, updated_at = now() WHERE slug = $1")
                 .bind(&slug)
                 .bind(&cleaned)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;
             report.cleaned_links += dead.len();
         }
-
-        // 3. index.md 同步（重建式）
-        crate::ingest::rebuild_index_page(pool).await?;
     }
 
-    // 4. 删 source 行本身
+    // 3. 删 source 行本身（事务内，与页面删除原子）
     sqlx::query("DELETE FROM wiki_sources WHERE id = $1")
         .bind(source_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    // 4. index.md 同步（派生数据，事务外幂等重建）
+    if !delete_slugs.is_empty() {
+        crate::ingest::rebuild_index_page(pool).await?;
+    }
 
     Ok(report)
 }
