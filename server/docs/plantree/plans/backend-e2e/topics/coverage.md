@@ -38,6 +38,7 @@ scripts/e2e/
 | 9 | test_jobs.py | 任务列表/事件流 → 造永久失败任务 → dead → revive | 事件时间线、dead→pending 复活 |
 | 10 | test_llm_settings.py | provider CRUD + routing 读写 + usage 记录出现 | 回退链生效、用量记账行存在 |
 | 11 | test_search_recall.py | 长查询（多 token）召回不再零命中（R2 行为验证） | OR 兜底生效（需要无 embedding 场景） |
+| 10 | test_llm_provider_probe.py | 真 provider 注册→chat+embed 连通探测→用量记账→key 不回显 | 探测 ok=true、usage 行出现 |
 | 12 | test_codegraph.py | 注册项目→索引→同步→查询（**可选**：本机有 node+CLI 才跑） | 注册/查询返回结构 |
 
 ## 现有资产（不复做，作为参照）

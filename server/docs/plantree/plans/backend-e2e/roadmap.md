@@ -8,7 +8,7 @@
 | ID | 任务 | 结果 |
 |---|---|---|
 | E0 | 公共编排库 `_lib/`（env/client/check）+ run_all.py | ✅ |
-| E1 | 冒烟批：health_auth / apikeys_scopes / llm_provider_probe | ✅ 12+10+5 断言 |
+| E1 | 冒烟批：health_auth / apikeys_scopes / llm_provider_probe | ✅ 12+12+5 断言 |
 | E2 | 核心域批：memory_distill / memory_read / knowledge_upload | ✅ 14+16+11 断言 |
 | E3 | wiki 批：wiki_ingest / wiki_governance | ✅ 14+23 断言 |
 | E4 | 跨域与系统批：unified_search / jobs / llm_settings / search_recall | ✅ 7+12+6+3 断言 |
