@@ -31,3 +31,5 @@ test-results/
 .idea/
 .vscode/
 *.swp
+
+__pycache__/
