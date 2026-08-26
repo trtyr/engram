@@ -58,7 +58,8 @@ storage → (sqlx only：pool 装配 + 迁移执行)
   内部细节、内部细节只进日志（见 `server/crates/api/src/error.rs`）。
 - 日志用 `tracing`（结构化字段，禁止 println）。
 - sqlx：运行时 API（`query` / `query_as`），不用编译期 `query!` 宏——避免构建依赖 DATABASE_URL。
-- 提示词模板：代码内常量 + `PROMPT_VERSION`，修改必须升版本。
+- 提示词模板：版本化 `PromptId(name, version)` 常量（`distill`/`wiki-engine` 的 `prompts.rs`），
+  修改任何模板必须升版本号（蒸馏产物记录版本，可归因可回放）。
 - 前端：类型从 OpenAPI 生成到 `web/src/lib/api-schema.ts`（`npm run gen:api` 或上文的
   openapi-dump 流程），禁止手写重复后端类型；服务端状态走 TanStack Query，
   UI 状态用 React 本地 state（zustand 曾声明于 D0006，落地未使用，2026-08 移除，见 Q10）。
@@ -75,8 +76,9 @@ storage → (sqlx only：pool 装配 + 迁移执行)
 ## 已知开放项（初始化审计 2026-08 记录，详见 open-questions.md）
 
 - **Q8（lopdf 高危）已解决 2026-08-23**：pdf-extract 0.8→0.12（lopdf ≥0.42）。
-  余下低风险：tokio-tar（仅 testcontainers dev）、rsa（lockfile 孤儿）、
-  ttf-parser unmaintained 警告（pdf-extract 0.12 传递依赖）。
+  余下（2026-08-25 `cargo audit` 复扫）：2 漏洞——tokio-tar（仅 testcontainers dev）、
+  rsa（lockfile 孤儿）；4 个 unmaintained 警告——ttf-parser（pdf-extract 传递依赖）、
+  fxhash、rand_os、rustls-pemfile（后三个为 advisory-db 更新新出现，非代码回归）。
 - **Q9（api→core 边界）已解决 2026-08-23**：parsing crate 解环 + core 门面（见上）。
 - **Q10（zustand）已解决 2026-08-23**：依赖移除 + D0006 注记。
 - **Q11（test-results/）已解决 2026-08-20**：gitignore + 移出跟踪。

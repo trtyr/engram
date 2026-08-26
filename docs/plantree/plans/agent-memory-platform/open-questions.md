@@ -32,6 +32,8 @@ JWT（无状态、登出麻烦）vs opaque token + PG 表（可吊销）。单�
   升级 pdf-extract 0.8.2 → 0.12.0（内部 lopdf 0.42），audit 复扫漏洞消失。
   余下：tokio-tar（仅 testcontainers dev）、rsa（lockfile 孤儿，无引用方），
   以及新增传递依赖 unmaintained 警告 ttf-parser（pdf-extract 0.12 引入，可接受权衡）。
+  （2026-08-25 复扫：仍 2 漏洞 + 4 unmaintained 警告；fxhash / rand_os / rustls-pemfile
+  为新出现，均 advisory-db 更新所致，非代码回归。）
 - ~~**Q9 api→域 crate 直连 vs core 边界**~~（**已解决 2026-08-23，路径 A**）：
   新建底层 `parsing` crate 解开 wiki-engine→core 依赖环；core 新增 wiki/codegraph 门面；
   api 不再 import wiki-engine/cg-bridge（grep 零匹配）。module-map/AGENTS.md 已同步。
