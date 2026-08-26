@@ -9,7 +9,7 @@
 ```bash
 # 后端（在 server/ 下）
 cargo fmt --check
-cargo clippy --workspace --all-targets -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace            # 集成测试需要 Docker（testcontainers 真 PG）
 cargo audit                       # 依赖漏洞基线（见 AGENTS.md「已知开放项」）
 

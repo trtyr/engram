@@ -76,7 +76,7 @@
 
 ## 硬约束（每阶段通用出口）
 
-1. `cargo fmt --check` + `cargo clippy -D warnings` + `cargo test` 全绿
+1. `cargo fmt --check` + `cargo clippy -- -D warnings` + `cargo test` 全绿
 2. `tsc --noEmit` + eslint + vitest 全绿（涉及前端时）
 3. 集成测试跑在 testcontainers 真 PG 上
 4. docker-compose 起栈后该阶段功能可用

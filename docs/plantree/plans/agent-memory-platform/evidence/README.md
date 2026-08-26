@@ -8,7 +8,7 @@
 |---|---|---|
 | cargo test --workspace | ✅ 29 套件 56 测试 0 失败 | 真 PG testcontainers 重跑（提交 `043997c` 前） |
 | cargo fmt --check | ✅ 0 diff | rustc 1.97.1 |
-| cargo clippy --workspace --all-targets -D warnings | ✅ 0 警告 | |
+| cargo clippy --workspace --all-targets -- -D warnings | ✅ 0 警告 | |
 | web lint / tsc / vitest / build | ✅ 全绿（26s） | oxlint + TS 6.x + vitest + vite build |
 | npm audit | ✅ 0 漏洞 | |
 | cargo audit（472 crates） | ⚠️ 3 漏洞 + 3 unmaintained | lopdf 0.34（high 7.5，经 pdf-extract 进 core，升 ≥0.42 可修，生产依赖）/ tokio-tar（仅 testcontainers dev）/ rsa（lockfile 孤儿）→ Q8 |
@@ -195,7 +195,7 @@ md/txt（直读）· PDF（pdf-extract，要求合法 xref）· HTML（scraper�
 | 门 | 结果 | 证据 |
 |---|---|---|
 | cargo fmt --check | ✅ 0 diff | 本地 rustc 1.97.1 |
-| cargo clippy --workspace --all-targets -D warnings | ✅ 0 警告 | 同上 |
+| cargo clippy --workspace --all-targets -- -D warnings | ✅ 0 警告 | 同上 |
 | cargo test --workspace | ✅ 1 passed | `migrations_apply_on_clean_pgvector`：testcontainers 起 pgvector/pgvector:pg17 → 迁移应用 → `SELECT '[1,2,3]'::vector` 成功 → 幂等重放成功 |
 | web tsc --noEmit | ✅ 0 错误 | TS 6.x |
 | web oxlint | ✅ 仅 shadcn 生成代码已知 fast-refresh 警告 | |

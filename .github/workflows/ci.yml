@@ -26,7 +26,7 @@ jobs:
       - name: fmt
         run: cargo fmt --check
       - name: clippy
-        run: cargo clippy --workspace --all-targets -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       # testcontainers 需要 Docker（ubuntu runner 自带）
       - name: test
         run: cargo test --workspace

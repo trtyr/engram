@@ -6,7 +6,7 @@
 
 | 门 | 工具 | 要求 |
 |---|---|---|
-| 格式/静态 | `cargo fmt --check` + `cargo clippy -D warnings` | 零警告 |
+| 格式/静态 | `cargo fmt --check` + `cargo clippy -- -D warnings` | 零警告 |
 | 单元测试 | `cargo test` | 领域逻辑（蒸馏编排、RRF、wikilink 解析、矛盾消解、job 状态机）全覆盖核心路径+边界+失败路径 |
 | 集成测试 | testcontainers（真 PG + pgvector） | 仓储层、迁移、检索（含中文）、事务 |
 | API 契约 | utoipa 生成 OpenAPI + 快照测试 | 端点变更必须显式更新快照 |
