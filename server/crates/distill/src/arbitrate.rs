@@ -82,8 +82,9 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             .fetch_all(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?
-        } else {
+        } else if agent_memory_search::tokenize::has_query_tokens(&c.content) {
             // FTS 兜底：写入与查询同源 jieba 分词，语义相近的既有原子可命中
+            // （K7：内容无有效 token 时不空跑 to_tsquery——直接走无相似分支）
             sqlx::query_as(
                 "SELECT id, content FROM atoms, to_tsquery('simple', $1) q \
                  WHERE status = 'active' AND tsv @@ q \
@@ -93,6 +94,8 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             .fetch_all(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?
+        } else {
+            vec![]
         };
 
         writeln!(user, "候选[{}]: id={} 内容={}", i, c.id, c.content).ok();

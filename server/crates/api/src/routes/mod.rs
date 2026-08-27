@@ -36,7 +36,7 @@ use utoipa::OpenApi;
         search_api::search,
         knowledge_api::submit_url, knowledge_api::upload, knowledge_api::list_documents,
         knowledge_api::get_document, knowledge_api::document_chunks,
-        knowledge_api::delete_document, knowledge_api::search,
+        knowledge_api::delete_document, knowledge_api::reembed, knowledge_api::search,
         wiki_api::ingest, wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
         wiki_api::get_purpose, wiki_api::set_purpose,
@@ -123,6 +123,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/knowledge/documents/{id}/chunks",
             get(knowledge_api::document_chunks),
+        )
+        .route(
+            "/knowledge/documents/{id}/re-embed",
+            post(knowledge_api::reembed),
         )
         .route("/knowledge/search", post(knowledge_api::search))
         .route("/wiki/ingest", post(wiki_api::ingest))

@@ -239,6 +239,10 @@ impl WikiService {
     /// Wiki 检索（FTS + 向量 RRF）。purpose 注入：检索走 LLM 时（AI 客户端
     /// 读 query_context.purpose）提供方向意图——对齐 llm_wiki 的 query 注入。
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<WikiPageDto>, WikiError> {
+        // K7：单字/纯标点无 token → 短路空结果（不再空跑 to_tsquery）
+        if !agent_memory_search::tokenize::has_query_tokens(query) {
+            return Ok(vec![]);
+        }
         let tsq = agent_memory_search::tokenize::tsv_query_smart(query, 3);
         Ok(sqlx::query_as::<_, WikiPageDto>(
             "SELECT * FROM wiki_pages, to_tsquery('simple', $1) q \

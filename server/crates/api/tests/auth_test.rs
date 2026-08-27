@@ -225,6 +225,7 @@ async fn openapi_snapshot() {
             "/knowledge/documents",
             "/knowledge/documents/{id}",
             "/knowledge/documents/{id}/chunks",
+            "/knowledge/documents/{id}/re-embed",
             "/knowledge/search",
             "/knowledge/upload",
             "/llm/usage",

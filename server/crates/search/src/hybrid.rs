@@ -4,7 +4,7 @@ use pgvector::Vector;
 use sqlx::{PgPool, QueryBuilder, Row};
 use uuid::Uuid;
 
-use crate::tokenize::tsv_query_smart;
+use crate::tokenize::{has_query_tokens, tsv_query_smart};
 
 /// 统一命中形态。
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
@@ -27,6 +27,10 @@ pub async fn search_atoms(
     query_vec: Option<&[f32]>,
     limit: i64,
 ) -> Result<Vec<SearchHit>, sqlx::Error> {
+    // K7：无 token 且无查询向量 → 短路空结果（单字/纯标点不再空跑 to_tsquery）
+    if query_vec.is_none() && !has_query_tokens(query) {
+        return Ok(vec![]);
+    }
     let has_vec = query_vec.is_some();
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
         "WITH fts AS (SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
@@ -82,6 +86,10 @@ pub async fn search_scenarios(
     query_vec: Option<&[f32]>,
     limit: i64,
 ) -> Result<Vec<SearchHit>, sqlx::Error> {
+    // K7：无 token 且无查询向量 → 短路空结果
+    if query_vec.is_none() && !has_query_tokens(query) {
+        return Ok(vec![]);
+    }
     let has_vec = query_vec.is_some();
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
         "WITH fts AS (SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \

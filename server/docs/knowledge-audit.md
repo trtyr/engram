@@ -50,6 +50,12 @@ POST /knowledge/documents（URL）、POST /knowledge/upload（multipart，50MB �
 > 按严重度排序。**P0=正确性/数据一致性/安全，P1=质量/健壮性，P2=增强**。
 > 与 memory-audit B 系列同类的问题标注了对应关系。
 
+> **修复状态（2026-08-27）**：K1~K9 已修复（goal mtb43ztv；workspace 81 tests + E2E 13/13 全绿）——
+> K1 自愈（failed/卡死 >5min 原子重置+新幂等键重入队）、K2 入队失败回滚、K3 代理模式私网校验保留（safe_fetch_opts 可测形态）、
+> K4 短响应/维度不符整批降级、K5 非 UTF-8/NUL 二进制拒绝、K6 ON CONFLICT 单往返、K7 has_query_tokens 五调用点短路、
+> K8 只补缺失+Transient 重试+re-embed 端点、K9 Network→Retryable 分类。
+> 未修：K10~K16（P2 级，按需排期）。
+
 ### P0
 
 **K1 · sha 幂等墙无状态过滤 + 失败全归 Permanent——一次网络抖动永久卡死该 URL/文件**

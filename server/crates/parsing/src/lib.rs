@@ -49,11 +49,22 @@ pub fn parse_bytes(
         "docx" => parse_docx(bytes),
         "html" => parse_html(bytes),
         _ => {
-            let text = String::from_utf8_lossy(bytes);
+            // K5：默认分支只收真实文本——含 NUL 或非 UTF-8 的未知格式（xlsx/pptx/epub/zip…）
+            // 直接拒绝，不再 lossy 转成乱码入库污染索引
+            if bytes.contains(&0u8) {
+                return Err(ParseError::Unsupported(format!(
+                    "「{name}」疑似二进制格式（含 NUL 字节）。支持：pdf / docx / html / md / txt；其他格式请先转为 UTF-8 文本"
+                )));
+            }
+            let Ok(text) = std::str::from_utf8(bytes) else {
+                return Err(ParseError::Unsupported(format!(
+                    "「{name}」不是有效的 UTF-8 文本（可能是不支持的二进制格式）。支持：pdf / docx / html / md / txt；请先转码后上传"
+                )));
+            };
             if text.trim().is_empty() {
                 Err(ParseError::Failed("文件内容为空".into()))
             } else {
-                Ok(text.into_owned())
+                Ok(text.to_string())
             }
         }
     }
@@ -196,5 +207,39 @@ mod tests {
     #[test]
     fn empty_file_rejected() {
         assert!(parse_bytes("a.md", None, b"   ").is_err());
+    }
+
+    #[test]
+    fn binary_with_nul_rejected() {
+        // K5：zip/xlsx 类压缩流以 PK\x03\x04 开头，必含 NUL
+        let err = parse_bytes("data.xlsx", None, b"PK\x03\x04\x00\x00rest\x00of\x00binary");
+        let msg = err.expect_err("含 NUL 二进制应被拒绝").to_string();
+        assert!(msg.contains("UTF-8"), "错误信息应提示转码: {msg}");
+        assert!(msg.contains("xlsx"), "错误信息应带文件名: {msg}");
+    }
+
+    #[test]
+    fn gbk_text_rejected_with_hint() {
+        // K5：「你好」的 GBK 编码——非 UTF-8 字节序列
+        let gbk = [0xC4u8, 0xE3, 0xBA, 0xC3]; // 你好
+        let err = parse_bytes("note.txt", None, &gbk);
+        let msg = err.expect_err("GBK 应被拒绝（提示转码而非乱码入库）").to_string();
+        assert!(msg.contains("UTF-8"), "应提示转码: {msg}");
+    }
+
+    #[test]
+    fn valid_utf8_text_still_passes() {
+        // K5：合法 UTF-8（含中文与 emoji）行为不变
+        let out = parse_bytes("a.md", None, "中文内容 🎉 与 emoji".as_bytes()).unwrap();
+        assert!(out.contains("中文内容"));
+    }
+
+    #[test]
+    fn pdf_and_docx_by_extension_untouched() {
+        // K5：显式格式仍走各自解析器（默认分支守卫不拦已知格式）
+        assert!(parse_bytes("x.pdf", None, b"PK\x00\x03").is_err()); // PDF 解析失败而非 Unsupported 拦截
+        assert!(parse_bytes("x.pdf", None, b"PK\x00\x03")
+            .map(|_| ())
+            .is_err());
     }
 }

@@ -16,7 +16,7 @@ use super::chunking::chunk_text;
 /// 并发说明：管道并发由 RunnerConfig.concurrency（默认 4）全局约束，
 /// 不在 job 内做 per-kind 限流（单用户规模下解析快，避免互相挤死的重试风暴）。
 ///
-/// 入队摄取（幂等：sha 命中返回既有文档）。
+/// 入队摄取（幂等：sha 命中返回既有文档；K6 并发同 sha 无竞态、K2 入队失败回滚）。
 pub async fn enqueue_ingest(
     queue: &agent_memory_jobs::JobQueue,
     _registry: &ProviderRegistry,
@@ -46,18 +46,7 @@ pub async fn enqueue_ingest(
     };
     let sha = hex(&bytes);
 
-    // 幂等：同 sha 已有文档（任何状态）→ 返回既有
-    if let Some((id, _status)) =
-        sqlx::query_as::<_, (Uuid, String)>("SELECT id, status FROM documents WHERE sha256 = $1")
-            .bind(&sha)
-            .fetch_optional(queue.pool())
-            .await
-            .map_err(|e| KnowledgeError::Storage(e.to_string()))?
-    {
-        return Ok((id, true));
-    }
-
-    // 落盘 / 记 URL
+    // 落盘 / 记 URL（冲突路径下再清理刚写的文件）
     let id = Uuid::now_v7();
     let (title, raw_path, mime, source_uri) = match &source {
         IngestSource::Bytes {
@@ -84,9 +73,11 @@ pub async fn enqueue_ingest(
         IngestSource::Url(url) => (url.clone(), String::new(), None, url.clone()),
     };
 
-    sqlx::query(
+    // K6：INSERT ... ON CONFLICT 单往返——并发同 sha 一个赢、一个幂等命中，不再竞态 503
+    let inserted = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO documents (id, title, source_uri, mime, raw_path, sha256, status) \
-         VALUES ($1, $2, $3, $4, NULLIF($5,''), $6, 'pending')",
+         VALUES ($1, $2, $3, $4, NULLIF($5,''), $6, 'pending') \
+         ON CONFLICT (sha256) DO NOTHING RETURNING id",
     )
     .bind(id)
     .bind(&title)
@@ -94,18 +85,76 @@ pub async fn enqueue_ingest(
     .bind(&mime)
     .bind(&raw_path)
     .bind(&sha)
-    .execute(queue.pool())
+    .fetch_optional(queue.pool())
     .await
     .map_err(|e| KnowledgeError::Storage(e.to_string()))?;
 
-    queue
+    let Some(id) = inserted else {
+        // 幂等命中：清掉刚写的文件
+        if !raw_path.is_empty() {
+            let _ = tokio::fs::remove_file(&raw_path).await;
+        }
+        let existing: Uuid = sqlx::query_scalar("SELECT id FROM documents WHERE sha256 = $1")
+            .bind(&sha)
+            .fetch_one(queue.pool())
+            .await
+            .map_err(|e| KnowledgeError::Storage(e.to_string()))?;
+
+        // K1 自愈：failed 文档 / 非终态卡死（>5 分钟无 pending·running 活 job）→ 原子重置 + 重新入队。
+        // 不再让一次网络抖动永久卡死该 sha；ready 或在途文档不受影响。
+        // 5 分钟静默期：杜绝「并发重复提交时，先到者尚未入队」毫秒窗口被误判为卡死。
+        let healed = sqlx::query_scalar::<_, Uuid>(
+            "UPDATE documents SET status = 'pending', error = NULL, updated_at = now() \
+             WHERE id = $1 AND ( \
+                status = 'failed' \
+                OR (status <> 'ready' \
+                    AND updated_at < now() - interval '5 minutes' \
+                    AND NOT EXISTS ( \
+                        SELECT 1 FROM jobs \
+                        WHERE kind IN ('parse_document','chunk_document','embed_document') \
+                          AND status IN ('pending','running') \
+                          AND payload->>'document_id' = $1::text)) \
+             ) RETURNING id",
+        )
+        .bind(existing)
+        .fetch_optional(queue.pool())
+        .await
+        .map_err(|e| KnowledgeError::Storage(e.to_string()))?;
+        if healed.is_some() {
+            // 新幂等键：旧 ingest-{id} job 已 failed/dead，复用会被幂等墙挡住
+            queue
+                .enqueue(
+                    JobTemplate::new("parse_document")
+                        .with_payload(json!({"document_id": existing}))
+                        .with_idempotency_key(format!(
+                            "ingest-{existing}-{}",
+                            Uuid::now_v7().simple()
+                        )),
+                )
+                .await
+                .map_err(|e| KnowledgeError::Storage(format!("自愈入队失败: {e}")))?;
+        }
+        return Ok((existing, true));
+    };
+
+    // K2：入队失败 → 回滚文档行 + 文件，错误上抛（不再 .ok() 吞掉致文档永卡 pending）
+    if let Err(e) = queue
         .enqueue(
             JobTemplate::new("parse_document")
                 .with_payload(json!({"document_id": id}))
                 .with_idempotency_key(format!("ingest-{id}")),
         )
         .await
-        .ok();
+    {
+        let _ = sqlx::query("DELETE FROM documents WHERE id = $1")
+            .bind(id)
+            .execute(queue.pool())
+            .await;
+        if !raw_path.is_empty() {
+            let _ = tokio::fs::remove_file(&raw_path).await;
+        }
+        return Err(KnowledgeError::Storage(format!("job 入队失败: {e}")));
+    }
     Ok((id, false))
 }
 
@@ -201,6 +250,12 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
             }
             Err(e) => {
                 let m = format!("URL 抓取失败: {e}");
+                // K9：瞬态网络错误（含超时）→ Retryable，交给队列退避重试，不 mark_failed；
+                // SSRF 判定/协议/大小/DNS 类保持 Permanent，防恶意 URL 反复探测
+                if matches!(e, super::ssrf::FetchError::Network(_)) {
+                    ctx.emit(&m, None).await.ok();
+                    return Err(JobError::Retryable(m));
+                }
                 mark_failed(&ctx, doc_id, &m).await;
                 return Err(fail(m));
             }
@@ -358,12 +413,24 @@ pub async fn embed_job(
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    let chunks: Vec<(Uuid, String)> =
-        sqlx::query_as("SELECT id, content FROM chunks WHERE document_id = $1 ORDER BY seq")
+    // K8：只补缺失块（NULL 向量或 embed_failed）——重跑 / re-embed / Transient 重试
+    // 的进度天然保留，已嵌入块不重复计费
+    let chunks: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, content FROM chunks \
+         WHERE document_id = $1 AND (embedding IS NULL OR embed_failed) ORDER BY seq",
+    )
+    .bind(doc_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    let total: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE document_id = $1")
             .bind(doc_id)
-            .fetch_all(pool)
+            .fetch_one(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let missing = chunks.len();
 
     let mut embedded = 0usize;
     if !chunks.is_empty() {
@@ -380,27 +447,52 @@ pub async fn embed_job(
                     .await
                 {
                     Ok(resp) => {
+                        // K4：响应数量或维度与批次不符 → 整批按失败处理，
+                        // 杜绝「NULL 向量 + embed_failed=false」双重静默入库
+                        let bad = resp.embeddings.len() != batch.len()
+                            || resp.embeddings.iter().any(|v| v.len() != 1024); // D0010
+                        if bad {
+                            tracing::warn!(
+                                doc = %doc_id,
+                                expected = batch.len(),
+                                got = resp.embeddings.len(),
+                                "embed 响应与批次不符，整批降级 FTS"
+                            );
+                            for (cid, _) in batch {
+                                sqlx::query(
+                                    "UPDATE chunks SET embed_failed = true WHERE id = $1",
+                                )
+                                .bind(cid)
+                                .execute(pool)
+                                .await
+                                .map_err(|e| JobError::Retryable(e.to_string()))?;
+                            }
+                            continue;
+                        }
                         for (i, (cid, _)) in batch.iter().enumerate() {
-                            let emb = resp.embeddings.get(i);
                             sqlx::query(
                                 "UPDATE chunks SET embedding = $2, embed_failed = false WHERE id = $1",
                             )
                             .bind(cid)
-                            .bind(emb.map(|v| pgvector::Vector::from(v.clone())))
+                            .bind(pgvector::Vector::from(resp.embeddings[i].clone()))
                             .execute(pool)
                             .await
                             .map_err(|e| JobError::Retryable(e.to_string()))?;
                             embedded += 1;
                         }
                         ctx.emit(
-                            &format!("嵌入 {}/{}", embedded, chunks.len()),
-                            Some(json!({"done": embedded, "total": chunks.len()})),
+                            &format!("补嵌 {}/{}", embedded, missing),
+                            Some(json!({"done": embedded, "missing": missing})),
                         )
                         .await
                         .ok();
                     }
                     Err(e) => {
-                        // 本批标 embed_failed（降级 FTS），不阻塞 ready
+                        // K8：瞬态失败（429/5xx/超时）→ 整体重试，只补缺失保证进度不丢；
+                        // 永久失败才降级 FTS（不阻塞 ready，可事后 re-embed 恢复）
+                        if matches!(e, agent_memory_llm::types::LlmError::Transient(_)) {
+                            return Err(JobError::Retryable(format!("嵌入瞬态失败: {e}")));
+                        }
                         tracing::warn!(error = %e, "嵌入批次失败，标记 embed_failed");
                         for (cid, _) in batch {
                             sqlx::query("UPDATE chunks SET embed_failed = true WHERE id = $1")
@@ -412,7 +504,7 @@ pub async fn embed_job(
                     }
                 },
                 Err(e) => {
-                    // 无 provider：全部降级 FTS
+                    // 无 provider：全部降级 FTS（可事后配置 provider 并 re-embed 恢复）
                     tracing::warn!(error = %e, "无 embedding provider，全部降级 FTS");
                     for (cid, _) in batch {
                         sqlx::query("UPDATE chunks SET embed_failed = true WHERE id = $1")
@@ -438,12 +530,14 @@ pub async fn embed_job(
     let _ = tokio::fs::remove_file(data_uploads().join(format!("{doc_id}.extracted.txt"))).await;
 
     ctx.emit(
-        &format!("文档 ready（{embedded}/{} 嵌入成功）", chunks.len()),
+        &format!(
+            "文档 ready（补嵌 {embedded}/{missing}，共 {total} 块）"
+        ),
         None,
     )
     .await
     .ok();
-    Ok(json!({"document_id": doc_id, "embedded": embedded, "total": chunks.len()}))
+    Ok(json!({"document_id": doc_id, "embedded": embedded, "missing": missing, "total": total}))
 }
 
 /// 注册知识域 handlers（main 装配用）。

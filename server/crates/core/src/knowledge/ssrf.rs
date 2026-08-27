@@ -82,8 +82,9 @@ async fn resolve_validated(host: &str, port: u16) -> Result<Vec<std::net::Socket
 }
 
 /// 安全抓取（重定向手动逐跳复检；每跳 DNS 结果 pin 住防 rebinding）。
-/// 配置了 HTTP(S)_PROXY 时连接由代理发起——本机 DNS 解析无意义，
-/// 跳过 pinning/私网校验（信任边移到代理），仅保留协议/大小/超时限制。
+/// 配置了 HTTP(S)_PROXY 时连接由代理发起——本机 DNS pinning 失去意义（代理
+/// 自行解析目标），但 **K3：私网校验不跳过**，字面量与常规解析结果仍拒绝；
+/// 残余风险是代理侧 DNS rebinding，需在部署文档声明「代理出口可信」。
 pub async fn safe_fetch(
     url: &str,
     max_bytes: usize,
@@ -94,6 +95,16 @@ pub async fn safe_fetch(
         .or_else(|_| std::env::var("HTTP_PROXY"))
         .or_else(|_| std::env::var("http_proxy"))
         .is_ok();
+    safe_fetch_opts(url, max_bytes, timeout, via_proxy).await
+}
+
+/// `safe_fetch` 的可测形态：`via_proxy` 显式传入（不读环境变量）。
+pub async fn safe_fetch_opts(
+    url: &str,
+    max_bytes: usize,
+    timeout: std::time::Duration,
+    via_proxy: bool,
+) -> Result<FetchedPage, FetchError> {
     let mut current = url.to_string();
     for _hop in 0..4 {
         let parsed = reqwest::Url::parse(&current)
@@ -107,19 +118,19 @@ pub async fn safe_fetch(
             .to_string();
         let port = parsed.port_or_known_default().unwrap_or(80);
 
-        let addrs = if via_proxy {
-            vec![] // 代理模式：连接由代理发起，本机 pinning 无意义
-        } else {
-            resolve_validated(&host, port).await?
-        };
+        // K3：两种模式都做 DNS 解析 + 私网校验（代理模式只是不 pin）
+        let addrs = resolve_validated(&host, port).await?;
 
-        // DNS pinning：逐跳构建 client，只对已校验地址解析（防 rebinding）
+        // DNS pinning：逐跳构建 client，只对已校验地址解析（防 rebinding）；
+        // 代理模式跳过 pin——连接由代理发起，本机 resolve 无效
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(timeout)
             .user_agent("agent-memory/1.0");
-        for a in &addrs {
-            builder = builder.resolve(&host, *a);
+        if !via_proxy {
+            for a in &addrs {
+                builder = builder.resolve(&host, *a);
+            }
         }
         let pinned = builder
             .build()

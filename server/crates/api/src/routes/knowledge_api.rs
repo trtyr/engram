@@ -185,6 +185,19 @@ pub async fn delete_document(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// 重新嵌入缺失块（embed_failed / NULL 向量的显式恢复入口，K8）。
+#[utoipa::path(post, path = "/knowledge/documents/{id}/re-embed",
+    responses((status = 202, description = "补嵌 job 已入队")))]
+pub async fn reembed(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    require_knowledge(&principal)?;
+    svc(&state).reembed(id).await.map_err(ke)?;
+    Ok(StatusCode::ACCEPTED)
+}
+
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct KnowledgeSearchRequest {
     pub query: String,

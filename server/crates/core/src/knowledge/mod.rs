@@ -7,10 +7,11 @@ pub mod pipeline;
 pub mod ssrf;
 
 use agent_memory_jobs::JobQueue;
+use agent_memory_jobs::types::JobTemplate;
 use agent_memory_llm::ProviderRegistry;
 use agent_memory_llm::provider::LlmProvider as _;
 use agent_memory_llm::types::{EmbedRequest, Purpose};
-use agent_memory_search::tokenize::tsv_query_smart;
+use agent_memory_search::tokenize::{has_query_tokens, tsv_query_smart};
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, QueryBuilder, Row};
 use uuid::Uuid;
@@ -140,6 +141,36 @@ impl KnowledgeService {
         Ok(())
     }
 
+    /// 重新嵌入缺失块（K8：embed_failed / NULL 向量的显式恢复入口）。
+    pub async fn reembed(&self, id: Uuid) -> Result<(), KnowledgeError> {
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM documents WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| KnowledgeError::Storage(e.to_string()))?;
+        match status.as_deref() {
+            None => Err(KnowledgeError::NotFound(format!("文档 {id} 不存在"))),
+            Some("ready") => {
+                self.queue
+                    .enqueue(
+                        JobTemplate::new("embed_document")
+                            .with_payload(serde_json::json!({"document_id": id}))
+                            .with_idempotency_key(format!(
+                                "reembed-{id}-{}",
+                                Uuid::now_v7().simple()
+                            )),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| KnowledgeError::Storage(format!("入队失败: {e}")))
+            }
+            Some(s) => Err(KnowledgeError::BadRequest(format!(
+                "文档状态 {s} 不可重嵌（需 ready）"
+            ))),
+        }
+    }
+
     /// 混合检索 chunks（FTS + 向量 + RRF，带文档引用）。
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<ChunkHit>, KnowledgeError> {
         let qv: Option<Vec<f32>> = match self.registry.resolve(Purpose::Embed).await {
@@ -154,6 +185,10 @@ impl KnowledgeService {
                 .and_then(|r| r.embeddings.first().cloned()),
             Err(_) => None,
         };
+        // K7：单字/纯标点等无 token 且无查询向量 → 短路空结果（不再空跑 to_tsquery）
+        if qv.is_none() && !has_query_tokens(query) {
+            return Ok(vec![]);
+        }
         let has_vec = qv.is_some();
 
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(

@@ -68,6 +68,14 @@ pub fn tsv_query_smart(text: &str, max_and_tokens: usize) -> String {
     }
 }
 
+/// K7：查询 token 判空。单字 / 纯标点 / 单字母经 `keep()` 过滤后为空——
+/// 空串送进 `to_tsquery` 只会产生空 tsquery 的 NOTICE 并静默返回零命中。
+/// FTS 调用方应先用本函数判空短路（无查询向量时直接返回空结果），
+/// **不要用哨兵串**（如 `'!'`——实测报 `no operand in tsquery` 真 500）。
+pub fn has_query_tokens(text: &str) -> bool {
+    !tokenize(text).is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +114,18 @@ mod tests {
         let long = tsv_query_smart("用户偏好简洁的中文回答", 3);
         assert!(long.contains('|'), "长查询应走 OR: {long}");
         assert!(!long.contains('&'), "长查询不应走 AND: {long}");
+    }
+
+    #[test]
+    fn has_query_tokens_filters_noise() {
+        // K7：单字 / 纯标点 / 单字母 → 无有效 token
+        assert!(!has_query_tokens("书"));
+        assert!(!has_query_tokens("的"));
+        assert!(!has_query_tokens("?? !! ,,"));
+        assert!(!has_query_tokens("a"));
+        assert!(!has_query_tokens("  "));
+        // 正常查询 → 有 token
+        assert!(has_query_tokens("Rust 记忆"));
+        assert!(has_query_tokens("上海"));
     }
 }
