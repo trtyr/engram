@@ -56,3 +56,5 @@ TencentDB 案例缺口 4：log 应记 ingest + query + lint。当前 `update_ind
 - 实现覆盖了理论谱系的绝大部分设计，且补上了 TencentDB 自认缺失的 lint。
 - 真正值得做的代码改进：**G1 并发去重**、**G2 pin 存活**（若未来有多 Agent / 并发 ingest 需求）。
 - G3~G6 属增强项，优先级低。
+
+> 2026-08-27 补充：本文件的工程实现层深挖审查见 [../wiki-audit.md](../wiki-audit.md)（W 系列 14 条，G1 的具体化 = W6，异步人审缺口 = W12）。

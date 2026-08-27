@@ -13,6 +13,7 @@
 | [data-model.md](data-model.md) | 19 张表的字段/关系/索引、分层蒸馏与各域数据流 | 想查数据库结构时 |
 | [memory-audit.md](memory-audit.md) | Memory 域实现审查：L0~L3 蒸馏全链机制 + 12 条问题清单（P0/P1/P2，含代码位置与修复建议） | 想改进记忆域之前必读 |
 | [knowledge-audit.md](knowledge-audit.md) | Knowledge 域实现审查：摄取链/切块/SSRF/检索机制全解 + K1~K16 问题清单 | 想改进知识域之前必读 |
+| [wiki-audit.md](wiki-audit.md) | Wiki 域实现审查：两步 ingest/图/治理机制全解 + W1~W14 问题清单 | 想改进 Wiki 域之前必读 |
 | [wiki/](wiki/README.md) | Wiki 模块专项文档：两步 ingest、数据模型、链接图/相关性/洞察、lint/review/purpose/级联删除、API | 想深入 Wiki 模块时 |
 | [run-and-deploy.md](run-and-deploy.md) | 本地开发命令、环境变量、Docker 部署、健康检查、验证脚本 | 想跑起来/部署时 |
 | [conventions.md](conventions.md) | 代码风格、错误/日志/sqlx/提示词约定、模块边界规则、git 工作流、CI | 想贡献代码前 |

@@ -7,6 +7,10 @@
 - **2026-08-26：P0 五项（R1~R5）全部落地**，独立审计通过（goal `mt9ydklt-ze8023`）。
   R1 `core/unified.rs` + `POST /search`；R2 `tsv_query_smart` 覆盖全部 4 个 FTS 调用点；R3 context_pack L1 走 `search_atoms`；R4 cascade 全写操作包事务；R5 `CircuitBreaker` + `Retry-After`（含 HTTP-date、HalfOpen 单试探）。`cargo test --workspace` 66 passed。
 
+## 新增（2026-08-27 wiki-audit 发现，未排期）
+
+来源：[wiki-audit.md](../../../wiki-audit.md) W1~W14。**P0×3**：W1 失败重试三重死锁（幂等键墙+冲突路径自删原料文件[with_extension 同路径语义 rustc 实测]+generate 无独立重试；E2E 实测 JSON 抖动脆点的根因确认；=K1 同构且更糟）、W2 tsv 三写三标+检索无向量通道（LLM 页只嵌 slug→内容词搜不到；embedding/HNSW 建而不用）、W3 嵌入失败静默跳过 tsv（页面从检索彻底消失，比 K4 更彻底）。**P1×5**：W4 'failed' 态是幽灵（全代码无人写，卡 processing 误导）、W5 级联删除幽灵边（wiki_links 残边+源重叠权重不重算）、W6 并发 generate 竞态（=G1 具体化：slug UNIQUE 撞车/版本互相覆盖）、W7 log 页无界增长、W8 dead link 清理不吃 [[slug|alias]] 形式。**P2×6**：W9 reingest 无幂等键+review 重复、W10 archive_query slug 不校验、W11 摘源不 bump version、W12 human 提案只活事件流（应进 review_items）、W13 frontmatter 垃圾字段+系统页 title 不可更、W14 全提案轮不重算+lint N+1。关联：W1←K1 修法平移、W3←K4/K8 模式、W6←G1、W12←G 异步人审。建议起点：W1→W2（含存量补数 SQL）→W3→W4/W5 一个 goal 连续修（W1~W4 高度相关）。
+
 ## 新增（2026-08-27 knowledge-audit 发现；K1~K9 已于同日修复 ✅）
 
 来源：[knowledge-audit.md](../../../knowledge-audit.md) K1~K16。**P0×5**：K1 sha 幂等墙无状态过滤+失败全 Permanent（一次网络抖动永久卡死，与 wiki sha 墙同构）、K2 enqueue 结果被 .ok() 吞（文档永卡 pending）、K3 SSRF 代理旁路（HTTPS_PROXY 下私网校验全跳）、K4 embed 短响应 NULL 向量+embed_failed=false 双重静默（=B2 同类）、K5 未知二进制默认按文本（mojibake 入库）。**P1×3**：K6 并发 sha 竞态 503、K8 embed 失败永久降级无恢复入口、K9 URL 瞬态错误归 Permanent。**P2×8**：K7 空 token 查询静默零召回（单字/纯标点无声返回空，三域共用，tokenize 一处修；勿用哨兵——'!' 实测报 no operand 错）、K10 游标非唯一、K11 chunk 重跑残留、K12 extracted.txt 泄漏、K13 检索嵌入降级无日志、K14 chunks 500 截断、K15 URL 内容级去重、K16 大文件成本护栏（可并入 R15）。关联：K7←R2 延续、K16←R15 合并、K13←R10 挂载、K4 参照 B2 修法。建议起点：~~K2+K6 → K7 → K1/K9~~（已全部落地，2026-08-27 goal mtb43ztv：workspace 81 tests + E2E 13/13 全绿；剩 K10~K16 P2 按需）。
