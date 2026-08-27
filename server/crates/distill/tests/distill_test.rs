@@ -260,13 +260,15 @@ async fn arbitrate_branches_organize_and_persona_history() {
         .await
         .unwrap();
     assert_eq!(s, "active");
-    // duplicate → 候选删除 + 靶子 hit_count+1
-    let cnt: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms WHERE id = $1")
-        .bind(c_dup)
-        .fetch_one(&env.pool)
-        .await
-        .unwrap();
-    assert_eq!(cnt, 0, "duplicate 候选应删除");
+    // duplicate → 候选归档保留（B6：不再物理删除）+ superseded_by 溯源 + 靶子 hit_count+1
+    let (dup_status, dup_sup): (String, Option<Uuid>) =
+        sqlx::query_as("SELECT status, superseded_by FROM atoms WHERE id = $1")
+            .bind(c_dup)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(dup_status, "archived", "duplicate 候选应归档保留（可审计）");
+    assert_eq!(dup_sup, Some(t_dup), "归档候选 superseded_by 指向既有条");
     let hits: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
         .bind(t_dup)
         .fetch_one(&env.pool)
@@ -314,15 +316,20 @@ async fn arbitrate_branches_organize_and_persona_history() {
         .enqueue(JobTemplate::new("distill_persona").with_payload(json!({"scenario_ids": [sid]})))
         .await
         .unwrap();
-    wait_done(&env.queue, "distill_persona").await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let history: Vec<(i32, String)> = sqlx::query_as(
-        "SELECT version, content FROM persona_aspects WHERE aspect = 'identity' ORDER BY version",
-    )
-    .fetch_all(&env.pool)
-    .await
-    .unwrap();
+    // 轮询 DB 等 v2 落库（wait_done 可能匹配到第一次的终态 job，不可靠——既有 flaky 根因）
+    let mut history: Vec<(i32, String)> = Vec::new();
+    for _ in 0..100 {
+        history = sqlx::query_as(
+            "SELECT version, content FROM persona_aspects WHERE aspect = 'identity' ORDER BY version",
+        )
+        .fetch_all(&env.pool)
+        .await
+        .unwrap();
+        if history.len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     assert_eq!(history.len(), 2, "两个版本: {history:?}");
     assert!(history[1].1.contains("广州"));
     let evidence: serde_json::Value = sqlx::query_scalar(
@@ -366,6 +373,176 @@ async fn debounce_bucket_shares_job() {
         .await
         .unwrap();
     assert_ne!(j1.id, j3.id);
+
+    env.handle.shutdown();
+    env.handle.join().await;
+}
+
+/// B3：分面级证据链——不同分面 evidence_refs 只含各自依据的场景，并打通到 L0 会话。
+#[tokio::test]
+async fn persona_evidence_per_aspect() {
+    let s_home = Uuid::now_v7(); // S1：居住
+    let s_skill = Uuid::now_v7(); // S2：技能
+    let a_home = Uuid::now_v7(); // S1 的原子
+    let a_skill = Uuid::now_v7(); // S2 的原子
+    let sess_home = Uuid::now_v7(); // L0：居住信息来源会话
+    let sess_skill = Uuid::now_v7(); // L0：技能信息来源会话
+
+    let env = setup(vec![
+        // persona：两个分面各标注自己的依据场景
+        json!({"aspects": [
+            {"aspect": "identity", "content": "用户现居深圳。", "evidence_scenarios": ["S1"]},
+            {"aspect": "skills", "content": "用户会写 Rust。", "evidence_scenarios": ["S2"]},
+        ]}),
+    ])
+    .await;
+
+    for (sid, topic, aid, content, sess) in [
+        (s_home, "居住地", a_home, "用户现居深圳", sess_home),
+        (s_skill, "技能栈", a_skill, "用户会写 Rust", sess_skill),
+    ] {
+        sqlx::query(
+            "INSERT INTO scenarios (id, topic, summary, body, atom_refs) \
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(sid)
+        .bind(topic)
+        .bind(content)
+        .bind(content)
+        .bind(sqlx::types::Json(vec![aid]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, status, confidence, source_refs) \
+             VALUES ($1, 'fact', $2, 'active', 0.9, $3)",
+        )
+        .bind(aid)
+        .bind(content)
+        .bind(sqlx::types::Json(vec![
+            serde_json::json!({"session_id": sess.to_string()}),
+        ]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
+
+    env.queue
+        .enqueue(
+            JobTemplate::new("distill_persona")
+                .with_payload(json!({"scenario_ids": [s_home, s_skill]})),
+        )
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "distill_persona").await;
+    assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
+
+    let rows: Vec<(String, serde_json::Value)> = sqlx::query_as(
+        "SELECT aspect, evidence_refs FROM persona_aspects",
+    )
+    .fetch_all(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 2, "两个分面: {rows:?}");
+
+    let ev = |aspect: &str| -> serde_json::Value {
+        rows.iter()
+            .find(|(a, _)| a == aspect)
+            .map(|(_, e)| e.clone())
+            .unwrap()
+    };
+    let identity = ev("identity");
+    let skills = ev("skills");
+
+    // 分面级证据：各含各的场景，不串
+    let id_scen: Vec<String> = identity["scenarios"].as_array().unwrap()
+        .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let sk_scen: Vec<String> = skills["scenarios"].as_array().unwrap()
+        .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(id_scen, vec![s_home.to_string()], "identity 只依据居住场景");
+    assert_eq!(sk_scen, vec![s_skill.to_string()], "skills 只依据技能场景");
+
+    // L3→L2→L1→L0 全链：atoms + sessions 各归各
+    assert_eq!(identity["sessions"].as_array().unwrap().len(), 1);
+    assert!(identity["sessions"].to_string().contains(&sess_home.to_string()));
+    assert!(skills["sessions"].to_string().contains(&sess_skill.to_string()));
+
+    // prompt 版本落 v2
+    let pv: String = sqlx::query_scalar(
+        "SELECT prompt_version FROM persona_aspects WHERE aspect = 'identity'",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(pv, "2", "persona prompt 升版 v2");
+
+    env.handle.shutdown();
+    env.handle.join().await;
+}
+#[tokio::test]
+async fn arbitrate_null_embedding_falls_back_to_fts() {
+    let c_no_emb = Uuid::now_v7(); // 候选：embedding NULL
+    let target = Uuid::now_v7(); // 既有 active：与候选文本共享关键词（FTS 可命中），带向量
+
+    let env = setup(vec![
+        // arbitrate：对无嵌入候选给出 duplicate 判定（证明它进了 LLM 仲裁而非直通转正）
+        json!({"verdicts": [
+            {"candidate_id": c_no_emb.to_string(), "disposition": "duplicate", "target_id": target.to_string()},
+        ]}),
+        // organize：空动作收尾（无转正 → 不入队，本条仅为队列兜底）
+        json!({"actions": []}),
+    ])
+    .await;
+
+    // 候选无嵌入（模拟 embed 失败/上游异常的产物）
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, confidence, embedding, tsv) \
+         VALUES ($1, 'fact', '用户喜欢简洁的中文回复', 'candidate', 0.9, NULL, to_tsvector('simple', $2))",
+    )
+    .bind(c_no_emb)
+    .bind(agent_memory_search::tokenize::tsv_text("用户喜欢简洁的中文回复"))
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    // 既有 active：语义相近（关键词重叠），有嵌入
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, confidence, embedding, tsv, hit_count) \
+         VALUES ($1, 'preference', '用户喜欢简洁中文回答', 'active', 0.9, $2, to_tsvector('simple', $3), 1)",
+    )
+    .bind(target)
+    .bind(emb(9))
+    .bind(agent_memory_search::tokenize::tsv_text("用户喜欢简洁中文回答"))
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    env.queue
+        .enqueue(
+            JobTemplate::new("arbitrate_atoms").with_payload(json!({"candidate_ids": [c_no_emb]})),
+        )
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "arbitrate_atoms").await;
+    assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
+
+    // B6 语义：duplicate → 归档 + superseded_by（而非物理删除）——同时证明候选
+    // 真的经过 LLM 仲裁（旧代码里无嵌入候选会直通 active）
+    let (status, sup_by): (String, Option<Uuid>) =
+        sqlx::query_as("SELECT status, superseded_by FROM atoms WHERE id = $1")
+            .bind(c_no_emb)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "archived", "无嵌入候选应被仲裁（duplicate → archived）");
+    assert_eq!(sup_by, Some(target));
+    let hits: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
+        .bind(target)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(hits, 2, "靶子 hit_count 1→2");
 
     env.handle.shutdown();
     env.handle.join().await;

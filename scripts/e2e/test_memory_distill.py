@@ -176,5 +176,35 @@ async def main() -> None:
         superseded = [a for a in shanghai if a["status"] == "superseded" and a.get("superseded_by")]
         ok(len(superseded) >= 1, "supersede 指向新原子（superseded_by 已设）")
 
+    section("B1：长会话分段覆盖率（多段事件 + 末段事实不丢）")
+    # 构造 >6000 字符的多段输入：中段用背景填充撑体积，首尾各放一个独特标记事实
+    filler = "这是一段较长的背景铺垫，讲述日常工作流的细节，用于撑大输入体积，本身无需记忆。" * 2
+    long_turns = [{"speaker": "user", "text": "请记住：我的座右铭是「静水流深」。"},
+                  {"speaker": "assistant", "text": "好的，已记下。"}]
+    for i in range(60):
+        long_turns.append({"speaker": "user", "text": f"背景细节 {i}：{filler}"})
+    long_turns.append({"speaker": "user", "text": "最后再记一条：我的幸运数字是 42。"})
+    long_turns.append({"speaker": "assistant", "text": "好的，幸运数字 42 已记下。"})
+
+    t3 = datetime.now(timezone.utc).isoformat()
+    mem.post("/memory/sessions", json={"agent": "e2e", "turns": long_turns, "distill": "off"})
+    mem.post("/memory/distill", json={"full": False})
+    _wait_chain(mem, after=t3, required=("extract_atoms",))
+
+    # 段级事件留痕（B1 机械断言）：长输入应产生 ≥2 个「分段抽取」事件
+    extract_jobs = [j for j in mem.get("/jobs", params={"kind": "extract_atoms", "limit": 5})
+                    if j["created_at"] > t3]
+    events = mem.get(f"/jobs/{extract_jobs[0]['id']}/events")
+    seg_events = [e for e in events if e["message"].startswith("分段抽取")]
+    ok(len(seg_events) >= 2, f"长输入分段 ≥2（实际 {len(seg_events)} 段：{[e['message'] for e in seg_events]}）")
+
+    # 末段事实不丢（覆盖率的直接证据：旧单调用下最易静默丢的就是末段）
+    _wait_chain(mem, after=t3, required=("extract_atoms", "arbitrate_atoms"))
+    final_atoms = mem.get("/memory/atoms", params={"limit": 200})
+    tail_fact = [a for a in final_atoms if "42" in a["content"]]
+    head_fact = [a for a in final_atoms if "静水流深" in a["content"]]
+    ok(len(tail_fact) >= 1, f"末段事实「幸运数字 42」被抽取（{len(tail_fact)}）")
+    ok(len(head_fact) >= 1, f"首段事实「座右铭」被抽取（{len(head_fact)}）")
+
 
 check.run(main)

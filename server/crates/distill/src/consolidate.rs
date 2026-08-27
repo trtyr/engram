@@ -55,14 +55,15 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             }
         }
 
-        let out = llm
-            .chat_json(
-                agent_memory_llm::types::Purpose::Consolidate,
-                &prompts::consolidate_system(),
-                &user,
-                ctx.job.id,
-            )
-            .await?;
+        let out = crate::llm_port::chat_json_retrying(
+            &ctx,
+            llm.as_ref(),
+            agent_memory_llm::types::Purpose::Consolidate,
+            &prompts::consolidate_system(),
+            &user,
+            ctx.job.id,
+        )
+        .await?;
 
         let merges = out
             .get("merges")
@@ -116,11 +117,13 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         }
     }
 
-    // 2. stale 降权：90 天未命中 + 低置信 → confidence * 0.7
+    // 2. stale 降权：90 天零命中 + 低置信 → confidence * 0.7
+    // B10：不再刷新 updated_at（旧写法降权动作自身刷新时间戳，条件自锁只能降一次）；
+    // 判龄改 created_at（原子出生日，不受任何后续写动作影响）
     let stale = sqlx::query(
-        "UPDATE atoms SET confidence = confidence * 0.7, updated_at = now() \
+        "UPDATE atoms SET confidence = confidence * 0.7 \
          WHERE status = 'active' AND hit_count = 0 AND confidence < 0.9 \
-           AND updated_at < now() - interval '90 days' AND confidence * 0.7 > 0.2",
+           AND created_at < now() - interval '90 days' AND confidence * 0.7 > 0.2",
     )
     .execute(pool)
     .await

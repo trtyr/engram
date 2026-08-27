@@ -66,6 +66,9 @@ consolidate（每周自续期，手动 full=true 也触发）┘                
 
 按严重度排序。**P0=正确性/数据一致性，P1=质量/效率，P2=增强**。
 
+> **修复状态（2026-08-27）**：B1/B2/B3/B5/B6/B9/B10 已修复（goal mtazbygx；workspace 69 tests + E2E 13/13 全绿）。
+> 未修：B4/B7/B8/B11/B12（P2 级，按需排期）。
+
 ### B1.【P0】extract 长会话无覆盖率保障——静默丢段
 
 **位置**：`extract.rs::run_claimed`（全部轮次拼一个 `numbered` 文本，单次 LLM 调用）。

@@ -75,3 +75,64 @@ async fn context_pack_l1_is_query_relevant_not_hit_count() {
         );
     }
 }
+
+/// B9：检索命中异步回写 hit_count（atoms + scenarios）。
+#[tokio::test]
+async fn search_hits_bump_hit_count() {
+    let (pool, svc, _container) = setup().await;
+
+    let a = insert_atom(&pool, "用户偏好使用 Rust 语言进行系统编程", 0).await;
+
+    // 场景种子（含关键词，FTS 可命中）
+    let sid = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO scenarios (id, topic, summary, body, tsv) VALUES \
+         ($1, '开发环境', '用户偏好 Rust', '完整描述', to_tsvector('simple', $2))",
+    )
+    .bind(sid)
+    .bind(agent_memory_search::tokenize::tsv_text("开发环境 用户偏好 Rust"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let _ = svc.search("Rust", &[], 10).await.expect("search");
+
+    // 回写是异步的：轮询等它落地
+    let mut atom_hits = 0i32;
+    let mut scen_hits = 0i32;
+    for _ in 0..50 {
+        atom_hits = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
+            .bind(a)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        scen_hits = sqlx::query_scalar("SELECT hit_count FROM scenarios WHERE id = $1")
+            .bind(sid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        if atom_hits >= 1 && scen_hits >= 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(atom_hits >= 1, "atoms.hit_count 应回写（实际 {atom_hits}）");
+    assert!(scen_hits >= 1, "scenarios.hit_count 应回写（实际 {scen_hits}）");
+
+    // context_pack 读路径同样计数（有 query 时 L1 走 search_atoms）
+    let before = atom_hits;
+    let _ = svc.context_pack(Some("Rust"), 10, 10_000).await.unwrap();
+    let mut after = before;
+    for _ in 0..50 {
+        after = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
+            .bind(a)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        if after > before {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(after > before, "context_pack 命中应回写（{before} → {after}）");
+}

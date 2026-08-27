@@ -38,7 +38,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         return Ok(json!({"updated": []}));
     }
 
-    // 1. 变动场景 + 当前画像（每个 aspect 的最新版本）
+    // 1. 变动场景（S1..Sn 编号，LLM 证据标注用）+ 当前画像（每个 aspect 的最新版本）
     let scenarios: Vec<(String, String)> =
         sqlx::query_as("SELECT topic, summary FROM scenarios WHERE id = ANY($1)")
             .bind(&scenario_ids)
@@ -56,8 +56,8 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
 
     let mut user = String::new();
     writeln!(user, "== 有变动的场景 ==").ok();
-    for (topic, summary) in &scenarios {
-        writeln!(user, "「{topic}」：{summary}").ok();
+    for (i, (topic, summary)) in scenarios.iter().enumerate() {
+        writeln!(user, "S{} 「{topic}」：{summary}", i + 1).ok();
     }
     writeln!(user, "\n== 当前画像（各分面最新版）==").ok();
     for (aspect, content, _) in &current {
@@ -80,6 +80,88 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+
+    // B3：证据素材一次性查齐（循环外）——场景 atom_refs + 原子 source_refs（补 L0 溯源）
+    // scenario_atoms: sid -> atom ids；atom_sessions: atom_id -> session ids
+    let scenario_atoms: std::collections::HashMap<Uuid, Vec<Uuid>> =
+        sqlx::query_as::<_, (Uuid, serde_json::Value)>(
+            "SELECT id, atom_refs FROM scenarios WHERE id = ANY($1)",
+        )
+        .bind(&scenario_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .into_iter()
+        .map(|(sid, refs)| {
+            let atoms: Vec<Uuid> = refs
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().and_then(|s| Uuid::parse_str(s).ok()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (sid, atoms)
+        })
+        .collect();
+
+    let all_atom_ids: Vec<Uuid> = scenario_atoms.values().flatten().copied().collect();
+    let atom_sessions: std::collections::HashMap<Uuid, Vec<Uuid>> = if all_atom_ids.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        sqlx::query_as::<_, (Uuid, serde_json::Value)>(
+            "SELECT id, source_refs FROM atoms WHERE id = ANY($1)",
+        )
+        .bind(&all_atom_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .into_iter()
+        .map(|(aid, refs)| {
+            let sessions: Vec<Uuid> = refs
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|r| {
+                            r.get("session_id")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| Uuid::parse_str(s).ok())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            (aid, sessions)
+        })
+        .collect()
+    };
+
+    /// 组装单个分面的证据链：依据场景 → 归属原子 → 来源会话（L3→L2→L1→L0 全链）。
+    fn build_evidence(
+        dep_ids: &[Uuid],
+        scenario_atoms: &std::collections::HashMap<Uuid, Vec<Uuid>>,
+        atom_sessions: &std::collections::HashMap<Uuid, Vec<Uuid>>,
+    ) -> serde_json::Value {
+        let mut atom_ids: Vec<Uuid> = Vec::new();
+        let mut session_ids: Vec<Uuid> = Vec::new();
+        for sid in dep_ids {
+            for aid in scenario_atoms.get(sid).into_iter().flatten() {
+                if !atom_ids.contains(aid) {
+                    atom_ids.push(*aid);
+                }
+                for sess in atom_sessions.get(aid).into_iter().flatten() {
+                    if !session_ids.contains(sess) {
+                        session_ids.push(*sess);
+                    }
+                }
+            }
+        }
+        serde_json::json!({
+            "scenarios": dep_ids,
+            "atoms": atom_ids,
+            "sessions": session_ids,
+        })
+    }
+
     let mut updated = Vec::new();
     for a in aspects {
         let aspect = a
@@ -96,17 +178,24 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         if !ASPECTS.contains(&aspect.as_str()) || content.is_empty() {
             continue;
         }
-        // 证据链：本批场景（含其 atom_refs）
-        let evidence: Vec<serde_json::Value> = sqlx::query_as::<_, (serde_json::Value,)>(
-            "SELECT atom_refs FROM scenarios WHERE id = ANY($1)",
-        )
-        .bind(&scenario_ids)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?
-        .into_iter()
-        .map(|(r,)| r)
-        .collect();
+
+        // B3：分面级证据——LLM 标注的 S 编号映射回场景 id；
+        // 非法/缺失标注回退全量场景（保守：宁多勿断链）
+        let dep_ids: Vec<Uuid> = a
+            .get("evidence_scenarios")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str())
+                    .filter_map(|s| s.trim_start_matches('S').parse::<usize>().ok())
+                    .filter(|n| (1..=scenario_ids.len()).contains(n))
+                    .map(|n| scenario_ids[n - 1])
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v: &Vec<Uuid>| !v.is_empty())
+            .unwrap_or_else(|| scenario_ids.clone());
+
+        let evidence = build_evidence(&dep_ids, &scenario_atoms, &atom_sessions);
 
         let row = sqlx::query_as::<_, (i32,)>(
             "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version) \
@@ -116,7 +205,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         .bind(Uuid::now_v7())
         .bind(&aspect)
         .bind(&content)
-        .bind(sqlx::types::Json(&json!({"scenarios": scenario_ids, "atoms": evidence})))
+        .bind(sqlx::types::Json(&evidence))
         .bind(prompts::P_PERSONA.1.to_string())
         .fetch_one(pool)
         .await

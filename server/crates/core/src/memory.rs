@@ -425,6 +425,25 @@ impl MemoryService {
         }
     }
 
+    /// B9 命中反馈：检索命中即异步回写 hit_count（best-effort，失败只记日志）。
+    /// 不刷 updated_at——hit 是使用热度而非内容变化，避免扰动「最近更新」排序。
+    fn fire_hit_feedback(&self, table: &'static str, ids: Vec<Uuid>) {
+        if ids.is_empty() {
+            return;
+        }
+        let pool = self.pool.clone();
+        tokio::spawn(async move {
+            let sql = if table == "atoms" {
+                "UPDATE atoms SET hit_count = hit_count + 1 WHERE id = ANY($1)"
+            } else {
+                "UPDATE scenarios SET hit_count = hit_count + 1 WHERE id = ANY($1)"
+            };
+            if let Err(e) = sqlx::query(sql).bind(&ids).execute(&pool).await {
+                tracing::warn!(error = %e, table, "hit_count 回写失败（不影响检索结果）");
+            }
+        });
+    }
+
     /// 分层检索。无 embedding 通道时自动退化为纯 FTS。
     pub async fn search(
         &self,
@@ -461,6 +480,9 @@ impl MemoryService {
         } else {
             vec![]
         };
+        // B9：命中反馈（异步 best-effort，不阻塞返回）
+        self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
+        self.fire_hit_feedback("scenarios", l2.iter().map(|h| h.id).collect());
         Ok(SearchResponse {
             l1,
             l2,
@@ -575,6 +597,16 @@ impl MemoryService {
                 break;
             }
         }
+
+        // B9：context_pack 也是使用（AI 冷启动读路径），同样计热度
+        self.fire_hit_feedback(
+            "atoms",
+            out_atoms.iter().map(|a| a.id).collect(),
+        );
+        self.fire_hit_feedback(
+            "scenarios",
+            out_scenarios.iter().map(|s| s.id).collect(),
+        );
 
         Ok(ContextPack {
             persona,

@@ -7,9 +7,11 @@
 - **2026-08-26：P0 五项（R1~R5）全部落地**，独立审计通过（goal `mt9ydklt-ze8023`）。
   R1 `core/unified.rs` + `POST /search`；R2 `tsv_query_smart` 覆盖全部 4 个 FTS 调用点；R3 context_pack L1 走 `search_atoms`；R4 cascade 全写操作包事务；R5 `CircuitBreaker` + `Retry-After`（含 HTTP-date、HalfOpen 单试探）。`cargo test --workspace` 66 passed。
 
-## 新增（2026-08-27 memory-audit 发现，未排期）
+## 新增（2026-08-27 memory-audit 发现；B1/B2/B3/B5/B6/B9/B10 已于同日修复 ✅）
 
-来源：[memory-audit.md](../../../memory-audit.md) B1~B12。P0 级三条：B1 extract 长会话静默丢段（=R7）、B2 零向量/NULL embedding 仲裁旁路、B3 persona 证据链全量共享。P1 级五条含 B5 arbitrate/consolidate 裸调 chat_json 无重试、B6 duplicate 物理删除丢溯源、B9 hit_count 语义残缺致 stale 误伤（=R8 依赖）。修 P1 批（R7/R8）时应连同 B2/B3/B5 一并处理。
+来源：[memory-audit.md](../../../memory-audit.md) B1~B12。
+**已修（2026-08-27，goal mtazbygx）**：B1 extract 分段覆盖率（6000 字符贪心分段+段级事件+prompt v2）、B2 零向量置 NULL+FTS 兜底（含 MockLlm 全零碰撞修复）、B3 persona 证据链分面化（S 编号标注+L0 会话链+prompt v2）、B5 chat_json_retrying 统一、B6 duplicate 改 archived+superseded_by、B9 检索命中回写 hit_count（0013 迁移+search/context_pack 双路径）、B10 stale 降权不自锁（created_at 判龄）。workspace 69 tests + E2E 13/13 全绿。
+**未修**：B4（聚类先验排除交叉组）、B7（persona 幻觉校验）、B8（防抖窗口配置化）、B11（organize 孤儿重进 prompt）、B12（persona 版本竞态）——均为 P2 级，按需排期。
 
 ## P0 —— 高价值，低成本
 

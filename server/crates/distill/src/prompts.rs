@@ -3,15 +3,17 @@
 /// 提示词标识：(名称, 版本)。
 pub struct PromptId(pub &'static str, pub u32);
 
-pub const P_EXTRACT: PromptId = PromptId("extract", 1);
+pub const P_EXTRACT: PromptId = PromptId("extract", 2);
 pub const P_ARBITRATE: PromptId = PromptId("arbitrate", 1);
 pub const P_ORGANIZE: PromptId = PromptId("organize", 1);
-pub const P_PERSONA: PromptId = PromptId("persona", 1);
+pub const P_PERSONA: PromptId = PromptId("persona", 2);
 pub const P_CONSOLIDATE: PromptId = PromptId("consolidate", 1);
 
-/// L0→L1：从原始会话抽取候选原子记忆。
+/// L0→L1：从原始会话抽取候选原子记忆（v2：分段输入，逐段抽取保覆盖率）。
 pub fn extract_system() -> String {
     "你是一个严谨的记忆抽取器。从 AI 与用户的对话中抽取值得长期记住的原子记忆。
+
+输入可能分多段给出（同一批会话按顺序切分），轮次编号全局连续——请对**每一段**独立完整抽取，段内所有值得记的信息都要覆盖，不要因为段落在中间而遗漏。
 
 分类（kind）只能是以下之一：
 - preference 用户偏好 | fact 稳定事实 | decision 已定决策 | event 事件
@@ -71,8 +73,10 @@ constraints（约束/雷区）| communication_style（沟通风格）| goals（�
 2. 当前画像为空的分面，只要场景里有对应信息，就必须产出初始版本。
 3. 没有任何分面需要更新时输出空数组。
 4. 证据要充分：scenarios 中没有的信息不要写。
+5. 每个分面必须标注 evidence_scenarios：该分面结论**实际依据**的场景编号（如 [\"S1\",\"S3\"]）——只列真正支撑该分面内容的场景，不要把全部场景都列上。
 
-输出严格 JSON：{\"aspects\":[{\"aspect\":\"...\",\"content\":\"...\"}]}".into()
+输出严格 JSON：{\"aspects\":[{\"aspect\":\"...\",\"content\":\"...\",\"evidence_scenarios\":[\"S1\"]}]}"
+    .into()
 }
 
 /// 整理：近重复合并判定。

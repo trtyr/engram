@@ -292,11 +292,13 @@ impl DistillLlm for MockLlm {
             Ok(texts
                 .iter()
                 .map(|t| {
-                    // 内容确定性的伪向量（相似文本相近：hash 混合）
+                    // 内容确定性的伪向量（相似文本相近：hash 混合）。
+                    // +1 保证非零：B2 的零向量守卫会把全零嵌入过滤为 NULL
+                    // （h % 97 == 0 的输入会碰撞出全零，实测「用户用 Mac 开发」命中）
                     let h = t.chars().map(|c| c as usize).sum::<usize>();
                     (0..self.embed_dim)
-                        .map(|i| ((h.wrapping_mul(i + 7)) % 97) as f32 / 97.0)
-                        .collect()
+                        .map(|i| ((h.wrapping_mul(i + 7)) % 97 + 1) as f32 / 98.0)
+                        .collect::<Vec<f32>>()
                 })
                 .collect())
         })
