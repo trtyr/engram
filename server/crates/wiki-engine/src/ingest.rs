@@ -78,13 +78,97 @@ pub async fn enqueue_ingest(
         tokio::fs::write(&path, text)
             .await
             .map_err(|e| JobError::Permanent(format!("写原料失败: {e}")))?;
-        let _ = tokio::fs::remove_file(&path.with_extension("md")).await; // no-op clarity
         sqlx::query("UPDATE wiki_sources SET raw_path = $2 WHERE id = $1")
             .bind(real_id)
             .bind(path.to_string_lossy().as_ref())
             .execute(queue.pool())
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
+    }
+
+    // W1 状态感知重入队：source 非 ready 时查两步 job 实况——
+    // analyze 已成功而 generate 缺失/终态失败 → 从失败 job 的 payload 取 analysis
+    // 重入队 generate（新幂等键）；analyze 在途 → 真正的秒跳过。
+    // 旧逻辑无条件入队 analyze（幂等键墙直接返回既有终态 job，链断即死锁）。
+    if real_id != id {
+        let jobs: Vec<(String, String, serde_json::Value)> = sqlx::query_as(
+            "SELECT kind, status, payload FROM jobs \
+             WHERE kind IN ('wiki_analyze','wiki_generate') \
+               AND payload->>'source_id' = $1 \
+             ORDER BY created_at DESC",
+        )
+        .bind(real_id.to_string())
+        .fetch_all(queue.pool())
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        let has_active = jobs
+            .iter()
+            .any(|(k, s, _)| {
+                (k == "wiki_analyze" || k == "wiki_generate")
+                    && matches!(s.as_str(), "pending" | "running")
+            });
+        if !has_active {
+            // generate 曾成功？source ready 已在上面早退；这里 generate 无终态成功 → 可安全重跑
+            let generate_done = jobs
+                .iter()
+                .any(|(k, s, _)| k == "wiki_generate" && s == "succeeded");
+            if !generate_done {
+                // analyze 成功过 → analysis 在它链式入队的 generate job payload 里
+                // （即使 generate 失败，payload 也带着 analysis——直发新 generate 省一次 LLM）
+                let analyze_ok = jobs
+                    .iter()
+                    .any(|(k, s, _)| k == "wiki_analyze" && s == "succeeded");
+                let analysis = jobs
+                    .iter()
+                    .find(|(k, _, _)| k == "wiki_generate")
+                    .and_then(|(_, _, payload)| payload.get("analysis").cloned())
+                    .filter(|a| a.as_object().is_some_and(|o| !o.is_empty()));
+                if analyze_ok
+                    && let Some(analysis) = analysis
+                {
+                    // W4：failed/卡死源重置（generate 结束时会落 ready）
+                    sqlx::query(
+                        "UPDATE wiki_sources SET status = 'pending', error = NULL WHERE id = $1 AND status <> 'ready'",
+                    )
+                    .bind(real_id)
+                    .execute(queue.pool())
+                    .await
+                    .map_err(|e| JobError::Retryable(e.to_string()))?;
+                    queue
+                        .enqueue(
+                            JobTemplate::new("wiki_generate")
+                                .with_payload(json!({
+                                    "source_id": real_id,
+                                    "analysis": analysis,
+                                    "source_title": title,
+                                }))
+                                .with_idempotency_key(format!(
+                                    "wiki-generate-{real_id}-{}",
+                                    Uuid::now_v7().simple()
+                                )),
+                        )
+                        .await?;
+                    return Ok((real_id, false));
+                }
+                // analyze 未成功或 analysis 不可得 → 重跑 analyze（原料文件刚重写过，可读）
+                sqlx::query("UPDATE wiki_sources SET status = 'pending', error = NULL WHERE id = $1 AND status <> 'ready'")
+                    .bind(real_id)
+                    .execute(queue.pool())
+                    .await
+                    .map_err(|e| JobError::Retryable(e.to_string()))?;
+                queue
+                    .enqueue(
+                        JobTemplate::new("wiki_analyze")
+                            .with_payload(json!({"source_id": real_id}))
+                            .with_idempotency_key(format!(
+                                "wiki-analyze-{real_id}-{}",
+                                Uuid::now_v7().simple()
+                            )),
+                    )
+                    .await?;
+                return Ok((real_id, false));
+            }
+        }
     }
 
     queue
@@ -267,13 +351,6 @@ pub async fn generate_job(
         }
         all_slugs.push(slug.clone());
 
-        let existing: Option<(Uuid, String)> =
-            sqlx::query_as("SELECT id, origin FROM wiki_pages WHERE slug = $1")
-                .bind(&slug)
-                .fetch_optional(pool)
-                .await
-                .map_err(|e| JobError::Retryable(e.to_string()))?;
-
         let fm = json!({
             "title": title,
             "page_type": page_type,
@@ -281,26 +358,38 @@ pub async fn generate_job(
             "origin_if_new": "llm",
         });
 
-        match existing {
+        // W6：单语句 UPSERT——消除 check-then-act 竞态（并发 generate 不再撞
+        // slug UNIQUE，也不会双 UPDATE 互相覆盖）。human 页保护语义收进
+        // DO UPDATE 的 WHERE：冲突且 origin=human 时子句为假 → RETURNING 无行 → 提案路径。
+        let upserted: Option<bool> = sqlx::query_scalar(
+            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'llm', 1) \
+             ON CONFLICT (slug) DO UPDATE SET \
+                content = $5, \
+                frontmatter = jsonb_set(wiki_pages.frontmatter, '{sources}', \
+                    (SELECT COALESCE(jsonb_agg(DISTINCT s), '[]'::jsonb) FROM \
+                        (SELECT jsonb_array_elements_text(wiki_pages.frontmatter->'sources') AS s \
+                         UNION ALL SELECT $7::text) sub)), \
+                version = wiki_pages.version + 1, updated_at = now() \
+             WHERE wiki_pages.origin = 'llm' \
+             RETURNING (xmax = 0)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(&slug)
+        .bind(&title)
+        .bind(page_type)
+        .bind(&content)
+        .bind(sqlx::types::Json(&fm))
+        .bind(source_id.to_string())
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+        match upserted {
+            Some(true) => created += 1,
+            Some(false) => updated += 1,
             None => {
-                let id = Uuid::now_v7();
-                sqlx::query(
-                    "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
-                     VALUES ($1, $2, $3, $4, $5, $6, 'llm', 1)",
-                )
-                .bind(id)
-                .bind(&slug)
-                .bind(&title)
-                .bind(page_type)
-                .bind(&content)
-                .bind(sqlx::types::Json(&fm))
-                .execute(pool)
-                .await
-                .map_err(|e| JobError::Retryable(e.to_string()))?;
-                created += 1;
-            }
-            Some((_id, origin)) if origin == "human" => {
-                // 人写的页面不覆盖 → 提案（存新内容于 proposal 事件）
+                // 冲突且 origin=human：不覆盖 → 提案（内容存事件流，待人工合入）
                 proposals += 1;
                 ctx.emit(
                     "人工页面更新提案（待审核）",
@@ -313,26 +402,6 @@ pub async fn generate_job(
                 .await
                 .ok();
             }
-            Some((id, _)) => {
-                // LLM 页面：合并 sources + 版本递增
-                sqlx::query(
-                    "UPDATE wiki_pages SET \
-                        content = $2, \
-                        frontmatter = jsonb_set(frontmatter, '{sources}', \
-                            (SELECT COALESCE(jsonb_agg(DISTINCT s), '[]'::jsonb) FROM \
-                                (SELECT jsonb_array_elements_text(frontmatter->'sources') AS s FROM wiki_pages WHERE id = $1 \
-                                 UNION ALL SELECT $3::text) sub)), \
-                        version = version + 1, updated_at = now() \
-                     WHERE id = $1",
-                )
-                .bind(id)
-                .bind(&content)
-                .bind(source_id.to_string())
-                .execute(pool)
-                .await
-                .map_err(|e| JobError::Retryable(e.to_string()))?;
-                updated += 1;
-            }
         }
     }
 
@@ -342,13 +411,80 @@ pub async fn generate_job(
     // 索引 + 日志 + overview 维护
     update_index_and_log(pool, source_id, &source_title, created, updated, proposals).await?;
 
-    // 新/变页嵌入
-    let texts: Vec<String> = collect_page_texts(pool, &all_slugs).await?;
-    if !texts.is_empty()
-        && let Ok(emb) = llm.embed(&texts, ctx.job.id).await
-    {
-        write_embeddings(pool, &all_slugs, emb).await?;
+    // 新/变页索引与嵌入（W2/W3 重构）
+    // W2：tsv 统一 title+content 口径（旧实现只嵌 slug——LLM 页内容词搜不到）；
+    // W3：tsv 写入与嵌入解耦——嵌入失败只丢向量不丢 FTS 索引，页面不再从检索消失
+    let pages: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT slug, COALESCE(frontmatter->>'title', slug), content FROM wiki_pages WHERE slug = ANY($1)",
+    )
+    .bind(&all_slugs)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    let mut tsv_written = 0usize;
+    for (slug, title, content) in &pages {
+        let text = format!("{title}\n{content}");
+        sqlx::query("UPDATE wiki_pages SET tsv = to_tsvector('simple', $2) WHERE slug = $1")
+            .bind(slug)
+            .bind(agent_memory_search::tokenize::tsv_text(&text))
+            .execute(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+        tsv_written += 1;
     }
+
+    let texts: Vec<String> = pages
+        .iter()
+        .map(|(_, title, content)| format!("{title}\n{content}"))
+        .collect();
+    let mut embedded_pages = 0usize;
+    if !texts.is_empty() {
+        match llm.embed(&texts, ctx.job.id).await {
+            Ok(emb) => {
+                // K4 守卫（移植）：响应数量/维度与批次不符 → 拒绝写入，
+                // 不再静默跳过部分页（短响应旁路）
+                if emb.len() != texts.len() || emb.iter().any(|v| v.len() != 1024) {
+                    tracing::warn!(
+                        source = %source_id,
+                        expected = texts.len(),
+                        got = emb.len(),
+                        "wiki 页嵌入响应与批次不符，本批向量全部放弃（FTS 检索不受影响）"
+                    );
+                    ctx.emit(
+                        "嵌入响应异常，页面保留 FTS 检索（向量缺失）",
+                        Some(json!({"expected": texts.len(), "got": emb.len()})),
+                    )
+                    .await
+                    .ok();
+                } else {
+                    for (i, (slug, _, _)) in pages.iter().enumerate() {
+                        sqlx::query(
+                            "UPDATE wiki_pages SET embedding = $2 WHERE slug = $1",
+                        )
+                        .bind(slug)
+                        .bind(pgvector::Vector::from(emb[i].clone()))
+                        .execute(pool)
+                        .await
+                        .map_err(|e| JobError::Retryable(e.to_string()))?;
+                        embedded_pages += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                // W3：嵌入失败不阻塞——页面已入库、tsv 已写，向量可由下次更新或重跑补
+                tracing::warn!(error = %e, source = %source_id, "wiki 页嵌入失败（FTS 检索不受影响）");
+                ctx.emit(
+                    "嵌入失败，页面保留 FTS 检索（向量缺失）",
+                    Some(json!({"error": e.to_string()})),
+                )
+                .await
+                .ok();
+            }
+        }
+    }
+    let _ = tsv_written;
+    let _ = embedded_pages;
 
     sqlx::query("UPDATE wiki_sources SET status = 'ready', last_ingested_at = now() WHERE id = $1")
         .bind(source_id)
@@ -366,8 +502,10 @@ pub async fn generate_job(
     }
 
     ctx.emit(
-        &format!("Wiki 生成：新建 {created} / 更新 {updated} / 提案 {proposals}"),
-        Some(json!({"created": created, "updated": updated, "proposals": proposals})),
+        &format!(
+            "Wiki 生成：新建 {created} / 更新 {updated} / 提案 {proposals}（{embedded_pages} 页已嵌入）"
+        ),
+        Some(json!({"created": created, "updated": updated, "proposals": proposals, "embedded": embedded_pages})),
     )
     .await
     .ok();
@@ -412,20 +550,25 @@ async fn read_index(pool: &sqlx::PgPool) -> Result<String, JobError> {
         .join("\n"))
 }
 
-/// 重建给定页面的出边（wikilink 边）。
+/// 重建给定页面的出边（wikilink 边）。W6：包事务——与并发 generate 的
+/// 链接重建交错时不再留 DELETE/INSERT 半态。
 async fn rebuild_links(pool: &sqlx::PgPool, slugs: &[String]) -> Result<(), JobError> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
     for slug in slugs {
         let content: Option<String> =
             sqlx::query_scalar("SELECT content FROM wiki_pages WHERE slug = $1")
                 .bind(slug)
-                .fetch_optional(pool)
+                .fetch_optional(&mut *tx)
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?
                 .flatten();
         let Some(content) = content else { continue };
         sqlx::query("DELETE FROM wiki_links WHERE from_slug = $1")
             .bind(slug)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
         for target in extract_wikilinks(&content) {
@@ -435,11 +578,14 @@ async fn rebuild_links(pool: &sqlx::PgPool, slugs: &[String]) -> Result<(), JobE
             )
             .bind(slug)
             .bind(&target)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
         }
     }
+    tx.commit()
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
     Ok(())
 }
 
@@ -472,6 +618,13 @@ async fn update_index_and_log(
         prev_log.unwrap_or_else(|| "# 操作日志\n".into()),
         log_line
     );
+    // W7：截最近 500 行——log 不再无界增长（全量历史由 job_events 承担）
+    let lines: Vec<&str> = log_md.lines().collect();
+    let log_md = if lines.len() > 500 {
+        lines[lines.len() - 500..].join("\n")
+    } else {
+        log_md
+    };
 
     upsert_system_page(pool, "log", "log", "日志", &log_md).await?;
     let _ = source_id;
@@ -543,45 +696,22 @@ async fn upsert_system_page(
     Ok(())
 }
 
-async fn collect_page_texts(
-    pool: &sqlx::PgPool,
-    slugs: &[String],
-) -> Result<Vec<String>, JobError> {
-    let mut out = Vec::new();
-    for slug in slugs {
-        let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT COALESCE(frontmatter->>'title', slug), content FROM wiki_pages WHERE slug = $1",
-        )
-        .bind(slug)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
-        if let Some((title, content)) = row {
-            out.push(format!("{title}\n{content}"));
-        }
-    }
-    Ok(out)
-}
-
-async fn write_embeddings(
-    pool: &sqlx::PgPool,
-    slugs: &[String],
-    embeddings: Vec<Vec<f32>>,
-) -> Result<(), JobError> {
-    for (i, slug) in slugs.iter().enumerate() {
-        if let Some(v) = embeddings.get(i) {
-            sqlx::query(
-                "UPDATE wiki_pages SET embedding = $2, tsv = to_tsvector('simple', $3) WHERE slug = $1",
-            )
-            .bind(slug)
-            .bind(pgvector::Vector::from(v.clone()))
-            .bind(agent_memory_search::tokenize::tsv_text(slug))
-            .execute(pool)
-            .await
-            .map_err(|e| JobError::Retryable(e.to_string()))?;
-        }
-    }
-    Ok(())
+/// W4：Permanent 失败 → wiki_sources 标 failed + error 落列（此前 'failed' 态全代码无人写）。
+async fn mark_source_failed(pool: &sqlx::PgPool, ctx_job: &agent_memory_jobs::types::Job, msg: &str) {
+    let Some(sid) = ctx_job
+        .payload
+        .0
+        .get("source_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| Uuid::parse_str(s).ok())
+    else {
+        return;
+    };
+    let _ = sqlx::query("UPDATE wiki_sources SET status = 'failed', error = $2 WHERE id = $1")
+        .bind(sid)
+        .bind(msg)
+        .execute(pool)
+        .await;
 }
 
 /// 注册 Wiki handler。
@@ -594,10 +724,26 @@ pub fn register_handlers(
     runner
         .register("wiki_analyze", move |ctx| {
             let llm = l1.clone();
-            async move { analyze_job(ctx, llm).await }
+            async move {
+                let pool = ctx.pool().clone();
+                let job = ctx.job.clone();
+                let r = analyze_job(ctx, llm).await;
+                if let Err(agent_memory_jobs::types::JobError::Permanent(msg)) = &r {
+                    mark_source_failed(&pool, &job, msg).await;
+                }
+                r
+            }
         })
         .register("wiki_generate", move |ctx| {
             let llm = l2.clone();
-            async move { generate_job(ctx, llm).await }
+            async move {
+                let pool = ctx.pool().clone();
+                let job = ctx.job.clone();
+                let r = generate_job(ctx, llm).await;
+                if let Err(agent_memory_jobs::types::JobError::Permanent(msg)) = &r {
+                    mark_source_failed(&pool, &job, msg).await;
+                }
+                r
+            }
         })
 }

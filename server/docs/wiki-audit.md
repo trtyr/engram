@@ -42,6 +42,12 @@ ingest() → enqueue_ingest（sha 幂等：ready 秒跳过；非 ready 走 ON CO
 > 按严重度排序。**P0=正确性/数据一致性，P1=质量/健壮性，P2=增强**。
 > 与 gap-analysis G1~G6 及 B/K 系列的关联逐条标注。
 
+> **修复状态（2026-08-27）**：W1~W8 已修复（goal mtb8xsy2；workspace 88 tests + E2E 13/13 全绿）——
+> W1 死锁三锁全解（删自删行+状态感知重入队[analysis 从失败 job payload 直发 generate]）、W2 tsv 改嵌 title+content+检索向量 RRF 通道+启动存量补数、
+> W3 tsv 与嵌入解耦+K4 守卫移植+失败事件、W4 0014 error 列+Permanent 统一 mark_failed+自愈、W5 级联删边+无据边回收+权重重算、
+> W6 页写入单语句 UPSERT（human 保护进 WHERE）+rebuild_links 事务化、W7 log 截 500 行、W8 alias 结构化移除。
+> 未修：W9~W14（P2 级，按需排期）。
+
 ### P0
 
 **W1 · 失败重试三重死锁——幂等键墙 + 冲突路径自删原料文件 + generate 无独立重试（E2E 实测根因确认）**

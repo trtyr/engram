@@ -102,9 +102,10 @@ pub async fn cascade_delete_source(
             if dead.is_empty() {
                 continue;
             }
-            let mut cleaned = content.clone();
+            // W8：结构化移除（含 [[slug|别名]] 形式）——精确串替换会留 `|别名]]` 裸碎片
+            let mut cleaned = content;
             for d in &dead {
-                cleaned = cleaned.replace(&format!("[[{d}]]"), "");
+                cleaned = crate::markup::remove_wikilinks(&cleaned, d);
             }
             let cleaned = cleaned.replace("\n\n\n", "\n\n");
             sqlx::query("UPDATE wiki_pages SET content = $2, updated_at = now() WHERE slug = $1")
@@ -124,6 +125,16 @@ pub async fn cascade_delete_source(
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
+    // W5：幽灵边——指向已删页面的 wiki_links 边必须在事务内一并删除
+    // （旧实现只清 content 里的 [[link]] 文本，边表残留悬空边污染图视图与洞察）
+    if !delete_slugs.is_empty() {
+        sqlx::query("DELETE FROM wiki_links WHERE from_slug = ANY($1) OR to_slug = ANY($1)")
+            .bind(&delete_slugs)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+    }
+
     tx.commit()
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -131,6 +142,52 @@ pub async fn cascade_delete_source(
     // 4. index.md 同步（派生数据，事务外幂等重建）
     if !delete_slugs.is_empty() {
         crate::ingest::rebuild_index_page(pool).await?;
+    }
+
+    // 5. W5：无据边清理——摘源后，既无内容 wikilink 又无共享源的边不再成立，删除
+    //    （源重叠补边只在 ingest 时新增，从不回收——摘源后成为无据残留）
+    for slug in report.updated_shared.clone() {
+        let others: Vec<String> = sqlx::query_scalar(
+            "SELECT to_slug FROM wiki_links WHERE from_slug = $1 \
+             UNION SELECT from_slug FROM wiki_links WHERE to_slug = $1",
+        )
+        .bind(&slug)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        for other in others {
+            let pages: Vec<(String, String, Vec<String>)> = sqlx::query_as(
+                "SELECT slug, content, \
+                 ARRAY(SELECT jsonb_array_elements_text(frontmatter->'sources')) \
+                 FROM wiki_pages WHERE slug = ANY($1)",
+            )
+            .bind(vec![slug.clone(), other.clone()])
+            .fetch_all(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+            if pages.len() != 2 {
+                continue; // 对端已删（幽灵边已被上面事务内清理）
+            }
+            let (a, b) = (&pages[0], &pages[1]);
+            let direct = extract_wikilinks(&a.1).contains(&other) || extract_wikilinks(&b.1).contains(&slug);
+            let shared = a.2.iter().any(|s| b.2.contains(s));
+            if !direct && !shared {
+                sqlx::query(
+                    "DELETE FROM wiki_links \
+                     WHERE (from_slug = $1 AND to_slug = $2) OR (from_slug = $2 AND to_slug = $1)",
+                )
+                .bind(&slug)
+                .bind(&other)
+                .execute(pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+            }
+        }
+    }
+
+    // 6. W5：权重重算（删除/摘源后剩余边的 4 信号权重修正）
+    if !delete_slugs.is_empty() || !report.updated_shared.is_empty() {
+        crate::relevance::rebuild_weights(pool).await?;
     }
 
     Ok(report)

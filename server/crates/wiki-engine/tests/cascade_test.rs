@@ -12,7 +12,15 @@ async fn setup() -> (sqlx::PgPool, WikiService, support::TestPg) {
     agent_memory_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    (pool.clone(), WikiService::new(pool), container)
+    let registry = agent_memory_llm::ProviderRegistry::new(
+        pool.clone(),
+        agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+    );
+    (
+        pool.clone(),
+        WikiService::new(pool, registry),
+        container,
+    )
 }
 
 #[tokio::test]
@@ -92,4 +100,80 @@ async fn cascade_delete_removes_source_and_downstream() {
             .await
             .unwrap();
     assert_eq!(concept_sources, 0, "共享页 sources 应摘除该 source");
+}
+
+// ---------- W5：级联删除不留幽灵边（事务内删边 + 无据边回收 + 权重重算） ----------
+
+#[tokio::test]
+async fn w5_cascade_cleans_dangling_and_baseless_edges() {
+    let (pool, wiki, _pg) = setup().await;
+
+    let sid = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO wiki_sources (id, sha256, raw_path, title, status) VALUES ($1, $2, '/tmp/w5.md', 'W5源', 'ready')")
+        .bind(sid)
+        .bind(format!("sha-w5-{}", uuid::Uuid::now_v7().simple()))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    async fn mk_page(
+        pool: &sqlx::PgPool,
+        slug: &str,
+        pt: &str,
+        sources: serde_json::Value,
+    ) {
+        let id = uuid::Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, tsv) \
+             VALUES ($1, $2, $2, $3, $4, $5::jsonb, 'llm', NULL)",
+        )
+        .bind(id)
+        .bind(slug)
+        .bind(pt)
+        .bind(format!("# {slug}\n\n内容。"))
+        .bind(sources)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    // 源摘要页（独源→整删）+ 两个共享页（摘源后不再有任何关联依据）
+    mk_page(&pool, "w5-src", "source", serde_json::json!({"sources": [sid.to_string()]})).await;
+    mk_page(&pool, "w5-a", "concept", serde_json::json!({"sources": [sid.to_string()]})).await;
+    mk_page(&pool, "w5-b", "concept", serde_json::json!({"sources": [sid.to_string()]})).await;
+
+    // 源重叠边生成（三页两两无向双插，与真实 ingest 相同路径）
+    agent_memory_wiki_engine::relevance::rebuild_weights(&pool)
+        .await
+        .unwrap();
+    let edges_before: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_links WHERE from_slug LIKE 'w5-%' OR to_slug LIKE 'w5-%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(edges_before >= 4, "源重叠边应已生成: {edges_before}");
+
+    // 级联删除
+    let report = wiki.delete_source_cascade(sid).await.unwrap();
+    assert_eq!(report.deleted_pages, vec!["w5-src".to_string()]);
+    assert_eq!(report.updated_shared.len(), 2, "两个共享页摘源");
+
+    // 幽灵边：不得存在任何指向 w5-src 的边
+    let dangling: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_links WHERE from_slug = 'w5-src' OR to_slug = 'w5-src'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(dangling, 0, "删页后不得有悬空边");
+
+    // 无据边：w5-a 与 w5-b 已无共享源也无内容互链 → 边必须被回收
+    let baseless: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_links \
+         WHERE (from_slug = 'w5-a' AND to_slug = 'w5-b') OR (from_slug = 'w5-b' AND to_slug = 'w5-a')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(baseless, 0, "摘源后无据边应被回收");
 }

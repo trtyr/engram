@@ -25,7 +25,7 @@ fn we(e: WikiError) -> ApiError {
 }
 
 fn svc(state: &AppState) -> WikiService {
-    WikiService::new(state.pool.clone())
+    WikiService::new(state.pool.clone(), state.registry())
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

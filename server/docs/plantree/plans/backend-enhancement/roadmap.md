@@ -7,9 +7,9 @@
 - **2026-08-26：P0 五项（R1~R5）全部落地**，独立审计通过（goal `mt9ydklt-ze8023`）。
   R1 `core/unified.rs` + `POST /search`；R2 `tsv_query_smart` 覆盖全部 4 个 FTS 调用点；R3 context_pack L1 走 `search_atoms`；R4 cascade 全写操作包事务；R5 `CircuitBreaker` + `Retry-After`（含 HTTP-date、HalfOpen 单试探）。`cargo test --workspace` 66 passed。
 
-## 新增（2026-08-27 wiki-audit 发现，未排期）
+## 新增（2026-08-27 wiki-audit 发现；W1~W8 已于同日修复 ✅）
 
-来源：[wiki-audit.md](../../../wiki-audit.md) W1~W14。**P0×3**：W1 失败重试三重死锁（幂等键墙+冲突路径自删原料文件[with_extension 同路径语义 rustc 实测]+generate 无独立重试；E2E 实测 JSON 抖动脆点的根因确认；=K1 同构且更糟）、W2 tsv 三写三标+检索无向量通道（LLM 页只嵌 slug→内容词搜不到；embedding/HNSW 建而不用）、W3 嵌入失败静默跳过 tsv（页面从检索彻底消失，比 K4 更彻底）。**P1×5**：W4 'failed' 态是幽灵（全代码无人写，卡 processing 误导）、W5 级联删除幽灵边（wiki_links 残边+源重叠权重不重算）、W6 并发 generate 竞态（=G1 具体化：slug UNIQUE 撞车/版本互相覆盖）、W7 log 页无界增长、W8 dead link 清理不吃 [[slug|alias]] 形式。**P2×6**：W9 reingest 无幂等键+review 重复、W10 archive_query slug 不校验、W11 摘源不 bump version、W12 human 提案只活事件流（应进 review_items）、W13 frontmatter 垃圾字段+系统页 title 不可更、W14 全提案轮不重算+lint N+1。关联：W1←K1 修法平移+B5 实录场景（wiki_generate JSON 抖动）、W2←G4 查询侧缺口、W3←B2/K4/K8 嵌入静默失败家族、W6←G1 并发去重、W7←G5 log 设计缺口。建议起点：W1→W2（含存量补数 SQL）→W3→W4/W5 一个 goal 连续修（W1~W4 高度相关）。
+来源：[wiki-audit.md](../../../wiki-audit.md) W1~W14。**P0×3**：W1 失败重试三重死锁（幂等键墙+冲突路径自删原料文件[with_extension 同路径语义 rustc 实测]+generate 无独立重试；E2E 实测 JSON 抖动脆点的根因确认；=K1 同构且更糟）、W2 tsv 三写三标+检索无向量通道（LLM 页只嵌 slug→内容词搜不到；embedding/HNSW 建而不用）、W3 嵌入失败静默跳过 tsv（页面从检索彻底消失，比 K4 更彻底）。**P1×5**：W4 'failed' 态是幽灵（全代码无人写，卡 processing 误导）、W5 级联删除幽灵边（wiki_links 残边+源重叠权重不重算）、W6 并发 generate 竞态（=G1 具体化：slug UNIQUE 撞车/版本互相覆盖）、W7 log 页无界增长、W8 dead link 清理不吃 [[slug|alias]] 形式。**P2×6**：W9 reingest 无幂等键+review 重复、W10 archive_query slug 不校验、W11 摘源不 bump version、W12 human 提案只活事件流（应进 review_items）、W13 frontmatter 垃圾字段+系统页 title 不可更、W14 全提案轮不重算+lint N+1。关联：W1←K1 修法平移+B5 实录场景（wiki_generate JSON 抖动）、W2←G4 查询侧缺口、W3←B2/K4/K8 嵌入静默失败家族、W6←G1 并发去重、W7←G5 log 设计缺口。建议起点：~~W1→W2→W3→W4/W5~~（已全部落地，2026-08-27 goal mtb8xsy2：workspace 88 tests + E2E 13/13 全绿，含 0014 迁移与 api 启动 tsv 补数；剩 W9~W14 P2 按需）。
 
 ## 新增（2026-08-27 knowledge-audit 发现；K1~K9 已于同日修复 ✅）
 

@@ -64,6 +64,29 @@ pub fn parse_frontmatter_sources(fm_text: &str) -> Vec<String> {
     out
 }
 
+/// W8：从正文中移除指向 `slug` 的全部 wikilink（**含 `[[slug|别名]]` 形式**）。
+/// cascade 清 dead link 用——精确串替换只吃 `[[slug]]`，alias 形式会留 `|别名]]` 裸碎片。
+pub fn remove_wikilinks(content: &str, slug: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut i = 0;
+    while i < content.len() {
+        if content[i..].starts_with("[[")
+            && let Some(end_rel) = content[i + 2..].find("]]")
+        {
+            let inner = &content[i + 2..i + 2 + end_rel];
+            let target = inner.split('|').next().unwrap_or("").trim();
+            if target == slug {
+                i += 2 + end_rel + 2; // 跳过整个链接（含别名与闭合符）
+                continue;
+            }
+        }
+        let ch = content[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,5 +114,24 @@ mod tests {
         assert_eq!(parse_frontmatter_sources(inline), vec!["s1", "s2"]);
         let multi = "title: x\nsources:\n  - s1\n  - s2\nother: y";
         assert_eq!(parse_frontmatter_sources(multi), vec!["s1", "s2"]);
+    }
+
+    #[test]
+    fn w8_remove_wikilinks_handles_alias() {
+        // W8：别名形式整链移除，不留 `|别名]]` 裸碎片
+        let md = "参见 [[dead]] 与 [[dead|别名]]，以及 [[live|活链]]。";
+        let out = remove_wikilinks(md, "dead");
+        assert!(!out.contains("dead"), "{out}");
+        assert!(!out.contains("别名"), "别名形式的链接体必须整体移除: {out}");
+        assert!(out.contains("[[live|活链]]"), "活链不受影响: {out}");;
+
+        // 中文 slug 与重复出现（移除后留双空格属正常——链接占位两侧空格保留）
+        let md2 = "前 [[中文页]] 中 [[中文页|显示]] 后";
+        let out2 = remove_wikilinks(md2, "中文页");
+        assert_eq!(out2.trim(), "前  中  后");
+
+        // 无关内容原样保留（含多字节字符边界）
+        let md3 = "# 标题\n\n普通文字 🎉 保留。";
+        assert_eq!(remove_wikilinks(md3, "ghost"), md3);
     }
 }

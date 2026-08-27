@@ -97,6 +97,11 @@ async def main() -> None:
         eq(acc.get("skipped"), False, f"第{attempt + 1}次 ingest 未跳过")
         st = _wait_wiki_jobs(wiki, after=t0)
         if st.get("wiki_analyze") == "succeeded" and st.get("wiki_generate") == "succeeded":
+            # LLM 偶发不生成 source 摘要页（非失败，但后续断言依赖）——软重试一次
+            got = wiki.get("/wiki/pages", params={"limit": 100})
+            if attempt < 2 and not any(pg["page_type"] == "source" for pg in got):
+                print(f"[retry] 第{attempt + 1}次未生成 source 摘要页，换文本重试")
+                continue
             ok_run = True
             break
         print(f"[retry] 第{attempt + 1}次 generate 未成功（{st}），换文本重试")
@@ -125,6 +130,20 @@ async def main() -> None:
     section("index 系统页重建")
     index = wiki.get("/wiki/pages/index")
     ok("[" in index["content"], "index 页含页面链接列表")
+
+    section("W2：内容词检索（tsv 含 title+content，非仅 slug）")
+    # 「窃取」「提交」出自源文本正文，LLM 摘要页内容必含；不会出现在任何 slug 里。
+    # 旧实现 tsv 只嵌 slug——这两词检索零命中。
+    resp = wiki.post("/wiki/search", json={"query": "窃取 提交", "max_items": 20})
+    hits = resp.get("pages", resp) if isinstance(resp, dict) else resp
+    ok(len(hits) >= 1, f"内容词（非 slug 词）检索命中（{len(hits)}）")
+    if hits:
+        h0 = hits[0]
+        ok(bool(h0["slug"]) and bool(h0["content"]), "命中带 slug 与 content")
+    # slug 词检索依旧可用（回归保障）
+    resp2 = wiki.post("/wiki/search", json={"query": "tokio", "max_items": 20})
+    hits2 = resp2.get("pages", resp2) if isinstance(resp2, dict) else resp2
+    ok(len(hits2) >= 1, f"slug 词检索仍命中（{len(hits2)}）")
 
     section("review 系统：确定性预置 + resolve 全流程")
     subprocess.run(

@@ -246,6 +246,10 @@ pub struct MockLlm {
     pub chats: std::sync::Mutex<std::collections::VecDeque<String>>,
     /// embedding 固定输出维度
     pub embed_dim: usize,
+    /// 测试注入（W3）：embed 一律失败
+    pub embed_fail: bool,
+    /// 测试注入（W3/K4）：embed 短响应（比输入少一条）
+    pub embed_short: bool,
 }
 
 impl MockLlm {
@@ -258,6 +262,8 @@ impl MockLlm {
         Self {
             chats: std::sync::Mutex::new(chats.into_iter().collect()),
             embed_dim: 1024, // 与存储层 vector(1024) 一致（D0010）
+            embed_fail: false,
+            embed_short: false,
         }
     }
 }
@@ -289,8 +295,14 @@ impl DistillLlm for MockLlm {
         Box<dyn std::future::Future<Output = Result<Vec<Vec<f32>>, JobError>> + Send + 'a>,
     > {
         Box::pin(async move {
+            // W3/K4 测试注入：失败 / 短响应路径
+            if self.embed_fail {
+                return Err(JobError::Permanent("mock embed 失败（注入）".into()));
+            }
+            let n = texts.len() - usize::from(self.embed_short && texts.len() > 1);
             Ok(texts
                 .iter()
+                .take(n)
                 .map(|t| {
                     // 内容确定性的伪向量（相似文本相近：hash 混合）。
                     // +1 保证非零：B2 的零向量守卫会把全零嵌入过滤为 NULL

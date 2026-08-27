@@ -1,6 +1,9 @@
 //! Wiki 服务层：页面 CRUD、图数据、ingest 入口、lint 调用。
 
 use agent_memory_jobs::{JobQueue, JobTemplate};
+use agent_memory_llm::ProviderRegistry;
+use agent_memory_llm::provider::LlmProvider as _;
+use agent_memory_llm::types::{EmbedRequest, Purpose};
 use agent_memory_search::tokenize::tsv_text;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -85,12 +88,15 @@ pub struct GraphEdge {
 pub struct WikiService {
     pool: sqlx::PgPool,
     queue: JobQueue,
+    /// W2：检索向量通道需要查询嵌入（无 provider 时退纯 FTS）
+    registry: ProviderRegistry,
 }
 
 impl WikiService {
-    pub fn new(pool: sqlx::PgPool) -> Self {
+    pub fn new(pool: sqlx::PgPool, registry: ProviderRegistry) -> Self {
         Self {
             queue: JobQueue::new(pool.clone()),
+            registry,
             pool,
         }
     }
@@ -236,22 +242,85 @@ impl WikiService {
         self.put_page(slug, title, content).await
     }
 
-    /// Wiki 检索（FTS + 向量 RRF）。purpose 注入：检索走 LLM 时（AI 客户端
-    /// 读 query_context.purpose）提供方向意图——对齐 llm_wiki 的 query 注入。
+    /// Wiki 检索（FTS + 向量 RRF 融合；W2：向量通道落地）。
+    /// purpose 注入：检索走 LLM 时（AI 客户端读 query_context.purpose）提供方向意图——对齐 llm_wiki 的 query 注入。
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<WikiPageDto>, WikiError> {
         // K7：单字/纯标点无 token → 短路空结果（不再空跑 to_tsquery）
         if !agent_memory_search::tokenize::has_query_tokens(query) {
             return Ok(vec![]);
         }
         let tsq = agent_memory_search::tokenize::tsv_query_smart(query, 3);
-        Ok(sqlx::query_as::<_, WikiPageDto>(
-            "SELECT * FROM wiki_pages, to_tsquery('simple', $1) q \
-             WHERE tsv @@ q ORDER BY ts_rank(tsv, q) DESC LIMIT $2",
+        let limit = limit.min(50);
+
+        // W2：查询向量（无 provider / 嵌入失败 → None → 纯 FTS）
+        let qv: Option<Vec<f32>> = match self.registry.resolve(Purpose::Embed).await {
+            Ok((provider, model)) => provider
+                .embed(EmbedRequest {
+                    model,
+                    inputs: vec![query.to_string()],
+                    dimensions: Some(1024),
+                })
+                .await
+                .ok()
+                .and_then(|r| r.embeddings.first().cloned()),
+            Err(_) => None,
+        };
+
+        if let Some(qv) = qv {
+            // FTS + ANN 双候选 + RRF 融合（与 knowledge 同款模式）
+            let rows: Vec<WikiPageDto> = sqlx::query_as(
+                "WITH fts AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
+                 FROM wiki_pages, to_tsquery('simple', $1) q WHERE tsv @@ q LIMIT 100), \
+                 vec AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY embedding <=> $2) AS rank \
+                 FROM wiki_pages WHERE embedding IS NOT NULL LIMIT 100) \
+                 SELECT p.* FROM wiki_pages p \
+                 LEFT JOIN fts ON fts.slug = p.slug \
+                 LEFT JOIN vec ON vec.slug = p.slug \
+                 WHERE fts.slug IS NOT NULL OR vec.slug IS NOT NULL \
+                 ORDER BY (COALESCE(1.0/(60 + fts.rank), 0) + COALESCE(1.0/(60 + vec.rank), 0)) DESC \
+                 LIMIT $3",
+            )
+            .bind(tsq)
+            .bind(pgvector::Vector::from(qv))
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
+            Ok(rows)
+        } else {
+            Ok(sqlx::query_as::<_, WikiPageDto>(
+                "SELECT * FROM wiki_pages, to_tsquery('simple', $1) q \
+                 WHERE tsv @@ q ORDER BY ts_rank(tsv, q) DESC LIMIT $2",
+            )
+            .bind(tsq)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?)
+        }
+    }
+
+    /// W2 存量补数：LLM 页 tsv 曾只嵌 slug——重写为 title+content 口径。
+    /// 幂等（值不变不写）；jieba 分词必须经 Rust，故逐页计算。
+    pub async fn backfill_tsv(&self) -> Result<u64, WikiError> {
+        let pages: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT slug, COALESCE(frontmatter->>'title', slug), content FROM wiki_pages \
+             WHERE origin = 'llm' AND page_type NOT IN ('index','log','overview')",
         )
-        .bind(tsq)
-        .bind(limit.min(50))
         .fetch_all(&self.pool)
-        .await?)
+        .await?;
+        let mut n = 0u64;
+        for (slug, title, content) in &pages {
+            let text = format!("{title}\n{content}");
+            let r = sqlx::query(
+                "UPDATE wiki_pages SET tsv = to_tsvector('simple', $2) \
+                 WHERE slug = $1 AND tsv IS DISTINCT FROM to_tsvector('simple', $2)",
+            )
+            .bind(slug)
+            .bind(agent_memory_search::tokenize::tsv_text(&text))
+            .execute(&self.pool)
+            .await?;
+            n += r.rows_affected();
+        }
+        Ok(n)
     }
 
     /// 检索上下文包（query 时 purpose 注入的载体）：purpose + 命中页面，

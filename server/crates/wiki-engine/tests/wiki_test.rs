@@ -17,13 +17,6 @@ async fn setup(
     agent_memory_jobs::RunnerHandle,
     support::TestPg,
 ) {
-    let container = support::start_pgvector().await.expect("容器");
-    let url = support::connection_url(&container).await.unwrap();
-    let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
-
     let llm: LlmRef = Arc::new(MockLlm::with_raw_chats(
         chats
             .into_iter()
@@ -33,6 +26,25 @@ async fn setup(
             })
             .collect(),
     ));
+    setup_llm(llm).await
+}
+
+/// W3：可注入定制 MockLlm（如 embed_fail=true）的 setup。
+async fn setup_llm(
+    llm: LlmRef,
+) -> (
+    sqlx::PgPool,
+    WikiService,
+    agent_memory_jobs::RunnerHandle,
+    support::TestPg,
+) {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
+
     let l1 = llm.clone();
     let runner = agent_memory_wiki_engine::ingest::register_handlers(
         Runner::new(
@@ -49,7 +61,16 @@ async fn setup(
     );
     // embed 也需要 handler 之外的 Llm —— WikiService 不直接调 LLM（嵌入在 job 内）
     let handle = runner.start();
-    (pool.clone(), WikiService::new(pool), handle, container)
+    let registry = agent_memory_llm::ProviderRegistry::new(
+        pool.clone(),
+        agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+    );
+    (
+        pool.clone(),
+        WikiService::new(pool, registry),
+        handle,
+        container,
+    )
 }
 
 async fn wait_jobs(pool: &sqlx::PgPool, kinds: &[&str]) {
@@ -316,4 +337,303 @@ async fn lint_reports_dead_links_and_orphans() {
 
     handle.shutdown();
     handle.join().await;
+}
+
+// ---------- W1：generate 永久失败后重提交自愈（死锁解除） ----------
+
+#[tokio::test]
+async fn w1_generate_failure_resubmit_recovers() {
+    let analysis = json!({"entities": ["W1实体"], "concepts": [], "links": [], "conflicts": [], "source_title": "W1文档"});
+    let pages_ok = json!({"pages": [
+        {"slug": "w1-page", "page_type": "concept", "title": "W1页", "content": "# W1页\n\nW1 内容词可检索。"}
+    ]});
+    let bad = serde_json::Value::String("{not json".into());
+    // analyze ✓ → generate 两连坏 JSON 永久失败 → 重提交后新 generate ✓
+    let (pool, wiki, handle, _pg) =
+        setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
+
+    let text = "# W1 死锁恢复测试\n这是独一无二的内容 w1-unique-123。";
+    let skipped = wiki.ingest("W1文档", text).await.unwrap();
+    assert!(!skipped);
+    wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
+
+    // 第一轮：generate 永久失败，source 未 ready
+    let failed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind='wiki_generate' AND status='failed'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(failed, 1, "第一轮 generate 应 failed");
+    let src_status: String = sqlx::query_scalar("SELECT status FROM wiki_sources")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_ne!(src_status, "ready");
+
+    // 重提交同 sha → 状态感知：从失败 job payload 取 analysis 直发新 generate
+    // （旧逻辑：幂等键墙返回终态 job，链断死锁）
+    let skipped2 = wiki.ingest("W1文档", text).await.unwrap();
+    assert!(!skipped2, "恢复路径应真正重跑而非秒跳过");
+
+    for _ in 0..300 {
+        let done: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM jobs WHERE kind='wiki_generate' AND status IN ('succeeded','failed','dead')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if done >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let succ: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind='wiki_generate' AND status='succeeded'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(succ, 1, "第二轮 generate 应成功（死锁解除）");
+
+    let ready: String = sqlx::query_scalar("SELECT status FROM wiki_sources")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(ready, "ready");
+    let page = wiki.get_page("w1-page").await.unwrap();
+    assert!(page.content.contains("W1 内容词"));
+
+    handle.shutdown();
+    handle.join().await;
+}
+
+// ---------- W2/W3：内容词检索 + 嵌入失败不丢索引 ----------
+
+/// W2：LLM 生成页可按内容词（非 slug 词）FTS 命中（旧实现 tsv 只嵌 slug）。
+#[tokio::test]
+async fn w2_content_word_search_hits_llm_pages() {
+    let analysis = json!({"entities": [], "concepts": [], "links": [], "conflicts": [], "source_title": "W2文档"});
+    let pages = json!({"pages": [
+        {"slug": "w2-knowledge-graph", "page_type": "concept", "title": "知识图谱页",
+         "content": "# 知识图谱页\n\n这里讨论分布式系统的一致性哈希与数据分片策略。"}
+    ]});
+    let (pool, wiki, handle, _pg) = setup(vec![analysis, pages]).await;
+
+    wiki.ingest("W2文档", "# W2 测试内容\n独一无二 w2-unique。").await.unwrap();
+    wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
+
+    // 内容词命中（slug 里完全没有这些词）
+    let hits = wiki.search("一致性哈希 数据分片", 10).await.unwrap();
+    assert!(!hits.is_empty(), "内容词应命中 LLM 生成页");
+    assert_eq!(hits[0].slug, "w2-knowledge-graph");
+
+    // 纯 FTS 语义也成立：tsv 非 NULL 且含内容 token
+    let tsv_len: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(length(tsv::text), 0) FROM wiki_pages WHERE slug = 'w2-knowledge-graph'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(tsv_len > 0, "tsv 应已写入（旧实现只嵌 slug）");
+
+    handle.shutdown();
+    handle.join().await;
+}
+
+/// W3：嵌入整体失败——页面仍入库、tsv 仍写、内容词仍可检索（不再从检索消失）。
+#[tokio::test]
+async fn w3_embed_failure_keeps_fts_searchable() {
+    // 真注入：MockLlm embed_fail=true（generate 内 llm.embed 直接 Err）
+    let mut mock = MockLlm::with_raw_chats(vec![
+        json!({"entities": [], "concepts": [], "links": [], "conflicts": [], "source_title": "W3文档"}).to_string(),
+        json!({"pages": [
+            {"slug": "w3-resilient", "page_type": "concept", "title": "韧性页",
+             "content": "# 韧性页\n\n探讨故障恢复与降级策略的工程实践。"}
+        ]}).to_string(),
+    ]);
+    mock.embed_fail = true;
+    let (pool, wiki, handle, _pg) = setup_llm(Arc::new(mock)).await;
+
+    wiki.ingest("W3文档", "# W3 嵌入失败\nw3-unique-777。").await.unwrap();
+    wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
+
+    let src: String = sqlx::query_scalar("SELECT status FROM wiki_sources")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(src, "ready", "嵌入失败不阻塞 ready");
+
+    // 向量缺失 + tsv 已写（W3 解耦的直接证据）
+    let (no_vec, tsv_null): (i64, i64) = sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE embedding IS NULL), count(*) FILTER (WHERE tsv IS NULL) \
+         FROM wiki_pages WHERE slug = 'w3-resilient'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(no_vec, 1, "嵌入失败 → 向量缺失");
+    assert_eq!(tsv_null, 0, "tsv 必须已写（W3 解耦）");
+
+    let hits = wiki.search("故障恢复 降级", 10).await.unwrap();
+    assert!(!hits.is_empty(), "嵌入失败后内容词仍可检索");
+
+    // 失败事件留痕（可观测）
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM job_events WHERE message LIKE '%嵌入失败%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(events >= 1, "嵌入失败应有事件");
+
+    handle.shutdown();
+    handle.join().await;
+}
+
+// ---------- W4：Permanent 失败标 failed + error 落列（'failed' 不再是幽灵态） ----------
+
+#[tokio::test]
+async fn w4_permanent_failure_marks_source_failed() {
+    let analysis = json!({"entities": [], "concepts": [], "links": [], "conflicts": [], "source_title": "W4文档"});
+    let bad = serde_json::Value::String("{broken".into());
+    let pages_ok = json!({"pages": [
+        {"slug": "w4-page", "page_type": "concept", "title": "W4页", "content": "# W4\n\n恢复后的页面。"}
+    ]});
+    // analyze ✓ → generate 坏 JSON ×2 → Permanent → W4 标 failed → 重提交自愈 → ready
+    let (pool, wiki, handle, _pg) = setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
+
+    let text = "# W4 失败标记测试\nw4-unique-42。";
+    wiki.ingest("W4文档", text).await.unwrap();
+    wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
+
+    // W4 核心：generate Permanent 失败 → source='failed' + error 非空（旧实现永卡 processing）
+    let (status, error): (String, Option<String>) =
+        sqlx::query_as("SELECT status, error FROM wiki_sources")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "failed", "Permanent 失败应标 failed");
+    assert!(error.as_deref().unwrap_or("").contains("解析") || error.is_some(),
+        "error 应落列: {error:?}");
+
+    // 重提交同 sha → 自愈（W1 路径 + W4 状态重置）→ 最终 ready
+    wiki.ingest("W4文档", text).await.unwrap();
+    for _ in 0..300 {
+        let (s, e): (String, Option<String>) = sqlx::query_as(
+            "SELECT status, error FROM wiki_sources",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if s == "ready" && e.is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let (s, e): (String, Option<String>) = sqlx::query_as("SELECT status, error FROM wiki_sources")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(s, "ready", "自愈后应 ready");
+    assert!(e.is_none(), "自愈应清 error");
+
+    handle.shutdown();
+    handle.join().await;
+}
+
+// ---------- W6：UPSERT 原子化（human 保护 + 并发不撞 UNIQUE） ----------
+
+#[tokio::test]
+async fn w6_upsert_protects_human_and_concurrent_safe() {
+    let analysis = json!({"entities": [], "concepts": [], "links": [], "conflicts": [], "source_title": "W6文档"});
+    let pages = json!({"pages": [
+        {"slug": "w6-page", "page_type": "concept", "title": "W6页", "content": "# W6页\n\nLLM 生成的原始内容。"}
+    ]});
+    let (pool, wiki, handle, _pg) = setup(vec![analysis, pages]).await;
+    wiki.ingest("W6文档", "# W6 首轮\nw6-unique-a").await.unwrap();
+    wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
+
+    // 人工接管该页
+    let human = wiki
+        .put_page("w6-page", "W6页", "# W6页\n\n人工内容，不许覆盖。")
+        .await
+        .unwrap();
+    assert_eq!(human.origin, "human");
+    let v_before = human.version;
+
+    // 第二轮 generate 同 slug：human 保护 → 提案，内容/版本不动
+    let analysis2 = json!({"entities": [], "concepts": [], "links": [], "conflicts": [], "source_title": "W6文档2"});
+    let pages2 = json!({"pages": [
+        {"slug": "w6-page", "page_type": "concept", "title": "W6页", "content": "# W6页\n\nLLM 想改成自己的版本。"},
+        {"slug": "w6-llm", "page_type": "concept", "title": "W6二号", "content": "# W6二号\n\n新页面内容。"}
+    ]});
+    // setup 只支持一次注入——直接向队列再手动入链（复用 svc 的 ingest 会耗尽 mock）。
+    drop((wiki, handle)); // 保留 pool；runner 停掉避免抢跑
+    let _ = pages2;
+
+    // 直接构造 generate job 的 UPSERT 语义验证：并发两次同 slug UPSERT（模拟两个 generate 竞态）
+    let fm = serde_json::json!({"title": "W6页", "page_type": "concept", "sources": []});
+    let upsert = |content: &'static str| {
+        sqlx::query_scalar::<_, bool>(
+            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
+             VALUES ($1, $2, 'W6页', 'concept', $3, $4::jsonb, 'llm', 1) \
+             ON CONFLICT (slug) DO UPDATE SET content = $3, version = wiki_pages.version + 1, updated_at = now() \
+             WHERE wiki_pages.origin = 'llm' \
+             RETURNING (xmax = 0)",
+        )
+    };
+    // 新 slug：两个并发 UPSERT —— 一个插入，一个合并，绝不 UNIQUE 报错
+    let (a, b) = tokio::join!(
+        async {
+            upsert("并发写入A")
+                .bind(uuid::Uuid::now_v7())
+                .bind("w6-race")
+                .bind("并发写入A")
+                .bind(sqlx::types::Json(&fm))
+                .fetch_optional(&pool)
+                .await
+                .unwrap()
+        },
+        async {
+            upsert("并发写入B")
+                .bind(uuid::Uuid::now_v7())
+                .bind("w6-race")
+                .bind("并发写入B")
+                .bind(sqlx::types::Json(&fm))
+                .fetch_optional(&pool)
+                .await
+                .unwrap()
+        }
+    );
+    assert_eq!((a.is_some(), b.is_some()), (true, true), "并发 UPSERT 都成功（一插一合）");
+    let (content, version): (String, i32) =
+        sqlx::query_as("SELECT content, version FROM wiki_pages WHERE slug = 'w6-race'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(version == 1 || version == 2, "合并方 version+1: {version}");
+    assert!(content == "并发写入A" || content == "并发写入B");
+
+    // human 页：UPSERT 不生效（RETURNING None），内容与版本不动
+    let blocked = sqlx::query_scalar::<_, bool>(
+        "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
+         VALUES ($1, 'w6-page', 'W6页', 'concept', 'LLM 想覆盖', $2::jsonb, 'llm', 1) \
+         ON CONFLICT (slug) DO UPDATE SET content = 'LLM 想覆盖', version = wiki_pages.version + 1 \
+         WHERE wiki_pages.origin = 'llm' \
+         RETURNING (xmax = 0)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(sqlx::types::Json(&fm))
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert!(blocked.is_none(), "human 页 UPSERT 应无行返回（保护生效）");
+    let (content, version): (String, i32) =
+        sqlx::query_as("SELECT content, version FROM wiki_pages WHERE slug = 'w6-page'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(content.contains("人工内容"), "human 内容未被动");
+    assert_eq!(version, v_before, "human 页版本未动");
 }

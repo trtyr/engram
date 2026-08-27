@@ -73,7 +73,7 @@ impl UnifiedSearch {
         let mem = MemoryService::new(self.pool.clone(), self.registry.clone());
         let know =
             KnowledgeService::new(self.pool.clone(), self.registry.clone(), self.data_dir.clone());
-        let wiki = WikiService::new(self.pool.clone());
+        let wiki = WikiService::new(self.pool.clone(), self.registry.clone());
 
         // 三域并行检索（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
         let (mem_res, know_res, wiki_res) = tokio::join!(

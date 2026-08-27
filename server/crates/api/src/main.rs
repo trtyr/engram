@@ -70,6 +70,23 @@ async fn main() -> anyhow::Result<()> {
         .with_admin_password(cfg.admin_password.clone())
         .with_master_key(cfg.master_key.clone())
         .with_data_dir(cfg.data_dir.clone());
+
+    // W2 存量补数：LLM 页 tsv 曾只嵌 slug，启动时异步重写为 title+content 口径
+    // （幂等：值不变不写；失败仅告警不影响服务）
+    {
+        let st = state.clone();
+        tokio::spawn(async move {
+            let registry = st.registry();
+            let wiki =
+                agent_memory_core::wiki::WikiService::new(st.pool.clone(), registry);
+            match wiki.backfill_tsv().await {
+                Ok(n) if n > 0 => tracing::info!("wiki tsv 存量补数完成：{n} 页"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!("wiki tsv 存量补数失败（下次启动重试）: {e}"),
+            }
+        });
+    }
+
     let app = routes::router(state).layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], cfg.port));
