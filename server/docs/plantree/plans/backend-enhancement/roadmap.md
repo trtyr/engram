@@ -9,7 +9,7 @@
 
 ## 新增（2026-08-27 knowledge-audit 发现，未排期）
 
-来源：[knowledge-audit.md](../../../knowledge-audit.md) K1~K16。**P0×5**：K1 sha 幂等墙无状态过滤+失败全 Permanent（一次网络抖动永久卡死，与 wiki sha 墙同构）、K2 enqueue 结果被 .ok() 吞（文档永卡 pending）、K3 SSRF 代理旁路（HTTPS_PROXY 下私网校验全跳）、K4 embed 短响应 NULL 向量+embed_failed=false 双重静默（=B2 同类）、K5 未知二进制默认按文本（mojibake 入库）。**P1×4**：K6 并发 sha 竞态 503、K7 空 token 查询 SQL 炸（单汉字查询 500，三域共用，tokenize 一处修）、K8 embed 失败永久降级无恢复入口、K9 URL 瞬态错误归 Permanent。**P2×7**：K10 游标非唯一、K11 chunk 重跑残留、K12 extracted.txt 泄漏、K13 检索嵌入降级无日志、K14 chunks 500 截断、K15 URL 内容级去重、K16 大文件成本护栏（可并入 R15）。关联：K7←R2 延续、K16←R15 合并、K13←R10 挂载、K4 参照 B2 修法。建议起点：K2+K6（提交路径正确性）→ K7（一行修三域）→ K1/K9。
+来源：[knowledge-audit.md](../../../knowledge-audit.md) K1~K16。**P0×5**：K1 sha 幂等墙无状态过滤+失败全 Permanent（一次网络抖动永久卡死，与 wiki sha 墙同构）、K2 enqueue 结果被 .ok() 吞（文档永卡 pending）、K3 SSRF 代理旁路（HTTPS_PROXY 下私网校验全跳）、K4 embed 短响应 NULL 向量+embed_failed=false 双重静默（=B2 同类）、K5 未知二进制默认按文本（mojibake 入库）。**P1×3**：K6 并发 sha 竞态 503、K8 embed 失败永久降级无恢复入口、K9 URL 瞬态错误归 Permanent。**P2×8**：K7 空 token 查询静默零召回（单字/纯标点无声返回空，三域共用，tokenize 一处修；勿用哨兵——'!' 实测报 no operand 错）、K10 游标非唯一、K11 chunk 重跑残留、K12 extracted.txt 泄漏、K13 检索嵌入降级无日志、K14 chunks 500 截断、K15 URL 内容级去重、K16 大文件成本护栏（可并入 R15）。关联：K7←R2 延续、K16←R15 合并、K13←R10 挂载、K4 参照 B2 修法。建议起点：K2+K6（提交路径正确性）→ K7（一行修三域）→ K1/K9。
 
 ## 新增（2026-08-27 memory-audit 发现；B1/B2/B3/B5/B6/B9/B10 已于同日修复 ✅）
 

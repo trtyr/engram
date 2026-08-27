@@ -39,7 +39,7 @@ submit → enqueue_ingest（sha 幂等 + 落盘 + 入队）
 
 DB 行删除（chunks 级联）→ 删原始文件（raw_path）→ 删 extracted.txt（mod.rs:119-141）。不可恢复（无回收站）。
 
-### A7 API 面（8 端点，knowledge scope）
+### A7 API 面（7 端点，knowledge scope）
 
 POST /knowledge/documents（URL）、POST /knowledge/upload（multipart，50MB 上限）、GET documents（status 过滤 + 游标，limit≤200）、GET documents/{id}、GET documents/{id}/chunks（**硬编码 500 上限**，内容截 300 字）、DELETE documents/{id}、POST /knowledge/search（max_items≤100）。
 
@@ -84,11 +84,6 @@ POST /knowledge/documents（URL）、POST /knowledge/upload（multipart，50MB �
 - 影响：双击上传/客户端重试并发到达 → 两个 SELECT 都未命中 → 第二个 INSERT 撞 `sha256 UNIQUE` → `KnowledgeError::Storage` → API 503（正确语义应是 200 幂等命中）。对照：jobs 队列对同一场景显式定义了 `idempotency_conflict`。
 - 修法：`INSERT ... ON CONFLICT (sha256) DO NOTHING RETURNING id`，无返回行再 SELECT 既有——单往返无竞态。
 
-**K7 · 空 token 查询 SQL 炸——单汉字/纯标点查询 500（三域共用）**
-- 位置：tokenize.rs:21-33（`keep()` 过滤单汉字与 1 字符 ASCII）→ `tsv_query_smart` 返回空串 → `to_tsquery('simple','')` 语法错。调用点：knowledge mod.rs:160-164、search/hybrid.rs:33-35 与 88-90（memory atoms/scenarios）、wiki-engine service.rs。
-- 影响：查询「书」「的」「?」或纯标点 → SQL error → 各域 search 返回 500/503。用户随手一搜即触发。
-- 修法：`tsv_query_smart` 对空 token 返回哨兵（如 `'!'`——tsquery 语法错误前直接空结果）或在各调用点先判空短路返回 `vec![]`。一处修（tokenize）三域受益。
-
 **K8 · embed 批次失败永久降级，无恢复入口**
 - 位置：pipeline.rs:402-424（Err 分支整批标 embed_failed，不区分 Transient/Permanent，不重试）。
 - 影响：上游嵌入服务宕机 5 分钟期间摄入的文档 → 全部 FTS-only，服务恢复后**没有任何机制补嵌**。唯一恢复路径是 admin 手工 POST /jobs/{id}/revive 重跑 embed job（可行但完全不可发现，且 revive 是通用运维操作）。此外 embed 无 token/成本记账（chat 侧有 400k 预算，embed 侧裸跑）。
@@ -100,6 +95,11 @@ POST /knowledge/documents（URL）、POST /knowledge/upload（multipart，50MB �
 - 修法：见 K1②。SSRF 判定类保持 Permanent 防恶意 URL 反复打探测。
 
 ### P2
+
+**K7 · 空 token 查询静默零召回——单字/纯标点查询无声返回空（三域共用）**
+- 位置：tokenize.rs:21-33（`keep()` 过滤单汉字与 1 字符 ASCII）→ `tsv_query_smart` 返回空串 → `to_tsquery('simple','')` 产生**空 tsquery**（PG 16 实测：NOTICE「doesn't contain lexemes」而非错误，不匹配任何行）。调用点：knowledge mod.rs:160-164、search/hybrid.rs:33-35 与 88-90（memory atoms/scenarios）、wiki-engine service.rs。
+- 影响：查询「书」「的」或纯标点 → 各域 search **静默返回空结果**，无错误无提示。与索引侧过滤语义一致（单字本就不进索引），故不是崩溃而是可用性缺口——用户不知道为何搜不到，也无反馈引导换词。
+- 修法：各调用点判空短路：tokenize 后 tokens 为空直接返回 `vec![]`（可选返回 BadRequest「查询词太短」提示），在 tokenize.rs 提供空判辅助一处修三域。**注意不要用哨兵串**——实测 `to_tsquery('simple','!')` 报 `no operand in tsquery` 错误，哨兵会把静默缺口变成真 500。
 
 **K10 · 游标分页 created_at 非唯一——同刻多行跨页丢失/重复**
 - 位置：knowledge mod.rs:81-84（`created_at < $2 ORDER BY created_at DESC`）；memory.rs:186/251 同款。
@@ -148,4 +148,4 @@ POST /knowledge/documents（URL）、POST /knowledge/upload（multipart，50MB �
 | K4 | memory B2（已修） | 同类问题在知识域的对应物，修法可参照 |
 | K1 | wiki sha 幂等墙（E2E 观测） | 同构问题三域第二例，建议一并出通用方案 |
 
-修复优先级建议：**K2+K6（提交路径正确性，半小时级）→ K7（一行修三域）→ K1/K9（重试语义）→ K4/K5（静默降级）→ K3（代理 SSRF，看部署形态定急缓）→ P2 按需**。
+修复优先级建议：**K2+K6（提交路径正确性，半小时级）→ K1/K9（重试语义）→ K4/K5（静默降级）→ K3（代理 SSRF，看部署形态定急缓）→ P2 按需（含 K7 空 token 静默零召回，一行修三域）**。
