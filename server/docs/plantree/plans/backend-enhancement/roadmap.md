@@ -7,6 +7,10 @@
 - **2026-08-26：P0 五项（R1~R5）全部落地**，独立审计通过（goal `mt9ydklt-ze8023`）。
   R1 `core/unified.rs` + `POST /search`；R2 `tsv_query_smart` 覆盖全部 4 个 FTS 调用点；R3 context_pack L1 走 `search_atoms`；R4 cascade 全写操作包事务；R5 `CircuitBreaker` + `Retry-After`（含 HTTP-date、HalfOpen 单试探）。`cargo test --workspace` 66 passed。
 
+## 新增（2026-08-27 memory-audit 发现，未排期）
+
+来源：[memory-audit.md](../../../memory-audit.md) B1~B12。P0 级三条：B1 extract 长会话静默丢段（=R7）、B2 零向量/NULL embedding 仲裁旁路、B3 persona 证据链全量共享。P1 级五条含 B5 arbitrate/consolidate 裸调 chat_json 无重试、B6 duplicate 物理删除丢溯源、B9 hit_count 语义残缺致 stale 误伤（=R8 依赖）。修 P1 批（R7/R8）时应连同 B2/B3/B5 一并处理。
+
 ## P0 —— 高价值，低成本
 
 | ID | 项 | 现状 | 目标 | 依据 |
