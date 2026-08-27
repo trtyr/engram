@@ -7,6 +7,10 @@
 - **2026-08-26：P0 五项（R1~R5）全部落地**，独立审计通过（goal `mt9ydklt-ze8023`）。
   R1 `core/unified.rs` + `POST /search`；R2 `tsv_query_smart` 覆盖全部 4 个 FTS 调用点；R3 context_pack L1 走 `search_atoms`；R4 cascade 全写操作包事务；R5 `CircuitBreaker` + `Retry-After`（含 HTTP-date、HalfOpen 单试探）。`cargo test --workspace` 66 passed。
 
+## 新增（2026-08-27 knowledge-audit 发现，未排期）
+
+来源：[knowledge-audit.md](../../../knowledge-audit.md) K1~K16。**P0×5**：K1 sha 幂等墙无状态过滤+失败全 Permanent（一次网络抖动永久卡死，与 wiki sha 墙同构）、K2 enqueue 结果被 .ok() 吞（文档永卡 pending）、K3 SSRF 代理旁路（HTTPS_PROXY 下私网校验全跳）、K4 embed 短响应 NULL 向量+embed_failed=false 双重静默（=B2 同类）、K5 未知二进制默认按文本（mojibake 入库）。**P1×4**：K6 并发 sha 竞态 503、K7 空 token 查询 SQL 炸（单汉字查询 500，三域共用，tokenize 一处修）、K8 embed 失败永久降级无恢复入口、K9 URL 瞬态错误归 Permanent。**P2×7**：K10 游标非唯一、K11 chunk 重跑残留、K12 extracted.txt 泄漏、K13 检索嵌入降级无日志、K14 chunks 500 截断、K15 URL 内容级去重、K16 大文件成本护栏（可并入 R15）。关联：K7←R2 延续、K16←R15 合并、K13←R10 挂载、K4 参照 B2 修法。建议起点：K2+K6（提交路径正确性）→ K7（一行修三域）→ K1/K9。
+
 ## 新增（2026-08-27 memory-audit 发现；B1/B2/B3/B5/B6/B9/B10 已于同日修复 ✅）
 
 来源：[memory-audit.md](../../../memory-audit.md) B1~B12。
