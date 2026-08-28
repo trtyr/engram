@@ -6,9 +6,9 @@
 
 ## Part A 机制全解
 
-### A1 数据模型（0003_system_llm.sql）
+### A1 数据模型（0003_system_llm.sql + 0010_settings.sql）
 
-三表：`llm_providers`（name UNIQUE / base_url / api_key_encrypted bytea / models jsonb `[{"id","capabilities":[]}]` / is_default）；`settings` 表 `llm_routing` 键（`{purpose: [{provider, model}]}` flatten HashMap）；`llm_usage`（provider/model/purpose/tokens/latency/job_id/ts，按 ts 与 purpose 建索引）。
+三表：`llm_providers`（0003：name UNIQUE / base_url / api_key_encrypted bytea / models jsonb `[{"id","capabilities":[]}]` / is_default）；`llm_usage`（0003：provider/model/purpose/tokens/latency/job_id/ts，按 ts 与 purpose 建索引）；`settings` 表 `llm_routing` 键（0010；`{purpose: [{provider, model}]}` flatten HashMap）。
 
 ### A2 Provider 生命周期
 
@@ -77,7 +77,7 @@ POST/GET `/settings/llm/providers`、POST `/settings/llm/providers/{id}/test`、
 - 修法：把 `resolve + provider.embed/chat + record_usage` 收进 ProviderRegistry 的门面方法（如 `registry.embed_for(purpose, req)`），调用方拿不到裸 provider——记账面从「约定」变「结构保证」。关联 R10（metrics）。
 
 **L10 · master key 占位符陷阱——密文与后续真实密钥不兼容且无预警**
-- 位置：main.rs:60-65（`cfg.master_key.unwrap_or("00".repeat(32))`）；state.rs registry()（同占位符回退）。
+- 位置：main.rs:41/51/61（三处 `cfg.master_key.unwrap_or_else(|| "00".repeat(32))` 占位符回退）；state.rs registry()（同占位符回退）。
 - 影响：服务首次无 env 启动 → 管理员照常建 provider（占位符加密，**无任何提示**）→ 之后部署补上真实 master key → 全部 api_key 解密失败（每次 LLM 调用报「解密失败（主密钥不匹配）」），且因 L2 无重加密路径，密钥只能重建。单用户自部署的高频踩坑序列。
 - 修法：① 占位符生效时 create_provider 返回带 warning 字段（或直接拒绝建 provider，要求显式设 key）；② 启动日志显式告警「使用占位主密钥」；③ 与 L2 的 re-encrypt 路径配套。
 
