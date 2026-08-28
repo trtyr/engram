@@ -21,6 +21,5 @@ chrono.workspace = true
 pgvector.workspace = true
 
 [dev-dependencies]
-testcontainers.workspace = true
 anyhow.workspace = true
 agent-memory-storage = { path = "../storage" }

@@ -38,5 +38,4 @@ sha2.workspace = true
 rand.workspace = true
 
 [dev-dependencies]
-testcontainers.workspace = true
 tower.workspace = true

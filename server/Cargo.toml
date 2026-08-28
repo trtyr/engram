@@ -82,7 +82,6 @@ docx-rs = "0.4"
 scraper = "0.23"
 
 # 测试
-testcontainers = "0.24"
 
 [profile.release]
 lto = "thin"

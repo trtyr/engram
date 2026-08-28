@@ -25,7 +25,6 @@ utoipa.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
-testcontainers.workspace = true
 anyhow.workspace = true
 agent-memory-storage = { path = "../storage" }
 agent-memory-distill = { path = "../distill" }
