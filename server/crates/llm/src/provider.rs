@@ -467,24 +467,6 @@ impl ProviderRegistry {
         )))
     }
 
-    /// 默认 provider（L3：ORDER BY 保证多行残留时的确定性——正常路径唯一性由创建端维护）。
-    pub async fn default_provider(&self) -> Result<Arc<OpenAiCompatProvider>, LlmError> {
-        let row = sqlx::query_as::<_, ProviderRow>(
-            "SELECT * FROM llm_providers WHERE is_default = true ORDER BY created_at LIMIT 1",
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| LlmError::Transient(e.to_string()))?
-        .ok_or_else(|| LlmError::NotConfigured("未配置默认 provider".into()))?;
-
-        let api_key = self.cipher.decrypt(&row.api_key_encrypted)?;
-        Ok(Arc::new(OpenAiCompatProvider::new(
-            row.name,
-            row.base_url,
-            api_key,
-        )))
-    }
-
     /// 按用途解析 (provider, model)：路由链优先；回退默认 provider 中
     /// **具备对应能力**的模型（Embed→embedding 能力，chat 用途→非 embedding）。
     pub async fn resolve(
