@@ -228,3 +228,12 @@ export interface SearchResponse {
   query: string
   hits: UnifiedHit[]
 }
+export interface Purpose {
+  goals: string[]
+  key_questions: string[]
+  scope: string[]
+}
+export interface WikiSearchResponse {
+  purpose: Purpose
+  pages: WikiPage[]
+}

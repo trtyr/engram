@@ -5,12 +5,13 @@ import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/u
 import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'providers' | 'routing' | 'keys'
+type Tab = 'providers' | 'routing' | 'keys' | 'reencrypt'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'providers', label: 'Providers' },
   { value: 'routing', label: '路由' },
   { value: 'keys', label: 'API Keys' },
+  { value: 'reencrypt', label: '重加密' },
 ]
 
 export default function Settings() {
@@ -22,6 +23,7 @@ export default function Settings() {
       {tab === 'providers' && <Providers />}
       {tab === 'routing' && <Routing />}
       {tab === 'keys' && <Keys />}
+      {tab === 'reencrypt' && <ReencryptPane />}
     </div>
   )
 }
@@ -306,5 +308,49 @@ function Keys() {
         </Card>
       )}
     </div>
+  )
+}
+
+/** 主密钥重加密：更换 AGENT_MEMORY_MASTER_KEY 后，用旧密钥重加密所有 provider 密钥。 */
+function ReencryptPane() {
+  const [oldKey, setOldKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  return (
+    <Card className="space-y-3 p-4">
+      <p className="text-sm text-muted-foreground">
+        更换主密钥（AGENT_MEMORY_MASTER_KEY）后，用旧主密钥重加密所有 provider 密钥。
+      </p>
+      <input
+        className={`${inputCls} w-full font-mono`}
+        type="password"
+        placeholder="旧主密钥（64 hex）"
+        value={oldKey}
+        onChange={(e) => setOldKey(e.target.value)}
+      />
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          disabled={busy || !oldKey.trim()}
+          onClick={async () => {
+            setBusy(true)
+            setMsg('')
+            try {
+              const r = await api.post<{ re_encrypted: number }>('/settings/llm/providers/re-encrypt', {
+                old_master_key: oldKey.trim(),
+              })
+              setMsg(`已重加密 ${r.re_encrypted} 个 provider`)
+            } catch (ex) {
+              setMsg(ex instanceof Error ? ex.message : '重加密失败')
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          {busy ? '重加密中…' : '执行重加密'}
+        </Button>
+        {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+      </div>
+    </Card>
   )
 }

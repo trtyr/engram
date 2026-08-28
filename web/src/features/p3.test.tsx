@@ -6,6 +6,18 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
+type WikiPageM = {
+  id: string
+  slug: string
+  title: string
+  page_type: string
+  content: string
+  frontmatter: Record<string, unknown>
+  origin: string
+  version: number
+  updated_at: string
+}
+
 // ---- api mock ----
 vi.mock('@/lib/api', () => {
   const state = {
@@ -13,6 +25,9 @@ vi.mock('@/lib/api', () => {
     docs: [] as { id: string; title: string; source_uri: string; mime: string | null; status: string; error: string | null; created_at: string }[],
     chunks: [] as { seq: number; content: string; embed_failed: boolean }[],
     searchResult: null as { query: string; hits: { id: string; domain: string; score: number; snippet: string; title?: string | null }[] } | null,
+    purpose: { goals: [], key_questions: [], scope: [] } as { goals: string[]; key_questions: string[]; scope: string[] },
+    wikiSearchResult: null as { purpose: { goals: string[]; key_questions: string[]; scope: string[] }; pages: WikiPageM[] } | null,
+    reencryptResult: 0 as number,
   }
   const api = {
     get: vi.fn(async (p: string) => {
@@ -21,6 +36,7 @@ vi.mock('@/lib/api', () => {
       if (p.startsWith('/knowledge/documents')) return state.docs
       if (p.startsWith('/memory/atoms')) return []
       if (p.startsWith('/wiki/pages')) return []
+      if (p === '/wiki/purpose') return state.purpose
       if (p.startsWith('/memory/persona')) return []
       if (p.startsWith('/jobs')) return []
       if (p.startsWith('/llm/usage')) return []
@@ -29,9 +45,14 @@ vi.mock('@/lib/api', () => {
     post: vi.fn(async (p: string, _b?: unknown) => {
       if (p === '/search') return state.searchResult
       if (p.includes('/re-embed')) return undefined
+      if (p === '/wiki/search') return state.wikiSearchResult
+      if (p.endsWith('/re-encrypt')) return { re_encrypted: state.reencryptResult }
       return {}
     }),
-    put: vi.fn(async () => ({})),
+    put: vi.fn(async (p: string) => {
+      if (p === '/wiki/purpose') return undefined
+      return {}
+    }),
     del: vi.fn(async () => undefined),
     __state: state,
   }
@@ -45,6 +66,9 @@ interface MockState {
   docs: { id: string; title: string; source_uri: string; mime: string | null; status: string; error: string | null; created_at: string }[]
   chunks: { seq: number; content: string; embed_failed: boolean }[]
   searchResult: { query: string; hits: { id: string; domain: string; score: number; snippet: string; title?: string | null }[] } | null
+  purpose: { goals: string[]; key_questions: string[]; scope: string[] }
+  wikiSearchResult: { purpose: { goals: string[]; key_questions: string[]; scope: string[] }; pages: WikiPageM[] } | null
+  reencryptResult: number
 }
 
 const mockState = (api as unknown as { __state: MockState }).__state
@@ -52,6 +76,7 @@ const mockState = (api as unknown as { __state: MockState }).__state
 import Dashboard from '@/features/Dashboard'
 import Settings from '@/features/Settings'
 import Knowledge from '@/features/Knowledge'
+import Wiki from '@/features/Wiki'
 
 const wrap = (ui: React.ReactElement) => <MemoryRouter initialEntries={['/']}>{ui}</MemoryRouter>
 
@@ -61,6 +86,9 @@ beforeEach(() => {
   mockState.docs = []
   mockState.chunks = []
   mockState.searchResult = null
+  mockState.purpose = { goals: [], key_questions: [], scope: [] }
+  mockState.wikiSearchResult = null
+  mockState.reencryptResult = 0
 })
 
 describe('跨域统一检索 GlobalSearch', () => {
@@ -141,6 +169,54 @@ describe('Knowledge re-embed', () => {
     fireEvent.click(screen.getByRole('button', { name: '重嵌缺失块' }))
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith('/knowledge/documents/d1/re-embed')
+    })
+  })
+})
+
+describe('Wiki 目标（purpose）', () => {
+  it('读 purpose 展示三栏，保存调 PUT', async () => {
+    mockState.purpose = { goals: ['构建知识库'], key_questions: ['什么？'], scope: ['Rust'] }
+    render(wrap(<Wiki />))
+    fireEvent.click(screen.getByRole('button', { name: '目标' }))
+    await screen.findByText('构建知识库')
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => {
+      expect(api.put).toHaveBeenCalledWith(
+        '/wiki/purpose',
+        expect.objectContaining({ goals: ['构建知识库'], key_questions: ['什么？'], scope: ['Rust'] }),
+      )
+    })
+  })
+})
+
+describe('Wiki 搜索', () => {
+  it('输入 query 调 POST /wiki/search 并展示 resp.pages', async () => {
+    mockState.wikiSearchResult = {
+      purpose: { goals: [], key_questions: [], scope: [] },
+      pages: [{ id: 'w1', slug: 'tokio', title: 'Tokio', page_type: 'concept', content: '', frontmatter: {}, origin: 'llm', version: 1, updated_at: '2026-08-20T00:00:00Z' }],
+    }
+    render(wrap(<Wiki />))
+    const input = await screen.findByPlaceholderText('搜索 Wiki…')
+    fireEvent.change(input, { target: { value: 'tokio' } })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith('/wiki/search', { query: 'tokio', max_items: 20 })
+      expect(screen.getByText('Tokio')).toBeInTheDocument()
+    })
+  })
+})
+
+describe('主密钥重加密', () => {
+  it('输入旧密钥 POST re-encrypt 并展示结果', async () => {
+    mockState.reencryptResult = 2
+    render(wrap(<Settings />))
+    fireEvent.click(screen.getByRole('button', { name: '重加密' }))
+    const input = await screen.findByPlaceholderText('旧主密钥（64 hex）')
+    fireEvent.change(input, { target: { value: 'aabbccdd' } })
+    fireEvent.click(screen.getByRole('button', { name: '执行重加密' }))
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith('/settings/llm/providers/re-encrypt', { old_master_key: 'aabbccdd' })
+      expect(screen.getByText('已重加密 2 个 provider')).toBeInTheDocument()
     })
   })
 })

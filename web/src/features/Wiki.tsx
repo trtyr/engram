@@ -5,12 +5,12 @@ import InsightsPanel from '@/components/InsightsPanel'
 import ReviewQueue from '@/components/ReviewQueue'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { useSearchParams } from 'react-router-dom'
-import { api, type GraphDto, type LintReport, type WikiPage } from '@/lib/api'
+import { api, type GraphDto, type LintReport, type Purpose, type WikiPage, type WikiSearchResponse } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'pages' | 'graph' | 'insights' | 'lint' | 'proposals' | 'sources'
+type Tab = 'pages' | 'graph' | 'insights' | 'lint' | 'proposals' | 'sources' | 'purpose'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'pages', label: '页面' },
@@ -19,6 +19,7 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'lint', label: 'Lint' },
   { value: 'proposals', label: '提案' },
   { value: 'sources', label: '原料' },
+  { value: 'purpose', label: '目标' },
 ]
 
 export default function Wiki() {
@@ -33,6 +34,7 @@ export default function Wiki() {
       {tab === 'lint' && <LintPane />}
       {tab === 'proposals' && <ReviewAndProposals />}
       {tab === 'sources' && <SourcesPane />}
+      {tab === 'purpose' && <PurposePane />}
     </div>
   )
 }
@@ -46,6 +48,8 @@ function PagesPane() {
   const [ingestText, setIngestText] = useState('')
   const [ingestTitle, setIngestTitle] = useState('')
   const [msg, setMsg] = useState('')
+  const [searchQ, setSearchQ] = useState('')
+  const [searchResults, setSearchResults] = useState<WikiPage[] | null>(null)
   const [params] = useSearchParams()
   const load = () => api.get<WikiPage[]>('/wiki/pages?limit=100').then(setPages).catch(() => {})
   useEffect(() => {
@@ -63,6 +67,30 @@ function PagesPane() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
       <div className="space-y-2">
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const q = searchQ.trim()
+            if (!q) {
+              setSearchResults(null)
+              return
+            }
+            api.post<WikiSearchResponse>('/wiki/search', { query: q, max_items: 20 })
+              .then((r) => setSearchResults(r.pages))
+              .catch(() => setSearchResults([]))
+          }}
+        >
+          <input
+            className={`${inputCls} flex-1`}
+            placeholder="搜索 Wiki…"
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+          />
+          <Button size="sm" variant="outline" type="submit">
+            搜索
+          </Button>
+        </form>
         <Card className="p-3">
           <details>
             <summary className="cursor-pointer text-sm font-medium">新文档 ingest</summary>
@@ -98,7 +126,7 @@ function PagesPane() {
             </div>
           </details>
         </Card>
-        {pages.map((p) => (
+        {(searchResults ?? pages).map((p) => (
           <Card
             key={p.id}
             className={`cursor-pointer p-3 transition-colors ${open?.id === p.id ? 'border-brand/50 bg-brand/5' : 'hover:bg-muted/30'}`}
@@ -386,5 +414,59 @@ function ProposalsPane() {
         </Card>
       ))}
     </div>
+  )
+}
+
+/** Wiki 目标（purpose）：goals / key_questions / scope 三栏，每行一条。 */
+function PurposePane() {
+  const [p, setP] = useState<Purpose | null>(null)
+  const [goals, setGoals] = useState('')
+  const [questions, setQuestions] = useState('')
+  const [scope, setScope] = useState('')
+  const [msg, setMsg] = useState('')
+  useEffect(() => {
+    api
+      .get<Purpose>('/wiki/purpose')
+      .then((p) => {
+        setP(p)
+        setGoals(p.goals.join('\n'))
+        setQuestions(p.key_questions.join('\n'))
+        setScope(p.scope.join('\n'))
+      })
+      .catch(() => {})
+  }, [])
+  if (!p) return <Spinner />
+  const split = (s: string) => s.split('\n').map((x) => x.trim()).filter(Boolean)
+  return (
+    <Card className="space-y-4 p-4">
+      <div>
+        <label className="mb-1.5 block text-sm font-medium">目标（为什么建这个知识库）</label>
+        <textarea className={`${inputCls} h-24 w-full`} value={goals} onChange={(e) => setGoals(e.target.value)} />
+      </div>
+      <div>
+        <label className="mb-1.5 block text-sm font-medium">关键问题（应能回答什么）</label>
+        <textarea className={`${inputCls} h-24 w-full`} value={questions} onChange={(e) => setQuestions(e.target.value)} />
+      </div>
+      <div>
+        <label className="mb-1.5 block text-sm font-medium">范围边界</label>
+        <textarea className={`${inputCls} h-24 w-full`} value={scope} onChange={(e) => setScope(e.target.value)} />
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          onClick={async () => {
+            try {
+              await api.put('/wiki/purpose', { goals: split(goals), key_questions: split(questions), scope: split(scope) })
+              setMsg('已保存')
+            } catch (ex) {
+              setMsg(ex instanceof Error ? ex.message : '保存失败')
+            }
+          }}
+        >
+          保存
+        </Button>
+        {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+      </div>
+    </Card>
   )
 }
