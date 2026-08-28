@@ -69,13 +69,21 @@ export const api = {
     const headers: Record<string, string> = {}
     if (getToken()) headers.authorization = `Bearer ${getToken()}`
     const resp = await fetch(`${BASE}${p}`, { method: 'POST', headers, body: fd })
+    if (resp.status === 401) {
+      clearToken()
+      throw new ApiError(401, 'unauthorized', '未认证', false)
+    }
     if (!resp.ok) {
       let msg = `HTTP ${resp.status}`
+      let code = 'upload_failed'
+      let retryable = false
       try {
         const e = await resp.json()
         msg = e.error?.message ?? msg
+        code = e.error?.code ?? code
+        retryable = e.error?.retryable ?? false
       } catch { /* 保底 */ }
-      throw new ApiError(resp.status, 'upload_failed', msg, false)
+      throw new ApiError(resp.status, code, msg, retryable)
     }
     return (await resp.json()) as T
   },
@@ -149,6 +157,7 @@ export interface Document {
   status: string
   error: string | null
   created_at: string
+  updated_at: string
 }
 export interface ChunkHit {
   chunk_id: string
@@ -173,7 +182,7 @@ export interface WikiPage {
 export interface GraphDto {
   nodes: { slug: string; title: string; page_type: string; community?: number }[]
   edges: { from_slug: string; to_slug: string; weight: number }[]
-  communities?: { id: number; top_slug?: string; size?: number; cohesion: number; sparse: boolean }[]
+  communities?: { id: number; top_slug: string; size: number; cohesion: number; sparse: boolean }[]
 }
 export interface LintReport {
   issues: { rule: string; slug: string; detail: string }[]
@@ -187,6 +196,7 @@ export interface CgProject {
   status: string
   stats: Record<string, number> | null
   error: string | null
+  created_at: string
   last_synced_at: string | null
 }
 export interface Provider {
@@ -199,6 +209,7 @@ export interface Provider {
 }
 export interface UsageRow {
   id: number
+  job_id?: string | null
   provider: string
   model: string
   purpose: string
