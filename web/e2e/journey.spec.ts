@@ -6,7 +6,10 @@
  */
 import { expect, test } from '@playwright/test'
 
-const ADMIN_PW = process.env.E2E_ADMIN_PW ?? 'release-admin'
+// admin 密码是拉起栈的启动脚本注入的（E2E_ADMIN_PW），spec 不写死、不猜默认值。
+// 未设置立即 fail-fast：避免拿错密码打 401、或撞上同密码栈默默测过。
+const ADMIN_PW = process.env.E2E_ADMIN_PW
+if (!ADMIN_PW) throw new Error('缺 E2E_ADMIN_PW：由启动脚本注入（勿在 spec 里写死密码）')
 const BASE = process.env.E2E_BASE ?? 'http://127.0.0.1:19180'
 
 async function api(method: string, path: string, body?: unknown, token?: string) {

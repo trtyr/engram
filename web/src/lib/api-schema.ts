@@ -237,6 +237,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/knowledge/documents/{id}/re-embed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重新嵌入缺失块（embed_failed / NULL 向量的显式恢复入口，K8）。 */
+        post: operations["reembed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/knowledge/search": {
         parameters: {
             query?: never;
@@ -503,6 +520,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 跨域统一检索：一次查询融合记忆、知识、wiki 三域。 */
+        post: operations["unified_search"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/api-keys": {
         parameters: {
             query?: never;
@@ -548,9 +582,47 @@ export interface paths {
         /** provider 列表（永不含密钥）。 */
         get: operations["list_providers"];
         put?: never;
-        /** 注册 LLM provider（key 加密落库）。 */
+        /** 注册 LLM provider（key 加密落库）。L1：写入口全量校验；L3：默认唯一性事务降级。 */
         post: operations["create_provider"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/llm/providers/re-encrypt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * L2：master key 轮换——全部 provider 密钥用旧密钥解密、当前密钥重新加密（单事务）。
+         *     场景：先改 AGENT_MEMORY_MASTER_KEY 重启，再带旧密钥调用本端点完成迁移。
+         */
+        post: operations["reencrypt_providers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/llm/providers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** L2：更新 provider（name 不可改；key 提供则重新加密；is_default 切换保持唯一性）。 */
+        put: operations["update_provider"];
+        post?: never;
+        /** L2：删除 provider（默认拒删；routing 引用拒删带明细）。 */
+        delete: operations["delete_provider"];
         options?: never;
         head?: never;
         patch?: never;
@@ -582,7 +654,7 @@ export interface paths {
         };
         /** 读取路由表。 */
         get: operations["get_routing"];
-        /** 保存路由表。 */
+        /** 保存路由表。L4：落库前全量校验（purpose 枚举 / provider 存在 / model 在册）。 */
         put: operations["put_routing"];
         post?: never;
         delete?: never;
@@ -618,6 +690,57 @@ export interface paths {
         put?: never;
         /** 触发两步 ingest（sha 命中秒跳过，返回 skipped=true）。 */
         post: operations["ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 图洞察（意外连接/孤立页/稀疏社区/桥节点）+ 社区信息。 */
+        post: operations["insights"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/insights/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** dismiss 洞察（不再出现）。 */
+        post: operations["dismiss_insight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/insights/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置全部 dismiss。 */
+        post: operations["reset_insights"];
         delete?: never;
         options?: never;
         head?: never;
@@ -691,6 +814,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/wiki/purpose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取 purpose（wiki 方向意图）。 */
+        get: operations["get_purpose"];
+        /** 设置 purpose（ingest/query 时注入 LLM）。 */
+        put: operations["set_purpose"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/queries/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 检索结果/问答存档为 queries 页并自动再摄取。 */
+        post: operations["archive_query"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_reviews"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/reviews/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 处理 review 项（resolve / dismiss + 动作标签）。 */
+        post: operations["resolve_review"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wiki/search": {
         parameters: {
             query?: never;
@@ -703,6 +894,39 @@ export interface paths {
         /** Wiki 页面检索。 */
         post: operations["wiki_search"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_sources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 级联删除 source（摘要页删 + 共享页摘源 + dead link 清理 + index 同步）。 */
+        delete: operations["delete_source"];
         options?: never;
         head?: never;
         patch?: never;
@@ -737,6 +961,11 @@ export interface components {
             slug: string;
             title: string;
         };
+        ArchiveQueryRequest: {
+            answer: string;
+            question: string;
+            title: string;
+        };
         AtomDto: {
             /** Format: float */
             confidence: number;
@@ -757,6 +986,11 @@ export interface components {
             superseded_by?: string | null;
             /** Format: date-time */
             updated_at: string;
+        };
+        CascadeReport: {
+            cleaned_links: number;
+            deleted_pages: string[];
+            updated_shared: string[];
         };
         /** @description 项目 DTO。 */
         CgProjectDto: {
@@ -797,6 +1031,19 @@ export interface components {
             seq: number;
             snippet: string;
         };
+        CommunityInfo: {
+            /** Format: double */
+            cohesion: number;
+            id: number;
+            size: number;
+            /**
+             * @description 稀疏社区（后端判定：cohesion<0.15 且成员≥3，与 insights 同口径）——
+             *     前端图例直接消费，避免本地重复实现漂移
+             */
+            sparse: boolean;
+            /** @description 社区首位成员 slug（与 insights 口径一致：成员表首个） */
+            top_slug: string;
+        };
         ContextMeta: {
             chars_used: number;
             query?: string | null;
@@ -829,6 +1076,9 @@ export interface components {
             models?: components["schemas"]["ModelInfo"][];
             name: string;
         };
+        DismissInsightRequest: {
+            key: string;
+        };
         DistillRequest: {
             /** @description true 时附带 consolidate */
             full?: boolean;
@@ -856,6 +1106,8 @@ export interface components {
             error: components["schemas"]["ErrorBody"];
         };
         GraphDto: {
+            /** @description Louvain 社区信息（id → 凝聚度） */
+            communities?: components["schemas"]["CommunityInfo"][];
             edges: components["schemas"]["GraphEdge"][];
             nodes: components["schemas"]["GraphNode"][];
         };
@@ -866,6 +1118,8 @@ export interface components {
             weight: number;
         };
         GraphNode: {
+            /** @description Louvain 社区 id（着色切换用） */
+            community?: number;
             page_type: string;
             slug: string;
             title: string;
@@ -885,6 +1139,22 @@ export interface components {
             /** @description 源文本（也可通过 knowledge 文档 ID） */
             text?: string | null;
             title: string;
+        };
+        Insight: {
+            detail: string;
+            /** @description 稳定键（dismiss 用） */
+            key: string;
+            kind: string;
+            /** @description 预生成检索词（deep research 用） */
+            search_queries: string[];
+            /** @description 涉及的页面 slug（前端点击高亮） */
+            slugs: string[];
+            title: string;
+        };
+        InsightsReport: {
+            communities: components["schemas"]["CommunityInfo"][];
+            insights: components["schemas"]["Insight"][];
+            total_pages: number;
         };
         /** @description 任务行。 */
         Job: {
@@ -979,10 +1249,29 @@ export interface components {
             is_default: boolean;
             models: components["schemas"]["ModelInfo"][];
             name: string;
+            /** @description L10：占位主密钥生效时的告示（不阻断；换真实密钥后需 re-encrypt 迁移） */
+            warning?: string | null;
+        };
+        Purpose: {
+            /** @description wiki 存在的目标（为什么建这个知识库） */
+            goals: string[];
+            /** @description 关键问题（wiki 应能回答什么） */
+            key_questions: string[];
+            /** @description 研究范围边界 */
+            scope: string[];
+            /** @description 演化中的核心论点 */
+            thesis?: string | null;
         };
         PutPageRequest: {
             content: string;
             title: string;
+        };
+        ReEncryptRequest: {
+            /** @description 轮换前的旧主密钥（64 hex；当前密钥来自 env，新密钥下加密） */
+            old_master_key: string;
+        };
+        ReEncryptResult: {
+            re_encrypted: number;
         };
         ReadyBody: {
             /** Format: int64 */
@@ -993,6 +1282,25 @@ export interface components {
             name: string;
             /** @description 本地绝对路径或 git URL */
             source_uri: string;
+        };
+        ResolveReviewRequest: {
+            action?: string | null;
+            dismiss?: boolean;
+        };
+        ReviewItem: {
+            action?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            id: string;
+            kind: string;
+            payload: Record<string, never>;
+            /** Format: date-time */
+            resolved_at?: string | null;
+            search_queries: string[];
+            /** Format: uuid */
+            source_id?: string | null;
+            status: string;
         };
         RollbackRequest: {
             aspect: string;
@@ -1026,16 +1334,12 @@ export interface components {
             title?: string | null;
         };
         SearchRequest: {
-            /** @description 层过滤：["l1","l2","l3"]，空 = 全部 */
-            layers?: string[];
             /** Format: int64 */
-            max_items?: number | null;
+            limit?: number;
             query: string;
         };
         SearchResponse: {
-            l1: components["schemas"]["SearchHit"][];
-            l2: components["schemas"]["SearchHit"][];
-            l3: components["schemas"]["PersonaVersion"][];
+            hits: components["schemas"]["UnifiedHit"][];
             query: string;
         };
         SessionDto: {
@@ -1047,6 +1351,12 @@ export interface components {
             /** Format: uuid */
             id: string;
         };
+        SetPurposeRequest: {
+            goals: string[];
+            key_questions?: string[];
+            scope?: string[];
+            thesis?: string | null;
+        };
         SubmitUrlRequest: {
             url: string;
         };
@@ -1054,12 +1364,38 @@ export interface components {
             message: string;
             ok: boolean;
         };
+        /** @description 统一命中（跨域检索的最小公分母）。 */
+        UnifiedHit: {
+            /** @description 域标签：memory | knowledge | wiki */
+            domain: string;
+            /** @description 域特有字段（layer/kind/slug/page_type/document_id/seq 等） */
+            extra: Record<string, never>;
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: double
+             * @description 域内 rank 归一化的 RRF 分数（跨域可比）
+             */
+            score: number;
+            snippet: string;
+            title?: string | null;
+        };
         UpdateAtomRequest: {
             /** Format: float */
             confidence?: number | null;
             content?: string | null;
             /** @description 只允许 "archived" / "active" */
             status?: string | null;
+        };
+        UpdateProviderRequest: {
+            /** @description 新明文 key（可选；提供则重新加密） */
+            api_key?: string | null;
+            /** @description 新 base_url（可选） */
+            base_url?: string | null;
+            /** @description 默认切换（可选；true 时事务降级存量默认） */
+            is_default?: boolean | null;
+            /** @description 新模型列表（可选） */
+            models?: components["schemas"]["ModelInfo"][] | null;
         };
         /** @description 用量记账行。 */
         UsageRecord: {
@@ -1097,6 +1433,12 @@ export interface components {
             /** Format: int64 */
             max_items?: number | null;
             query: string;
+        };
+        WikiSourceDto: {
+            /** Format: uuid */
+            id: string;
+            status: string;
+            title?: string | null;
         };
         WriteSessionRequest: {
             agent?: string | null;
@@ -1510,6 +1852,26 @@ export interface operations {
                         boolean
                     ][];
                 };
+            };
+        };
+    };
+    reembed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 补嵌 job 已入队 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -1945,6 +2307,29 @@ export interface operations {
             };
         };
     };
+    unified_search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+        };
+    };
     list_api_keys: {
         parameters: {
             query?: never;
@@ -2048,6 +2433,73 @@ export interface operations {
             };
         };
     };
+    reencrypt_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReEncryptRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReEncryptResult"];
+                };
+            };
+        };
+    };
+    update_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProviderRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderDto"];
+                };
+            };
+        };
+    };
+    delete_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     test_provider: {
         parameters: {
             query?: never;
@@ -2148,6 +2600,63 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["IngestAccepted"];
                 };
+            };
+        };
+    };
+    insights: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsReport"];
+                };
+            };
+        };
+    };
+    dismiss_insight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DismissInsightRequest"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reset_insights: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2261,6 +2770,111 @@ export interface operations {
             };
         };
     };
+    get_purpose: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Purpose"];
+                };
+            };
+        };
+    };
+    set_purpose: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPurposeRequest"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    archive_query: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveQueryRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestAccepted"];
+                };
+            };
+        };
+    };
+    list_reviews: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewItem"][];
+                };
+            };
+        };
+    };
+    resolve_review: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveReviewRequest"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     wiki_search: {
         parameters: {
             query?: never;
@@ -2279,7 +2893,47 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WikiPageDto"][];
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    list_sources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WikiSourceDto"][];
+                };
+            };
+        };
+    };
+    delete_source: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CascadeReport"];
                 };
             };
         };

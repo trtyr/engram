@@ -53,7 +53,7 @@ async function req<T>(method: string, path: string, body?: unknown, raw = false)
     throw new ApiError(resp.status, code, msg, retryable)
   }
   if (raw) return (await resp.blob()) as T
-  if (resp.status === 204) return undefined as T
+  if (resp.status === 204 || resp.status === 202) return undefined as T
   return (await resp.json()) as T
 }
 
@@ -173,7 +173,7 @@ export interface WikiPage {
 export interface GraphDto {
   nodes: { slug: string; title: string; page_type: string; community?: number }[]
   edges: { from_slug: string; to_slug: string; weight: number }[]
-  communities?: { id: number; top_slug?: string; size?: number; cohesion: number }[]
+  communities?: { id: number; top_slug?: string; size?: number; cohesion: number; sparse: boolean }[]
 }
 export interface LintReport {
   issues: { rule: string; slug: string; detail: string }[]
@@ -195,6 +195,7 @@ export interface Provider {
   base_url: string
   models: { id: string; capabilities: string[] }[]
   is_default: boolean
+  warning?: string | null
 }
 export interface UsageRow {
   id: number
@@ -214,4 +215,16 @@ export interface ApiKey {
   created_at: string
   last_used_at: string | null
   revoked_at: string | null
+}
+export interface UnifiedHit {
+  id: string
+  domain: string
+  score: number
+  snippet: string
+  title?: string | null
+  extra?: Record<string, unknown>
+}
+export interface SearchResponse {
+  query: string
+  hits: UnifiedHit[]
 }

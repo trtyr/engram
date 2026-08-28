@@ -1,10 +1,10 @@
 /**
  * 图洞察面板（llm_wiki 对齐）：意外连接 / 孤立页 / 稀疏社区 / 桥节点。
- * 点击卡片高亮对应节点（联动 WikiGraph）；可 dismiss。
+ * 点击卡片高亮对应节点（联动 WikiGraph）；可忽略。
  */
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import { Empty, ErrorBox, Spinner } from '@/components/ui-bits'
+import { Card, Empty, ErrorBox, Spinner } from '@/components/ui-bits'
 import { Button } from '@/components/ui/button'
 
 interface Insight {
@@ -29,11 +29,11 @@ const KIND_LABEL: Record<string, string> = {
   bridge_node: '桥节点',
 }
 
-const KIND_COLOR: Record<string, string> = {
-  surprising_connection: 'bg-purple-500/15 text-purple-400',
-  isolated_page: 'bg-yellow-500/15 text-yellow-400',
-  sparse_community: 'bg-orange-500/15 text-orange-400',
-  bridge_node: 'bg-blue-500/15 text-blue-400',
+const KIND_STYLE: Record<string, { dot: string; text: string }> = {
+  surprising_connection: { dot: 'bg-purple-400', text: 'text-purple-400' },
+  isolated_page: { dot: 'bg-yellow-400', text: 'text-yellow-400' },
+  sparse_community: { dot: 'bg-orange-400', text: 'text-orange-400' },
+  bridge_node: { dot: 'bg-blue-400', text: 'text-blue-400' },
 }
 
 export default function InsightsPanel({
@@ -69,64 +69,66 @@ export default function InsightsPanel({
             load()
           }}
         >
-          重置 dismiss
+          重置忽略
         </Button>
       </div>
 
       {report.insights.length === 0 ? (
-        <Empty text="无洞察（知识库连接良好或全部已 dismiss）" />
+        <Empty text="无洞察（知识库连接良好或全部已忽略）" />
       ) : (
         <div className="space-y-2">
-          {report.insights.map((ins) => (
-            <div
-              key={ins.key}
-              className={`cursor-pointer rounded-lg border p-3 text-sm transition-colors hover:bg-accent/30 ${
-                active === ins.key ? 'border-accent bg-accent/20' : ''
-              }`}
-              onClick={() => {
-                if (active === ins.key) {
-                  setActive(null)
-                  onHighlight(null)
-                } else {
-                  setActive(ins.key)
-                  onHighlight(ins.slugs)
-                }
-              }}
-              data-testid={`insight-${ins.kind}`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <span className={`mr-2 rounded px-1.5 py-0.5 text-xs ${KIND_COLOR[ins.kind] ?? 'bg-gray-500/15 text-gray-400'}`}>
-                    {KIND_LABEL[ins.kind] ?? ins.kind}
-                  </span>
-                  <span className="font-medium">{ins.title}</span>
-                  <p className="mt-1 text-xs text-muted-foreground">{ins.detail}</p>
+          {report.insights.map((ins) => {
+            const s = KIND_STYLE[ins.kind] ?? { dot: 'bg-gray-400', text: 'text-gray-400' }
+            return (
+              <Card
+                key={ins.key}
+                className={`cursor-pointer p-3 transition-colors ${active === ins.key ? 'border-brand/50 bg-brand/5' : 'hover:bg-muted/30'}`}
+                onClick={() => {
+                  if (active === ins.key) {
+                    setActive(null)
+                    onHighlight(null)
+                  } else {
+                    setActive(ins.key)
+                    onHighlight(ins.slugs)
+                  }
+                }}
+                data-testid={`insight-${ins.kind}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/5 bg-white/[0.03] px-2 py-0.5 text-[11px] font-medium">
+                      <span className={`size-1.5 rounded-full ${s.dot}`} />
+                      <span className={s.text}>{KIND_LABEL[ins.kind] ?? ins.kind}</span>
+                    </span>
+                    <span className="ml-2 text-sm font-medium">{ins.title}</span>
+                    <p className="mt-1 text-xs text-muted-foreground">{ins.detail}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={async (e) => {
+                      e.stopPropagation()
+                      await api.post('/wiki/insights/dismiss', { key: ins.key })
+                      load()
+                    }}
+                  >
+                    忽略
+                  </Button>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={async (e) => {
-                    e.stopPropagation()
-                    await api.post('/wiki/insights/dismiss', { key: ins.key })
-                    load()
-                  }}
-                >
-                  dismiss
-                </Button>
-              </div>
-            </div>
-          ))}
+              </Card>
+            )
+          })}
         </div>
       )}
 
       {report.communities.length > 0 && (
-        <details className="rounded-lg border p-3">
+        <details className="rounded-xl border border-border bg-card p-3">
           <summary className="cursor-pointer text-sm font-medium">社区列表（Louvain）</summary>
-          <div className="mt-2 space-y-1 text-xs">
+          <div className="mt-2 space-y-1.5 text-xs text-muted-foreground">
             {report.communities.map((c) => (
               <p key={c.id}>
                 #{c.id}：{c.top_slug} 等 {c.size} 页 · 凝聚度 {c.cohesion.toFixed(2)}
-                {c.cohesion < 0.15 && c.size >= 3 ? ' ⚠️ 稀疏' : ''}
+                {c.cohesion < 0.15 && c.size >= 3 ? ' · 稀疏' : ''}
               </p>
             ))}
           </div>

@@ -6,23 +6,27 @@ import ReviewQueue from '@/components/ReviewQueue'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { useSearchParams } from 'react-router-dom'
 import { api, type GraphDto, type LintReport, type WikiPage } from '@/lib/api'
-import { Empty, ErrorBox, Spinner, fmtTime } from '@/components/ui-bits'
+import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
+import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
 type Tab = 'pages' | 'graph' | 'insights' | 'lint' | 'proposals' | 'sources'
+
+const TABS: { value: Tab; label: string }[] = [
+  { value: 'pages', label: '页面' },
+  { value: 'graph', label: '图谱' },
+  { value: 'insights', label: '洞察' },
+  { value: 'lint', label: 'Lint' },
+  { value: 'proposals', label: '提案' },
+  { value: 'sources', label: '原料' },
+]
 
 export default function Wiki() {
   const [tab, setTab] = useState<Tab>('pages')
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Wiki</h1>
-      <div className="flex gap-2">
-        {(['pages', 'graph', 'insights', 'lint', 'proposals', 'sources'] as Tab[]).map((t) => (
-          <Button key={t} variant={tab === t ? 'default' : 'outline'} size="sm" onClick={() => setTab(t)}>
-            {t}
-          </Button>
-        ))}
-      </div>
+      <PageHeader title="Wiki" desc="LLM 增量维护的互链知识库" />
+      <Tabs items={TABS} value={tab} onChange={setTab} />
       {tab === 'pages' && <PagesPane />}
       {tab === 'graph' && <GraphPane />}
       {tab === 'insights' && <GraphWithInsights />}
@@ -59,30 +63,45 @@ function PagesPane() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
       <div className="space-y-2">
-        <details className="rounded-lg border p-3">
-          <summary className="cursor-pointer text-sm font-medium">新文档 ingest</summary>
-          <div className="mt-2 space-y-2">
-            <input className="w-full rounded border bg-transparent px-2 py-1 text-sm" placeholder="标题" value={ingestTitle} onChange={(e) => setIngestTitle(e.target.value)} />
-            <textarea className="h-24 w-full rounded border bg-transparent px-2 py-1 text-sm" placeholder="源文本" value={ingestText} onChange={(e) => setIngestText(e.target.value)} />
-            <Button
-              size="sm"
-              onClick={async () => {
-                const r = await api.post<{ skipped: boolean }>('/wiki/ingest', { title: ingestTitle, text: ingestText })
-                setMsg(r.skipped ? '相同内容已摄取（sha 跳过）' : '已入队摄取')
-                setIngestText('')
-                setIngestTitle('')
-                setTimeout(load, 3000)
-              }}
-            >
-              摄取
-            </Button>
-            {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
-          </div>
-        </details>
+        <Card className="p-3">
+          <details>
+            <summary className="cursor-pointer text-sm font-medium">新文档 ingest</summary>
+            <div className="mt-3 space-y-2">
+              <input
+                className={`${inputCls} w-full`}
+                placeholder="标题"
+                value={ingestTitle}
+                onChange={(e) => setIngestTitle(e.target.value)}
+              />
+              <textarea
+                className={`${inputCls} h-24 w-full`}
+                placeholder="源文本"
+                value={ingestText}
+                onChange={(e) => setIngestText(e.target.value)}
+              />
+              <Button
+                size="sm"
+                onClick={async () => {
+                  const r = await api.post<{ skipped: boolean }>('/wiki/ingest', {
+                    title: ingestTitle,
+                    text: ingestText,
+                  })
+                  setMsg(r.skipped ? '相同内容已摄取（sha 跳过）' : '已入队摄取')
+                  setIngestText('')
+                  setIngestTitle('')
+                  setTimeout(load, 3000)
+                }}
+              >
+                摄取
+              </Button>
+              {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+            </div>
+          </details>
+        </Card>
         {pages.map((p) => (
-          <div
+          <Card
             key={p.id}
-            className={`cursor-pointer rounded-lg border p-3 text-sm hover:bg-accent/30 ${open?.id === p.id ? 'border-accent' : ''}`}
+            className={`cursor-pointer p-3 transition-colors ${open?.id === p.id ? 'border-brand/50 bg-brand/5' : 'hover:bg-muted/30'}`}
             onClick={async () => {
               setOpen(await api.get<WikiPage>(`/wiki/pages/${encodeURIComponent(p.slug)}`))
               setEditing(false)
@@ -94,17 +113,25 @@ function PagesPane() {
                 {p.page_type} v{p.version}
               </span>
             </div>
-            {p.origin === 'human' && <span className="text-xs text-orange-400">人工</span>}
-          </div>
+            {p.origin === 'human' && <span className="mt-1 inline-block text-xs text-orange-400">人工</span>}
+          </Card>
         ))}
       </div>
       <div>
         {!open ? (
           <Empty text="选择左侧页面" />
         ) : editing ? (
-          <div className="space-y-2">
-            <input className="w-full rounded-md border bg-transparent px-3 py-2 text-sm" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <textarea className="h-96 w-full rounded-md border bg-transparent px-3 py-2 font-mono text-sm" value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <Card className="space-y-3 p-4">
+            <input
+              className={`${inputCls} w-full`}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+            <textarea
+              className={`${inputCls} h-96 w-full font-mono`}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
             <div className="flex gap-2">
               <Button
                 size="sm"
@@ -121,9 +148,9 @@ function PagesPane() {
                 取消
               </Button>
             </div>
-          </div>
+          </Card>
         ) : (
-          <div className="space-y-3">
+          <Card className="space-y-3 p-4">
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
                 {open.slug} · v{open.version} · {fmtTime(open.updated_at)} · {open.origin}
@@ -141,7 +168,7 @@ function PagesPane() {
               </Button>
             </div>
             <WikiMarkdown content={open.content} onNavigateSlug={() => {}} />
-          </div>
+          </Card>
         )}
       </div>
     </div>
@@ -210,57 +237,59 @@ function SourcesPane() {
       {rows.length === 0 ? (
         <Empty text="暂无原料" />
       ) : (
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted-foreground">
-            <tr className="border-b">
-              <th className="py-1.5 pr-4">标题</th>
-              <th className="pr-4">状态</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-b">
-                <td className="py-1.5 pr-4">{r.title ?? '(未命名)'}</td>
-                <td className="pr-4">{r.status}</td>
-                <td className="text-right">
-                  {confirming === r.id ? (
-                    <span className="inline-flex gap-1">
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        data-testid={`confirm-delete-${r.id}`}
-                        onClick={async () => {
-                          const rep = await api.del<typeof report>(`/wiki/sources/${r.id}`)
-                          setReport(rep)
-                          setConfirming(null)
-                          load()
-                        }}
-                      >
-                        确认级联删除
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
-                        取消
-                      </Button>
-                    </span>
-                  ) : (
-                    <Button size="sm" variant="outline" onClick={() => setConfirming(r.id)}>
-                      删除
-                    </Button>
-                  )}
-                </td>
+        <Card className="overflow-hidden">
+          <table className={tableCls.root}>
+            <thead className={tableCls.thead}>
+              <tr>
+                <th className={tableCls.th}>标题</th>
+                <th className={tableCls.th}>状态</th>
+                <th className={tableCls.th} />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className={tableCls.row}>
+                  <td className={`${tableCls.td} font-medium`}>{r.title ?? '(未命名)'}</td>
+                  <td className={tableCls.td}>{r.status}</td>
+                  <td className={`${tableCls.td} text-right`}>
+                    {confirming === r.id ? (
+                      <span className="inline-flex gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          data-testid={`confirm-delete-${r.id}`}
+                          onClick={async () => {
+                            const rep = await api.del<typeof report>(`/wiki/sources/${r.id}`)
+                            setReport(rep)
+                            setConfirming(null)
+                            load()
+                          }}
+                        >
+                          确认级联删除
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                          取消
+                        </Button>
+                      </span>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => setConfirming(r.id)}>
+                        删除
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
       {report && (
-        <div className="rounded-lg border p-3 text-xs" data-testid="cascade-report">
-          <p className="font-medium">级联删除报告：</p>
+        <Card className="p-3 text-xs" data-testid="cascade-report">
+          <p className="mb-1 font-medium">级联删除报告：</p>
           <p>整页删除：{report.deleted_pages.length}（{report.deleted_pages.join(', ')}）</p>
           <p>共享页摘源：{report.updated_shared.length}（{report.updated_shared.join(', ')}）</p>
           <p>清理死链：{report.cleaned_links} 条</p>
-        </div>
+        </Card>
       )}
     </div>
   )
@@ -271,22 +300,29 @@ function LintPane() {
   const [err, setErr] = useState('')
   return (
     <div className="space-y-4">
-      <Button size="sm" onClick={async () => {
-        try {
-          setR(await api.post<LintReport>('/wiki/lint'))
-        } catch (e) {
-          setErr(e instanceof Error ? e.message : 'lint 失败')
-        }
-      }}>
+      <Button
+        size="sm"
+        onClick={async () => {
+          try {
+            setR(await api.post<LintReport>('/wiki/lint'))
+          } catch (e) {
+            setErr(e instanceof Error ? e.message : 'lint 失败')
+          }
+        }}
+      >
         运行 Lint
       </Button>
       {err && <ErrorBox msg={err} />}
       {r && (
         <div>
-          <p className="mb-2 text-sm text-muted-foreground">检查 {r.checked_pages} 页，{r.issues.length} 个问题</p>
+          <p className="mb-2 text-sm text-muted-foreground">
+            检查 {r.checked_pages} 页，{r.issues.length} 个问题
+          </p>
           {r.issues.map((i, idx) => (
-            <div key={idx} className="border-b py-2 text-sm">
-              <span className="mr-2 rounded bg-yellow-500/15 px-1.5 text-xs text-yellow-400">{i.rule}</span>
+            <div key={idx} className="border-b border-border/50 py-2 text-sm last:border-0">
+              <span className="mr-2 rounded bg-yellow-500/15 px-1.5 py-0.5 text-xs text-yellow-400">
+                {i.rule}
+              </span>
               <span className="font-medium">{i.slug}</span>
               <span className="ml-2 text-muted-foreground">{i.detail}</span>
             </div>
@@ -310,11 +346,14 @@ function ProposalsPane() {
             all.push({ job_id: j.id, data: ev.data as { page_slug: string; proposal_content: string }, ts: ev.ts })
           }
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
     setEvents(all)
   }
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- load 异步拉取，setEvents 在 await 之后，非同步级联（误报）
     load()
   }, [])
   if (!events) return <Spinner />
@@ -322,11 +361,13 @@ function ProposalsPane() {
   return (
     <div className="space-y-3">
       {events.map((e, i) => (
-        <div key={i} className="rounded-lg border p-4">
+        <Card key={i} className="p-4">
           <p className="text-sm font-medium">
-            {e.data.page_slug} <span className="ml-2 text-xs text-muted-foreground">{fmtTime(e.ts)}</span>
+            {e.data.page_slug} <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtTime(e.ts)}</span>
           </p>
-          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/50 p-2 text-xs">{e.data.proposal_content}</pre>
+          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-xs">
+            {e.data.proposal_content}
+          </pre>
           <Button
             size="sm"
             className="mt-2"
@@ -342,7 +383,7 @@ function ProposalsPane() {
           >
             合入
           </Button>
-        </div>
+        </Card>
       ))}
     </div>
   )

@@ -1,7 +1,7 @@
 /**
  * Wiki Markdown 渲染：mermaid 代码块 + [[wikilink]] 页内跳转。
  */
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -32,7 +32,7 @@ function WikilinkText({ text, onNavigate }: { text: string; onNavigate: (slug: s
           return (
             <button
               key={i}
-              className="text-blue-400 underline-offset-2 hover:underline"
+              className="text-brand-strong underline-offset-2 hover:underline"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -50,18 +50,18 @@ function WikilinkText({ text, onNavigate }: { text: string; onNavigate: (slug: s
 }
 
 function MermaidBlock({ code }: { code: string }) {
-  const idRef = useRef(`mmd-${Math.random().toString(36).slice(2)}`)
+  const [id] = useState(() => `mmd-${Math.random().toString(36).slice(2)}`)
   const [svg, setSvg] = useState('')
   const [err, setErr] = useState('')
   useEffect(() => {
     let cancelled = false
-    renderMermaid(idRef.current, code)
+    renderMermaid(id, code)
       .then((svg) => !cancelled && setSvg(svg))
       .catch(() => !cancelled && setErr('mermaid 渲染失败'))
     return () => {
       cancelled = true
     }
-  }, [code])
+  }, [code, id])
   if (err) return <pre className="rounded bg-muted/50 p-2 text-xs text-red-400">{err}</pre>
   if (!svg) return <pre className="rounded bg-muted/50 p-2 text-xs">{code}</pre>
   return <div className="my-2 overflow-auto" dangerouslySetInnerHTML={{ __html: svg }} />

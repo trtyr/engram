@@ -7,7 +7,7 @@ import Graph from 'graphology'
 import Sigma from 'sigma'
 import { useNavigate } from 'react-router-dom'
 import type { GraphDto } from '@/lib/api'
-import { Button } from '@/components/ui/button'
+import { Empty, Tabs } from '@/components/ui-bits'
 
 const TYPE_COLOR: Record<string, string> = {
   entity: '#e6772e',
@@ -28,6 +28,8 @@ const COMMUNITY_PALETTE = [
   '#06b6d4', '#3b82f6', '#6366f1', '#a855f7', '#d946ef', '#f43f5e',
 ]
 
+type ColorMode = 'community' | 'type'
+
 /** 高亮的 slug 集合（洞察卡片点击联动） */
 export default function WikiGraph({
   graph,
@@ -38,7 +40,7 @@ export default function WikiGraph({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const nav = useNavigate()
-  const [mode, setMode] = useState<'community' | 'type'>('community')
+  const [mode, setMode] = useState<ColorMode>('community')
 
   const nodeColor = useMemo(() => {
     return (pageType: string, community: number) => {
@@ -92,44 +94,36 @@ export default function WikiGraph({
   }, [graph, nav, nodeColor, highlightSlugs])
 
   if (graph.nodes.length === 0) {
-    return <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">图谱为空（ingest 后生成）</p>
+    return <Empty text="图谱为空（ingest 后生成）" />
   }
 
   const communityCount = new Set(graph.nodes.map((n) => n.community ?? 0)).size
-  const lowCohesion = (graph.communities ?? []).filter((c) => c.cohesion < 0.15 && (c.size ?? 0) >= 3)
+  const sparseComms = (graph.communities ?? []).filter((c) => c.sparse)
 
   return (
-    <div className="space-y-2" data-testid="wiki-graph-root">
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          variant={mode === 'community' ? 'default' : 'outline'}
-          data-testid="color-mode-community"
-          onClick={() => setMode('community')}
-        >
-          社区着色（{communityCount} 簇）
-        </Button>
-        <Button
-          size="sm"
-          variant={mode === 'type' ? 'default' : 'outline'}
-          data-testid="color-mode-type"
-          onClick={() => setMode('type')}
-        >
-          类型着色
-        </Button>
-        {lowCohesion.length > 0 && (
+    <div className="space-y-3" data-testid="wiki-graph-root">
+      <div className="flex flex-wrap items-center gap-3">
+        <Tabs
+          items={[
+            { value: 'community', label: `社区着色（${communityCount} 簇）` },
+            { value: 'type', label: '类型着色' },
+          ]}
+          value={mode}
+          onChange={setMode}
+        />
+        {sparseComms.length > 0 && (
           <span className="text-xs text-orange-400">
-            {lowCohesion.length} 个稀疏社区（凝聚度 &lt; 0.15）
+            {sparseComms.length} 个稀疏社区
           </span>
         )}
       </div>
-      <div ref={ref} className="h-[480px] w-full rounded-lg border bg-card" data-testid="wiki-graph-canvas" />
-      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+      <div ref={ref} className="h-[480px] w-full rounded-xl border border-border bg-card" data-testid="wiki-graph-canvas" />
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         {mode === 'type'
           ? Object.entries(TYPE_COLOR)
               .filter(([t]) => graph.nodes.some((n) => n.page_type === t))
               .map(([t, c]) => (
-                <span key={t} className="flex items-center gap-1">
+                <span key={t} className="flex items-center gap-1.5">
                   <span className="inline-block size-2 rounded-full" style={{ background: c }} />
                   {t}
                 </span>
@@ -137,7 +131,7 @@ export default function WikiGraph({
           : (graph.communities ?? [])
               .filter((c) => graph.nodes.some((n) => (n.community ?? 0) === c.id))
               .map((c) => (
-                <span key={c.id} className="flex items-center gap-1">
+                <span key={c.id} className="flex items-center gap-1.5">
                   <span
                     className="inline-block size-2 rounded-full"
                     style={{ background: COMMUNITY_PALETTE[c.id % COMMUNITY_PALETTE.length] }}

@@ -1,7 +1,8 @@
 /** Jobs 域：任务表 + 事件时间线。 */
 import { useEffect, useState } from 'react'
 import { api, type Job, type JobEvent } from '@/lib/api'
-import { Empty, Spinner, StatusBadge, fmtTime } from '@/components/ui-bits'
+import { Card, Empty, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
+import { fmtTime, selectCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
 export default function Jobs() {
@@ -23,40 +24,43 @@ export default function Jobs() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Jobs</h1>
-        <select className="rounded border bg-transparent px-2 py-1 text-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
+      <PageHeader title="Jobs" desc="后台任务队列与事件时间线">
+        <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">全部状态</option>
           {['pending', 'running', 'succeeded', 'failed', 'dead'].map((s) => (
             <option key={s}>{s}</option>
           ))}
         </select>
-      </div>
+      </PageHeader>
       {rows.length === 0 ? (
         <Empty text="无任务" />
       ) : (
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted-foreground">
-            <tr className="border-b">
-              <th className="py-1.5 pr-4">类型</th>
-              <th className="pr-4">状态</th>
-              <th className="pr-4">尝试</th>
-              <th className="pr-4">时间</th>
-              <th className="pr-4">错误</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((j) => (
-              <tr key={j.id} className="cursor-pointer border-b hover:bg-accent/30" onClick={() => setOpen(j)}>
-                <td className="py-1.5 pr-4">{j.kind}</td>
-                <td className="pr-4"><StatusBadge status={j.status} /></td>
-                <td className="pr-4">{j.attempts}</td>
-                <td className="pr-4">{fmtTime(j.created_at)}</td>
-                <td className="max-w-64 truncate pr-4 text-red-400">{j.error ?? ''}</td>
+        <Card className="overflow-hidden">
+          <table className={tableCls.root}>
+            <thead className={tableCls.thead}>
+              <tr>
+                <th className={tableCls.th}>类型</th>
+                <th className={tableCls.th}>状态</th>
+                <th className={tableCls.th}>尝试</th>
+                <th className={tableCls.th}>时间</th>
+                <th className={tableCls.th}>错误</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((j) => (
+                <tr key={j.id} className={`${tableCls.row} cursor-pointer`} onClick={() => setOpen(j)}>
+                  <td className={`${tableCls.td} font-medium`}>{j.kind}</td>
+                  <td className={tableCls.td}>
+                    <StatusBadge status={j.status} />
+                  </td>
+                  <td className={`${tableCls.td} tabular-nums`}>{j.attempts}</td>
+                  <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(j.created_at)}</td>
+                  <td className={`${tableCls.td} max-w-64 truncate text-red-400`}>{j.error ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
       {open && <EventTimeline job={open} onClose={() => setOpen(null)} />}
     </div>
@@ -69,10 +73,10 @@ function EventTimeline({ job, onClose }: { job: Job; onClose: () => void }) {
     api.get<JobEvent[]>(`/jobs/${job.id}/events?limit=200`).then(setEvents).catch(() => setEvents([]))
   }, [job.id])
   return (
-    <div className="rounded-lg border p-4">
-      <div className="mb-2 flex items-center justify-between">
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
         <p className="text-sm font-medium">
-          {job.kind} · {job.id}
+          {job.kind} <span className="ml-2 font-mono text-xs text-muted-foreground">{job.id}</span>
         </p>
         <div className="flex gap-2">
           {(job.status === 'dead' || job.status === 'failed') && (
@@ -99,15 +103,17 @@ function EventTimeline({ job, onClose }: { job: Job; onClose: () => void }) {
       ) : (
         <div className="max-h-96 space-y-1 overflow-auto">
           {events.map((e) => (
-            <div key={e.id} className="border-b py-1 text-sm last:border-0">
-              <span className={`mr-2 text-xs ${e.level === 'error' ? 'text-red-400' : 'text-muted-foreground'}`}>
+            <div key={e.id} className="border-b border-border/50 py-1.5 text-sm last:border-0">
+              <span
+                className={`mr-2 text-xs tabular-nums ${e.level === 'error' ? 'text-red-400' : 'text-muted-foreground'}`}
+              >
                 {fmtTime(e.ts)}
               </span>
               {e.message}
               {e.data != null && (
-                <details className="mt-0.5">
+                <details className="mt-1">
                   <summary className="cursor-pointer text-xs text-muted-foreground">数据</summary>
-                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted/50 p-1.5 text-xs">
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-2 text-xs">
                     {JSON.stringify(e.data, null, 2)}
                   </pre>
                 </details>
@@ -116,6 +122,6 @@ function EventTimeline({ job, onClose }: { job: Job; onClose: () => void }) {
           ))}
         </div>
       )}
-    </div>
+    </Card>
   )
 }

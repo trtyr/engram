@@ -1,7 +1,16 @@
 /** Knowledge 域：文档表格 + 上传/URL + 分块预览 + 检索。 */
 import { useEffect, useRef, useState } from 'react'
+import { Upload } from 'lucide-react'
 import { api, type ChunkHit, type Document } from '@/lib/api'
-import { Empty, ErrorBox, Spinner, StatusBadge, fmtTime } from '@/components/ui-bits'
+import {
+  Card,
+  Empty,
+  ErrorBox,
+  PageHeader,
+  Spinner,
+  StatusBadge,
+} from '@/components/ui-bits'
+import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
 export default function Knowledge() {
@@ -22,42 +31,55 @@ export default function Knowledge() {
     if (!docs?.some((d) => ['pending', 'parsing', 'chunking', 'embedding'].includes(d.status))) return
     const t = setInterval(load, 3000)
     return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docs])
+
+  const upload = async (f: File) => {
+    try {
+      await api.upload('/knowledge/upload', f)
+      load()
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : '上传失败')
+    }
+  }
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Knowledge</h1>
+      <PageHeader title="Knowledge" desc="文档 / URL 摄取 → 分块 → 嵌入 → 混合检索" />
 
       <div
-        className="flex flex-wrap items-center gap-2 rounded-lg border-2 border-dashed p-4 transition-colors hover:border-accent"
+        className="flex flex-wrap items-center gap-3 rounded-xl border-2 border-dashed border-border p-4 transition-colors hover:border-brand/50"
         data-testid="dropzone"
-        onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-accent') }}
-        onDragLeave={(e) => { e.currentTarget.classList.remove('border-accent') }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          e.currentTarget.classList.add('border-brand')
+        }}
+        onDragLeave={(e) => {
+          e.currentTarget.classList.remove('border-brand')
+        }}
         onDrop={async (e) => {
           e.preventDefault()
-          e.currentTarget.classList.remove('border-accent')
+          e.currentTarget.classList.remove('border-brand')
           const f = e.dataTransfer.files?.[0]
           if (!f) return
-          try {
-            await api.upload('/knowledge/upload', f)
-            load()
-          } catch (ex) {
-            setErr(ex instanceof Error ? ex.message : '上传失败')
-          }
+          await upload(f)
         }}
       >
-        <input ref={fileRef} type="file" className="hidden" onChange={async (e) => {
-          const f = e.target.files?.[0]
-          if (!f) return
-          try {
-            await api.upload('/knowledge/upload', f)
-            load()
-          } catch (ex) {
-            setErr(ex instanceof Error ? ex.message : '上传失败')
-          }
-          e.target.value = ''
-        }} />
-        <Button size="sm" onClick={() => fileRef.current?.click()}>上传文件</Button>
+        <Upload className="size-4 text-muted-foreground" />
+        <input
+          ref={fileRef}
+          type="file"
+          className="hidden"
+          onChange={async (e) => {
+            const f = e.target.files?.[0]
+            if (!f) return
+            await upload(f)
+            e.target.value = ''
+          }}
+        />
+        <Button size="sm" onClick={() => fileRef.current?.click()}>
+          上传文件
+        </Button>
         <form
           className="flex flex-1 gap-2"
           onSubmit={async (e) => {
@@ -72,8 +94,15 @@ export default function Knowledge() {
             }
           }}
         >
-          <input className="flex-1 rounded-md border bg-transparent px-3 py-1.5 text-sm" placeholder="https://…" value={url} onChange={(e) => setUrl(e.target.value)} />
-          <Button size="sm" variant="outline" type="submit">摄取 URL</Button>
+          <input
+            className={`${inputCls} flex-1`}
+            placeholder="https://…"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <Button size="sm" variant="outline" type="submit">
+            摄取 URL
+          </Button>
         </form>
       </div>
 
@@ -86,24 +115,30 @@ export default function Knowledge() {
           setHits(await api.post<ChunkHit[]>('/knowledge/search', { query: q, max_items: 10 }))
         }}
       >
-        <input className="flex-1 rounded-md border bg-transparent px-3 py-2 text-sm" value={q} onChange={(e) => setQ(e.target.value)} placeholder="检索知识库…" />
+        <input
+          className={`${inputCls} flex-1`}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="检索知识库…"
+        />
         <Button type="submit">检索</Button>
       </form>
       {hits && (
-        <div className="rounded-lg border p-4">
+        <Card className="p-4">
           {hits.length === 0 ? (
             <p className="text-sm text-muted-foreground">无命中</p>
           ) : (
             hits.map((h) => (
-              <div key={h.chunk_id} className="border-b py-2 text-sm last:border-0">
-                <p className="text-xs text-muted-foreground">
-                  [{h.document_title}] #{h.seq} {h.embed_failed ? '(FTS)' : ''} ({h.score.toFixed(3)})
+              <div key={h.chunk_id} className="border-b border-border/50 py-2.5 text-sm last:border-0">
+                <p className="mb-1 text-xs text-muted-foreground">
+                  [{h.document_title}] #{h.seq} {h.embed_failed ? '(FTS)' : ''} (
+                  {h.score.toFixed(3)})
                 </p>
                 <p>{h.snippet}</p>
               </div>
             ))
           )}
-        </div>
+        </Card>
       )}
 
       {docs === null ? (
@@ -111,42 +146,51 @@ export default function Knowledge() {
       ) : docs.length === 0 ? (
         <Empty text="暂无文档" />
       ) : (
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted-foreground">
-            <tr className="border-b">
-              <th className="py-1.5 pr-4">标题</th>
-              <th className="pr-4">状态</th>
-              <th className="pr-4">时间</th>
-              <th className="pr-4">错误</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {docs.map((d) => (
-              <tr key={d.id} className="border-b">
-                <td className="max-w-72 truncate py-1.5 pr-4">{d.title}</td>
-                <td className="pr-4"><StatusBadge status={d.status} /></td>
-                <td className="pr-4">{fmtTime(d.created_at)}</td>
-                <td className="max-w-48 truncate pr-4 text-red-400">{d.error ?? ''}</td>
-                <td className="text-right">
-                  <Button variant="ghost" size="sm" className="mr-1" onClick={() => setOpenChunks(openChunks === d.id ? null : d.id)}>
-                    分块
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={async () => {
-                      await api.del(`/knowledge/documents/${d.id}`)
-                      load()
-                    }}
-                  >
-                    删除
-                  </Button>
-                </td>
+        <Card className="overflow-hidden">
+          <table className={tableCls.root}>
+            <thead className={tableCls.thead}>
+              <tr>
+                <th className={tableCls.th}>标题</th>
+                <th className={tableCls.th}>状态</th>
+                <th className={tableCls.th}>时间</th>
+                <th className={tableCls.th}>错误</th>
+                <th className={tableCls.th} />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {docs.map((d) => (
+                <tr key={d.id} className={tableCls.row}>
+                  <td className={`${tableCls.td} max-w-72 truncate font-medium`}>{d.title}</td>
+                  <td className={tableCls.td}>
+                    <StatusBadge status={d.status} />
+                  </td>
+                  <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(d.created_at)}</td>
+                  <td className={`${tableCls.td} max-w-48 truncate text-red-400`}>{d.error ?? ''}</td>
+                  <td className={`${tableCls.td} whitespace-nowrap text-right`}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mr-1"
+                      onClick={() => setOpenChunks(openChunks === d.id ? null : d.id)}
+                    >
+                      分块
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        await api.del(`/knowledge/documents/${d.id}`)
+                        load()
+                      }}
+                    >
+                      删除
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
 
       {openChunks && <ChunksPanel docId={openChunks} />}
@@ -156,18 +200,46 @@ export default function Knowledge() {
 
 function ChunksPanel({ docId }: { docId: string }) {
   const [rows, setRows] = useState<{ seq: number; content: string; embed_failed: boolean }[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
   useEffect(() => {
     api.get<typeof rows>(`/knowledge/documents/${docId}/chunks`).then(setRows).catch(() => setRows([]))
   }, [docId])
   if (!rows) return <Spinner />
+  const failedCount = rows.filter((c) => c.embed_failed).length
   return (
-    <div className="max-h-96 space-y-2 overflow-auto rounded-lg border p-4">
+    <Card className="max-h-96 overflow-auto p-4">
+      {failedCount > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2">
+          <span className="text-xs text-orange-400">{failedCount} 个分块嵌入失败（FTS 降级）</span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              setMsg('')
+              try {
+                await api.post(`/knowledge/documents/${docId}/re-embed`)
+                setMsg('重嵌任务已入队')
+              } catch (ex) {
+                setMsg(ex instanceof Error ? ex.message : '重嵌失败')
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            {busy ? '入队中…' : '重嵌缺失块'}
+          </Button>
+          {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+        </div>
+      )}
       {rows.map((c) => (
-        <div key={c.seq} className="border-b pb-2 text-sm last:border-0">
-          <p className="text-xs text-muted-foreground">#{c.seq} {c.embed_failed ? '（FTS 降级）' : ''}</p>
+        <div key={c.seq} className="border-b border-border/50 py-2.5 text-sm last:border-0">
+          <p className="mb-1 text-xs text-muted-foreground">#{c.seq} {c.embed_failed ? '（FTS 降级）' : ''}</p>
           <p className="line-clamp-3">{c.content}</p>
         </div>
       ))}
-    </div>
+    </Card>
   )
 }

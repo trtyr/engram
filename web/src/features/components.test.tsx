@@ -130,7 +130,7 @@ describe('Atoms 表格操作', () => {
       { id: 'a2', kind: 'fact', content: '用户住上海', confidence: 0.85, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, scenario_id: null, source_refs: [], created_at: '2026-08-20T00:01:00Z' },
     ]
     render(wrap(<Memory />))
-    fireEvent.click(screen.getByRole('button', { name: 'atoms' }))
+    fireEvent.click(screen.getByRole('button', { name: '原子' }))
     const rows = await screen.findAllByTestId(/^atom-content-/)
     expect(rows).toHaveLength(2)
     fireEvent.click(screen.getByTestId('atom-archive-a2'))
@@ -146,7 +146,7 @@ describe('Atoms 表格操作', () => {
       { id: 'a1', kind: 'fact', content: '旧内容', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, scenario_id: null, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
     ]
     render(wrap(<Memory />))
-    fireEvent.click(screen.getByRole('button', { name: 'atoms' }))
+    fireEvent.click(screen.getByRole('button', { name: '原子' }))
     const cell = await screen.findByTestId('atom-content-a1')
     fireEvent.doubleClick(cell)
     const input = screen.getByTestId('atom-edit-a1')
@@ -162,7 +162,7 @@ describe('Atoms 表格操作', () => {
       { id: 'old', kind: 'fact', content: '用户住在上海', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, scenario_id: null, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
     ]
     render(wrap(<Memory />))
-    fireEvent.click(screen.getByRole('button', { name: 'atoms' }))
+    fireEvent.click(screen.getByRole('button', { name: '原子' }))
     await screen.findByTestId('atom-content-old')
     fireEvent.click(screen.getByTestId('atom-supersede-old'))
     const panel = screen.getByTestId('supersede-panel')
@@ -186,7 +186,7 @@ describe('Persona 版本历史与回滚', () => {
       { id: 'p1', aspect: 'identity', content: '用户居住在上海。v1', version: 1, evidence_refs: {}, prompt_version: '1', created_at: '2026-08-20T01:00:00Z' },
     ]
     render(wrap(<Memory />))
-    fireEvent.click(screen.getByRole('button', { name: 'persona' }))
+    fireEvent.click(screen.getByRole('button', { name: '画像' }))
     await screen.findByText('用户居住在北京。v2')
     // 历史
     fireEvent.click(screen.getByRole('button', { name: '历史' }))
@@ -209,7 +209,7 @@ describe('Wiki 编辑器保存', () => {
     mockState.wikiPage = mockState.pages[0]
     mockState.draftContent = '# 向量检索\n\n人工编辑后的新内容'
     render(wrap(<Wiki />))
-    fireEvent.click(screen.getByRole('button', { name: 'pages' }))
+    fireEvent.click(screen.getByRole('button', { name: '页面' }))
     await screen.findByText('向量检索')
     // 先选中页面（点卡片）再进入编辑
     fireEvent.click(screen.getByText('向量检索'))

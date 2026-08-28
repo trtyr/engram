@@ -98,7 +98,7 @@ describe('InsightsPanel（图洞察）', () => {
     }
     render(wrap(<InsightsPanel onHighlight={() => {}} />))
     await screen.findByText('孤立页面：y')
-    fireEvent.click(screen.getByRole('button', { name: 'dismiss' }))
+    fireEvent.click(screen.getByRole('button', { name: '忽略' }))
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith('/wiki/insights/dismiss', { key: 'isolated_page:y' })
     })

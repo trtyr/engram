@@ -48,6 +48,11 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+@theme {
+    --color-brand: oklch(0.55 0.2 264);
+    --color-brand-strong: oklch(0.72 0.16 264);
+}
+
 :root {
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
@@ -127,4 +132,30 @@
   html {
     @apply font-sans;
     }
+}
+
+/* 浏览器表面：选中、光标主题化（跟随品牌蓝紫）*/
+::selection {
+    background: oklch(0.55 0.2 264 / 0.35);
+}
+input,
+textarea {
+    caret-color: oklch(0.72 0.16 264);
+}
+
+/* 登录页入场：一次性起手式 */
+@keyframes login-enter {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+        filter: blur(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+        filter: blur(0);
+    }
+}
+.login-enter {
+    animation: login-enter 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }

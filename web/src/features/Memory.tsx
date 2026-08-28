@@ -1,29 +1,34 @@
 /** Memory 域：会话 / 原子 / 场景 / 画像 / 检索。 */
 import { useEffect, useState } from 'react'
+import { api, type Atom, type Persona, type Scenario, type Session } from '@/lib/api'
 import {
-  api,
-  type Atom,
-  type Persona,
-  type Scenario,
-  type Session,
-} from '@/lib/api'
-import { Empty, ErrorBox, Spinner, StatusBadge, fmtTime } from '@/components/ui-bits'
+  Card,
+  Empty,
+  ErrorBox,
+  PageHeader,
+  Spinner,
+  StatusBadge,
+  Tabs,
+} from '@/components/ui-bits'
+import { fmtTime, inputCls, selectCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
 type Tab = 'sessions' | 'atoms' | 'scenarios' | 'persona' | 'search'
+
+const TABS: { value: Tab; label: string }[] = [
+  { value: 'sessions', label: '会话' },
+  { value: 'atoms', label: '原子' },
+  { value: 'scenarios', label: '场景' },
+  { value: 'persona', label: '画像' },
+  { value: 'search', label: '检索' },
+]
 
 export default function Memory() {
   const [tab, setTab] = useState<Tab>('sessions')
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Memory</h1>
-      <div className="flex gap-2">
-        {(['sessions', 'atoms', 'scenarios', 'persona', 'search'] as Tab[]).map((t) => (
-          <Button key={t} variant={tab === t ? 'default' : 'outline'} size="sm" onClick={() => setTab(t)}>
-            {t}
-          </Button>
-        ))}
-      </div>
+      <PageHeader title="Memory" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
+      <Tabs items={TABS} value={tab} onChange={setTab} />
       {tab === 'sessions' && <Sessions />}
       {tab === 'atoms' && <Atoms />}
       {tab === 'scenarios' && <Scenarios />}
@@ -46,7 +51,7 @@ function Sessions() {
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
+      <div className="flex justify-end">
         <Button
           size="sm"
           onClick={async () => {
@@ -60,39 +65,41 @@ function Sessions() {
       {rows.length === 0 ? (
         <Empty text="暂无会话——POST /memory/sessions 写入" />
       ) : (
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted-foreground">
-            <tr className="border-b">
-              <th className="py-1.5 pr-4">时间</th>
-              <th className="pr-4">Agent</th>
-              <th className="pr-4">轮次</th>
-              <th className="pr-4">蒸馏</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((s) => (
-              <tr key={s.id} className="border-b">
-                <td className="py-1.5 pr-4">{fmtTime(s.created_at)}</td>
-                <td className="pr-4">{s.agent}</td>
-                <td className="pr-4">{s.content?.length ?? 0}</td>
-                <td className="pr-4">
-                  <StatusBadge status={s.distill_status} />
-                </td>
-                <td className="text-right">
-                  <Button variant="ghost" size="sm" onClick={() => setOpen(s)}>
-                    详情
-                  </Button>
-                </td>
+        <Card className="overflow-hidden">
+          <table className={tableCls.root}>
+            <thead className={tableCls.thead}>
+              <tr>
+                <th className={tableCls.th}>时间</th>
+                <th className={tableCls.th}>Agent</th>
+                <th className={tableCls.th}>轮次</th>
+                <th className={tableCls.th}>蒸馏</th>
+                <th className={tableCls.th} />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id} className={tableCls.row}>
+                  <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(s.created_at)}</td>
+                  <td className={tableCls.td}>{s.agent}</td>
+                  <td className={`${tableCls.td} tabular-nums`}>{s.content?.length ?? 0}</td>
+                  <td className={tableCls.td}>
+                    <StatusBadge status={s.distill_status} />
+                  </td>
+                  <td className={`${tableCls.td} text-right`}>
+                    <Button variant="ghost" size="sm" onClick={() => setOpen(s)}>
+                      详情
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
       {open && (
-        <div className="rounded-lg border p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">{open.id}</p>
+        <Card className="p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="font-mono text-xs text-muted-foreground">{open.id}</p>
             <Button
               variant="destructive"
               size="sm"
@@ -105,15 +112,15 @@ function Sessions() {
               擦除
             </Button>
           </div>
-          <div className="space-y-1">
+          <div className="space-y-2">
             {open.content?.map((t, i) => (
-              <p key={i} className="text-sm">
-                <span className="mr-2 text-muted-foreground">{t.speaker}:</span>
-                {t.text}
-              </p>
+              <div key={i} className="flex gap-2 text-sm">
+                <span className="w-16 shrink-0 text-muted-foreground">{t.speaker}:</span>
+                <span className="flex-1">{t.text}</span>
+              </div>
             ))}
           </div>
-        </div>
+        </Card>
       )}
     </div>
   )
@@ -127,146 +134,182 @@ function Atoms() {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [superseding, setSuperseding] = useState<string | null>(null)
-  const load = () => {
+  const params = () => {
     const p = new URLSearchParams({ limit: '200' })
     if (kind) p.set('kind', kind)
     if (review) p.set('needs_review', 'true')
-    api.get<Atom[]>(`/memory/atoms?${p}`).then(setRows).catch((e) => setErr(e.message))
+    return p
+  }
+  const load = () => {
+    api.get<Atom[]>(`/memory/atoms?${params()}`).then(setRows).catch((e) => setErr(e.message))
   }
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, review])
   // 蒸馏后台进行时轮询（有 pending 会话即可能有新原子；全部处理完则停）
   useEffect(() => {
     const t = setInterval(load, 5000)
     return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, review])
   if (err) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
 
   const kinds = ['preference', 'fact', 'decision', 'event', 'insight', 'correction', 'failure', 'convention']
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <select className="rounded border bg-transparent px-2 py-1 text-sm" value={kind} onChange={(e) => setKind(e.target.value)}>
+      <div className="flex items-center gap-3">
+        <select className={selectCls} value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">全部 kind</option>
           {kinds.map((k) => (
             <option key={k}>{k}</option>
           ))}
         </select>
-        <label className="flex items-center gap-1 text-sm">
-          <input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} />
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            className="size-3.5 accent-[var(--brand-strong)]"
+            checked={review}
+            onChange={(e) => setReview(e.target.checked)}
+          />
           仅人审
         </label>
       </div>
+
       {superseding && (
-        <div className="rounded-lg border border-orange-500/40 bg-orange-500/10 p-4" data-testid="supersede-panel">
+        <Card className="border-orange-500/40 bg-orange-500/10 p-4" data-testid="supersede-panel">
           <p className="mb-2 text-sm font-medium">supersede：输入取代旧记忆的新事实</p>
           <form
             className="flex gap-2"
             onSubmit={async (e) => {
               e.preventDefault()
               const old = rows?.find((r) => r.id === superseding)
-              // 平台语义：新增新事实（人审），旧条手工归档——矛盾仲裁由蒸馏管道自动处理，
-              // 这里人工路径提供等价操作（create + archive 一步完成）
               await api.post('/memory/atoms', { kind: old?.kind ?? 'fact', content: draft, confidence: 0.95 })
               await api.patch(`/memory/atoms/${superseding}`, { status: 'archived' })
               setSuperseding(null)
               setDraft('')
-              const p = new URLSearchParams({ limit: '200' })
-              if (kind) p.set('kind', kind)
-              if (review) p.set('needs_review', 'true')
-              setRows(await api.get<Atom[]>(`/memory/atoms?${p}`))
+              setRows(await api.get<Atom[]>(`/memory/atoms?${params()}`))
             }}
           >
-            <input data-testid="supersede-input" className="flex-1 rounded border bg-transparent px-3 py-1.5 text-sm" placeholder="新事实（取代旧条目）" value={draft} onChange={(e) => setDraft(e.target.value)} />
-            <Button size="sm" type="submit" data-testid="supersede-submit">取代</Button>
-            <Button size="sm" variant="ghost" type="button" onClick={() => setSuperseding(null)}>取消</Button>
+            <input
+              data-testid="supersede-input"
+              className={`${inputCls} flex-1`}
+              placeholder="新事实（取代旧条目）"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <Button size="sm" type="submit" data-testid="supersede-submit">
+              取代
+            </Button>
+            <Button size="sm" variant="ghost" type="button" onClick={() => setSuperseding(null)}>
+              取消
+            </Button>
           </form>
-        </div>
+        </Card>
       )}
+
       {rows.length === 0 ? (
         <Empty text="暂无原子" />
       ) : (
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted-foreground">
-            <tr className="border-b">
-              <th className="py-1.5 pr-4">kind</th>
-              <th className="pr-4">内容</th>
-              <th className="pr-4">置信</th>
-              <th className="pr-4">状态</th>
-              <th className="pr-4">命中</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((a) => (
-              <tr key={a.id} className="border-b">
-                <td className="py-1.5 pr-4">{a.kind}</td>
-                <td className="pr-4">
-                  {editing === a.id ? (
-                    <span className="flex items-center gap-1">
-                      <input
-                        data-testid={`atom-edit-${a.id}`}
-                        className="w-72 rounded border bg-transparent px-2 py-0.5 text-sm"
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onKeyDown={async (e) => {
-                          if (e.key === 'Enter') {
-                            await api.patch(`/memory/atoms/${a.id}`, { content: draft })
-                            setEditing(null)
-                            const p = new URLSearchParams({ limit: '200' })
-                            if (kind) p.set('kind', kind)
-                            if (review) p.set('needs_review', 'true')
-                            setRows(await api.get<Atom[]>(`/memory/atoms?${p}`))
-                          }
-                          if (e.key === 'Escape') setEditing(null)
-                        }}
-                      />
-                      <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>取消</Button>
-                    </span>
-                  ) : (
-                    <span
-                      data-testid={`atom-content-${a.id}`}
-                      onDoubleClick={() => { setEditing(a.id); setDraft(a.content) }}
-                      title="双击编辑"
-                      className="cursor-text"
-                    >
-                      {a.needs_review && <span className="mr-1 rounded bg-orange-500/20 px-1 text-xs text-orange-400">人审</span>}
-                      {a.content}
-                    </span>
-                  )}
-                </td>
-                <td className="pr-4">{a.confidence.toFixed(2)}</td>
-                <td className="pr-4">
-                  <StatusBadge status={a.status} />
-                  {a.superseded_by && <span className="ml-1 text-xs text-muted-foreground">→ {a.superseded_by.slice(0, 8)}</span>}
-                </td>
-                <td className="pr-4">{a.hit_count}</td>
-                <td className="text-right whitespace-nowrap">
-                  {a.status === 'active' && (
-                    <>
-                      <Button variant="ghost" size="sm" className="mr-1" data-testid={`atom-supersede-${a.id}`} onClick={() => setSuperseding(a.id)}>
-                        supersede
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        data-testid={`atom-archive-${a.id}`}
-                        onClick={async () => {
-                          await api.patch(`/memory/atoms/${a.id}`, { status: 'archived' })
-                          setRows(rows.filter((r) => r.id !== a.id))
-                        }}
-                      >
-                        归档
-                      </Button>
-                    </>
-                  )}
-                </td>
+        <Card className="overflow-hidden">
+          <table className={tableCls.root}>
+            <thead className={tableCls.thead}>
+              <tr>
+                <th className={tableCls.th}>kind</th>
+                <th className={tableCls.th}>内容</th>
+                <th className={tableCls.th}>置信</th>
+                <th className={tableCls.th}>状态</th>
+                <th className={tableCls.th}>命中</th>
+                <th className={tableCls.th} />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((a) => (
+                <tr key={a.id} className={tableCls.row}>
+                  <td className={`${tableCls.td} text-muted-foreground`}>{a.kind}</td>
+                  <td className={tableCls.td}>
+                    {editing === a.id ? (
+                      <span className="flex items-center gap-1.5">
+                        <input
+                          data-testid={`atom-edit-${a.id}`}
+                          className={`${inputCls} w-72`}
+                          value={draft}
+                          onChange={(e) => setDraft(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter') {
+                              await api.patch(`/memory/atoms/${a.id}`, { content: draft })
+                              setEditing(null)
+                              setRows(await api.get<Atom[]>(`/memory/atoms?${params()}`))
+                            }
+                            if (e.key === 'Escape') setEditing(null)
+                          }}
+                        />
+                        <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
+                          取消
+                        </Button>
+                      </span>
+                    ) : (
+                      <span
+                        data-testid={`atom-content-${a.id}`}
+                        onDoubleClick={() => {
+                          setEditing(a.id)
+                          setDraft(a.content)
+                        }}
+                        title="双击编辑"
+                        className="cursor-text"
+                      >
+                        {a.needs_review && (
+                          <span className="mr-1.5 rounded bg-orange-500/20 px-1.5 py-0.5 text-xs text-orange-400">
+                            人审
+                          </span>
+                        )}
+                        {a.content}
+                      </span>
+                    )}
+                  </td>
+                  <td className={`${tableCls.td} tabular-nums`}>{a.confidence.toFixed(2)}</td>
+                  <td className={tableCls.td}>
+                    <StatusBadge status={a.status} />
+                    {a.superseded_by && (
+                      <span className="ml-1.5 font-mono text-xs text-muted-foreground">
+                        → {a.superseded_by.slice(0, 8)}
+                      </span>
+                    )}
+                  </td>
+                  <td className={`${tableCls.td} tabular-nums`}>{a.hit_count}</td>
+                  <td className={`${tableCls.td} whitespace-nowrap text-right`}>
+                    {a.status === 'active' && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mr-1"
+                          data-testid={`atom-supersede-${a.id}`}
+                          onClick={() => setSuperseding(a.id)}
+                        >
+                          supersede
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          data-testid={`atom-archive-${a.id}`}
+                          onClick={async () => {
+                            await api.patch(`/memory/atoms/${a.id}`, { status: 'archived' })
+                            setRows(rows.filter((r) => r.id !== a.id))
+                          }}
+                        >
+                          归档
+                        </Button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
     </div>
   )
@@ -282,13 +325,13 @@ function Scenarios() {
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {rows.map((s) => (
-        <div key={s.id} className="rounded-lg border p-4">
+        <Card key={s.id} className="p-4">
           <div className="flex items-center justify-between">
             <h3 className="font-medium">{s.topic}</h3>
             <span className="text-xs text-muted-foreground">v{s.version}</span>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">{s.summary}</p>
-        </div>
+          <p className="mt-1.5 text-sm text-muted-foreground">{s.summary}</p>
+        </Card>
       ))}
     </div>
   )
@@ -306,10 +349,10 @@ function PersonaView() {
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         {rows.map((p) => (
-          <div key={p.id} className="rounded-lg border p-4">
+          <Card key={p.id} className="p-4">
             <div className="flex items-center justify-between">
               <h3 className="font-medium">{p.aspect}</h3>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <span className="text-xs text-muted-foreground">v{p.version}</span>
                 <Button
                   variant="ghost"
@@ -336,26 +379,26 @@ function PersonaView() {
                 )}
               </div>
             </div>
-            <p className="mt-2 whitespace-pre-wrap text-sm">{p.content}</p>
-          </div>
+            <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{p.content}</p>
+          </Card>
         ))}
       </div>
       {history && (
-        <div className="rounded-lg border p-4">
-          <div className="mb-2 flex items-center justify-between">
+        <Card className="p-4">
+          <div className="mb-3 flex items-center justify-between">
             <h3 className="font-medium">{history.aspect} 版本历史</h3>
             <Button variant="ghost" size="sm" onClick={() => setHistory(null)}>
               关闭
             </Button>
           </div>
           {history.versions.map((v) => (
-            <div key={v.id} className="mb-2 border-b pb-2 text-sm">
-              <span className="mr-2 rounded bg-gray-500/15 px-1 text-xs">v{v.version}</span>
+            <div key={v.id} className="mb-2 border-b border-border/50 pb-2 text-sm last:border-0">
+              <span className="mr-2 rounded bg-white/5 px-1.5 py-0.5 text-xs">v{v.version}</span>
               <span className="text-muted-foreground">{fmtTime(v.created_at)}</span>
               <p className="mt-1">{v.content}</p>
             </div>
           ))}
-        </div>
+        </Card>
       )}
     </div>
   )
@@ -364,7 +407,11 @@ function PersonaView() {
 function SearchPane() {
   const [q, setQ] = useState('')
   const [archiveMsg, setArchiveMsg] = useState('')
-  const [r, setR] = useState<{ l1: { id: string; snippet: string; score: number }[]; l2: { id: string; title: string | null; snippet: string }[]; l3: Persona[] } | null>(null)
+  const [r, setR] = useState<{
+    l1: { id: string; snippet: string; score: number }[]
+    l2: { id: string; title: string | null; snippet: string }[]
+    l3: Persona[]
+  } | null>(null)
   const [err, setErr] = useState('')
   return (
     <div className="space-y-4">
@@ -379,7 +426,7 @@ function SearchPane() {
           }
         }}
       >
-        <input className="flex-1 rounded-md border bg-transparent px-3 py-2 text-sm" value={q} onChange={(e) => setQ(e.target.value)} placeholder="中文检索记忆…" />
+        <input className={`${inputCls} flex-1`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="中文检索记忆…" />
         <Button type="submit">检索</Button>
       </form>
       {err && <ErrorBox msg={err} />}
@@ -408,32 +455,50 @@ function SearchPane() {
             </Button>
           </div>
           {archiveMsg && <p className="text-xs text-muted-foreground">{archiveMsg}</p>}
-          <section>
-            <h3 className="mb-1 text-sm font-medium">L1 原子（{r.l1.length}）</h3>
-            {r.l1.map((h) => (
-              <p key={h.id} className="border-b py-1 text-sm">
-                {h.snippet} <span className="text-xs text-muted-foreground">({h.score.toFixed(3)})</span>
-              </p>
-            ))}
-          </section>
-          <section>
-            <h3 className="mb-1 text-sm font-medium">L2 场景（{r.l2.length}）</h3>
-            {r.l2.map((h) => (
-              <p key={h.id} className="border-b py-1 text-sm">
-                {h.title} — {h.snippet}
-              </p>
-            ))}
-          </section>
-          <section>
-            <h3 className="mb-1 text-sm font-medium">L3 画像（{r.l3.length}）</h3>
-            {r.l3.map((p) => (
-              <p key={p.id} className="border-b py-1 text-sm">
-                [{p.aspect}] {p.content}
-              </p>
-            ))}
-          </section>
+          <Card className="divide-y divide-border/50 p-1">
+            <ResultSection title="L1 原子" count={r.l1.length}>
+              {r.l1.map((h) => (
+                <p key={h.id} className="py-2 text-sm">
+                  {h.snippet} <span className="text-xs tabular-nums text-muted-foreground">({h.score.toFixed(3)})</span>
+                </p>
+              ))}
+            </ResultSection>
+            <ResultSection title="L2 场景" count={r.l2.length}>
+              {r.l2.map((h) => (
+                <p key={h.id} className="py-2 text-sm">
+                  <span className="font-medium">{h.title}</span> — {h.snippet}
+                </p>
+              ))}
+            </ResultSection>
+            <ResultSection title="L3 画像" count={r.l3.length}>
+              {r.l3.map((p) => (
+                <p key={p.id} className="py-2 text-sm">
+                  <span className="font-medium">[{p.aspect}]</span> {p.content}
+                </p>
+              ))}
+            </ResultSection>
+          </Card>
         </div>
       )}
     </div>
+  )
+}
+
+function ResultSection({
+  title,
+  count,
+  children,
+}: {
+  title: string
+  count: number
+  children: React.ReactNode
+}) {
+  return (
+    <section className="px-3 py-2">
+      <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {title}（{count}）
+      </h3>
+      {children}
+    </section>
   )
 }

@@ -1,7 +1,8 @@
 /** 组件测试：状态徽章 / 时间格式 / API 错误体。 */
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { StatusBadge, Empty, fmtTime } from '@/components/ui-bits'
+import { StatusBadge, Empty } from '@/components/ui-bits'
+import { fmtTime } from '@/lib/ui'
 import { ApiError } from '@/lib/api'
 
 describe('StatusBadge', () => {
