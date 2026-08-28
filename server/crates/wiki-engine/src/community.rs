@@ -3,6 +3,12 @@
 
 use std::collections::HashMap;
 
+/// 稀疏社区判定阈值（insights 与 graph 共用，单一事实源）：
+/// 平均每对边权 < 0.15 ≈ 仅靠一两条下限权重边（0.1~0.2）粘着。
+pub const SPARSE_COHESION: f64 = 0.15;
+/// 稀疏社区最小成员数。
+pub const SPARSE_MIN_SIZE: usize = 3;
+
 /// 无向加权图上的 Louvain 一层（节点迁移直到模块度无提升）。
 /// 返回：slug → community id（0..k）。
 pub fn louvain_communities<'a>(

@@ -637,3 +637,52 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
     assert!(content.contains("人工内容"), "human 内容未被动");
     assert_eq!(version, v_before, "human 页版本未动");
 }
+
+// ---------- 契约：graph 端点 sparse 旗标与 insights 同口径 ----------
+
+#[tokio::test]
+async fn graph_community_sparse_flag_matches_insights_threshold() {
+    let env = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&env).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool).await.expect("迁移");
+    let registry = agent_memory_llm::ProviderRegistry::new(
+        pool.clone(),
+        agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+    );
+    let svc = agent_memory_wiki_engine::WikiService::new(pool.clone(), registry);
+
+    // 3 页同一社区：仅靠下限权重边（无 wikilink、无共享 source）→ 应判稀疏
+    for slug in ["sp-a", "sp-b", "sp-c"] {
+        sqlx::query(
+            "INSERT INTO wiki_pages (id, slug, title, content, page_type, origin, frontmatter)
+             VALUES ($2, $1, $1, 'x', 'concept', 'llm', '{}')",
+        )
+        .bind(slug)
+        .bind(uuid::Uuid::now_v7())
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // 手工放三条下限权重边（0.1）——Louvain 会聚成一个社区，cohesion = 0.3/3 = 0.1 < 0.15
+    for (f, t) in [("sp-a", "sp-b"), ("sp-b", "sp-c"), ("sp-a", "sp-c")] {
+        sqlx::query("INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, 0.1)")
+            .bind(f)
+            .bind(t)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let g = svc.graph().await.unwrap();
+    assert!(
+        g.communities.iter().any(|c| c.sparse && c.size >= 3),
+        "下限权重边社区应判 sparse（cohesion=0.1<0.15）：{:?}",
+        g.communities
+    );
+    // 全部社区 size/top_slug/sparse 字段名实相符
+    for c in &g.communities {
+        assert_eq!(c.top_slug.is_empty(), c.size == 0, "top_slug 与 size 一致");
+    }
+    drop(env);
+}

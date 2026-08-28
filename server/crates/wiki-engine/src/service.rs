@@ -65,6 +65,9 @@ pub struct CommunityInfo {
     pub top_slug: String,
     pub size: usize,
     pub cohesion: f64,
+    /// 稀疏社区（后端判定：cohesion<0.15 且成员≥3，与 insights 同口径）——
+    /// 前端图例直接消费，避免本地重复实现漂移
+    pub sparse: bool,
 }
 
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
@@ -213,14 +216,17 @@ impl WikiService {
                 .into_iter()
                 .map(|(id, cohesion)| {
                     let m = members.get(&id);
+                    let size = m.map_or(0, |v| v.len());
                     CommunityInfo {
                         id,
                         top_slug: m
                             .and_then(|v| v.first().copied())
                             .unwrap_or_default()
                             .to_string(),
-                        size: m.map_or(0, |v| v.len()),
+                        size,
                         cohesion,
+                        sparse: size >= crate::community::SPARSE_MIN_SIZE
+                            && cohesion < crate::community::SPARSE_COHESION,
                     }
                 })
                 .collect(),

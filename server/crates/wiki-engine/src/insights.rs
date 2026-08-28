@@ -7,6 +7,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::community::{community_cohesion, louvain_communities};
+use crate::service::CommunityInfo;
 
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct Insight {
@@ -24,17 +25,11 @@ pub struct Insight {
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct InsightsReport {
     pub insights: Vec<Insight>,
-    pub communities: Vec<CommunityInfo>,
+    pub communities: Vec<crate::service::CommunityInfo>,
     pub total_pages: usize,
 }
-
-#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
-pub struct CommunityInfo {
-    pub id: usize,
-    pub top_slug: String,
-    pub size: usize,
-    pub cohesion: f64,
-}
+// CommunityInfo 统一由 service.rs 定义（含 sparse 旗标）——
+// 曾经两处同名结构体在 utoipa 撞名，schema 与实现互相漂移（top_slug/size 违约的根因）
 
 pub async fn compute_insights(pool: &PgPool) -> Result<InsightsReport, JobError> {
     let pages: Vec<(String, String)> = sqlx::query_as(
@@ -81,11 +76,17 @@ pub async fn compute_insights(pool: &PgPool) -> Result<InsightsReport, JobError>
         }
         sizes
             .into_iter()
-            .map(|(id, members)| CommunityInfo {
-                id,
-                top_slug: members.first().copied().unwrap_or_default().to_string(),
-                size: members.len(),
-                cohesion: cohesion.get(&id).copied().unwrap_or(0.0),
+            .map(|(id, members)| {
+                let size = members.len();
+                let cohesion = cohesion.get(&id).copied().unwrap_or(0.0);
+                crate::service::CommunityInfo {
+                    id,
+                    top_slug: members.first().copied().unwrap_or_default().to_string(),
+                    size,
+                    cohesion,
+                    sparse: size >= crate::community::SPARSE_MIN_SIZE
+                        && cohesion < crate::community::SPARSE_COHESION,
+                }
             })
             .collect()
     };
@@ -111,9 +112,9 @@ pub async fn compute_insights(pool: &PgPool) -> Result<InsightsReport, JobError>
         }
     }
 
-    // 2. 稀疏社区（cohesion < 0.15 且 ≥3 页）
+    // 2. 稀疏社区（cohesion < SPARSE_COHESION 且 ≥SPARSE_MIN_SIZE 页）
     for c in &community_info {
-        if c.size >= 3 && c.cohesion < 0.15 {
+        if c.size >= crate::community::SPARSE_MIN_SIZE && c.cohesion < crate::community::SPARSE_COHESION {
             let key = format!("sparse_community:{}", c.id);
             if dismissed.iter().any(|d| d == &key) {
                 continue;
