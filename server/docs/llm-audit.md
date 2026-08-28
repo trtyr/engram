@@ -47,9 +47,9 @@ POST/GET `/settings/llm/providers`、POST `/settings/llm/providers/{id}/test`、
 
 > 按严重度排序。**P0=配置正确性/密钥安全面，P1=健壮性/可运维性，P2=增强**。
 
-> **修复状态（2026-08-28）**：L1~L10 已修复（goal mtcd14mk；workspace 97 tests + E2E 13/13 全绿）——
+> **修复状态（2026-08-28）**：L1~L10 已修复（goal mtcd14mk；workspace 99 tests + E2E 13/13 全绿）——
 > L1 创建全量校验+UNIQUE→400+能力回退改 NotConfigured、L2 PUT/DELETE/re-encrypt 端点、L3 默认唯一性事务降级+ORDER BY 兜底、
-> L4 routing PUT 全量校验+resolve 幽灵跳过 warn、L6 embed_for 记账门面（四调用点全覆盖）、L10 占位密钥启动告警+响应 warning。
+> L3 确定性兜底落在 resolve 热路径（ORDER BY created_at——首轮误加在零调用的 default_provider() 死代码上，审计驳回后修正+存量多默认行测试）、L4 routing PUT 全量校验+resolve 幽灵跳过 warn、L6 embed_for 记账门面（四调用点全覆盖）、L10 占位密钥启动告警+响应 warning（含占位态创建端到端测试）。
 > 未修：L5/L7/L8/L9/L15（P2 级，按需排期）。
 
 ### P0

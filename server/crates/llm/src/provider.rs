@@ -507,10 +507,12 @@ impl ProviderRegistry {
             }
         }
         // 默认 provider + 按能力选模型
+        // L3：ORDER BY 兜底确定性——存量多 default 行（本修复前数据/直插库）时
+        // 取最早创建的，不再依赖物理顺序（热路径：resolve 是所有默认选择的唯一入口）
         type DefaultRow = (String, String, Vec<u8>, sqlx::types::Json<Vec<ModelInfo>>);
         let row: Option<DefaultRow> =
             sqlx::query_as(
-                "SELECT name, base_url, api_key_encrypted, models FROM llm_providers WHERE is_default = true LIMIT 1",
+                "SELECT name, base_url, api_key_encrypted, models FROM llm_providers WHERE is_default = true ORDER BY created_at LIMIT 1",
             )
             .fetch_optional(&self.pool)
             .await
