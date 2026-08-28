@@ -246,6 +246,8 @@ async fn openapi_snapshot() {
             "/settings/api-keys",
             "/settings/api-keys/{id}/revoke",
             "/settings/llm/providers",
+            "/settings/llm/providers/re-encrypt",
+            "/settings/llm/providers/{id}",
             "/settings/llm/providers/{id}/test",
             "/settings/llm/routing",
             "/wiki/graph",

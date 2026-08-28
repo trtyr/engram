@@ -3,8 +3,7 @@
 use agent_memory_jobs::types::Job;
 use agent_memory_jobs::{JobQueue, JobTemplate};
 use agent_memory_llm::ProviderRegistry;
-use agent_memory_llm::provider::LlmProvider as _;
-use agent_memory_llm::types::{EmbedRequest, Purpose};
+use agent_memory_llm::types::Purpose;
 use agent_memory_search::tokenize::tokenize;
 use agent_memory_search::{SearchHit, search_atoms, search_scenarios};
 use chrono::{DateTime, Utc};
@@ -411,18 +410,12 @@ impl MemoryService {
     // ---------- 检索 ----------
 
     async fn try_embed(&self, texts: &[String]) -> Option<Vec<Vec<f32>>> {
-        match self.registry.resolve(Purpose::Embed).await {
-            Ok((provider, model)) => provider
-                .embed(EmbedRequest {
-                    model,
-                    inputs: texts.to_vec(),
-                    dimensions: Some(1024),
-                })
-                .await
-                .ok()
-                .map(|r| r.embeddings),
-            Err(_) => None,
-        }
+        // L6：经记账门面（查询/场景嵌入计入用量）
+        self.registry
+            .embed_for(Purpose::Embed, texts.to_vec(), Some(1024), None)
+            .await
+            .ok()
+            .map(|r| r.embeddings)
     }
 
     /// B9 命中反馈：检索命中即异步回写 hit_count（best-effort，失败只记日志）。

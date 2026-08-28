@@ -3,8 +3,7 @@
 use agent_memory_jobs::JobContext;
 use agent_memory_jobs::types::{JobError, JobTemplate};
 use agent_memory_llm::ProviderRegistry;
-use agent_memory_llm::provider::LlmProvider as _;
-use agent_memory_llm::types::{EmbedRequest, Purpose};
+use agent_memory_llm::types::Purpose;
 use agent_memory_parsing::parse_bytes;
 use agent_memory_search::tokenize::tsv_text;
 use serde_json::json;
@@ -434,78 +433,61 @@ pub async fn embed_job(
 
     let mut embedded = 0usize;
     if !chunks.is_empty() {
-        // 批量（≤64/批）
+        // 批量（≤64/批）；L6：经记账门面（批量嵌入计入用量，不再绕过记账）
         for batch in chunks.chunks(64) {
             let texts: Vec<String> = batch.iter().map(|(_, c)| c.clone()).collect();
-            match registry.resolve(Purpose::Embed).await {
-                Ok((provider, model)) => match provider
-                    .embed(EmbedRequest {
-                        model,
-                        inputs: texts,
-                        dimensions: Some(1024),
-                    })
-                    .await
-                {
-                    Ok(resp) => {
-                        // K4：响应数量或维度与批次不符 → 整批按失败处理，
-                        // 杜绝「NULL 向量 + embed_failed=false」双重静默入库
-                        let bad = resp.embeddings.len() != batch.len()
-                            || resp.embeddings.iter().any(|v| v.len() != 1024); // D0010
-                        if bad {
-                            tracing::warn!(
-                                doc = %doc_id,
-                                expected = batch.len(),
-                                got = resp.embeddings.len(),
-                                "embed 响应与批次不符，整批降级 FTS"
-                            );
-                            for (cid, _) in batch {
-                                sqlx::query(
-                                    "UPDATE chunks SET embed_failed = true WHERE id = $1",
-                                )
-                                .bind(cid)
-                                .execute(pool)
-                                .await
-                                .map_err(|e| JobError::Retryable(e.to_string()))?;
-                            }
-                            continue;
-                        }
-                        for (i, (cid, _)) in batch.iter().enumerate() {
+            match registry
+                .embed_for(Purpose::Embed, texts, Some(1024), Some(ctx.job.id))
+                .await
+            {
+                Ok(resp) => {
+                    // K4：响应数量或维度与批次不符 → 整批按失败处理，
+                    // 杜绝「NULL 向量 + embed_failed=false」双重静默入库
+                    let bad = resp.embeddings.len() != batch.len()
+                        || resp.embeddings.iter().any(|v| v.len() != 1024); // D0010
+                    if bad {
+                        tracing::warn!(
+                            doc = %doc_id,
+                            expected = batch.len(),
+                            got = resp.embeddings.len(),
+                            "embed 响应与批次不符，整批降级 FTS"
+                        );
+                        for (cid, _) in batch {
                             sqlx::query(
-                                "UPDATE chunks SET embedding = $2, embed_failed = false WHERE id = $1",
+                                "UPDATE chunks SET embed_failed = true WHERE id = $1",
                             )
                             .bind(cid)
-                            .bind(pgvector::Vector::from(resp.embeddings[i].clone()))
                             .execute(pool)
                             .await
                             .map_err(|e| JobError::Retryable(e.to_string()))?;
-                            embedded += 1;
                         }
-                        ctx.emit(
-                            &format!("补嵌 {}/{}", embedded, missing),
-                            Some(json!({"done": embedded, "missing": missing})),
+                        continue;
+                    }
+                    for (i, (cid, _)) in batch.iter().enumerate() {
+                        sqlx::query(
+                            "UPDATE chunks SET embedding = $2, embed_failed = false WHERE id = $1",
                         )
+                        .bind(cid)
+                        .bind(pgvector::Vector::from(resp.embeddings[i].clone()))
+                        .execute(pool)
                         .await
-                        .ok();
+                        .map_err(|e| JobError::Retryable(e.to_string()))?;
+                        embedded += 1;
                     }
-                    Err(e) => {
-                        // K8：瞬态失败（429/5xx/超时）→ 整体重试，只补缺失保证进度不丢；
-                        // 永久失败才降级 FTS（不阻塞 ready，可事后 re-embed 恢复）
-                        if matches!(e, agent_memory_llm::types::LlmError::Transient(_)) {
-                            return Err(JobError::Retryable(format!("嵌入瞬态失败: {e}")));
-                        }
-                        tracing::warn!(error = %e, "嵌入批次失败，标记 embed_failed");
-                        for (cid, _) in batch {
-                            sqlx::query("UPDATE chunks SET embed_failed = true WHERE id = $1")
-                                .bind(cid)
-                                .execute(pool)
-                                .await
-                                .map_err(|e2| JobError::Retryable(e2.to_string()))?;
-                        }
-                    }
-                },
+                    ctx.emit(
+                        &format!("补嵌 {}/{}", embedded, missing),
+                        Some(json!({"done": embedded, "missing": missing})),
+                    )
+                    .await
+                    .ok();
+                }
                 Err(e) => {
-                    // 无 provider：全部降级 FTS（可事后配置 provider 并 re-embed 恢复）
-                    tracing::warn!(error = %e, "无 embedding provider，全部降级 FTS");
+                    // K8：瞬态失败（429/5xx/超时）→ 整体重试，只补缺失保证进度不丢；
+                    // 永久失败才降级 FTS（不阻塞 ready，可事后 re-embed 恢复）
+                    if matches!(e, agent_memory_llm::types::LlmError::Transient(_)) {
+                        return Err(JobError::Retryable(format!("嵌入瞬态失败: {e}")));
+                    }
+                    tracing::warn!(error = %e, "嵌入批次失败，标记 embed_failed");
                     for (cid, _) in batch {
                         sqlx::query("UPDATE chunks SET embed_failed = true WHERE id = $1")
                             .bind(cid)

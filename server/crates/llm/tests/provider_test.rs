@@ -193,3 +193,93 @@ fn registry_pool(r: &ProviderRegistry) -> sqlx::PgPool {
 fn router_pool(r: &PurposeRouter) -> sqlx::PgPool {
     r.pool_for_test()
 }
+
+// ---------- L1/L3：能力回退陷阱与默认确定性 ----------
+
+#[tokio::test]
+async fn l1_capability_mismatch_reports_not_configured() {
+    let (_c, registry, _router) = setup().await;
+    let pool = registry_pool(&registry);
+
+    // embedding-only 默认 provider（旧实现 or_else(first) 会把 bge-m3 当 chat 模型选出去）
+    let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
+    sqlx::query(
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, models, is_default)
+         VALUES ($1, 'embed-only', 'http://127.0.0.1:1', $2, $3, true)",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(cipher.encrypt("k").unwrap())
+    .bind(sqlx::types::Json(vec![
+        agent_memory_llm::types::ModelInfo {
+            id: "bge-m3".into(),
+            capabilities: vec!["embedding".into()],
+        },
+    ]))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Embed 用途：能力匹配命中 ✓
+    assert!(registry.resolve(Purpose::Embed).await.is_ok());
+
+    // chat 用途（Extract）：旧实现静默选 bge-m3 → 调用全 400；新实现明确报配置错误
+    let err = match registry.resolve(Purpose::Extract).await {
+        Err(e) => e,
+        Ok(_) => panic!("embedding-only 默认 provider 不应解析出 chat 模型"),
+    };
+    match err {
+        agent_memory_llm::types::LlmError::NotConfigured(msg) => {
+            assert!(msg.contains("chat"), "报错应指向能力缺失: {msg}");
+        }
+        other => panic!("应为 NotConfigured，实际 {other}"),
+    }
+}
+
+// ---------- L6：记账门面（embed_for 结构性记账） ----------
+
+#[tokio::test]
+async fn l6_embed_for_records_usage() {
+    let (_c, registry, _router) = setup().await;
+    let pool = registry_pool(&registry);
+
+    let base_url = start_mock_llm().await;
+    let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
+    sqlx::query(
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, models, is_default)
+         VALUES ($1, 'facade-mock', $2, $3, $4, true)",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(&base_url)
+    .bind(cipher.encrypt("sk-k").unwrap())
+    .bind(sqlx::types::Json(vec![
+        agent_memory_llm::types::ModelInfo {
+            id: "mock-emb".into(),
+            capabilities: vec!["embedding".into()],
+        },
+    ]))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 门面调用：解析 + 嵌入 + 记账一体
+    let job_id = uuid::Uuid::new_v4();
+    let resp = registry
+        .embed_for(Purpose::Embed, vec!["你好".into(), "世界".into()], None, Some(job_id))
+        .await
+        .unwrap();
+    assert_eq!(resp.embeddings.len(), 2);
+
+    // 记账落行（此前裸 resolve→embed 直连全绕过）
+    let (provider, model, purpose, jid): (String, String, String, Option<uuid::Uuid>) =
+        sqlx::query_as(
+            "SELECT provider, model, purpose, job_id FROM llm_usage \
+             WHERE purpose = 'embed' ORDER BY ts DESC LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(provider, "facade-mock");
+    assert_eq!(model, "mock-emb");
+    assert_eq!(purpose, "embed");
+    assert_eq!(jid, Some(job_id), "job_id 透传记账");
+}

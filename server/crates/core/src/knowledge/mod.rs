@@ -9,8 +9,7 @@ pub mod ssrf;
 use agent_memory_jobs::JobQueue;
 use agent_memory_jobs::types::JobTemplate;
 use agent_memory_llm::ProviderRegistry;
-use agent_memory_llm::provider::LlmProvider as _;
-use agent_memory_llm::types::{EmbedRequest, Purpose};
+use agent_memory_llm::types::Purpose;
 use agent_memory_search::tokenize::{has_query_tokens, tsv_query_smart};
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, QueryBuilder, Row};
@@ -173,18 +172,13 @@ impl KnowledgeService {
 
     /// 混合检索 chunks（FTS + 向量 + RRF，带文档引用）。
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<ChunkHit>, KnowledgeError> {
-        let qv: Option<Vec<f32>> = match self.registry.resolve(Purpose::Embed).await {
-            Ok((provider, model)) => provider
-                .embed(EmbedRequest {
-                    model,
-                    inputs: vec![query.to_string()],
-                    dimensions: Some(1024),
-                })
-                .await
-                .ok()
-                .and_then(|r| r.embeddings.first().cloned()),
-            Err(_) => None,
-        };
+        // L6：经记账门面（查询嵌入也计入用量，不再绕过记账）
+        let qv: Option<Vec<f32>> = self
+            .registry
+            .embed_for(Purpose::Embed, vec![query.to_string()], Some(1024), None)
+            .await
+            .ok()
+            .and_then(|r| r.embeddings.first().cloned());
         // K7：单字/纯标点等无 token 且无查询向量 → 短路空结果（不再空跑 to_tsquery）
         if qv.is_none() && !has_query_tokens(query) {
             return Ok(vec![]);

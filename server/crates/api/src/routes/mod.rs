@@ -12,7 +12,7 @@ pub mod wiki_api;
 
 use crate::state::AppState;
 use axum::middleware::from_fn_with_state;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use utoipa::OpenApi;
 
@@ -25,6 +25,7 @@ use utoipa::OpenApi;
         auth_api::login_handler,
         jobs_api::list_jobs, jobs_api::get_job, jobs_api::get_job_events, jobs_api::revive_job,
         llm_api::create_provider, llm_api::list_providers, llm_api::test_provider,
+        llm_api::update_provider, llm_api::delete_provider, llm_api::reencrypt_providers,
         llm_api::get_routing, llm_api::put_routing, llm_api::usage,
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
         memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
@@ -65,6 +66,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/settings/llm/providers",
             post(llm_api::create_provider).get(llm_api::list_providers),
+        )
+        .route(
+            "/settings/llm/providers/{id}",
+            put(llm_api::update_provider).delete(llm_api::delete_provider),
+        )
+        .route(
+            "/settings/llm/providers/re-encrypt",
+            post(llm_api::reencrypt_providers),
         )
         .route(
             "/settings/llm/providers/{id}/test",

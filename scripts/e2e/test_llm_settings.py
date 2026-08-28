@@ -1,10 +1,12 @@
-"""E2E #10b：LLM 设置——routing 读写 / 回退链生效（ghost provider → 默认兜底）/ 用量查询。
+"""E2E #10b：LLM 设置——routing 写入校验 / 回退链生效（DB 级幽灵路由 → 默认兜底）/ 用量查询。
 
-回退链用真 embedding 观测：把 embed 路由指向不存在的 provider，知识摄取仍应
-落到默认 provider 完成嵌入（resolve 的回退语义）。
+L4 后 API 拒绝幽灵路由（400）；resolve 的回退语义改由 psql 直接种路由观测
+（校验在 API 层，resolve 读库不经过校验——两个层次分别验证）。
 """
 
 import io
+
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,7 +17,7 @@ import requests as rq
 
 from _lib import check, env
 from _lib.check import eq, ok, section
-from _lib.client import Client
+from _lib.client import ApiError, Client
 
 DOC = ("# 回退链验证\n"
        "路由指向幽灵 provider 时，嵌入应回退到默认 provider 完成。\n").encode("utf-8")
@@ -31,6 +33,12 @@ def _embed_ok(e) -> bool:
         return r.status_code == 200
     except rq.RequestException:
         return False
+
+
+def _psql(sql):
+    subprocess.run(["psql", "-h", env.PG_HOST, "-U", env.PG_USER, "-d", env.E2E_DB,
+                    "-v", "ON_ERROR_STOP=1", "-c", sql],
+                   check=True, capture_output=True)
 
 
 async def main() -> None:
@@ -51,13 +59,30 @@ async def main() -> None:
         "is_default": True,
     })
 
-    section("routing：写入与读回")
-    table = {"embed": [{"provider": "ghost-不存在", "model": "whatever"}]}
-    admin.put("/settings/llm/routing", json=table)
-    back = admin.get("/settings/llm/routing")
-    eq(back.get("embed"), table["embed"], "路由表读写一致（配置即时生效）")
+    section("L4：routing 写入校验（幽灵 provider / typo purpose 拒绝）")
+    try:
+        admin.put("/settings/llm/routing",
+                  json={"embed": [{"provider": "ghost-不存在", "model": "whatever"}]})
+        ok(False, "幽灵 provider 路由应被拒")
+    except ApiError as ex:
+        eq(ex.status, 400, "幽灵 provider 路由被拒（400）")
+    try:
+        admin.put("/settings/llm/routing",
+                  json={"extarct": [{"provider": "e2e-rt-default", "model": e.llm_chat_model}]})
+        ok(False, "typo purpose 应被拒")
+    except ApiError as ex:
+        eq(ex.status, 400, "typo purpose 被拒（400）")
+        msg = str(ex.body.get("error", {}).get("message", "")) if isinstance(ex.body, dict) else str(ex.body)
+        ok("extarct" in msg, f"报错带违规 purpose 明细（{msg[:60]}）")
 
-    section("回退链：embed 路由指向幽灵 → 摄取仍嵌入成功（默认 provider 兜底）")
+    section("回退链：DB 级幽灵路由 → 摄取仍嵌入成功（默认 provider 兜底）")
+    # L4 校验在 API 层；resolve 读库不经过校验——psql 直接种幽灵路由观测回退语义
+    _psql("INSERT INTO settings (key, value) VALUES ('llm_routing', "
+          "'{\"embed\": [{\"provider\": \"ghost-不存在\", \"model\": \"whatever\"}]}'::jsonb) "
+          "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value")
+    back = admin.get("/settings/llm/routing")
+    eq(back.get("embed", [{}])[0].get("provider"), "ghost-不存在", "幽灵路由已入库（psql 种子）")
+
     r = know.s.post(f"{know.base}/knowledge/upload",
                     files={"file": ("fallback.md", io.BytesIO(DOC), "text/markdown")},
                     timeout=30)

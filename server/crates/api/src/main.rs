@@ -87,6 +87,13 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // L10：占位主密钥显式告警——此状态下创建的 provider 密钥与后续真实密钥不兼容
+    if state.is_placeholder_master_key() {
+        tracing::warn!(
+            "使用占位主密钥（AGENT_MEMORY_MASTER_KEY 未设置）：此时创建的 provider API key 在换用真实主密钥后将无法解密。请尽早设置环境变量；轮换后调用 POST /settings/llm/providers/re-encrypt 迁移存量密钥"
+        );
+    }
+
     let app = routes::router(state).layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], cfg.port));

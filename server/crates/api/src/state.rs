@@ -54,4 +54,12 @@ impl AppState {
             .expect("主密钥格式恒合法（占位 64 hex）");
         agent_memory_llm::ProviderRegistry::new(self.pool.clone(), cipher)
     }
+
+    /// L10：占位主密钥检测——此状态下创建的 provider 密钥与后续真实密钥不兼容。
+    pub fn is_placeholder_master_key(&self) -> bool {
+        match &self.master_key {
+            None => true,
+            Some(m) => m.0 == "00".repeat(32),
+        }
+    }
 }

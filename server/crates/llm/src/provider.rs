@@ -418,6 +418,38 @@ impl ProviderRegistry {
         self.pool.clone()
     }
 
+    /// L6：嵌入记账门面——resolve + embed + record_usage 一体。调用方不再持有
+    /// 裸 provider，记账从「约定」变「结构保证」（此前 knowledge 批量嵌入与
+    /// 三域检索的查询嵌入全部绕过记账，用量面板系统性低估）。
+    pub async fn embed_for(
+        &self,
+        purpose: crate::types::Purpose,
+        inputs: Vec<String>,
+        dimensions: Option<u32>,
+        job_id: Option<Uuid>,
+    ) -> Result<crate::types::EmbedResponse, LlmError> {
+        let (provider, model) = self.resolve(purpose).await?;
+        let provider_name = provider.name().to_string();
+        let resp = provider
+            .embed(crate::types::EmbedRequest {
+                model,
+                inputs,
+                dimensions,
+            })
+            .await?;
+        self.record_usage(&crate::types::UsageMeta {
+            provider: provider_name,
+            model: resp.model.clone(),
+            purpose: purpose.as_str().to_string(),
+            input_tokens: resp.input_tokens,
+            output_tokens: 0,
+            latency_ms: resp.latency_ms,
+            job_id,
+        })
+        .await;
+        Ok(resp)
+    }
+
     /// 按名取 provider（每次从 DB 取，配置即时生效；单用户量级无性能问题）。
     pub async fn get(&self, name: &str) -> Result<Arc<OpenAiCompatProvider>, LlmError> {
         let row = sqlx::query_as::<_, ProviderRow>("SELECT * FROM llm_providers WHERE name = $1")
@@ -435,10 +467,10 @@ impl ProviderRegistry {
         )))
     }
 
-    /// 默认 provider。
+    /// 默认 provider（L3：ORDER BY 保证多行残留时的确定性——正常路径唯一性由创建端维护）。
     pub async fn default_provider(&self) -> Result<Arc<OpenAiCompatProvider>, LlmError> {
         let row = sqlx::query_as::<_, ProviderRow>(
-            "SELECT * FROM llm_providers WHERE is_default = true LIMIT 1",
+            "SELECT * FROM llm_providers WHERE is_default = true ORDER BY created_at LIMIT 1",
         )
         .fetch_optional(&self.pool)
         .await
@@ -463,8 +495,15 @@ impl ProviderRegistry {
             .table()
             .await?;
         for rule in table.chain(purpose) {
-            if let Ok(p) = self.get(&rule.provider).await {
-                return Ok((p, rule.model.clone()));
+            match self.get(&rule.provider).await {
+                Ok(p) => return Ok((p, rule.model.clone())),
+                // L4：幽灵路由不再静默——warn 留痕（typo/改名导致的失效路由可发现）
+                Err(e) => tracing::warn!(
+                    purpose = purpose.as_str(),
+                    provider = %rule.provider,
+                    error = %e,
+                    "路由链规则失效，跳过（回落下一条或默认 provider）"
+                ),
             }
         }
         // 默认 provider + 按能力选模型
@@ -480,6 +519,8 @@ impl ProviderRegistry {
             return Err(LlmError::NotConfigured("未配置任何 LLM provider".into()));
         };
         let want_embed = purpose == crate::types::Purpose::Embed;
+        // L1：能力找不到直接报配置错误——旧实现 or_else(first) 会把 embedding-only
+        // provider 的第一个嵌入模型选为 chat 模型（静默地雷：全部调用 400 却不指根因）
         let model = models
             .0
             .iter()
@@ -487,9 +528,13 @@ impl ProviderRegistry {
                 let has_emb = m.capabilities.iter().any(|c| c == "embedding");
                 want_embed == has_emb
             })
-            .or_else(|| models.0.first())
             .map(|m| m.id.clone())
-            .ok_or_else(|| LlmError::NotConfigured(format!("provider {name} 未配置模型")))?;
+            .ok_or_else(|| {
+                LlmError::NotConfigured(format!(
+                    "provider {name} 无{}能力的模型，请检查 models 的 capabilities 配置",
+                    if want_embed { "embedding" } else { "chat" }
+                ))
+            })?;
         let api_key = self.cipher.decrypt(&enc)?;
         Ok((
             Arc::new(OpenAiCompatProvider::new(name, base_url, api_key)),

@@ -7,9 +7,9 @@
 - **2026-08-26：P0 五项（R1~R5）全部落地**，独立审计通过（goal `mt9ydklt-ze8023`）。
   R1 `core/unified.rs` + `POST /search`；R2 `tsv_query_smart` 覆盖全部 4 个 FTS 调用点；R3 context_pack L1 走 `search_atoms`；R4 cascade 全写操作包事务；R5 `CircuitBreaker` + `Retry-After`（含 HTTP-date、HalfOpen 单试探）。`cargo test --workspace` 66 passed。
 
-## 新增（2026-08-28 llm-audit 发现，未排期）
+## 新增（2026-08-28 llm-audit 发现；L1~L10 已于同日修复 ✅）
 
-来源：[llm-audit.md](../../../llm-audit.md) L1~L15。**P0×2**：L1 provider 创建零输入校验（空 name/非法 base_url/能力枚举不查；重复 name→503 retryable 误分类；embedding-only 默认 provider 的 chat 模型回退陷阱——or_else(first) 会选嵌入模型当 chat 用）、L2 provider 无更新/删除端点+密钥无版本化（配错 key 只能改库；换 master key 全部密文变砖无重加密路径）。**P1×4**：L3 多默认 provider 无约束（resolve LIMIT 1 无 ORDER 任意取）、L4 routing PUT 零校验+幽灵 provider 静默跳过（typo purpose/错名路由静默落默认，无 warn）、L6 用量记账覆盖不全（grep 实证：knowledge 嵌入与三域检索查询嵌入全部绕过 record_usage——面板系统性低估）、L10 master key 占位符陷阱（"00"*32 缺省下建的密文与后续真实密钥不兼容且无预警）。**P2×5**：L5 test 探针幽灵代码+记账不对称、L7 usage 固定 30 天窗口、L8 usage 端点占位 cipher、L9 熔断器吞永久错误信号（401×5 后熔断打开报 Transient，根因被掩盖）、L15 max_tokens=1 对 reasoning 模型误报。关联：L1←K 校验族（K5/K10 模式）、L4←K1/W1 静默回退族、L6←R10 前置、L9←R5 副作用需一并回归。建议起点：L1+L3（创建路径，半天级）→ L4 → L2（U/D+re-encrypt）→ L6（记账门面）→ L10。
+来源：[llm-audit.md](../../../llm-audit.md) L1~L15。**P0×2**：L1 provider 创建零输入校验（空 name/非法 base_url/能力枚举不查；重复 name→503 retryable 误分类；embedding-only 默认 provider 的 chat 模型回退陷阱——or_else(first) 会选嵌入模型当 chat 用）、L2 provider 无更新/删除端点+密钥无版本化（配错 key 只能改库；换 master key 全部密文变砖无重加密路径）。**P1×4**：L3 多默认 provider 无约束（resolve LIMIT 1 无 ORDER 任意取）、L4 routing PUT 零校验+幽灵 provider 静默跳过（typo purpose/错名路由静默落默认，无 warn）、L6 用量记账覆盖不全（grep 实证：knowledge 嵌入与三域检索查询嵌入全部绕过 record_usage——面板系统性低估）、L10 master key 占位符陷阱（"00"*32 缺省下建的密文与后续真实密钥不兼容且无预警）。**P2×5**：L5 test 探针幽灵代码+记账不对称、L7 usage 固定 30 天窗口、L8 usage 端点占位 cipher、L9 熔断器吞永久错误信号（401×5 后熔断打开报 Transient，根因被掩盖）、L15 max_tokens=1 对 reasoning 模型误报。关联：L1←K 校验族（K5/K10 模式）、L4←K1/W1 静默回退族、L6←R10 前置、L9←R5 副作用需一并回归。建议起点：~~L1+L3→L4→L2→L6→L10~~（已全部落地，2026-08-28 goal mtcd14mk：workspace 97 tests + E2E 13/13 全绿；剩 L5/L7/L8/L9/L15 P2 按需）。
 
 ## 新增（2026-08-27 wiki-audit 发现；W1~W8 已于同日修复 ✅）
 

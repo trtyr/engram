@@ -47,6 +47,11 @@ POST/GET `/settings/llm/providers`、POST `/settings/llm/providers/{id}/test`、
 
 > 按严重度排序。**P0=配置正确性/密钥安全面，P1=健壮性/可运维性，P2=增强**。
 
+> **修复状态（2026-08-28）**：L1~L10 已修复（goal mtcd14mk；workspace 97 tests + E2E 13/13 全绿）——
+> L1 创建全量校验+UNIQUE→400+能力回退改 NotConfigured、L2 PUT/DELETE/re-encrypt 端点、L3 默认唯一性事务降级+ORDER BY 兜底、
+> L4 routing PUT 全量校验+resolve 幽灵跳过 warn、L6 embed_for 记账门面（四调用点全覆盖）、L10 占位密钥启动告警+响应 warning。
+> 未修：L5/L7/L8/L9/L15（P2 级，按需排期）。
+
 ### P0
 
 **L1 · provider 创建零输入校验 + 错误分类误导 + 能力回退陷阱**

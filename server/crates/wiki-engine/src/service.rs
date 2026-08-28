@@ -2,8 +2,7 @@
 
 use agent_memory_jobs::{JobQueue, JobTemplate};
 use agent_memory_llm::ProviderRegistry;
-use agent_memory_llm::provider::LlmProvider as _;
-use agent_memory_llm::types::{EmbedRequest, Purpose};
+use agent_memory_llm::types::Purpose;
 use agent_memory_search::tokenize::tsv_text;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -252,19 +251,13 @@ impl WikiService {
         let tsq = agent_memory_search::tokenize::tsv_query_smart(query, 3);
         let limit = limit.min(50);
 
-        // W2：查询向量（无 provider / 嵌入失败 → None → 纯 FTS）
-        let qv: Option<Vec<f32>> = match self.registry.resolve(Purpose::Embed).await {
-            Ok((provider, model)) => provider
-                .embed(EmbedRequest {
-                    model,
-                    inputs: vec![query.to_string()],
-                    dimensions: Some(1024),
-                })
-                .await
-                .ok()
-                .and_then(|r| r.embeddings.first().cloned()),
-            Err(_) => None,
-        };
+        // W2：查询向量（无 provider / 嵌入失败 → None → 纯 FTS）；L6：经记账门面
+        let qv: Option<Vec<f32>> = self
+            .registry
+            .embed_for(Purpose::Embed, vec![query.to_string()], Some(1024), None)
+            .await
+            .ok()
+            .and_then(|r| r.embeddings.first().cloned());
 
         if let Some(qv) = qv {
             // FTS + ANN 双候选 + RRF 融合（与 knowledge 同款模式）
