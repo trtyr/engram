@@ -61,7 +61,8 @@ pub struct GraphDto {
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct CommunityInfo {
     pub id: usize,
-    #[serde(default)]
+    /// 社区首位成员 slug（与 insights 口径一致：成员表首个）
+    pub top_slug: String,
     pub size: usize,
     pub cohesion: f64,
 }
@@ -197,13 +198,30 @@ impl WikiService {
             .collect();
         let comms = crate::community::louvain_communities(&node_slugs, &e64);
         let cohesion = crate::community::community_cohesion(&node_slugs, &e64, &comms);
+        // 成员映射（id → 成员 slugs，保持节点顺序）——top_slug/size 真实统计，
+        // 与 insights.rs 的 CommunityInfo 口径一致（曾长期 size:0 且缺 top_slug 违约）
+        let mut members: std::collections::HashMap<usize, Vec<&str>> =
+            std::collections::HashMap::new();
+        for slug in &node_slugs {
+            members
+                .entry(comms.get(slug.as_str()).copied().unwrap_or(0))
+                .or_default()
+                .push(slug);
+        }
         Ok(GraphDto {
             communities: cohesion
                 .into_iter()
-                .map(|(id, cohesion)| CommunityInfo {
-                    id,
-                    size: 0,
-                    cohesion,
+                .map(|(id, cohesion)| {
+                    let m = members.get(&id);
+                    CommunityInfo {
+                        id,
+                        top_slug: m
+                            .and_then(|v| v.first().copied())
+                            .unwrap_or_default()
+                            .to_string(),
+                        size: m.map_or(0, |v| v.len()),
+                        cohesion,
+                    }
                 })
                 .collect(),
             nodes: nodes
