@@ -19,6 +19,11 @@ export default defineConfig({
       ),
     ),
   },
+  build: {
+    // mermaid 主入口（~662kB）是发布产物固有体积，仅在渲染 mermaid 图时按需加载
+    // （各图表类型已自动分 chunk；域页已路由级 lazy——初始 bundle ~280kB）。故放宽阈值。
+    chunkSizeWarningLimit: 800,
+  },
   test: {
     environment: 'jsdom',
     globals: true,

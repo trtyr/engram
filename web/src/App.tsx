@@ -1,8 +1,9 @@
 /**
  * 应用壳：登录守卫 + 侧边栏七域导航。
+ * 域页全部 lazy（路由级代码分割：sigma/graphology/mermaid 等重依赖随 Wiki 页按需加载）。
  */
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import {
   Brain,
   BookOpen,
@@ -16,13 +17,14 @@ import { getToken } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/ui-bits'
 import Login from '@/features/Login'
-import Dashboard from '@/features/Dashboard'
-import Memory from '@/features/Memory'
-import Knowledge from '@/features/Knowledge'
-import Wiki from '@/features/Wiki'
-import CodeGraph from '@/features/CodeGraph'
-import Jobs from '@/features/Jobs'
-import Settings from '@/features/Settings'
+
+const Dashboard = lazy(() => import('@/features/Dashboard'))
+const Memory = lazy(() => import('@/features/Memory'))
+const Knowledge = lazy(() => import('@/features/Knowledge'))
+const Wiki = lazy(() => import('@/features/Wiki'))
+const CodeGraph = lazy(() => import('@/features/CodeGraph'))
+const Jobs = lazy(() => import('@/features/Jobs'))
+const Settings = lazy(() => import('@/features/Settings'))
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -69,15 +71,17 @@ function Shell() {
       </aside>
       <main className="flex-1 overflow-auto">
         <div className="mx-auto max-w-6xl px-6 py-8 lg:px-8">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/memory" element={<Memory />} />
-            <Route path="/knowledge" element={<Knowledge />} />
-            <Route path="/wiki" element={<Wiki />} />
-            <Route path="/codegraph" element={<CodeGraph />} />
-            <Route path="/jobs" element={<Jobs />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
+          <Suspense fallback={<div className="min-h-40" />}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/memory" element={<Memory />} />
+              <Route path="/knowledge" element={<Knowledge />} />
+              <Route path="/wiki" element={<Wiki />} />
+              <Route path="/codegraph" element={<CodeGraph />} />
+              <Route path="/jobs" element={<Jobs />} />
+              <Route path="/settings" element={<Settings />} />
+            </Routes>
+          </Suspense>
         </div>
       </main>
     </div>
