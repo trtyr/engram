@@ -2,7 +2,7 @@
 
 ## 本地开发
 
-后端是 Rust workspace（`server/`），集成测试用 testcontainers 拉起真实 PostgreSQL，**需要本机 Docker**。
+后端是 Rust workspace（`server/`），集成测试用**本机 PostgreSQL**（每测试建/删独立库 `am_test_*`，默认连 `postgres://127.0.0.1:5432/postgres`，`AM_TEST_PG_URL` 可覆盖），不再需要 Docker。
 
 ```bash
 cd server
@@ -16,7 +16,7 @@ cargo fmt --check
 # lint（警告即错误）
 cargo clippy --workspace --all-targets -- -D warnings
 
-# 测试（集成测试自动起 PG 容器）
+# 测试（需本机 PG 可达）
 cargo test --workspace
 
 # 依赖漏洞扫描（基线）
@@ -40,7 +40,7 @@ cd server
 cargo run -p agent-memory-api --bin openapi-dump > /tmp/openapi.json
 ```
 
-（前端类型由 `npx openapi-typescript` 从这份 json 生成，CI 的 `api-types` job 用它做漂移检查。）
+（前端类型由 `openapi-typescript` 从这份 json 生成——前端跑 `pnpm run gen:api`；CI 的 `api-types` job 用它做漂移检查。）
 
 ## 环境变量
 

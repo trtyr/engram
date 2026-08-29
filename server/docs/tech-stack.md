@@ -46,14 +46,14 @@
 
 | 库 | 版本 | 用途 |
 |---|---|---|
-| testcontainers | 0.24.0 | 集成测试拉起真实 PostgreSQL 容器 |
+| 本机 PostgreSQL | 16.x（Homebrew） | 集成测试：每测试建/删独立库（`AM_TEST_PG_URL` 可覆盖；2026-08-28 起替代 testcontainers） |
 | tempfile | 3 | 测试临时目录 |
 
 ## 数据库
 
 - **PostgreSQL 17**（生产镜像 `pgvector/pgvector:pg17`）
 - 扩展：`vector`（pgvector）、`pg_trgm`
-- schema 由 `server/migrations/` 12 个迁移文件定义，启动时由 `sqlx` 自动执行。
+- schema 由 `server/migrations/` 14 个迁移文件定义，启动时由 `sqlx` 自动执行。
 
 ## 质量门禁工具
 
@@ -61,7 +61,7 @@
 |---|---|---|
 | rustfmt | `cargo fmt --check` | 格式检查 |
 | clippy | `cargo clippy --workspace --all-targets -- -D warnings` | 警告即错误 |
-| cargo test | `cargo test --workspace` | 单元 + 集成（testcontainers 真 PG） |
+| cargo test | `cargo test --workspace` | 单元 + 集成（本机 PG 每测试一库） |
 | cargo audit | `cargo audit` | 依赖漏洞基线 |
 
 CI 门禁见 [conventions.md](conventions.md)，运行命令见 [run-and-deploy.md](run-and-deploy.md)。

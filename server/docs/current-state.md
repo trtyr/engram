@@ -1,5 +1,8 @@
 # 当前状态（验证基线）
 
+> ⚠️ 本文档是 2026-08-26 的 backend-only 基线，部分事实已过时（testcontainers→本机 PG、12→14 迁移、56→100 tests、新增端点）。
+> **最新全栈验证基线见仓库根 [docs/current-state.md](../../docs/current-state.md)（2026-08-29）**；本文档保留作历史参考，架构/数据模型/API 等事实性条目已在各文档就地修正。
+
 > 本文档记录 `project-init` 在 2026-08-26 对 `server/` 后端做的真实验证结果。所有命令在 `server/` 下运行。
 
 ## 环境

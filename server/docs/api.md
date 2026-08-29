@@ -69,6 +69,8 @@ Bearer token 两种主体（`server/crates/api/src/auth.rs`）：
 | 方法 | 路径 | handler | 说明 |
 |---|---|---|---|
 | POST/GET | `/settings/llm/providers` | `llm_api::create_provider` / `list_providers` | 注册/列出 LLM provider |
+| PUT/DELETE | `/settings/llm/providers/{id}` | `llm_api::update_provider` / `delete_provider` | 更新/删除 provider（生命周期） |
+| POST | `/settings/llm/providers/re-encrypt` | `llm_api::reencrypt_providers` | 主密钥更换后重加密全部 provider key |
 | POST | `/settings/llm/providers/{id}/test` | `llm_api::test_provider` | 测试 provider 连通性 |
 | GET/PUT | `/settings/llm/routing` | `llm_api::get_routing` / `put_routing` | purpose 路由配置 |
 | POST/GET | `/settings/api-keys` | `llm_api::create_api_key_handler` / `list_api_keys` | 签发/列出 API key |
@@ -108,6 +110,7 @@ Bearer token 两种主体（`server/crates/api/src/auth.rs`）：
 | POST | `/knowledge/upload` | `knowledge_api::upload` | 上传文件摄取 |
 | GET/DELETE | `/knowledge/documents/{id}` | `knowledge_api::get_document` / `delete_document` | 取/删文档 |
 | GET | `/knowledge/documents/{id}/chunks` | `knowledge_api::document_chunks` | 文档分块 |
+| POST | `/knowledge/documents/{id}/re-embed` | `knowledge_api::reembed` | 重建文档嵌入（换 embedding 模型后） |
 | POST | `/knowledge/search` | `knowledge_api::search` | 知识检索 |
 
 ### Wiki

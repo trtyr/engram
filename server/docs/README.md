@@ -26,5 +26,5 @@
 
 ## 补充说明
 
-- schema 唯一定义在 `server/migrations/`（12 个迁移），权威接口定义在运行时 `/openapi.json`。
+- schema 唯一定义在 `server/migrations/`（14 个迁移），权威接口定义在运行时 `/openapi.json`。
 - 被删除的旧 `docs/plantree/`（原规划树）不在本归档内，其内容仅存于 git 历史；本归档是独立重建。

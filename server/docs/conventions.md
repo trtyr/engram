@@ -58,8 +58,8 @@
 
 | job | 内容 |
 |---|---|
-| `backend` | `cargo fmt --check` → `cargo clippy --workspace --all-targets -- -D warnings` → `cargo test --workspace`（rust-cache，testcontainers 用 runner 自带 Docker） |
-| `web` | `npm ci` → lint → tsc → vitest → build（前端，不在本文档范围） |
+| `backend` | `cargo fmt --check` → `cargo clippy --workspace --all-targets -- -D warnings` → `cargo test --workspace`（rust-cache；pgvector/pgvector:pg17 service + `AM_TEST_PG_URL` 供集成测试） |
+| `web` | `pnpm install --frozen-lockfile` → lint → tsc → vitest → build（前端，不在本文档范围） |
 | `api-types` | `openapi-dump` 提取 → `openapi-typescript` 再生成 → git diff 漂移检查（后端 API 变更必须同步前端类型） |
 | `docker` | 构建 `deploy/Dockerfile` 镜像 |
 

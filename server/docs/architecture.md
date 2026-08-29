@@ -8,7 +8,7 @@
 server/
 ├── Cargo.toml              # workspace 定义 + workspace.dependencies
 ├── Cargo.lock
-├── migrations/             # schema 唯一定义处（12 个迁移，启动自动执行）
+├── migrations/             # schema 唯一定义处（14 个迁移，启动自动执行）
 └── crates/
     ├── api/                # HTTP 层（唯一有 main 的 crate）
     ├── core/               # 领域编排层（域服务 + 门面）
@@ -57,7 +57,7 @@ distill ─────→ jobs, llm, search
 | `state.rs` | `AppState` 依赖注入容器（pool + admin_password + master_key + data_dir） |
 | `auth.rs` | 鉴权：admin session（`ams_` 前缀 opaque token）+ API key（`amk_` 前缀，scopes）；Bearer 中间件 |
 | `error.rs` | 统一错误体 `{"error":{code,message,retryable}}` + `ApiError` 分类 |
-| `routes/*.rs` | 8 个路由模块（health/auth/jobs/llm/memory/knowledge/wiki/codegraph） |
+| `routes/*.rs` | 9 个路由模块（health/auth/jobs/llm/memory/knowledge/wiki/codegraph/search） |
 | `web_assets.rs` | SPA 静态资源兜底（`rust-embed` 内嵌 `web/dist`） |
 | `bin/openapi-dump.rs` | 从代码提取 openapi.json 的 CLI（CI 用，不起服务） |
 
@@ -163,4 +163,4 @@ distill ─────→ jobs, llm, search
 
 ## 数据流
 
-所有长操作走 job 队列；LLM 调用走 `llm` crate；检索走 `search` crate；文档/Wiki 原料解析走 `parsing` crate。数据落 PostgreSQL（详见 [data-model.md](data-model.md)）。完整 schema 见 `server/migrations/` 的 12 个迁移文件。
+所有长操作走 job 队列；LLM 调用走 `llm` crate；检索走 `search` crate；文档/Wiki 原料解析走 `parsing` crate。数据落 PostgreSQL（详见 [data-model.md](data-model.md)）。完整 schema 见 `server/migrations/` 的 14 个迁移文件。集成测试基建：本机 PG 每测试一库（各 crate `tests/support/mod.rs`，`AM_TEST_PG_URL` 可覆盖），不再依赖 testcontainers/Docker。

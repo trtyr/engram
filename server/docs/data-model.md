@@ -1,6 +1,6 @@
 # 数据模型
 
-> 来源：`server/migrations/` 12 个迁移文件（schema 唯一定义处，启动时由 sqlx 自动执行）。
+> 来源：`server/migrations/` 14 个迁移文件（schema 唯一定义处，启动时由 sqlx 自动执行）。
 > 约定：所有 ID 用 `uuid`（v7），时间戳 `timestamptz`，embedding 统一 **1024 维**（bge-m3），
 > 全文检索的 `tsv`（tsvector）由应用层 jieba 预分词维护（写入与查询同源）。
 
@@ -19,9 +19,9 @@
 | 系统      | `llm_providers` / `llm_usage`                              | 0003                    |
 | 系统      | `api_keys` / `admin_sessions`                              | 0004                    |
 | 系统      | `settings`                                                 | 0010                    |
-| 记忆      | `raw_sessions` / `atoms` / `scenarios` / `persona_aspects` | 0005（0011 扩充 atoms） |
+| 记忆      | `raw_sessions` / `atoms` / `scenarios` / `persona_aspects` | 0005（0011 扩充 atoms，0013 加 scenarios.hit_count） |
 | 知识      | `documents` / `chunks`                                     | 0006                    |
-| Wiki      | `wiki_sources` / `wiki_pages` / `wiki_links`               | 0007                    |
+| Wiki      | `wiki_sources` / `wiki_pages` / `wiki_links`               | 0007（0014 加 wiki_sources.error） |
 | Wiki      | `wiki_review_items` / `wiki_insight_dismissals`            | 0012                    |
 | CodeGraph | `cg_projects`                                              | 0008                    |
 
