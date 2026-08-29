@@ -71,8 +71,11 @@ impl UnifiedSearch {
         let per_domain = limit.clamp(5, 50);
 
         let mem = MemoryService::new(self.pool.clone(), self.registry.clone());
-        let know =
-            KnowledgeService::new(self.pool.clone(), self.registry.clone(), self.data_dir.clone());
+        let know = KnowledgeService::new(
+            self.pool.clone(),
+            self.registry.clone(),
+            self.data_dir.clone(),
+        );
         let wiki = WikiService::new(self.pool.clone(), self.registry.clone());
 
         // 三域并行检索（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
@@ -157,11 +160,7 @@ pub(crate) fn assign_rrf_scores(hits: &mut [UnifiedHit]) {
     use std::collections::HashMap;
     let mut rank: HashMap<String, usize> = HashMap::new();
     for h in hits.iter_mut() {
-        let layer = h
-            .extra
-            .get("layer")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let layer = h.extra.get("layer").and_then(|v| v.as_str()).unwrap_or("");
         let key = format!("{}:{}", h.domain, layer);
         let r = rank.entry(key).or_insert(0);
         h.score = 1.0 / (60.0 + *r as f64);

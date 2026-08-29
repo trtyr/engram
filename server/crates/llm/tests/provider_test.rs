@@ -264,7 +264,12 @@ async fn l6_embed_for_records_usage() {
     // 门面调用：解析 + 嵌入 + 记账一体
     let job_id = uuid::Uuid::new_v4();
     let resp = registry
-        .embed_for(Purpose::Embed, vec!["你好".into(), "世界".into()], None, Some(job_id))
+        .embed_for(
+            Purpose::Embed,
+            vec!["你好".into(), "世界".into()],
+            None,
+            Some(job_id),
+        )
         .await
         .unwrap();
     assert_eq!(resp.embeddings.len(), 2);

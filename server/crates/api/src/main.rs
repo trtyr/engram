@@ -77,8 +77,7 @@ async fn main() -> anyhow::Result<()> {
         let st = state.clone();
         tokio::spawn(async move {
             let registry = st.registry();
-            let wiki =
-                agent_memory_core::wiki::WikiService::new(st.pool.clone(), registry);
+            let wiki = agent_memory_core::wiki::WikiService::new(st.pool.clone(), registry);
             match wiki.backfill_tsv().await {
                 Ok(n) if n > 0 => tracing::info!("wiki tsv 存量补数完成：{n} 页"),
                 Ok(_) => {}

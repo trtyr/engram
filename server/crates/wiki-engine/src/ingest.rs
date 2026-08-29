@@ -101,12 +101,10 @@ pub async fn enqueue_ingest(
         .fetch_all(queue.pool())
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
-        let has_active = jobs
-            .iter()
-            .any(|(k, s, _)| {
-                (k == "wiki_analyze" || k == "wiki_generate")
-                    && matches!(s.as_str(), "pending" | "running")
-            });
+        let has_active = jobs.iter().any(|(k, s, _)| {
+            (k == "wiki_analyze" || k == "wiki_generate")
+                && matches!(s.as_str(), "pending" | "running")
+        });
         if !has_active {
             // generate 曾成功？source ready 已在上面早退；这里 generate 无终态成功 → 可安全重跑
             let generate_done = jobs
@@ -123,9 +121,7 @@ pub async fn enqueue_ingest(
                     .find(|(k, _, _)| k == "wiki_generate")
                     .and_then(|(_, _, payload)| payload.get("analysis").cloned())
                     .filter(|a| a.as_object().is_some_and(|o| !o.is_empty()));
-                if analyze_ok
-                    && let Some(analysis) = analysis
-                {
+                if analyze_ok && let Some(analysis) = analysis {
                     // W4：failed/卡死源重置（generate 结束时会落 ready）
                     sqlx::query(
                         "UPDATE wiki_sources SET status = 'pending', error = NULL WHERE id = $1 AND status <> 'ready'",
@@ -459,14 +455,12 @@ pub async fn generate_job(
                     .ok();
                 } else {
                     for (i, (slug, _, _)) in pages.iter().enumerate() {
-                        sqlx::query(
-                            "UPDATE wiki_pages SET embedding = $2 WHERE slug = $1",
-                        )
-                        .bind(slug)
-                        .bind(pgvector::Vector::from(emb[i].clone()))
-                        .execute(pool)
-                        .await
-                        .map_err(|e| JobError::Retryable(e.to_string()))?;
+                        sqlx::query("UPDATE wiki_pages SET embedding = $2 WHERE slug = $1")
+                            .bind(slug)
+                            .bind(pgvector::Vector::from(emb[i].clone()))
+                            .execute(pool)
+                            .await
+                            .map_err(|e| JobError::Retryable(e.to_string()))?;
                         embedded_pages += 1;
                     }
                 }
@@ -697,7 +691,11 @@ async fn upsert_system_page(
 }
 
 /// W4：Permanent 失败 → wiki_sources 标 failed + error 落列（此前 'failed' 态全代码无人写）。
-async fn mark_source_failed(pool: &sqlx::PgPool, ctx_job: &agent_memory_jobs::types::Job, msg: &str) {
+async fn mark_source_failed(
+    pool: &sqlx::PgPool,
+    ctx_job: &agent_memory_jobs::types::Job,
+    msg: &str,
+) {
     let Some(sid) = ctx_job
         .payload
         .0

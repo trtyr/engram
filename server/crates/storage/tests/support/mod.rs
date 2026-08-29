@@ -9,8 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// 管理库连接串（建库/删库用；指向已存在的库，通常 postgres）。
 fn admin_url() -> String {
-    std::env::var("AM_TEST_PG_URL")
-        .unwrap_or_else(|_| "postgres://127.0.0.1:5432/postgres".into())
+    std::env::var("AM_TEST_PG_URL").unwrap_or_else(|_| "postgres://127.0.0.1:5432/postgres".into())
 }
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -22,10 +21,7 @@ pub struct TestPg {
 
 impl Drop for TestPg {
     fn drop(&mut self) {
-        let sql = format!(
-            "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
-            self.db_name
-        );
+        let sql = format!("DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)", self.db_name);
         let _ = std::process::Command::new("psql")
             .arg("-d")
             .arg(admin_url())

@@ -200,9 +200,13 @@ pub async fn update_provider(
     // 校验提供的字段（与 create 同规则）
     if let Some(u) = &req.base_url {
         let scheme_ok = u.starts_with("http://") || u.starts_with("https://");
-        let host_part = u.trim_start_matches("http://").trim_start_matches("https://");
+        let host_part = u
+            .trim_start_matches("http://")
+            .trim_start_matches("https://");
         if !scheme_ok || host_part.is_empty() || host_part.contains(char::is_whitespace) {
-            return Err(ApiError::BadRequest(format!("base_url 非法（收到「{u}」）")));
+            return Err(ApiError::BadRequest(format!(
+                "base_url 非法（收到「{u}」）"
+            )));
         }
     }
     if let Some(k) = &req.api_key
@@ -215,7 +219,10 @@ pub async fn update_provider(
             if m.id.trim().is_empty() {
                 return Err(ApiError::BadRequest("models[].id 不能为空".into()));
             }
-            if m.capabilities.iter().any(|c| !matches!(c.as_str(), "chat" | "embedding")) {
+            if m.capabilities
+                .iter()
+                .any(|c| !matches!(c.as_str(), "chat" | "embedding"))
+            {
                 return Err(ApiError::BadRequest(format!(
                     "模型「{}」的 capabilities 仅接受 chat / embedding",
                     m.id
@@ -243,7 +250,16 @@ pub async fn update_provider(
     }
 
     // COALESCE 逐字段更新；未提供的字段保持原值
-    let row = sqlx::query_as::<_, (Uuid, String, String, sqlx::types::Json<Vec<ModelInfo>>, bool)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            String,
+            sqlx::types::Json<Vec<ModelInfo>>,
+            bool,
+        ),
+    >(
         "UPDATE llm_providers SET \
             base_url = COALESCE($2, base_url), \
             api_key_encrypted = COALESCE($3, api_key_encrypted), \
@@ -256,7 +272,7 @@ pub async fn update_provider(
     .bind(id)
     .bind(&req.base_url)
     .bind(&enc_new)
-    .bind(req.models.as_ref().map(|m| sqlx::types::Json(m)))
+    .bind(req.models.as_ref().map(sqlx::types::Json))
     .bind(req.is_default)
     .fetch_optional(&mut *tx)
     .await
@@ -381,11 +397,13 @@ pub async fn reencrypt_providers(
 
     let mut tx = state.pool.begin().await?;
     for (id, enc) in &reencoded {
-        sqlx::query("UPDATE llm_providers SET api_key_encrypted = $2, updated_at = now() WHERE id = $1")
-            .bind(id)
-            .bind(enc)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "UPDATE llm_providers SET api_key_encrypted = $2, updated_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(enc)
+        .execute(&mut *tx)
+        .await?;
     }
     tx.commit().await?;
 
@@ -590,10 +608,7 @@ pub async fn put_routing(
         sqlx::query_as("SELECT name, models FROM llm_providers")
             .fetch_all(&state.pool)
             .await?;
-    let provider_models: std::collections::HashMap<
-        String,
-        Vec<String>,
-    > = providers
+    let provider_models: std::collections::HashMap<String, Vec<String>> = providers
         .into_iter()
         .map(|(n, m)| (n, m.0.into_iter().map(|x| x.id).collect()))
         .collect();

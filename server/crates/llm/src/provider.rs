@@ -99,9 +99,7 @@ static CIRCUITS: std::sync::LazyLock<
     std::sync::Mutex<
         std::collections::HashMap<String, std::sync::Arc<std::sync::Mutex<CircuitBreaker>>>,
     >,
-> = std::sync::LazyLock::new(|| {
-    std::sync::Mutex::new(std::collections::HashMap::new())
-});
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// 解析 Retry-After 头：支持 delta-seconds（整数秒）与 HTTP-date（RFC 2822）两种形式。
 /// HTTP-date 已过期视为 0s（立即重试）；无法解析保守取 2s。
@@ -155,7 +153,9 @@ impl OpenAiCompatProvider {
             .lock()
             .unwrap()
             .entry(name.clone())
-            .or_insert_with(|| std::sync::Arc::new(std::sync::Mutex::new(CircuitBreaker::default())))
+            .or_insert_with(|| {
+                std::sync::Arc::new(std::sync::Mutex::new(CircuitBreaker::default()))
+            })
             .clone();
         Self {
             name,
@@ -613,10 +613,7 @@ mod tests {
         cb.record_failure(); // → Open
         std::thread::sleep(std::time::Duration::from_millis(5));
         assert!(cb.allow(), "冷却后放行第一个试探请求");
-        assert!(
-            !cb.allow(),
-            "试探未决期间其余请求应快速失败，不放行"
-        );
+        assert!(!cb.allow(), "试探未决期间其余请求应快速失败，不放行");
         assert_eq!(cb.state, CircuitState::HalfOpen);
         cb.record_success(); // 试探成功 → Closed
         assert!(cb.allow(), "恢复 Closed 后正常放行");
@@ -626,7 +623,10 @@ mod tests {
     fn retry_after_supports_seconds_and_http_date() {
         // delta-seconds
         assert_eq!(retry_after_from_str("5"), std::time::Duration::from_secs(5));
-        assert_eq!(retry_after_from_str(" 5 "), std::time::Duration::from_secs(5));
+        assert_eq!(
+            retry_after_from_str(" 5 "),
+            std::time::Duration::from_secs(5)
+        );
         // HTTP-date（RFC 2822）：未来 → 正秒数（2100 距今数十年，必然远大于 1e6 秒）
         let future = retry_after_from_str("Fri, 01 Jan 2100 00:00:00 GMT");
         assert!(future.as_secs() > 1_000_000, "future: {future:?}");
@@ -634,7 +634,10 @@ mod tests {
         let past = retry_after_from_str("Sat, 01 Jan 2000 00:00:00 GMT");
         assert_eq!(past, std::time::Duration::ZERO);
         // 无法解析 → 保守 2s
-        assert_eq!(retry_after_from_str("soon"), std::time::Duration::from_secs(2));
+        assert_eq!(
+            retry_after_from_str("soon"),
+            std::time::Duration::from_secs(2)
+        );
         assert_eq!(retry_after_from_str(""), std::time::Duration::from_secs(2));
     }
 }

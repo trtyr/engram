@@ -223,7 +223,9 @@ mod tests {
         // K5：「你好」的 GBK 编码——非 UTF-8 字节序列
         let gbk = [0xC4u8, 0xE3, 0xBA, 0xC3]; // 你好
         let err = parse_bytes("note.txt", None, &gbk);
-        let msg = err.expect_err("GBK 应被拒绝（提示转码而非乱码入库）").to_string();
+        let msg = err
+            .expect_err("GBK 应被拒绝（提示转码而非乱码入库）")
+            .to_string();
         assert!(msg.contains("UTF-8"), "应提示转码: {msg}");
     }
 
@@ -238,8 +240,10 @@ mod tests {
     fn pdf_and_docx_by_extension_untouched() {
         // K5：显式格式仍走各自解析器（默认分支守卫不拦已知格式）
         assert!(parse_bytes("x.pdf", None, b"PK\x00\x03").is_err()); // PDF 解析失败而非 Unsupported 拦截
-        assert!(parse_bytes("x.pdf", None, b"PK\x00\x03")
-            .map(|_| ())
-            .is_err());
+        assert!(
+            parse_bytes("x.pdf", None, b"PK\x00\x03")
+                .map(|_| ())
+                .is_err()
+        );
     }
 }

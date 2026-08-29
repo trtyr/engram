@@ -16,11 +16,7 @@ async fn setup() -> (sqlx::PgPool, WikiService, support::TestPg) {
         pool.clone(),
         agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
-    (
-        pool.clone(),
-        WikiService::new(pool, registry),
-        container,
-    )
+    (pool.clone(), WikiService::new(pool, registry), container)
 }
 
 #[tokio::test]
@@ -75,7 +71,10 @@ async fn cascade_delete_removes_source_and_downstream() {
     // 摘要页整页删、共享页摘源、dead link 清理
     assert!(report.deleted_pages.contains(&"src-page".to_string()));
     assert!(report.updated_shared.contains(&"concept-page".to_string()));
-    assert_eq!(report.cleaned_links, 1, "concept 页里的 [[src-page]] 应被清理");
+    assert_eq!(
+        report.cleaned_links, 1,
+        "concept 页里的 [[src-page]] 应被清理"
+    );
 
     // 验证 DB 状态（事务提交后三表一致）
     let source_exists: Option<Uuid> =
@@ -93,12 +92,13 @@ async fn cascade_delete_removes_source_and_downstream() {
             .unwrap();
     assert!(src_page.is_none(), "摘要页应被删除");
 
-    let concept_sources: i32 =
-        sqlx::query_scalar("SELECT jsonb_array_length(frontmatter->'sources') FROM wiki_pages WHERE id = $1")
-            .bind(concept_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let concept_sources: i32 = sqlx::query_scalar(
+        "SELECT jsonb_array_length(frontmatter->'sources') FROM wiki_pages WHERE id = $1",
+    )
+    .bind(concept_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(concept_sources, 0, "共享页 sources 应摘除该 source");
 }
 
@@ -116,12 +116,7 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
         .await
         .unwrap();
 
-    async fn mk_page(
-        pool: &sqlx::PgPool,
-        slug: &str,
-        pt: &str,
-        sources: serde_json::Value,
-    ) {
+    async fn mk_page(pool: &sqlx::PgPool, slug: &str, pt: &str, sources: serde_json::Value) {
         let id = uuid::Uuid::now_v7();
         sqlx::query(
             "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, tsv) \
@@ -137,9 +132,27 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
         .unwrap();
     }
     // 源摘要页（独源→整删）+ 两个共享页（摘源后不再有任何关联依据）
-    mk_page(&pool, "w5-src", "source", serde_json::json!({"sources": [sid.to_string()]})).await;
-    mk_page(&pool, "w5-a", "concept", serde_json::json!({"sources": [sid.to_string()]})).await;
-    mk_page(&pool, "w5-b", "concept", serde_json::json!({"sources": [sid.to_string()]})).await;
+    mk_page(
+        &pool,
+        "w5-src",
+        "source",
+        serde_json::json!({"sources": [sid.to_string()]}),
+    )
+    .await;
+    mk_page(
+        &pool,
+        "w5-a",
+        "concept",
+        serde_json::json!({"sources": [sid.to_string()]}),
+    )
+    .await;
+    mk_page(
+        &pool,
+        "w5-b",
+        "concept",
+        serde_json::json!({"sources": [sid.to_string()]}),
+    )
+    .await;
 
     // 源重叠边生成（三页两两无向双插，与真实 ingest 相同路径）
     agent_memory_wiki_engine::relevance::rebuild_weights(&pool)

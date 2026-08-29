@@ -114,7 +114,9 @@ pub async fn compute_insights(pool: &PgPool) -> Result<InsightsReport, JobError>
 
     // 2. 稀疏社区（cohesion < SPARSE_COHESION 且 ≥SPARSE_MIN_SIZE 页）
     for c in &community_info {
-        if c.size >= crate::community::SPARSE_MIN_SIZE && c.cohesion < crate::community::SPARSE_COHESION {
+        if c.size >= crate::community::SPARSE_MIN_SIZE
+            && c.cohesion < crate::community::SPARSE_COHESION
+        {
             let key = format!("sparse_community:{}", c.id);
             if dismissed.iter().any(|d| d == &key) {
                 continue;

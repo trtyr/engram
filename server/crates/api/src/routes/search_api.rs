@@ -29,11 +29,7 @@ fn ue(e: UnifiedError) -> ApiError {
 }
 
 fn svc(state: &AppState) -> UnifiedSearch {
-    UnifiedSearch::new(
-        state.pool.clone(),
-        state.registry(),
-        state.data_dir.clone(),
-    )
+    UnifiedSearch::new(state.pool.clone(), state.registry(), state.data_dir.clone())
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -63,7 +59,10 @@ pub async fn search(
     Json(req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, ApiError> {
     require_search(&principal)?;
-    let hits = svc(&state).search(&req.query, req.limit).await.map_err(ue)?;
+    let hits = svc(&state)
+        .search(&req.query, req.limit)
+        .await
+        .map_err(ue)?;
     Ok(Json(SearchResponse {
         query: req.query,
         hits,

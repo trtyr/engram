@@ -123,7 +123,7 @@ mod tests {
         let out = remove_wikilinks(md, "dead");
         assert!(!out.contains("dead"), "{out}");
         assert!(!out.contains("别名"), "别名形式的链接体必须整体移除: {out}");
-        assert!(out.contains("[[live|活链]]"), "活链不受影响: {out}");;
+        assert!(out.contains("[[live|活链]]"), "活链不受影响: {out}");
 
         // 中文 slug 与重复出现（移除后留双空格属正常——链接占位两侧空格保留）
         let md2 = "前 [[中文页]] 中 [[中文页|显示]] 后";

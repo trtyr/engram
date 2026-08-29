@@ -169,7 +169,8 @@ pub async fn cascade_delete_source(
                 continue; // 对端已删（幽灵边已被上面事务内清理）
             }
             let (a, b) = (&pages[0], &pages[1]);
-            let direct = extract_wikilinks(&a.1).contains(&other) || extract_wikilinks(&b.1).contains(&slug);
+            let direct =
+                extract_wikilinks(&a.1).contains(&other) || extract_wikilinks(&b.1).contains(&slug);
             let shared = a.2.iter().any(|s| b.2.contains(s));
             if !direct && !shared {
                 sqlx::query(

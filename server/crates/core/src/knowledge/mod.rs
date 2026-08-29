@@ -150,20 +150,16 @@ impl KnowledgeService {
                 .map_err(|e| KnowledgeError::Storage(e.to_string()))?;
         match status.as_deref() {
             None => Err(KnowledgeError::NotFound(format!("文档 {id} 不存在"))),
-            Some("ready") => {
-                self.queue
-                    .enqueue(
-                        JobTemplate::new("embed_document")
-                            .with_payload(serde_json::json!({"document_id": id}))
-                            .with_idempotency_key(format!(
-                                "reembed-{id}-{}",
-                                Uuid::now_v7().simple()
-                            )),
-                    )
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| KnowledgeError::Storage(format!("入队失败: {e}")))
-            }
+            Some("ready") => self
+                .queue
+                .enqueue(
+                    JobTemplate::new("embed_document")
+                        .with_payload(serde_json::json!({"document_id": id}))
+                        .with_idempotency_key(format!("reembed-{id}-{}", Uuid::now_v7().simple())),
+                )
+                .await
+                .map(|_| ())
+                .map_err(|e| KnowledgeError::Storage(format!("入队失败: {e}"))),
             Some(s) => Err(KnowledgeError::BadRequest(format!(
                 "文档状态 {s} 不可重嵌（需 ready）"
             ))),

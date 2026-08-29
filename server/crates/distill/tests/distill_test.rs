@@ -438,12 +438,11 @@ async fn persona_evidence_per_aspect() {
     let j = wait_done(&env.queue, "distill_persona").await;
     assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
 
-    let rows: Vec<(String, serde_json::Value)> = sqlx::query_as(
-        "SELECT aspect, evidence_refs FROM persona_aspects",
-    )
-    .fetch_all(&env.pool)
-    .await
-    .unwrap();
+    let rows: Vec<(String, serde_json::Value)> =
+        sqlx::query_as("SELECT aspect, evidence_refs FROM persona_aspects")
+            .fetch_all(&env.pool)
+            .await
+            .unwrap();
     assert_eq!(rows.len(), 2, "两个分面: {rows:?}");
 
     let ev = |aspect: &str| -> serde_json::Value {
@@ -456,25 +455,40 @@ async fn persona_evidence_per_aspect() {
     let skills = ev("skills");
 
     // 分面级证据：各含各的场景，不串
-    let id_scen: Vec<String> = identity["scenarios"].as_array().unwrap()
-        .iter().map(|v| v.as_str().unwrap().to_string()).collect();
-    let sk_scen: Vec<String> = skills["scenarios"].as_array().unwrap()
-        .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let id_scen: Vec<String> = identity["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let sk_scen: Vec<String> = skills["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
     assert_eq!(id_scen, vec![s_home.to_string()], "identity 只依据居住场景");
     assert_eq!(sk_scen, vec![s_skill.to_string()], "skills 只依据技能场景");
 
     // L3→L2→L1→L0 全链：atoms + sessions 各归各
     assert_eq!(identity["sessions"].as_array().unwrap().len(), 1);
-    assert!(identity["sessions"].to_string().contains(&sess_home.to_string()));
-    assert!(skills["sessions"].to_string().contains(&sess_skill.to_string()));
+    assert!(
+        identity["sessions"]
+            .to_string()
+            .contains(&sess_home.to_string())
+    );
+    assert!(
+        skills["sessions"]
+            .to_string()
+            .contains(&sess_skill.to_string())
+    );
 
     // prompt 版本落 v2
-    let pv: String = sqlx::query_scalar(
-        "SELECT prompt_version FROM persona_aspects WHERE aspect = 'identity'",
-    )
-    .fetch_one(&env.pool)
-    .await
-    .unwrap();
+    let pv: String =
+        sqlx::query_scalar("SELECT prompt_version FROM persona_aspects WHERE aspect = 'identity'")
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
     assert_eq!(pv, "2", "persona prompt 升版 v2");
 
     env.handle.shutdown();
@@ -535,7 +549,10 @@ async fn arbitrate_null_embedding_falls_back_to_fts() {
             .fetch_one(&env.pool)
             .await
             .unwrap();
-    assert_eq!(status, "archived", "无嵌入候选应被仲裁（duplicate → archived）");
+    assert_eq!(
+        status, "archived",
+        "无嵌入候选应被仲裁（duplicate → archived）"
+    );
     assert_eq!(sup_by, Some(target));
     let hits: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
         .bind(target)

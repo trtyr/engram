@@ -65,10 +65,7 @@ async fn context_pack_l1_is_query_relevant_not_hit_count() {
 
     // 不相关但 hit_count 高的 atom 不应挤到相关 atom 之前
     if let Some(pos_irr) = atom_ids.iter().position(|id| *id == irrelevant) {
-        let pos_rel = atom_ids
-            .iter()
-            .position(|id| *id == relevant)
-            .unwrap();
+        let pos_rel = atom_ids.iter().position(|id| *id == relevant).unwrap();
         assert!(
             pos_rel < pos_irr,
             "相关 atom 应排在不相关 atom 之前：rel@{pos_rel} irr@{pos_irr}"
@@ -90,7 +87,9 @@ async fn search_hits_bump_hit_count() {
          ($1, '开发环境', '用户偏好 Rust', '完整描述', to_tsvector('simple', $2))",
     )
     .bind(sid)
-    .bind(agent_memory_search::tokenize::tsv_text("开发环境 用户偏好 Rust"))
+    .bind(agent_memory_search::tokenize::tsv_text(
+        "开发环境 用户偏好 Rust",
+    ))
     .execute(&pool)
     .await
     .unwrap();
@@ -117,7 +116,10 @@ async fn search_hits_bump_hit_count() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     assert!(atom_hits >= 1, "atoms.hit_count 应回写（实际 {atom_hits}）");
-    assert!(scen_hits >= 1, "scenarios.hit_count 应回写（实际 {scen_hits}）");
+    assert!(
+        scen_hits >= 1,
+        "scenarios.hit_count 应回写（实际 {scen_hits}）"
+    );
 
     // context_pack 读路径同样计数（有 query 时 L1 走 search_atoms）
     let before = atom_hits;
@@ -134,5 +136,8 @@ async fn search_hits_bump_hit_count() {
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    assert!(after > before, "context_pack 命中应回写（{before} → {after}）");
+    assert!(
+        after > before,
+        "context_pack 命中应回写（{before} → {after}）"
+    );
 }

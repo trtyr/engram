@@ -349,8 +349,7 @@ async fn w1_generate_failure_resubmit_recovers() {
     ]});
     let bad = serde_json::Value::String("{not json".into());
     // analyze ✓ → generate 两连坏 JSON 永久失败 → 重提交后新 generate ✓
-    let (pool, wiki, handle, _pg) =
-        setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
+    let (pool, wiki, handle, _pg) = setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
 
     let text = "# W1 死锁恢复测试\n这是独一无二的内容 w1-unique-123。";
     let skipped = wiki.ingest("W1文档", text).await.unwrap();
@@ -420,7 +419,9 @@ async fn w2_content_word_search_hits_llm_pages() {
     ]});
     let (pool, wiki, handle, _pg) = setup(vec![analysis, pages]).await;
 
-    wiki.ingest("W2文档", "# W2 测试内容\n独一无二 w2-unique。").await.unwrap();
+    wiki.ingest("W2文档", "# W2 测试内容\n独一无二 w2-unique。")
+        .await
+        .unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     // 内容词命中（slug 里完全没有这些词）
@@ -455,7 +456,9 @@ async fn w3_embed_failure_keeps_fts_searchable() {
     mock.embed_fail = true;
     let (pool, wiki, handle, _pg) = setup_llm(Arc::new(mock)).await;
 
-    wiki.ingest("W3文档", "# W3 嵌入失败\nw3-unique-777。").await.unwrap();
+    wiki.ingest("W3文档", "# W3 嵌入失败\nw3-unique-777。")
+        .await
+        .unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     let src: String = sqlx::query_scalar("SELECT status FROM wiki_sources")
@@ -479,12 +482,11 @@ async fn w3_embed_failure_keeps_fts_searchable() {
     assert!(!hits.is_empty(), "嵌入失败后内容词仍可检索");
 
     // 失败事件留痕（可观测）
-    let events: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM job_events WHERE message LIKE '%嵌入失败%'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM job_events WHERE message LIKE '%嵌入失败%'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(events >= 1, "嵌入失败应有事件");
 
     handle.shutdown();
@@ -514,18 +516,19 @@ async fn w4_permanent_failure_marks_source_failed() {
             .await
             .unwrap();
     assert_eq!(status, "failed", "Permanent 失败应标 failed");
-    assert!(error.as_deref().unwrap_or("").contains("解析") || error.is_some(),
-        "error 应落列: {error:?}");
+    assert!(
+        error.as_deref().unwrap_or("").contains("解析") || error.is_some(),
+        "error 应落列: {error:?}"
+    );
 
     // 重提交同 sha → 自愈（W1 路径 + W4 状态重置）→ 最终 ready
     wiki.ingest("W4文档", text).await.unwrap();
     for _ in 0..300 {
-        let (s, e): (String, Option<String>) = sqlx::query_as(
-            "SELECT status, error FROM wiki_sources",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let (s, e): (String, Option<String>) =
+            sqlx::query_as("SELECT status, error FROM wiki_sources")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         if s == "ready" && e.is_none() {
             break;
         }
@@ -551,7 +554,9 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
         {"slug": "w6-page", "page_type": "concept", "title": "W6页", "content": "# W6页\n\nLLM 生成的原始内容。"}
     ]});
     let (pool, wiki, handle, _pg) = setup(vec![analysis, pages]).await;
-    wiki.ingest("W6文档", "# W6 首轮\nw6-unique-a").await.unwrap();
+    wiki.ingest("W6文档", "# W6 首轮\nw6-unique-a")
+        .await
+        .unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     // 人工接管该页
@@ -563,7 +568,6 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
     let v_before = human.version;
 
     // 第二轮 generate 同 slug：human 保护 → 提案，内容/版本不动
-    let analysis2 = json!({"entities": [], "concepts": [], "links": [], "conflicts": [], "source_title": "W6文档2"});
     let pages2 = json!({"pages": [
         {"slug": "w6-page", "page_type": "concept", "title": "W6页", "content": "# W6页\n\nLLM 想改成自己的版本。"},
         {"slug": "w6-llm", "page_type": "concept", "title": "W6二号", "content": "# W6二号\n\n新页面内容。"}
@@ -574,7 +578,7 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
 
     // 直接构造 generate job 的 UPSERT 语义验证：并发两次同 slug UPSERT（模拟两个 generate 竞态）
     let fm = serde_json::json!({"title": "W6页", "page_type": "concept", "sources": []});
-    let upsert = |content: &'static str| {
+    let upsert = || {
         sqlx::query_scalar::<_, bool>(
             "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
              VALUES ($1, $2, 'W6页', 'concept', $3, $4::jsonb, 'llm', 1) \
@@ -586,7 +590,7 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
     // 新 slug：两个并发 UPSERT —— 一个插入，一个合并，绝不 UNIQUE 报错
     let (a, b) = tokio::join!(
         async {
-            upsert("并发写入A")
+            upsert()
                 .bind(uuid::Uuid::now_v7())
                 .bind("w6-race")
                 .bind("并发写入A")
@@ -596,7 +600,7 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
                 .unwrap()
         },
         async {
-            upsert("并发写入B")
+            upsert()
                 .bind(uuid::Uuid::now_v7())
                 .bind("w6-race")
                 .bind("并发写入B")
@@ -606,7 +610,11 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
                 .unwrap()
         }
     );
-    assert_eq!((a.is_some(), b.is_some()), (true, true), "并发 UPSERT 都成功（一插一合）");
+    assert_eq!(
+        (a.is_some(), b.is_some()),
+        (true, true),
+        "并发 UPSERT 都成功（一插一合）"
+    );
     let (content, version): (String, i32) =
         sqlx::query_as("SELECT content, version FROM wiki_pages WHERE slug = 'w6-race'")
             .fetch_one(&pool)
@@ -645,7 +653,9 @@ async fn graph_community_sparse_flag_matches_insights_threshold() {
     let env = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&env).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool).await.expect("迁移");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
     let registry = agent_memory_llm::ProviderRegistry::new(
         pool.clone(),
         agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),

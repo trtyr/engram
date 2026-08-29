@@ -63,13 +63,12 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     let mut user = String::new();
     let mut no_similar: Vec<Uuid> = Vec::new();
     for (i, c) in candidates.iter().enumerate() {
-        let has_emb: bool = sqlx::query_scalar(
-            "SELECT embedding IS NOT NULL FROM atoms WHERE id = $1",
-        )
-        .bind(c.id)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        let has_emb: bool =
+            sqlx::query_scalar("SELECT embedding IS NOT NULL FROM atoms WHERE id = $1")
+                .bind(c.id)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
 
         let similar: Vec<(Uuid, String)> = if has_emb {
             sqlx::query_as(
@@ -90,7 +89,9 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                  WHERE status = 'active' AND tsv @@ q \
                  ORDER BY ts_rank(tsv, q) DESC LIMIT 5",
             )
-            .bind(agent_memory_search::tokenize::tsv_query_smart(&c.content, 3))
+            .bind(agent_memory_search::tokenize::tsv_query_smart(
+                &c.content, 3,
+            ))
             .fetch_all(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?

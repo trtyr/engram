@@ -345,7 +345,10 @@ async fn failed_doc_resubmit_self_heals() {
         .collect();
 
     let doc_id = uuid::Uuid::now_v7();
-    let path = svc.data_dir.join("uploads").join(format!("{doc_id}_{name}"));
+    let path = svc
+        .data_dir
+        .join("uploads")
+        .join(format!("{doc_id}_{name}"));
     std::fs::create_dir_all(svc.data_dir.join("uploads")).unwrap();
     std::fs::write(&path, content.as_bytes()).unwrap();
     sqlx::query(
@@ -422,10 +425,7 @@ async fn ready_doc_resubmit_does_not_reingest() {
 
 // ---------- K4/K8：嵌入链（只补缺失 + 短响应守卫 + re-embed 端点） ----------
 
-async fn insert_ready_doc_with_chunks(
-    pool: &sqlx::PgPool,
-    with_embedding: bool,
-) -> uuid::Uuid {
+async fn insert_ready_doc_with_chunks(pool: &sqlx::PgPool, with_embedding: bool) -> uuid::Uuid {
     let doc_id = uuid::Uuid::now_v7();
     sqlx::query(
         "INSERT INTO documents (id, title, source_uri, sha256, status) \
@@ -460,11 +460,7 @@ async fn insert_ready_doc_with_chunks(
 }
 
 /// 等待指定文档的某类 job 到终态（文档本身可能已 ready，不能靠 status 轮询）。
-async fn wait_job_done(
-    pool: &sqlx::PgPool,
-    doc_id: uuid::Uuid,
-    kind: &str,
-) -> String {
+async fn wait_job_done(pool: &sqlx::PgPool, doc_id: uuid::Uuid, kind: &str) -> String {
     for _ in 0..300 {
         if let Some(status) = sqlx::query_scalar::<_, String>(
             "SELECT status FROM jobs \
@@ -476,7 +472,7 @@ async fn wait_job_done(
         .fetch_optional(pool)
         .await
         .unwrap()
-        && matches!(status.as_str(), "succeeded" | "failed" | "dead")
+            && matches!(status.as_str(), "succeeded" | "failed" | "dead")
         {
             return status;
         }
@@ -523,10 +519,22 @@ async fn reembed_only_touches_missing_chunks() {
     .await
     .unwrap();
     let err = svc.reembed(pending_id).await.unwrap_err();
-    assert!(matches!(err, agent_memory_core::knowledge::KnowledgeError::BadRequest(_)), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            agent_memory_core::knowledge::KnowledgeError::BadRequest(_)
+        ),
+        "{err:?}"
+    );
     // 不存在的文档 → NotFound
     let err = svc.reembed(uuid::Uuid::now_v7()).await.unwrap_err();
-    assert!(matches!(err, agent_memory_core::knowledge::KnowledgeError::NotFound(_)), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            agent_memory_core::knowledge::KnowledgeError::NotFound(_)
+        ),
+        "{err:?}"
+    );
 
     handle.shutdown();
     handle.join().await;
@@ -558,19 +566,26 @@ async fn embed_short_response_marks_batch_failed_not_silent_null() {
             r#"{{"data":[{{"index":0,"embedding":{emb}}}],"usage":{{"prompt_tokens":2,"total_tokens":2}}}}"#
         );
         for _ in 0..4 {
-            let Ok((mut sock, _)) = listener.accept().await else { return };
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
             let mut buf = vec![0u8; 8192];
             let mut got = String::new();
             // 简易读请求：读到空行 + body（Content-Length 前缀足够小，一次读大概率够）
             loop {
                 let n = sock.read(&mut buf).await.unwrap_or(0);
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 got.push_str(&String::from_utf8_lossy(&buf[..n]));
-                if got.contains("\r\n\r\n") && got.len() > 200 { break; }
+                if got.contains("\r\n\r\n") && got.len() > 200 {
+                    break;
+                }
             }
             let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(), body
+                body.len(),
+                body
             );
             let _ = sock.write_all(resp.as_bytes()).await;
         }

@@ -592,14 +592,8 @@ impl MemoryService {
         }
 
         // B9：context_pack 也是使用（AI 冷启动读路径），同样计热度
-        self.fire_hit_feedback(
-            "atoms",
-            out_atoms.iter().map(|a| a.id).collect(),
-        );
-        self.fire_hit_feedback(
-            "scenarios",
-            out_scenarios.iter().map(|s| s.id).collect(),
-        );
+        self.fire_hit_feedback("atoms", out_atoms.iter().map(|a| a.id).collect());
+        self.fire_hit_feedback("scenarios", out_scenarios.iter().map(|s| s.id).collect());
 
         Ok(ContextPack {
             persona,

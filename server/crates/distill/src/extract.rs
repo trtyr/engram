@@ -101,11 +101,15 @@ async fn run_claimed(
         if !segments.last().unwrap().is_empty() && used + len > SEGMENT_CHARS {
             let mut new_seg: Vec<SegmentLine> = Vec::new();
             // 头不落单：上一段末行若是会话头，迁移到新段首
-            if segments.last().unwrap().last().map(|l| l.is_header).unwrap_or(false) {
-                if let Some(header) = segments.last_mut().unwrap().pop() {
-                    used -= header.text.len() + 1;
-                    new_seg.push(header);
-                }
+            if segments
+                .last()
+                .unwrap()
+                .last()
+                .map(|l| l.is_header)
+                .unwrap_or(false)
+                && let Some(header) = segments.last_mut().unwrap().pop()
+            {
+                new_seg.push(header);
             }
             segments.push(new_seg);
             used = 0;
@@ -120,7 +124,11 @@ async fn run_claimed(
     let mut texts: Vec<String> = Vec::new();
     let mut pending: Vec<(String, String, f32, serde_json::Value)> = Vec::new();
     for (i, seg) in segments.iter().enumerate() {
-        let user = seg.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("\n");
+        let user = seg
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         let out = crate::llm_port::chat_json_retrying(
             &ctx,
             llm.as_ref(),
@@ -174,14 +182,23 @@ async fn run_claimed(
         }
         if seg_count == 0 {
             ctx.emit(
-                &format!("分段抽取 {}/{}：无持久洞察（显式确认）", i + 1, total_segments),
+                &format!(
+                    "分段抽取 {}/{}：无持久洞察（显式确认）",
+                    i + 1,
+                    total_segments
+                ),
                 None,
             )
             .await
             .ok();
         } else {
             ctx.emit(
-                &format!("分段抽取 {}/{}：{} 条候选", i + 1, total_segments, seg_count),
+                &format!(
+                    "分段抽取 {}/{}：{} 条候选",
+                    i + 1,
+                    total_segments,
+                    seg_count
+                ),
                 None,
             )
             .await

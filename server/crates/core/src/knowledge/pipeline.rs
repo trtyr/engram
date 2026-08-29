@@ -423,12 +423,11 @@ pub async fn embed_job(
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    let total: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE document_id = $1")
-            .bind(doc_id)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE document_id = $1")
+        .bind(doc_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
     let missing = chunks.len();
 
     let mut embedded = 0usize;
@@ -453,13 +452,11 @@ pub async fn embed_job(
                             "embed 响应与批次不符，整批降级 FTS"
                         );
                         for (cid, _) in batch {
-                            sqlx::query(
-                                "UPDATE chunks SET embed_failed = true WHERE id = $1",
-                            )
-                            .bind(cid)
-                            .execute(pool)
-                            .await
-                            .map_err(|e| JobError::Retryable(e.to_string()))?;
+                            sqlx::query("UPDATE chunks SET embed_failed = true WHERE id = $1")
+                                .bind(cid)
+                                .execute(pool)
+                                .await
+                                .map_err(|e| JobError::Retryable(e.to_string()))?;
                         }
                         continue;
                     }
@@ -512,9 +509,7 @@ pub async fn embed_job(
     let _ = tokio::fs::remove_file(data_uploads().join(format!("{doc_id}.extracted.txt"))).await;
 
     ctx.emit(
-        &format!(
-            "文档 ready（补嵌 {embedded}/{missing}，共 {total} 块）"
-        ),
+        &format!("文档 ready（补嵌 {embedded}/{missing}，共 {total} 块）"),
         None,
     )
     .await
