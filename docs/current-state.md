@@ -58,6 +58,15 @@
 - **4 allowed warnings**：`fxhash`（unmaintained，RUSTSEC-2025-0057）、`rand_os`（unmaintained，RUSTSEC-2025-0124）、`ttf-parser`（unmaintained，RUSTSEC-2026-0192）、`chacha20`（yanked）——均为传递依赖且非高危，维持观察。
 - 对比 08-26 旧基线：`tokio-tar` 漏洞已随 testcontainers 移除消失 ✓。
 
-## CI 现状
+## CI 现状（2026-08-29 收官）
 
-（推送与 CI 盯绿结果回填——见提交记录）
+origin/main @ `0d1d145`，两个 workflow 最新 run **全绿**（gh 实查）：
+
+| workflow | run | 结果 |
+|---|---|---|
+| CI | 33263092482（6m32s） | ✅ backend(fmt/clippy/test×100) + web(pnpm 全链) + api-types(零漂移) + docker(镜像构建) |
+| e2e | 33263092491（10m57s） | ✅ compose 栈 Playwright 全旅程（无 provider 跳过 LLM 段） |
+
+修复过程两轮：第一轮 CI 后端挂在 **rust-embed 编译期找不到 `web/dist`**（runner 无前端产物；phase-6 起就存在的暗坑，此前一直被 fmt 失败掩盖）——backend job 补 `mkdir -p ../web/dist` 占位后全绿。另：CI stable 工具链已到 1.98.0（本地 1.97.1→1.98.0 升级后 clippy 复验通过，两版均无 lint）。
+
+提交序列（本次修复轮，共 6 个）：`d1884f4` fix(server) fmt/clippy → `a6005ae` fix(ci) pnpm+PG service → `38d0aaf` fix(e2e) 条件跳过+选择器 → `53f7e45` perf(web) 路由级 lazy → `c21f7a0` docs 全栈归档 → `0d1d145` fix(ci) web/dist 占位。
