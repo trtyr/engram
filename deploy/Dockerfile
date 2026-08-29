@@ -1,10 +1,12 @@
 ########## Stage 1: 前端构建 ##########
 FROM node:22-slim AS web-build
 WORKDIR /build/web
-COPY web/package.json web/package-lock.json web/.npmrc ./
-RUN npm ci
+# corepack 按 package.json 的 packageManager 字段钉 pnpm 版本
+RUN corepack enable
+COPY web/package.json web/pnpm-lock.yaml web/.npmrc ./
+RUN pnpm install --frozen-lockfile
 COPY web/ ./
-RUN npm run build
+RUN pnpm run build
 
 ########## Stage 2: 后端构建（cargo-chef 分层缓存）##########
 FROM lukemathwalker/cargo-chef:latest-rust-1.97-slim AS chef

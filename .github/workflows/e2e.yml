@@ -12,11 +12,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -25,7 +28,7 @@ jobs:
       # 构建前端（dist 进镜像；本地 build 供 openapi-dump 也用）
       - name: build web + openapi
         run: |
-          cd web && npm ci && npm run build
+          cd web && pnpm install --frozen-lockfile && pnpm run build
           cd ../server && mkdir -p ../web/dist && cargo run -q -p agent-memory-api --bin openapi-dump > /tmp/openapi.json
 
       # 干净栈
@@ -45,8 +48,8 @@ jobs:
       - name: playwright
         run: |
           cd web
-          npx playwright install chromium --with-deps
-          E2E_BASE=http://localhost:8080 E2E_ADMIN_PW=ci-e2e-admin npx playwright test
+          pnpm exec playwright install chromium --with-deps
+          E2E_BASE=http://localhost:8080 E2E_ADMIN_PW=ci-e2e-admin pnpm exec playwright test
 
       - name: dump logs on failure
         if: failure()

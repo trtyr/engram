@@ -12,6 +12,24 @@ jobs:
   backend:
     name: 后端（fmt + clippy + test）
     runs-on: ubuntu-latest
+    # 集成测试基建连本机 PG（AM_TEST_PG_URL，每测试建/删 am_test_* 库）。
+    # 镜像必须带 pgvector：迁移 0001 在每个测试库里 CREATE EXTENSION vector。
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: ci-test-pw
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      AM_TEST_PG_URL: postgres://agent:ci-test-pw@127.0.0.1:5432/postgres
     defaults:
       run:
         working-directory: server
@@ -27,7 +45,6 @@ jobs:
         run: cargo fmt --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      # testcontainers 需要 Docker（ubuntu runner 自带）
       - name: test
         run: cargo test --workspace
 
@@ -39,22 +56,33 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npx vitest run
-      - run: npm run build
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm test
+      - run: pnpm run build
 
   api-types:
     name: OpenAPI 类型同步检查
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -69,10 +97,10 @@ jobs:
       - name: generate types + drift check
         working-directory: web
         run: |
-          npm ci
-          npx openapi-typescript /tmp/openapi.json -o src/lib/api-schema.ts
+          pnpm install --frozen-lockfile
+          pnpm exec openapi-typescript /tmp/openapi.json -o src/lib/api-schema.ts
           if ! git diff --quiet -- src/lib/api-schema.ts; then
-            echo "::error::api-schema.ts 与后端 OpenAPI 漂移——运行 npm run gen:api 后提交"
+            echo "::error::api-schema.ts 与后端 OpenAPI 漂移——运行 pnpm run gen:api 后提交"
             git diff -- src/lib/api-schema.ts | head -40
             exit 1
           fi
