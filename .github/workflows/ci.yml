@@ -43,6 +43,9 @@ jobs:
           workspaces: server
       - name: fmt
         run: cargo fmt --check
+      # rust-embed 编译期要求 web/dist 存在（占位空目录即可；真产物由 docker/e2e job 构建）
+      - name: web/dist 占位
+        run: mkdir -p ../web/dist
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
