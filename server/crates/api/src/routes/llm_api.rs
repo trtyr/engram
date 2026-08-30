@@ -23,6 +23,19 @@ fn require_admin(principal: &Principal) -> Result<(), ApiError> {
     }
 }
 
+/// LLM 配置面：管理员全权，或持 llm scope 的 API key（2026-08-31 方向：
+/// 除 amk_ 管理外平台能力全部暴露给 AI——provider/路由/连通测试归 llm scope；
+/// api-keys 管理与主密钥 re-encrypt 仍仅管理员）。
+fn require_llm(principal: &Principal) -> Result<(), ApiError> {
+    match principal {
+        Principal::Admin => Ok(()),
+        Principal::ApiKey { scopes, .. } if scopes.iter().any(|s| s == "llm") => Ok(()),
+        Principal::ApiKey { .. } => Err(ApiError::Forbidden(
+            "该端点需要管理员或 llm scope 的 API key".into(),
+        )),
+    }
+}
+
 fn cipher_from(state: &AppState) -> Result<KeyCipher, ApiError> {
     let hex_master = state
         .master_key
@@ -74,7 +87,7 @@ pub async fn create_provider(
     State(state): State<AppState>,
     Json(req): Json<CreateProviderRequest>,
 ) -> Result<(StatusCode, Json<ProviderDto>), ApiError> {
-    require_admin(&principal)?;
+    require_llm(&principal)?;
 
     // L1：校验（违规 400 带明细——不再让配置错误延迟到运行时爆发）
     if req.name.trim().is_empty() {
@@ -195,7 +208,7 @@ pub async fn update_provider(
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateProviderRequest>,
 ) -> Result<Json<ProviderDto>, ApiError> {
-    require_admin(&principal)?;
+    require_llm(&principal)?;
 
     // 校验提供的字段（与 create 同规则）
     if let Some(u) = &req.base_url {
@@ -310,7 +323,7 @@ pub async fn delete_provider(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(&principal)?;
+    require_llm(&principal)?;
 
     let row: Option<(String, bool)> =
         sqlx::query_as("SELECT name, is_default FROM llm_providers WHERE id = $1")
@@ -418,7 +431,7 @@ pub async fn list_providers(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ProviderDto>>, ApiError> {
-    require_admin(&principal)?;
+    require_llm(&principal)?;
     type ProvRow = (
         Uuid,
         String,
@@ -459,7 +472,7 @@ pub async fn test_provider(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TestResult>, ApiError> {
-    require_admin(&principal)?;
+    require_llm(&principal)?;
     let cipher = cipher_from(&state)?;
     let registry = ProviderRegistry::new(state.pool.clone(), cipher.clone());
 
@@ -577,7 +590,7 @@ pub async fn get_routing(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<RoutingTable>, ApiError> {
-    require_admin(&principal)?;
+    require_llm(&principal)?;
     Ok(Json(PurposeRouter::new(state.pool).table().await?))
 }
 
@@ -590,7 +603,7 @@ pub async fn put_routing(
     State(state): State<AppState>,
     Json(table): Json<RoutingTable>,
 ) -> Result<StatusCode, ApiError> {
-    require_admin(&principal)?;
+    require_llm(&principal)?;
 
     const VALID_PURPOSES: [&str; 8] = [
         "extract",
@@ -665,7 +678,7 @@ pub async fn usage(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UsageRecord>>, ApiError> {
-    require_admin(&principal)?;
+    require_llm(&principal)?;
     let registry = ProviderRegistry::new(
         state.pool.clone(),
         KeyCipher::from_hex_master(&"00".repeat(32))

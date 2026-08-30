@@ -313,18 +313,37 @@ impl MemoryService {
         content: &str,
         confidence: f32,
     ) -> Result<AtomDto, MemoryError> {
+        let text = content.trim();
+        // A4 幂等护栏：同 kind + 同内容（trim 后）的 active 原子已存在则直接返回它——
+        // AI 重试/重复直写不会双份（2026-08-31 测试方实测两条一模一样的生日原子）。
+        // 近重复的语义合并仍归 arbitrate/consolidate，这里只挡精确重复。
+        if let Some(existing) = sqlx::query_as::<_, AtomDto>(
+            "SELECT * FROM atoms WHERE kind = $1 AND content = $2 AND status = 'active' LIMIT 1",
+        )
+        .bind(kind)
+        .bind(text)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            tracing::info!(atom_id = %existing.id, "直写命中已有同内容原子，幂等返回");
+            return Ok(existing);
+        }
+        // A1：与蒸馏链同规则——置信 <0.55 自动进人审，不直接生效污染记忆库
+        // （此前直写硬编码 needs_review=false，文档/CLI 提示/实现三方打架）。
+        let needs_review = confidence < 0.55;
         let id = Uuid::now_v7();
-        let emb = self.try_embed(&[content.to_string()]).await;
+        let emb = self.try_embed(&[text.to_string()]).await;
         let row = sqlx::query_as::<_, AtomDto>(
-            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, tsv) \
-             VALUES ($1, $2, $3, $4, 'active', '[]'::jsonb, $5, to_tsvector('simple', $6)) RETURNING *",
+            "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, source_refs, embedding, tsv) \
+             VALUES ($1, $2, $3, $4, 'active', $5, '[]'::jsonb, $6, to_tsvector('simple', $7)) RETURNING *",
         )
         .bind(id)
         .bind(kind)
-        .bind(content)
+        .bind(text)
         .bind(confidence)
+        .bind(needs_review)
         .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
-        .bind(agent_memory_search::tokenize::tsv_text(content))
+        .bind(agent_memory_search::tokenize::tsv_text(text))
         .fetch_one(&self.pool)
         .await?;
         Ok(row)

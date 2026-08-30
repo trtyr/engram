@@ -259,6 +259,231 @@ async fn api_key_memory_journey() {
     }
 }
 
+/// 已撤销的 amk_ key → 401 文案区分「已撤销」与「不存在」（2026-08-31 测试方实测痛点：
+/// 被误撤销的 key 与抄错的 key 报同一种错，排查靠猜）。
+#[tokio::test]
+async fn revoked_api_key_gets_distinct_401() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // 建 key（拿 id + 明文）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::from(r#"{"name":"rv-test","scopes":["memory"]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let id = body["id"].as_str().unwrap().to_string();
+    let key = body["key"].as_str().unwrap().to_string();
+
+    // 撤销（204）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/settings/api-keys/{id}/revoke"))
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // 撤销 key → 401 且文案含「撤销」
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/jobs")
+                .header("authorization", format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let text = String::from_utf8_lossy(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .to_string();
+    assert!(
+        text.contains("撤销"),
+        "撤销 key 的 401 应有区分文案，实得 {text}"
+    );
+
+    // 不存在的 key → 401 通用文案（不含「撤销」）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/jobs")
+                .header("authorization", "Bearer amk_bogus")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let text = String::from_utf8_lossy(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .to_string();
+    assert!(
+        !text.contains("撤销"),
+        "不存在 key 应走通用文案，实得 {text}"
+    );
+}
+
+/// llm scope 的 amk_ key 可管 provider/路由/连通测试/用量（2026-08-31 方向：
+/// 除 amk_ 管理外平台能力全暴露给 AI）；api-keys 管理与 re-encrypt 仍仅管理员。
+#[tokio::test]
+async fn llm_scope_key_manages_providers() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let key = create_key(&app, &admin, &["llm"]).await;
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+
+    let send = |app: &Router, method: &str, uri: &str, auth: String, body: Option<&str>| {
+        let mut b = Request::builder().method(method).uri(uri);
+        if body.is_some() {
+            b = b.header("content-type", "application/json");
+        }
+        app.clone().oneshot(
+            b.header("authorization", format!("Bearer {auth}"))
+                .body(Body::from(body.unwrap_or_default().to_string()))
+                .unwrap(),
+        )
+    };
+
+    // llm key：provider 列表 + 注册（base_url 不带 /v1——服务端自拼）+ 连通测试 + 路由读写
+    let resp = send(&app, "GET", "/settings/llm/providers", key.clone(), None)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "llm key 应能列 providers");
+    let resp = send(
+        &app,
+        "POST",
+        "/settings/llm/providers",
+        key.clone(),
+        Some(
+            r#"{"name":"t","base_url":"https://gw.example.com","api_key":"sk-x","models":[{"id":"m","capabilities":["chat"]}],"is_default":false}"#,
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::CREATED,
+        "llm key 应能注册 provider"
+    );
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let pid = body["id"].as_str().unwrap();
+    let resp = send(
+        &app,
+        "POST",
+        &format!("/settings/llm/providers/{pid}/test"),
+        key.clone(),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "llm key 应能测连通");
+    let resp = send(
+        &app,
+        "PUT",
+        "/settings/llm/routing",
+        key.clone(),
+        Some(r#"{"extract":[{"provider":"t","model":"m"}]}"#),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::NO_CONTENT,
+        "llm key 应能配路由（204）"
+    );
+    // 清理（路由表清空后删 provider）
+    let _ = send(
+        &app,
+        "PUT",
+        "/settings/llm/routing",
+        key.clone(),
+        Some("{}"),
+    )
+    .await;
+    let resp = send(
+        &app,
+        "DELETE",
+        &format!("/settings/llm/providers/{pid}"),
+        key.clone(),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::NO_CONTENT,
+        "llm key 应能删 provider"
+    );
+
+    // llm key 越界：amk_ 管理与主密钥操作仍仅管理员
+    let resp = send(&app, "GET", "/settings/api-keys", key.clone(), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "llm key 摸 api-keys 应 403"
+    );
+    let resp = send(
+        &app,
+        "POST",
+        "/settings/llm/providers/re-encrypt",
+        key.clone(),
+        Some(r#"{"old_master_key":"abab"}"#),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "llm key 摸 re-encrypt 应 403"
+    );
+
+    // memory key 越界：provider 面板 403
+    let resp = send(&app, "GET", "/settings/llm/providers", mem_key, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "memory key 摸 providers 应 403"
+    );
+}
+
 #[tokio::test]
 async fn openapi_snapshot() {
     let (app, _pg) = app().await;

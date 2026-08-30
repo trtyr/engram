@@ -141,13 +141,15 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                     continue;
                 };
                 // 追加原子引用（并集）+ 版本递增
+                // A6：新旧两侧都 jsonb_array_elements 展开成标量再 agg——此前新侧
+                // 整个数组当单个元素并进，产出 [["id"]] 嵌套混型（2026-08-31 测试方实测）。
                 sqlx::query(
                     "UPDATE scenarios SET \
                         summary = $2, body = $3, \
                         atom_refs = ( \
                             SELECT COALESCE(jsonb_agg(DISTINCT x), '[]'::jsonb) FROM ( \
                                 SELECT jsonb_array_elements(atom_refs) AS x FROM scenarios WHERE id = $1 \
-                                UNION ALL SELECT $4::jsonb \
+                                UNION ALL SELECT jsonb_array_elements($4::jsonb) \
                             ) sub ), \
                         version = version + 1, updated_at = now() \
                      WHERE id = $1",
