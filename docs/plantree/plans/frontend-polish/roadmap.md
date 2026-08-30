@@ -112,6 +112,15 @@
      是倒退（e2e 存量 pending 会话导致 ×15 常驻闪烁）；积压改会话页灰字「N 条未蒸馏」
    - 会话表加预览列（首条用户消息为主内容，max-w-96 截断），时间移末列
    - 实测：tabs 带计数+脉冲、条带零残留、预览/积压灰字、e2e PASS 20s
+0m. **AI 消费者契约面**（goal mtfx2rg5：记忆域 API 开放给 AI + pi skill 三件套）：
+   - amk_ key + memory scope 全旅程 25/25 端点验证（turns 契约/GET context 两处纠错）
+   - context_pack 补实体透镜（缺口即修）：AI 冷启动能看到用户世界里都有谁
+   - **delete_entity 连带清墓碑**（AI 全旅程实测逮到的潜伏 FK bug：删合并赢家必 503）
+   - skill 三件套落 `~/.pi/agent/skills/products/agent-memory/`：SKILL.md（触发/节律）
+     + scripts/memory.py（stdlib-only CLI 22 子命令，数组 json/空 id 防呆/HTML
+     fallback 护栏）+ references/memory-api.md（全端点+心法，逐例实测；逮到文档
+     layers 应为数组、字段是 max_items 不是 limit——脚本同错同修）
+   - cargo 109 / api_key_memory_journey + context_pack_carries_entity_lenses 新测试
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。

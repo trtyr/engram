@@ -147,4 +147,13 @@ async fn merge_moves_atom_links_and_counts() {
         svc.get_entity(loser.id).await.is_err(),
         "合并后 from 应 NotFound"
     );
+
+    // 删除赢家：必须连带清墓碑（merged_into 指向赢家的输家行），
+    // 否则 FK(entities_merged_into_fkey) 拒绝——2026-08-30 AI 全旅程实测逮到。
+    svc.delete_entity(winner.id).await.unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM entities")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "删赢家应连带清掉墓碑，两行都不剩");
 }

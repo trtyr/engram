@@ -587,11 +587,16 @@ impl MemoryService {
     }
 
     pub async fn delete_entity(&self, id: Uuid) -> Result<(), MemoryError> {
-        let n = sqlx::query("DELETE FROM entities WHERE id = $1 AND merged_into IS NULL")
-            .bind(id)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
+        // 只有活体可删；删活体时连带清掉并入它的墓碑（merged_into 指向它）——
+        // 否则 FK(entities_merged_into_fkey) 拒绝删除。墓碑是合并的残迹，赢家没了它也不复活。
+        let n = sqlx::query(
+            "DELETE FROM entities WHERE ($1 IN (SELECT id FROM entities WHERE id = $1 AND merged_into IS NULL)) \
+             AND (id = $1 OR merged_into = $1)",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
         if n == 0 {
             return Err(MemoryError::NotFound(format!("实体 {id} 不存在")));
         }
