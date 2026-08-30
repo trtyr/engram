@@ -26,7 +26,6 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'review', label: '人审' },
   { value: 'scenarios', label: '场景' },
   { value: 'persona', label: '画像' },
-  { value: 'search', label: '检索' },
 ]
 
 /** 原子 kind 中英对照（蒸馏产出的 8 类记忆形态）。 */
@@ -136,7 +135,8 @@ function MemoryPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="用户记忆" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
-      <PipelineStrip onGo={setTab} />
+      {/* 管线条带在星系 tab 隐藏（星系本身即全景导航，双头部冗余） */}
+      {tab !== 'galaxy' && <PipelineStrip onGo={setTab} />}
       <Tabs items={TABS} value={tab} onChange={setTab} />
       {tab === 'galaxy' && (
         <Galaxy

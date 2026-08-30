@@ -93,6 +93,7 @@ export function Tabs<T extends string>({
 const STATUS_STYLE: Record<string, { dot: string; text: string; pulse?: boolean }> = {
   ready: { dot: 'bg-success', text: 'text-success' },
   succeeded: { dot: 'bg-success', text: 'text-success' },
+  done: { dot: 'bg-success', text: 'text-success' },
   active: { dot: 'bg-success', text: 'text-success' },
   human: { dot: 'bg-success', text: 'text-success' },
   pending: { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' },

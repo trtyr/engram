@@ -152,31 +152,41 @@ describe('Dashboard 概览：管线主视觉 + 用量图', () => {
   })
 })
 
-describe('Memory 检索面板', () => {
-  it('实体段先于原子段渲染，点击直达星系选中；L1「查看」跳原子 tab', async () => {
+describe('Memory 检索面板（?tab=search 深链直达，tab 条已收敛入全局 palette）', () => {
+  it('实体段先于原子段渲染，点击直达星系选中', async () => {
     mockState.memorySearch = {
       entities: [{ id: 'e1', title: '张三', snippet: '同事，负责后端', score: 1.3, kind: 'person' }],
-      l1: [{ id: 'a1', snippet: '命中片段', score: 0.912 }],
+      l1: [],
       l2: [],
       l3: [],
     }
+    window.history.pushState({}, '', '/memory?tab=search')
     render(wrap(<Memory />))
-    fireEvent.click(screen.getByRole('button', { name: '检索' }))
+    await screen.findByPlaceholderText('中文检索记忆…')
     fireEvent.change(screen.getByPlaceholderText('中文检索记忆…'), { target: { value: '张三' } })
-    fireEvent.click(screen.getAllByRole('button', { name: '检索' }).at(-1)!)
+    fireEvent.click(screen.getByRole('button', { name: '检索' }))
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith('/memory/search', { query: '张三', max_items: 10 })
       expect(screen.getByText('张三')).toBeInTheDocument()
     })
-    // 实体命中点击 → 星系 tab + 选中
     fireEvent.click(screen.getByText('张三'))
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '星系' }).getAttribute('aria-pressed')).toBe('true')
     })
-    // 回检索 tab（面板重挂载、输入重置）重查，验证 L1 查看 → 原子
+  })
+
+  it('L1 命中「查看」跳原子 tab', async () => {
+    mockState.memorySearch = {
+      entities: [],
+      l1: [{ id: 'a1', snippet: '命中片段', score: 0.912 }],
+      l2: [],
+      l3: [],
+    }
+    window.history.pushState({}, '', '/memory?tab=search')
+    render(wrap(<Memory />))
+    await screen.findByPlaceholderText('中文检索记忆…')
+    fireEvent.change(screen.getByPlaceholderText('中文检索记忆…'), { target: { value: '命中' } })
     fireEvent.click(screen.getByRole('button', { name: '检索' }))
-    fireEvent.change(screen.getByPlaceholderText('中文检索记忆…'), { target: { value: '张三' } })
-    fireEvent.click(screen.getAllByRole('button', { name: '检索' }).at(-1)!)
     await waitFor(() => {
       expect(screen.getByText('查看')).toBeInTheDocument()
     })
