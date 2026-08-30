@@ -147,6 +147,13 @@ pub struct EntityGraph {
     pub edges: Vec<GraphEdge>,
 }
 
+/// 记忆域缺失向量统计（重嵌修复入口）。
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct EmbeddingStatus {
+    pub atoms_missing: i64,
+    pub scenarios_missing: i64,
+}
+
 // ---------- 服务 ----------
 
 #[derive(Clone)]
@@ -672,6 +679,35 @@ impl MemoryService {
         .fetch_all(&self.pool)
         .await?;
         Ok(EntityGraph { nodes, edges })
+    }
+
+    /// 记忆域缺失向量统计（重嵌修复入口的状态面）。
+    pub async fn embedding_status(&self) -> Result<EmbeddingStatus, MemoryError> {
+        let atoms_missing: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM atoms WHERE status = 'active' AND embedding IS NULL",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        let scenarios_missing: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM scenarios WHERE embedding IS NULL")
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(EmbeddingStatus {
+            atoms_missing,
+            scenarios_missing,
+        })
+    }
+
+    /// 入队重嵌（换 embedding 供应商后的修复路径；job 见 distill::reembed）。
+    pub async fn reembed(&self) -> Result<(), MemoryError> {
+        self.queue
+            .enqueue(
+                JobTemplate::new("reembed_memory")
+                    .with_idempotency_key(format!("reembed-memory-{}", Uuid::now_v7().simple())),
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| MemoryError::Storage(format!("入队失败: {e}")))
     }
 
     // ---------- 检索 ----------

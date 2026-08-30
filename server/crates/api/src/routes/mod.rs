@@ -33,7 +33,7 @@ use utoipa::OpenApi;
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
         memory_api::list_scenarios, memory_api::get_scenario,
         memory_api::get_persona, memory_api::persona_history, memory_api::persona_rollback,
-        memory_api::search, memory_api::context,
+        memory_api::search, memory_api::context, memory_api::embedding_status, memory_api::reembed_memory,
         memory_api::list_entities, memory_api::entity_graph, memory_api::create_entity,
         memory_api::get_entity, memory_api::update_entity, memory_api::delete_entity,
         memory_api::attach_atom, memory_api::detach_atom, memory_api::merge_entity,
@@ -122,6 +122,11 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/memory/search", post(memory_api::search))
         .route("/memory/context", get(memory_api::context))
+        .route(
+            "/memory/embeddings/status",
+            get(memory_api::embedding_status),
+        )
+        .route("/memory/reembed", post(memory_api::reembed_memory))
         // 实体（记忆星系）：graph 路由先于 {id}，避免 "graph" 被当作 id
         .route("/memory/entities/graph", get(memory_api::entity_graph))
         .route(

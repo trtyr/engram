@@ -295,8 +295,17 @@ function Atoms() {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [superseding, setSuperseding] = useState<string | null>(null)
+  // 重嵌修复：缺失向量可见 + 一键补嵌（换 embedding 供应商后的修复路径）
+  const [missing, setMissing] = useState<{ atoms_missing: number; scenarios_missing: number } | null>(null)
+  const [reembedMsg, setReembedMsg] = useState('')
   // 蒸馏进行中（系统状态轮询源）才有新原子产出——闲时不轮询，省请求
   const { distilling } = useSystemStatus()
+  useEffect(() => {
+    api
+      .get<{ atoms_missing: number; scenarios_missing: number }>('/memory/embeddings/status')
+      .then(setMissing)
+      .catch(() => {})
+  }, [])
   const params = () => {
     const p = new URLSearchParams({ limit: '200' })
     if (kind) p.set('kind', kind)
@@ -323,6 +332,29 @@ function Atoms() {
 
   return (
     <div className="space-y-4">
+      {missing && missing.atoms_missing + missing.scenarios_missing > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+          <span className="text-xs text-warning">
+            {missing.atoms_missing} 条原子 / {missing.scenarios_missing} 条场景缺向量——混合检索对它们退化为纯 FTS
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={async () => {
+              setReembedMsg('')
+              try {
+                await api.post('/memory/reembed')
+                setReembedMsg('重嵌任务已入队，完成后向量通道自动恢复')
+              } catch (ex) {
+                setReembedMsg(ex instanceof Error ? ex.message : '入队失败')
+              }
+            }}
+          >
+            重嵌缺失向量
+          </Button>
+          {reembedMsg && <span className="text-xs text-muted-foreground">{reembedMsg}</span>}
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <select className={selectCls} value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">全部 kind</option>

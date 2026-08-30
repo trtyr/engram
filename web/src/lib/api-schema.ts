@@ -372,6 +372,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/embeddings/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 记忆域缺失向量统计（原子/场景）。 */
+        get: operations["embedding_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/entities": {
         parameters: {
             query?: never;
@@ -504,6 +521,23 @@ export interface paths {
         put?: never;
         /** 回滚分面到历史版本（以新版本落地，历史不可变）。 */
         post: operations["persona_rollback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/reembed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 入队重嵌（换 embedding 供应商后的修复路径）。 */
+        post: operations["reembed_memory"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1191,6 +1225,13 @@ export interface components {
             title: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description 记忆域缺失向量统计（重嵌修复入口）。 */
+        EmbeddingStatus: {
+            /** Format: int64 */
+            atoms_missing: number;
+            /** Format: int64 */
+            scenarios_missing: number;
         };
         EntityDetail: {
             atoms: components["schemas"]["AtomDto"][];
@@ -2188,6 +2229,25 @@ export interface operations {
             };
         };
     };
+    embedding_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbeddingStatus"];
+                };
+            };
+        };
+    };
     list_entities: {
         parameters: {
             query?: {
@@ -2442,6 +2502,24 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PersonaVersion"];
                 };
+            };
+        };
+    };
+    reembed_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 重嵌 job 已入队 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

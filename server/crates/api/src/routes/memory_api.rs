@@ -1,8 +1,8 @@
 //! 记忆域端点（memory scope）。
 
 use agent_memory_core::memory::{
-    AtomDto, ContextPack, EntityDetail, EntityDto, EntityGraph, MemoryError, MemoryService,
-    PersonaVersion, ScenarioDto, SearchResponse, SessionDto,
+    AtomDto, ContextPack, EmbeddingStatus, EntityDetail, EntityDto, EntityGraph, MemoryError,
+    MemoryService, PersonaVersion, ScenarioDto, SearchResponse, SessionDto,
 };
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -493,6 +493,29 @@ pub async fn detach_atom(
     require_memory(&principal)?;
     svc(&state).detach_atom(id, atom_id).await.map_err(me)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// 记忆域缺失向量统计（原子/场景）。
+#[utoipa::path(get, path = "/memory/embeddings/status",
+    responses((status = 200, body = EmbeddingStatus)))]
+pub async fn embedding_status(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<EmbeddingStatus>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(svc(&state).embedding_status().await.map_err(me)?))
+}
+
+/// 入队重嵌（换 embedding 供应商后的修复路径）。
+#[utoipa::path(post, path = "/memory/reembed",
+    responses((status = 202, description = "重嵌 job 已入队")))]
+pub async fn reembed_memory(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiError> {
+    require_memory(&principal)?;
+    svc(&state).reembed().await.map_err(me)?;
+    Ok(StatusCode::ACCEPTED)
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

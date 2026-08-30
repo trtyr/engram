@@ -771,3 +771,62 @@ async fn extract_creates_and_links_entities() {
     env.handle.shutdown();
     env.handle.join().await;
 }
+
+/// 记忆域重嵌：NULL 向量的原子（active）与场景批量补嵌；archived 原子不动。
+#[tokio::test]
+async fn reembed_memory_fills_missing_vectors() {
+    // 无 chat 调用——纯 embed 路径
+    let env = setup(vec![]).await;
+
+    for (i, status) in ["active", "active", "archived"].iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
+             VALUES ($1, 'fact', $2, 0.9, $3, '[]'::jsonb, to_tsvector('simple', $4))",
+        )
+        .bind(Uuid::now_v7())
+        .bind(format!("记忆事实 {i}"))
+        .bind(status)
+        .bind(format!("fact {i}"))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO scenarios (id, topic, summary, body, atom_refs, tsv) \
+         VALUES ($1, '主题', '场景摘要', '正文', '[]'::jsonb, to_tsvector('simple', $2))",
+    )
+    .bind(Uuid::now_v7())
+    .bind("scene")
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    let miss: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM atoms WHERE embedding IS NULL), \
+                (SELECT count(*) FROM scenarios WHERE embedding IS NULL)",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(miss, (3, 1));
+
+    env.queue
+        .enqueue(JobTemplate::new("reembed_memory"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "reembed_memory").await;
+    assert_eq!(j.status, JobStatus::Succeeded, "重嵌应成功: {:?}", j.error);
+
+    // active 原子 2 条 + 场景 1 条补齐；archived 不动
+    let after: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM atoms WHERE embedding IS NULL), \
+                (SELECT count(*) FROM scenarios WHERE embedding IS NULL)",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(after, (1, 0), "archived 原子应保持无向量，其余补齐");
+
+    env.handle.shutdown();
+    env.handle.join().await;
+}

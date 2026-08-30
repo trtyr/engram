@@ -11,6 +11,7 @@ pub mod llm_port;
 pub mod organize;
 pub mod persona;
 pub mod prompts;
+pub mod reembed;
 
 pub use chain::{gateway_llm, register_handlers, trigger_auto_extract};
 pub use llm_port::{DistillLlm, GatewayLlm};

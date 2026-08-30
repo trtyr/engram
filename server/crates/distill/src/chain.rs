@@ -15,6 +15,7 @@ pub fn register_handlers(runner: Runner, llm: LlmRef) -> Runner {
     let l_organize = llm.clone();
     let l_persona = llm.clone();
     let l_consolidate = llm.clone();
+    let l_reembed = llm.clone();
     runner
         .register("extract_atoms", move |ctx| {
             let llm = l_extract.clone();
@@ -35,6 +36,10 @@ pub fn register_handlers(runner: Runner, llm: LlmRef) -> Runner {
         .register("consolidate", move |ctx| {
             let llm = l_consolidate.clone();
             async move { crate::consolidate::run(ctx, llm).await }
+        })
+        .register("reembed_memory", move |ctx| {
+            let llm = l_reembed.clone();
+            async move { crate::reembed::run(ctx, llm).await }
         })
 }
 
