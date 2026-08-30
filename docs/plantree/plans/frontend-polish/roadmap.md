@@ -77,6 +77,17 @@
    - 检索命中行可点开对应文档（document_id 直达）；分块调试信息在段落 title
    - e2e journey 选择器同步（row → 目录按钮 + 阅读区断言）；28/28 + e2e PASS
    - Wiki 主从版式为下一项
+0j. **目标 mtfpqhw9-qx7tp4：用户记忆 → 记忆星系**（用户「memory 是 user memory，太浅了，
+   应该以用户为中心」）：
+   - 全站命名中文化（概览/用户记忆/知识库/Wiki/代码图谱/任务/设置）+ e2e 同步（0a 之前的
+     独立提交 707e3a4）
+   - 后端实体层 1067a21：迁移 0015（entities + atom_entities，name+kind 活体唯一），
+     9 端点（list/graph CRUD attach/detach/merge），蒸馏 prompt 抽实体自动挂链
+     （失败仅告警），entity_test 2 用例，api-schema 再生成，workspace 102 测试全绿
+   - 前端星系 8bfd330：新首 tab（左列表搜索/类型过滤/密度排序/新建 + 右 sigma 图谱
+     懒加载 157kB 独立 chunk）；实体详情（画像/场景/原子时间线/挂摘计数回写/合并 confirm）；
+     中心锚点「我」点击跳画像；seed 6 实体 5 边实测零 pageerror
+   - e2e journey 适配新默认 tab（reload 后重进会话列表）
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
