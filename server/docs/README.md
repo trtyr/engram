@@ -1,30 +1,38 @@
-# agent-memory 后端文档归档
+# agent-memory server — 项目档案
 
-这是 `agent-memory` 仓库 **Rust 后端（`server/`）** 的完整文档归档，由 `project-init` 在 2026-08-26 生成。范围：backend-only（前端 `web/` 不在内）。
+> 后端 Rust workspace 的完整书面档案。2026-08-30 全新初始化（此前版本已过期，全部按当日源码与命令输出重写）。
+> 上层集成视角见[仓库根 docs/](../../docs/README.md)；前端项目档案见 [web/docs/](../../web/docs/README.md)。
 
-## 文档索引
+## 这是什么
 
-| 文档 | 内容 | 何时读 |
+单用户 AI 长期记忆服务的后端：记忆蒸馏（L0 会话→L1 原子→L2 场景→L3 画像）、知识库（文档→分块→向量）、
+LLM Wiki（摄取→分析→生成→图谱）、CodeGraph（代码库索引）、任务队列与 LLM 网关。
+HTTP API（axum）+ PostgreSQL(pgvector)，SPA 静态资源经 rust-embed 同源托管。
+
+## 档案索引
+
+| 文档 | 覆盖 | 何时读 |
 |---|---|---|
-| [overview.md](overview.md) | 项目是什么、四类记忆资产、整体形状图、关键设计特征 | 想 30 秒了解全貌时 |
-| [architecture.md](architecture.md) | 目录树、10 个 crate 的模块边界、依赖方向、每 crate 职责、启动装配、数据流 | 想找某段代码在哪个 crate 时 |
-| [tech-stack.md](tech-stack.md) | 语言、框架、关键库及精确版本（来自 Cargo.toml/lock）、工具链 | 想查依赖版本时 |
-| [api.md](api.md) | 全部 HTTP endpoint、鉴权模型、错误体契约、模块契约、外部接口 | 想查接口/写客户端时 |
-| [data-model.md](data-model.md) | 19 张表的字段/关系/索引、分层蒸馏与各域数据流 | 想查数据库结构时 |
-| [memory-audit.md](memory-audit.md) | Memory 域实现审查：L0~L3 蒸馏全链机制 + 12 条问题清单（P0/P1/P2，含代码位置与修复建议） | 想改进记忆域之前必读 |
-| [knowledge-audit.md](knowledge-audit.md) | Knowledge 域实现审查：摄取链/切块/SSRF/检索机制全解 + K1~K16 问题清单 | 想改进知识域之前必读 |
-| [wiki-audit.md](wiki-audit.md) | Wiki 域实现审查：两步 ingest/图/治理机制全解 + W1~W14 问题清单 | 想改进 Wiki 域之前必读 |
-| [llm-audit.md](llm-audit.md) | LLM 配置域实现审查：provider/路由/密钥/记账机制全解 + L1~L15 问题清单 | 想改进模型配置之前必读 |
-| [wiki/](wiki/README.md) | Wiki 模块专项文档：两步 ingest、数据模型、链接图/相关性/洞察、lint/review/purpose/级联删除、API | 想深入 Wiki 模块时 |
-| [run-and-deploy.md](run-and-deploy.md) | 本地开发命令、环境变量、Docker 部署、健康检查、验证脚本 | 想跑起来/部署时 |
-| [conventions.md](conventions.md) | 代码风格、错误/日志/sqlx/提示词约定、模块边界规则、git 工作流、CI | 想贡献代码前 |
-| [current-state.md](current-state.md) | 验证基线（真实命令与 exit code）、未提交更改、开放项/已知问题 | 想知道「现在能跑吗、有什么坑」时 |
+| [overview.md](overview.md) | 产品定位、核心能力、整体形状 | 30 秒了解这是什么 |
+| [architecture.md](architecture.md) | 10 crate 地图、模块职责、依赖方向 | 找代码从这开始 |
+| [tech-stack.md](tech-stack.md) | 语言/框架/关键依赖版本（lockfile 实查） | 排查版本问题 |
+| [api.md](api.md) | 全部 55 条 HTTP 端点（当日 OpenAPI 活体导出） | 对接前端/写客户端 |
+| [data-model.md](data-model.md) | 19 张业务表、14 个迁移、数据流 | 改 schema 前必读 |
+| [run-and-deploy.md](run-and-deploy.md) | 本地起栈、测试、环境变量、部署 | 跑起来 |
+| [conventions.md](conventions.md) | 代码风格、错误处理、测试、git/CI 约定 | 写代码前 |
+| [current-state.md](current-state.md) | 当日验证基线（命令+退出码）、未提交变更、开放项 | 接手第一步 |
 
-## 跳过项
+## 补充资料（非本档案核心，保留的历史深潜）
 
-- **frontend-backend.md**（前后端连接）——本次 scope 为 **backend-only**，前端 `web/` 未文档化，故跳过。若需了解前后端如何连通（dev 代理 / API base URL / OpenAPI 类型同步），参考 [api.md](api.md) 的「消费的外部接口」与 [conventions.md](conventions.md) 的 CI `api-types` job。
+- [plantree/](plantree/README.md)——后端规划树（活文档）
+- [wiki/](wiki/README.md)——LLM Wiki 子系统设计文档（theory/ingest/graph/api）
+- [memory-audit.md](memory-audit.md) / [knowledge-audit.md](knowledge-audit.md) / [llm-audit.md](llm-audit.md) / [wiki-audit.md](wiki-audit.md)——各域历史审计
 
-## 补充说明
+## 快速验证（2026-08-30 实跑）
 
-- schema 唯一定义在 `server/migrations/`（14 个迁移），权威接口定义在运行时 `/openapi.json`。
-- 被删除的旧 `docs/plantree/`（原规划树）不在本归档内，其内容仅存于 git 历史；本归档是独立重建。
+```bash
+cd server
+cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings   # 均 exit 0
+cargo test --workspace        # 100 passed / 0 failed（35 个套件）
+cargo run -q -p agent-memory-api --bin openapi-dump   # OpenAPI 导出
+```

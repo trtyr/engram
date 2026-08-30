@@ -1,67 +1,56 @@
 # 技术栈
 
-> 版本来源：`server/Cargo.toml`（workspace 约束）与 `server/Cargo.lock`（实际解析的精确版本）。精确 patch 版本以 Cargo.lock 为准。
+> 2026-08-30 实查（Cargo.lock / Cargo.toml / 本机工具链）。版本以 lockfile 为准。
 
 ## 语言与工具链
 
-| 项 | 值 |
-|---|---|
-| 语言 | Rust，edition **2024** |
-| 工具链 | rustc / cargo 1.97.x（本机 1.97.1；Dockerfile 用 `rust:1.97-slim`） |
-| 包管理 | Cargo（workspace，`resolver = "2"`） |
-| 构建配置 | `[profile.release]` `lto = "thin"` + `strip = true` |
-| 许可证 | MIT |
-| 仓库 | github.com/trtyr/agent-memory |
-
-## 核心框架与库（精确版本）
-
-| 库 | 版本 | 用途 |
+| 项 | 值 | 出处 |
 |---|---|---|
-| tokio | 1.53.1 | 异步运行时（`features = ["full"]`） |
-| axum | 0.8.9 | HTTP 框架（`multipart` feature） |
-| tower / tower-http | 0.5.3 / 0.6.11 | 中间件（trace/cors/fs） |
-| sqlx | 0.8.6 | Postgres 异步驱动（`postgres`, `macros`, `migrate`, `uuid`, `chrono`, `json`, `runtime-tokio-rustls`） |
-| serde / serde_json | 1.0.229 / 1.0.151 | 序列化 |
-| utoipa | 5.5.0 | OpenAPI 文档（`axum_extras`, `uuid`, `chrono`） |
-| uuid | 1.24.1 | ID（v7/v4，`serde`） |
-| chrono | 0.4.45 | 时间 |
-| thiserror / anyhow | 2.0.20 / 1.0.104 | 错误处理 |
-| tracing / tracing-subscriber | 0.1.44 / 0.3.23 | 结构化日志（`env-filter`, `json`） |
+| Rust edition | 2024 | server/Cargo.toml |
+| workspace version | 0.1.0 | server/Cargo.toml |
+| 本机 rustc | 1.97.1（开发钉版） | rustc -V |
+| CI 工具链 | stable 浮动（2026-08-30 为 1.98.0） | .github/workflows/ci.yml |
+| 构建目标 | aarch64-apple-darwin（本地）/ linux（Docker） | — |
+| release profile | thin LTO + strip | Cargo.toml [profile.release] |
 
-## 领域库
+## 核心 dependencies（Cargo.lock 实查）
 
-| 库 | 版本 | 用途 |
+| crate | 版本 | 用途 |
 |---|---|---|
-| pgvector | 0.4.2 | 向量类型 + HNSW 索引（`sqlx` feature） |
-| jieba-rs | 0.4.10 | 中文分词（应用层预分词 → tsvector） |
-| reqwest | 0.12.28 | LLM HTTP 客户端（`json`, `rustls-tls`） |
-| aes-gcm / sha2 / rand | 0.10.3 / 0.10.9 / 0.9.x | 密钥加密（AES-256-GCM）、哈希（登录/API key）、随机 |
-| pdf-extract | 0.12.0 | PDF → 文本（内部 lopdf ≥0.42，RUSTSEC-2026-0187 已修复） |
-| docx-rs | 0.4.22 | DOCX → 文本 |
-| scraper | 0.23.1 | HTML → 文本 |
-| rust-embed | 8.12.0 | 内嵌 `web/dist` SPA 静态资源 |
-| mime_guess | 2.0.5 | 上传 Content-Type 推断 |
+| axum | 0.8.9 | HTTP 框架（含 multipart 上传） |
+| tokio | 1.53.1 | 异步运行时 |
+| sqlx | 0.8.6 | PG 访问（migrate/uuid/chrono/json 宏） |
+| pgvector | 0.4.2 | 向量列类型 |
+| utoipa | 5.5.0 | OpenAPI 文档生成 |
+| serde / serde_json | 1.0.229 | 序列化 |
+| reqwest | 0.12.28（rustls） | LLM API 出站调用 |
+| tracing / tracing-subscriber | 0.3.23 | 日志 |
+| rust-embed | 8.12.0 | SPA 静态资源嵌入 |
+| thiserror | 2.0.20 | 错误定义 |
+| uuid / chrono | 1.24.1 / 0.4.45 | ID 与时间 |
+| jieba-rs | 0.4.10 | 中文分词（检索融合） |
+| pdf-extract | 0.12.0 | PDF 解析 |
+| docx-rs | 0.4.22 | DOCX 解析 |
+| scraper | 0.23.1 | HTML 清洗 |
 
-## 测试工具
+## 存储
 
-| 库 | 版本 | 用途 |
+- PostgreSQL 16（本地 Homebrew 16.14；CI 用 pgvector/pgvector:pg17 service）
+- 扩展：vector（迁移 0001 内 CREATE EXTENSION）
+
+## 工具与质量门禁
+
+| 工具 | 用途 | 命令 |
 |---|---|---|
-| 本机 PostgreSQL | 16.x（Homebrew） | 集成测试：每测试建/删独立库（`AM_TEST_PG_URL` 可覆盖；2026-08-28 起替代 testcontainers） |
-| tempfile | 3 | 测试临时目录 |
+| rustfmt | 格式 | `cargo fmt --check` |
+| clippy | 静态检查（-D warnings） | `cargo clippy --workspace --all-targets -- -D warnings` |
+| cargo test | 单元+集成（100 用例，本机 PG） | `cargo test --workspace` |
+| cargo audit | 依赖漏洞（1 接受项见 current-state） | `cargo audit` |
+| cargo-chef | Docker 层缓存 | deploy/Dockerfile |
+| openapi-dump | OpenAPI 导出 | `cargo run -q -p agent-memory-api --bin openapi-dump` |
 
-## 数据库
+## 已接受的依赖风险（2026-08-30 cargo audit）
 
-- **PostgreSQL 17**（生产镜像 `pgvector/pgvector:pg17`）
-- 扩展：`vector`（pgvector）、`pg_trgm`
-- schema 由 `server/migrations/` 14 个迁移文件定义，启动时由 `sqlx` 自动执行。
-
-## 质量门禁工具
-
-| 工具 | 命令 | 说明 |
-|---|---|---|
-| rustfmt | `cargo fmt --check` | 格式检查 |
-| clippy | `cargo clippy --workspace --all-targets -- -D warnings` | 警告即错误 |
-| cargo test | `cargo test --workspace` | 单元 + 集成（本机 PG 每测试一库） |
-| cargo audit | `cargo audit` | 依赖漏洞基线 |
-
-CI 门禁见 [conventions.md](conventions.md)，运行命令见 [run-and-deploy.md](run-and-deploy.md)。
+- rsa 0.9.10（RUSTSEC-2023-0071 Marvinattack，中危）：**lockfile 孤儿**，`cargo tree -i rsa --target all`
+  零反向依赖，不参与任何编译产物——接受，不动 418 依赖的 lockfile。
+- 4 条 transitive 提示（fxhash/rand_os/ttf-parser unmaintained、chacha20 yanked）：观察。

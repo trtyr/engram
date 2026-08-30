@@ -1,61 +1,43 @@
-# 当前状态（验证基线）
+# 当前状态（2026-08-30 验证基线）
 
-> ⚠️ 本文档是 2026-08-26 的 backend-only 基线，部分事实已过时（testcontainers→本机 PG、12→14 迁移、56→100 tests、新增端点）。
-> **最新全栈验证基线见仓库根 [docs/current-state.md](../../docs/current-state.md)（2026-08-29）**；本文档保留作历史参考，架构/数据模型/API 等事实性条目已在各文档就地修正。
+> 全新初始化当日实况。此前文档描述的 CI 修复、Engram 重设计等历史见 git log 与根 docs/plantree/。
 
-> 本文档记录 `project-init` 在 2026-08-26 对 `server/` 后端做的真实验证结果。所有命令在 `server/` 下运行。
+## 未提交变更（重要）
 
-## 环境
+本地 HEAD = origin/main = `d0abdf4`，但其上有 **38 个未提交文件**（26 改 + 15 新增 + docs）：
 
-| 项 | 值 |
-|---|---|
-| rustc / cargo | 1.97.1 |
-| Docker | 29.4.0（testcontainers 可用） |
-| 构建缓存 | `target/debug` 已有缓存（1638 个 .d） |
+- `server/crates/api/src/auth.rs`——**唯一后端改动**：/jobs Accept 分流（text/html→SPA，见 api.md）
+- `web/` 全套 Engram 重设计 + 侧栏四件套（收缩/徽章/命令面板/分区）+ 六轮视觉修复
+- 新增：PRODUCT.md、DESIGN.md、web/src/{lib/theme.ts,lib/status.ts,components/CommandPalette*,components/ThemeToggle.tsx}
+- docs/plantree/（frontend-polish 计划树）、docs/design/（审计证据）
 
-## 验证命令与结果
+origin CI 对 `d0abdf4` 双 workflow 绿（CI + e2e，2026-08-29）；**上述未提交内容尚未过远端 CI**。
 
-| 命令 | exit code | 结果 |
+## 当日验证记录（命令 + 结果）
+
+| 命令 | 结果 | 时间 |
 |---|---|---|
-| `cargo fmt --check` | 0 | ✅ 无格式问题 |
-| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | ✅ 无 warning（1.25s） |
-| `cargo test --workspace` | 0 | ✅ **56 passed, 0 failed**（约 2.5–3 分钟，含 testcontainers 集成测试） |
-| `cargo build`（隐含于 clippy/test） | — | ✅ 编译通过 |
+| `cargo fmt --check`（server） | exit 0 | 08-30 16:0x |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0（auth.rs 改后复验） | 08-30 16:03 |
+| `cargo test --workspace` | **100 passed / 0 failed**（35 套件；此后 server 零改动） | 08-30 16:07 |
+| `pnpm exec tsc --noEmit`（web） | 0 errors | 08-30 17:0x |
+| `pnpm run lint`（web, oxlint） | exit 0，**0 warnings** | 08-30 17:0x |
+| `pnpm test`（web, vitest） | **26/26**（5 文件，含 CommandPalette 5 新用例） | 08-30 17:0x |
+| `pnpm run build`（web） | exit 0；初始 JS gzip ~93kB + CSS 8.5kB | 08-30 17:0x |
+| `pnpm exec playwright test`（e2e journey，本地栈） | **PASS 1 / FAIL 0**（终树复跑，25s） | 08-30 17:1x |
+| OpenAPI 活体（:19180） | 55 路径（GET26/POST24/PATCH1/DELETE4） | 08-30 17:0x |
+| 运行库表清点 | 19 业务表 + _sqlx_migrations | 08-30 |
 
-### 测试明细
+本地设计验证栈：:19180（am_design_audit 库，种子数据齐全）当日全程可用。
 
-| crate | 单元测试 | 集成测试（testcontainers） |
-|---|---|---|
-| api | 0 | auth_test 2 |
-| cg-bridge | 3 | cg_test 3 |
-| core | 4 | knowledge_test 4 |
-| distill | 0 | distill_test 3 |
-| jobs | 0 | job_lifecycle_test 5 |
-| llm | 4 | provider_test 3 |
-| parsing | 4 | 0 |
-| search | 4 | search_test 1 |
-| storage | 0 | migrations_test 2 |
-| wiki-engine | 11 | wiki_test 3 |
-| **合计** | **30** | **26** |
+## 已知开放项
 
-总计 **56 passed / 0 failed**。
+1. 未提交批次待分块 commit + push + 盯 CI（沿用既定工作流）。
+2. `cargo audit`：rsa 孤儿 + 4 transitive 提示——已接受（见 tech-stack.md）。
+3. 前端 R3/R4 打磨项（skip-link、移动端 scrollIntoView、路由骨架屏）——见根 docs/plantree/frontend-polish roadmap。
+4. codegraph CLI 版本钉在 Dockerfile（1.5.0），本地 homebrew 版本可能领先——行为差异未审计。
 
-## 未提交更改（工作区）
+## 健康快照
 
-- **45 个文件被删除（未暂存，` D`）**：根目录 `README.md`、`AGENTS.md`、`CHANGELOG.md`、`docs/AI-INTERFACE.md`，以及整个 `docs/plantree/`（baseline、plans、evidence、decisions、ideas、phases 等全套规划树）。
-- 这些文件在 git HEAD 中仍存在（可 `git restore` 恢复）。
-- 本次按用户决定：**忽略删除、不恢复**；Recon 时从 `git show HEAD:...` 读取了旧 README 与 AGENTS 作参考。
-- 本次新增 7 个文档（`docs/*.md`，untracked `??`），未提交。
-
-## 开放项 / 已知问题
-
-1. **cargo audit 未运行**（不在 project-init verify 清单内）。旧 `AGENTS.md`（2026-08-25 复扫）记录：2 个漏洞（`tokio-tar` 仅 testcontainers dev 依赖、`rsa` 为 lockfile 孤儿），4 个 unmaintained 警告（`ttf-parser`、`fxhash`、`rand_os`、`rustls-pemfile`——后三个为 advisory-db 更新新出现，非代码回归）。**建议后续跑一次 `cargo audit` 复核**。
-2. **`pdf-extract` 的 lopdf 高危（原 Q8）已解决**：`pdf-extract 0.12.0` 内部 lopdf ≥0.42。
-3. **前端（`web/`）未文档化**：本次 scope 为 backend-only，web/ 的结构、技术栈、e2e 未覆盖。
-4. **被删的 `docs/plantree/` 是原权威规划树**：其内容（路线图、决策 D0005–D0011、证据、phase 0–7）在删除后仅存于 git 历史。本次 archive 是独立重建，不依赖它。
-
-## 本次验证的局限
-
-- 未起 Docker compose 栈做真实 HTTP 冒烟（`/health` `/ready`），只跑了编译/测试/静态检查。
-- 未跑 `scripts/verify-*.sh` 三套端到端验证脚本。
-- 未跑前端相关门禁（tsc/vitest/playwright）。
+- 测试：后端 100 + 前端 26 + e2e 1，全绿。
+- 无已知运行时缺陷；当日新增功能均经 Playwright 几何/像素验证。

@@ -1,167 +1,95 @@
 # API
 
-## 概览
+> 2026-08-30 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **55 路径**。
+> 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
+> token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，带 scope）。
+> 权威 schema 以 `cargo run -q -p agent-memory-api --bin openapi-dump` 输出为准（前端 CI 有零漂移门禁）。
 
-后端是单二进制 HTTP 服务 `agent-memory-server`（`crates/api`），用 **axum 0.8** 建路由，**utoipa 5** 自动生成 OpenAPI 文档。权威接口定义以运行时 `/openapi.json` 为准（由 `ApiDoc` 从 handler 的 `#[utoipa::path]` 标注 + 类型派生生成）。
+## 认证与健康
 
-- 路由集中定义在 `server/crates/api/src/routes/mod.rs` 的 `router()`。
-- 分两层：`public`（无鉴权）+ `authed`（Bearer 中间件）。
-- 所有 handler 的错误统一收敛到 `ApiError`（见 [错误体契约](#错误体契约)）。
-
-## 鉴权模型
-
-Bearer token 两种主体（`server/crates/api/src/auth.rs`）：
-
-| token 前缀 | 主体 | 权限 |
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| `ams_` | 管理员会话（opaque token，登录颁发，7 天过期） | 全权限 |
-| `amk_` | API key（签发时限定 scopes） | 按 scopes 限制 |
+| POST | /auth/login | 管理员密码 → ams_ 会话 |
+| GET | /health | 存活探针 |
+| GET | /ready | 就绪探针（依赖检查） |
 
-- 登录：`POST /auth/login`，密码 sha256 恒定时间比较后颁发会话 token（明文只返回一次）。
-- API key 存 sha256 哈希 + 前缀，明文只返回一次。
-- scope 值：`memory` / `knowledge` / `wiki` / `codegraph`（`SCOPES` 常量）。
-- 认证成功注入 `Principal` 扩展；scope 检查在各 handler 内用 `require_scope` 做。
+## memory（L0~L3 记忆域）
 
-## 错误体契约
-
-所有错误响应统一为：
-
-```json
-{"error": {"code": "...", "message": "...", "retryable": false, "details": null}}
-```
-
-| HTTP | code | retryable | 触发 |
-|---|---|---|---|
-| 400 | `bad_request` | false | 参数不合法 |
-| 404 | `not_found` | false | 资源不存在 |
-| 401 | `unauthorized` | false | 未认证/凭证无效 |
-| 403 | `forbidden` | false | 缺 scope |
-| 503 | `storage_unavailable` | **true** | 数据库故障（sqlx 错误） |
-| 503 | `unavailable` | **true** | 依赖服务不可用（LLM/job） |
-| 500 | `internal` | false | 未捕获内部错误（详情只进日志） |
-
-原则：`code` 稳定可编程判断；`message` 人话且不泄漏内部细节（内部细节只进 `tracing` 日志）。
-
-## Endpoint 清单
-
-按域分组。路径变量用 `{...}` 表示。全部 `authed` 路由需 `Authorization: Bearer <token>`。
-
-### 系统与鉴权
-
-| 方法 | 路径 | handler | 说明 |
-|---|---|---|---|
-| GET | `/health` | `health::health` | 存活探针 |
-| GET | `/ready` | `health::ready` | 就绪探针（compose 依赖/健康检查用） |
-| GET | `/openapi.json` | `openapi_json` | OpenAPI 文档 |
-| POST | `/auth/login` | `auth_api::login_handler` | 管理员登录，颁发会话 token |
-
-### 任务系统（jobs）
-
-| 方法 | 路径 | handler | 说明 |
-|---|---|---|---|
-| GET | `/jobs` | `jobs_api::list_jobs` | 列出任务 |
-| GET | `/jobs/{id}` | `jobs_api::get_job` | 取单任务 |
-| GET | `/jobs/{id}/events` | `jobs_api::get_job_events` | 任务事件流 |
-| POST | `/jobs/{id}/revive` | `jobs_api::revive_job` | 复活死任务 |
-
-### LLM 设置与用量
-
-| 方法 | 路径 | handler | 说明 |
-|---|---|---|---|
-| POST/GET | `/settings/llm/providers` | `llm_api::create_provider` / `list_providers` | 注册/列出 LLM provider |
-| PUT/DELETE | `/settings/llm/providers/{id}` | `llm_api::update_provider` / `delete_provider` | 更新/删除 provider（生命周期） |
-| POST | `/settings/llm/providers/re-encrypt` | `llm_api::reencrypt_providers` | 主密钥更换后重加密全部 provider key |
-| POST | `/settings/llm/providers/{id}/test` | `llm_api::test_provider` | 测试 provider 连通性 |
-| GET/PUT | `/settings/llm/routing` | `llm_api::get_routing` / `put_routing` | purpose 路由配置 |
-| POST/GET | `/settings/api-keys` | `llm_api::create_api_key_handler` / `list_api_keys` | 签发/列出 API key |
-| POST | `/settings/api-keys/{id}/revoke` | `llm_api::revoke_api_key` | 吊销 API key |
-| GET | `/llm/usage` | `llm_api::usage` | 用量记账查询 |
-
-### 跨域检索
-
-| 方法 | 路径 | handler | 说明 |
-|---|---|---|---|
-| POST | `/search` | `search_api::search` | 统一检索：并行查 memory+knowledge+wiki，域内 rank 归一化（RRF 风格）融合返回 `UnifiedHit[]`（带 domain 标签） |
-
-鉴权：需 `memory` / `knowledge` / `wiki` scope **至少其一**（Admin 恒通过）。请求体 `{query, limit?}`（limit 默认 20）。
-
-### 记忆（memory）
-
-| 方法 | 路径 | handler | 说明 |
-|---|---|---|---|
-| POST/GET | `/memory/sessions` | `memory_api::write_session` / `list_sessions` | 写入/列出 L0 会话 |
-| GET/DELETE | `/memory/sessions/{id}` | `memory_api::get_session` / `erase_session` | 取/删会话 |
-| POST | `/memory/distill` | `memory_api::trigger_distill` | 手动触发蒸馏 |
-| GET/POST | `/memory/atoms` | `memory_api::list_atoms` / `create_atom` | 列出/创建 L1 原子 |
-| PATCH | `/memory/atoms/{id}` | `memory_api::update_atom` | 更新原子（治理） |
-| GET | `/memory/scenarios` | `memory_api::list_scenarios` | 列出 L2 场景 |
-| GET | `/memory/scenarios/{id}` | `memory_api::get_scenario` | 取单场景 |
-| GET | `/memory/persona` | `memory_api::get_persona` | 当前 L3 画像 |
-| GET | `/memory/persona/history` | `memory_api::persona_history` | 画像历史版本 |
-| POST | `/memory/persona/rollback` | `memory_api::persona_rollback` | 画像回滚 |
-| POST | `/memory/search` | `memory_api::search` | 混合检索 |
-| GET | `/memory/context` | `memory_api::context` | 上下文包（供 AI 注入） |
-
-### 知识（knowledge）
-
-| 方法 | 路径 | handler | 说明 |
-|---|---|---|---|
-| POST/GET | `/knowledge/documents` | `knowledge_api::submit_url` / `list_documents` | 提交 URL 摄取 / 列出文档 |
-| POST | `/knowledge/upload` | `knowledge_api::upload` | 上传文件摄取 |
-| GET/DELETE | `/knowledge/documents/{id}` | `knowledge_api::get_document` / `delete_document` | 取/删文档 |
-| GET | `/knowledge/documents/{id}/chunks` | `knowledge_api::document_chunks` | 文档分块 |
-| POST | `/knowledge/documents/{id}/re-embed` | `knowledge_api::reembed` | 重建文档嵌入（换 embedding 模型后） |
-| POST | `/knowledge/search` | `knowledge_api::search` | 知识检索 |
-
-### Wiki
-
-| 方法 | 路径 | handler | 说明 |
-|---|---|---|---|
-| POST | `/wiki/ingest` | `wiki_api::ingest` | 两步 ingest 入口 |
-| GET | `/wiki/pages` | `wiki_api::list_pages` | 列出页面 |
-| GET/PUT | `/wiki/pages/{slug}` | `wiki_api::get_page` / `put_page` | 取/写页面（人工纠偏） |
-| GET | `/wiki/graph` | `wiki_api::graph` | 链接图 |
-| POST | `/wiki/lint` | `wiki_api::lint` | lint 检查 |
-| POST | `/wiki/proposals/apply` | `wiki_api::apply_proposal` | 应用提议 |
-| POST | `/wiki/search` | `wiki_api::search` | Wiki 检索 |
-| GET/PUT | `/wiki/purpose` | `wiki_api::get_purpose` / `set_purpose` | purpose 配置 |
-| GET | `/wiki/reviews` | `wiki_api::list_reviews` | 列出 review 项 |
-| POST | `/wiki/reviews/{id}/resolve` | `wiki_api::resolve_review` | 处理 review |
-| POST | `/wiki/queries/archive` | `wiki_api::archive_query` | 归档查询 |
-| GET | `/wiki/sources` | `wiki_api::list_sources` | 列出原料 |
-| DELETE | `/wiki/sources/{id}` | `wiki_api::delete_source` | 删除原料 |
-| POST | `/wiki/insights` | `wiki_api::insights` | 生成洞察 |
-| POST | `/wiki/insights/dismiss` | `wiki_api::dismiss_insight` | 忽略洞察 |
-| POST | `/wiki/insights/reset` | `wiki_api::reset_insights` | 重置洞察 |
-
-### CodeGraph
-
-| 方法 | 路径 | handler | 说明 |
-|---|---|---|---|
-| POST/GET | `/codegraph/projects` | `codegraph_api::register_project` / `list_projects` | 注册/列出项目 |
-| GET | `/codegraph/projects/{id}` | `codegraph_api::get_project` | 取项目 |
-| POST | `/codegraph/projects/{id}/index` | `codegraph_api::index_project` | 建索引 |
-| POST | `/codegraph/projects/{id}/sync` | `codegraph_api::sync_project` | 同步 |
-| POST | `/codegraph/projects/{id}/query` | `codegraph_api::query` | 图谱查询 |
-
-## 对外暴露的模块契约
-
-除 HTTP 外，后端通过以下 crate 的 public API 暴露能力（供内部跨 crate 调用）：
-
-- **`core`**：`MemoryService`、`KnowledgeService`、`WikiService`（re-export）、`UnifiedSearch`（跨域检索编排）、`CgBridge`（re-export）——api 层唯一入口。
-- **`llm`**：`LlmProvider` trait（`chat` / `embed` / `name`）、`ProviderRegistry`、`PurposeRouter`、`KeyCipher`。chat/embed 内置熔断器与 429 `Retry-After` 退避（≤2 次重试）。
-- **`jobs`**：`JobQueue`（enqueue/claim/complete/fail/emit）、`Runner`（register/start）、`JobContext`（progress/emit/enqueue_next）。
-- **`search`**：`search_atoms` / `search_scenarios`（返回 `SearchHit`）、`rrf_merge`、`tsv_text` / `tsv_query` / `tsv_query_smart`（短查询 AND、长查询 OR 兜底）。
-- **`distill`**：`register_handlers` / `gateway_llm` / `trigger_auto_extract`。
-- **`parsing`**：`detect_format` / `parse_bytes`。
-- **`storage`**：`connect_pool` / `run_migrations` / `current_version`。
-
-（各 crate 的完整 public 类型见 [architecture.md](architecture.md) 的职责表。）
-
-## 消费的外部接口
-
-| 外部 | 接口 | 说明 |
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| PostgreSQL | 连接串 `AGENT_MEMORY_DATABASE_URL` | 唯一持久化存储 |
-| LLM provider | OpenAI 兼容 HTTP（`base_url` + key + chat/embedding 模型） | 平台所有 LLM 调用 |
-| codegraph CLI | 子进程 + `--json`（`@colbymchenry/codegraph@1.5.0`） | 代码图谱建索引/查询 |
+| GET/POST | /memory/sessions | 会话列表（可过滤 agent/distill_status）/ 写入新会话 |
+| DELETE/GET | /memory/sessions/{id} | 会话详情 / 擦除（关联原子溯源标记 erased） |
+| POST | /memory/distill | 触发蒸馏流水线（异步任务） |
+| GET/POST | /memory/atoms | 原子列表 / 手工补录原子 |
+| PATCH | /memory/atoms/{id} | 原子更新（人审、状态流转） |
+| GET | /memory/scenarios、/memory/scenarios/{id} | 场景列表/详情 |
+| GET | /memory/persona、/memory/persona/history | 画像分面 / 版本历史 |
+| POST | /memory/persona/rollback | 画像回滚到历史版本 |
+| POST | /memory/search | 记忆域语义检索 |
+| GET | /memory/context | Agent 上下文组装（画像+相关记忆，供 prompt 注入） |
+
+## knowledge（知识库域）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | /knowledge/documents | 文档列表 / 直建文本文档 |
+| POST | /knowledge/upload | multipart 文件上传（pdf/docx/md/txt） |
+| DELETE/GET | /knowledge/documents/{id} | 详情 / 删除 |
+| GET | /knowledge/documents/{id}/chunks | 分块明细 |
+| POST | /knowledge/documents/{id}/re-embed | 重嵌入（换模型后补向量） |
+| POST | /knowledge/search | 语义+关键词融合检索 |
+
+## wiki（LLM Wiki 域）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /wiki/pages | 页面列表 |
+| GET/PUT | /wiki/pages/{slug} | 页面读取 / 编辑（版本+1） |
+| POST | /wiki/ingest | 源文本摄取（异步：分析→生成页面→建链） |
+| GET | /wiki/sources、DELETE /wiki/sources/{id} | 源数据管理 |
+| GET | /wiki/graph | 链接图谱（节点=页面，社区发现结果） |
+| POST | /wiki/lint | 页面一致性检查 |
+| GET/POST | /wiki/reviews、POST /wiki/reviews/{id}/resolve | 人审队列与裁决 |
+| GET | /wiki/insights、/insights/dismiss、/insights/reset | 洞察卡片管理 |
+| POST | /wiki/proposals/apply | 应用结构提案 |
+| POST | /wiki/queries/archive | 查询归档 |
+| GET/PUT | /wiki/purpose | Wiki 目的（goals/scope/key_questions） |
+| POST | /wiki/search | 目的导向 Wiki 检索 |
+
+## codegraph（代码图谱域）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | /codegraph/projects | 项目列表 / 注册（git clone 或本地路径） |
+| GET | /codegraph/projects/{id} | 项目详情与统计 |
+| POST | /codegraph/projects/{id}/index | 触发 codegraph CLI 索引（异步） |
+| POST | /codegraph/projects/{id}/sync | 增量同步 |
+| POST | /codegraph/projects/{id}/query | 结构化查询（符号/调用关系） |
+
+## jobs（任务域）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /jobs | 任务列表（kind/status 过滤）。⚠️ 前端 SPA 同路径：浏览器导航（Accept: text/html）在认证层分流回 index.html，API 客户端照常 JSON |
+| GET | /jobs/{id} | 任务详情 |
+| GET | /jobs/{id}/events | 事件流水（limit 参数） |
+| POST | /jobs/{id}/revive | 死信复活重试 |
+
+## settings（LLM 网关与密钥域）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | /settings/llm/providers | provider 列表 / 注册（密钥服务端加密） |
+| DELETE/PUT | /settings/llm/providers/{id} | 删除 / 更新 |
+| POST | /settings/llm/providers/{id}/test | 连通性测试 |
+| POST | /settings/llm/providers/re-encrypt | 主密钥轮换后全量重加密（危险操作） |
+| GET/PUT | /settings/llm/routing | purpose→provider/model 路由表 |
+| GET | /llm/usage | 用量记账（token/延迟/用途） |
+| GET/POST | /settings/api-keys | API Key 列表 / 签发（scope） |
+| POST | /settings/api-keys/{id}/revoke | 吊销 |
+
+## search（跨域统一检索）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | /search | 融合检索：memory + knowledge + wiki 一次查询，统一 score 排序 |

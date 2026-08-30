@@ -1,27 +1,40 @@
-# agent-memory 文档归档（全栈）
+# agent-memory 项目档案
 
-这是 `agent-memory` 仓库**全项目**（server + web + deploy + scripts）的完整文档归档，由 `project-init` 在 2026-08-28 生成。后端深度文档（四份域审计、Wiki 专项、plantree 规划树）在 [server/docs/](../server/docs/README.md)，与本文档互补不重复。
+> 全新初始化：2026-08-30。**三层结构**——本目录是全栈集成视角；
+> 后端与前端各有独立项目档案。旧版文档已过期，本轮全部按当日源码/命令输出重写。
 
-30 秒了解项目 → [overview.md](overview.md)。
+## 三层地图
 
-## 文档索引
-
-| 文档 | 内容 | 何时读 |
+| 层 | 入口 | 视角 |
 |---|---|---|
-| [overview.md](overview.md) | 项目是什么、四类记忆资产、全栈形状图、关键设计特征 | 想 30 秒了解全貌时 |
-| [architecture.md](architecture.md) | 仓库布局、server 10 crate 边界与依赖方向、web src 地图、前后端边界、scripts；含对 server/docs 的增量修正（14 迁移、9 路由组等） | 想找某段代码在哪时 |
-| [tech-stack.md](tech-stack.md) | 两端语言/框架/库及精确版本（Cargo.lock + pnpm-lock 核实）、工具链命令对照、CI/CD | 想查依赖版本时 |
-| [api.md](api.md) | 全量 55 endpoints（openapi-dump 实提）、鉴权与错误体摘要、相对 server/docs/api.md 的增量 | 想查接口/写客户端时 |
-| [data-model.md](data-model.md) | 19 张表总览、0013/0014 增量（scenarios.hit_count、wiki_sources.error）、数据流 | 想查数据库结构时 |
-| [frontend-backend.md](frontend-backend.md) | 前后端如何连通：Vite 代理 / rust-embed 同源 / OpenAPI 类型管线 / 鉴权流 | 想动对接层时 |
-| [run-and-deploy.md](run-and-deploy.md) | 本地开发两端命令（实测标注 ✅/⚠️）、环境变量、Docker 部署、备份、e2e 与验证脚本 | 想跑起来/部署时 |
-| [conventions.md](conventions.md) | 后端约定摘要 + 前端约定（pnpm/目录/测试共置）、git 工作流、CI 过程与现状 | 想贡献代码前 |
-| [current-state.md](current-state.md) | 验证基线（真实 exit code）、CI 现状、7 条开放项（含推送前必修的 pnpm 破坏面） | 想知道「现在能跑吗、有什么坑」时——**先读这个** |
+| 全栈（本目录） | 本 README | 仓库整体、前后端接缝、跨栈约定 |
+| 后端项目 | [server/docs/README.md](../server/docs/README.md) | Rust workspace 10 crates 的完整档案 |
+| 前端项目 | [web/docs/README.md](../web/docs/README.md) | Engram SPA 的完整档案 |
 
-## 跳过项
+产品事实与设计系统在仓库根：[PRODUCT.md](../PRODUCT.md)、[DESIGN.md](../DESIGN.md)。
 
-无——全栈归档 9 份文档全部成文（backend-only 时代跳过的 frontend-backend.md 本次补齐）。
+## 本目录索引
 
-## 一句话现状
+| 文档 | 覆盖 | 何时读 |
+|---|---|---|
+| [overview.md](overview.md) | 产品定位、仓库形状、记忆蒸馏阶梯 | 30 秒了解全貌 |
+| [architecture.md](architecture.md) | 系统总图、前后端接缝决策表 | 理解两端如何咬合 |
+| [tech-stack.md](tech-stack.md) | 双端技术汇总（版本实查） | 选版本/排环境 |
+| [api.md](api.md) | 55 端点域速览 + 契约管理 | 找端点入口（全表在 server 档案） |
+| [data-model.md](data-model.md) | 全栈数据流 + schema 三处同步点 | 改 schema 前 |
+| [frontend-backend.md](frontend-backend.md) | 代理/托管/认证流//jobs 分流 | 两端集成问题 |
+| [run-and-deploy.md](run-and-deploy.md) | 本地全栈最短路径 + 全量验证 | 跑起来 |
+| [conventions.md](conventions.md) | 跨栈约定：提交/CI 门禁/同步点 | 协作前 |
+| [current-state.md](current-state.md) | 当日验证矩阵、38 文件未提交批次、开放项 | **接手第一步** |
 
-本地全门禁绿（后端 100 测试、前端 21 测试、类型零漂移、e2e 无 provider 全旅程 PASS），08-28 基线的 7 条开放项已全部处置——详见 [current-state.md](current-state.md)。
+## 本目录其他内容
+
+- [design/](design/audit.md)——前端设计审计证据（七维报告、双主题截图、色彩/度量 JSON）
+- [plantree/](plantree/README.md)——规划树（frontend-polish 进行中；后端规划在 server/docs/plantree/）
+
+## 快速上手（当日全绿命令）
+
+```bash
+cd server && cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+cd web && pnpm run lint && pnpm exec tsc --noEmit && pnpm test && pnpm run build
+```
