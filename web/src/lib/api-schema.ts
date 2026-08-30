@@ -372,6 +372,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 实体列表（按记忆密度降序）。 */
+        get: operations["list_entities"];
+        put?: never;
+        /** 手动建实体。 */
+        post: operations["create_entity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/entities/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 星系图：节点 + 共现边。 */
+        get: operations["entity_graph"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/entities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 实体详情：画像摘要 + 相关原子时间线 + 相关场景。 */
+        get: operations["get_entity"];
+        put?: never;
+        post?: never;
+        /** 删实体（关联原子保留，仅解除关联）。 */
+        delete: operations["delete_entity"];
+        options?: never;
+        head?: never;
+        /** 改名/改画像摘要。 */
+        patch: operations["update_entity"];
+        trace?: never;
+    };
+    "/memory/entities/{id}/atoms/{atom_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 挂原子到实体（幂等）。 */
+        post: operations["attach_atom"];
+        /** 摘除原子关联。 */
+        delete: operations["detach_atom"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/entities/{id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 合并实体：原子关联全部改挂目标，from 置 merged_into 让出唯一名。 */
+        post: operations["merge_entity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/persona": {
         parameters: {
             query?: never;
@@ -1068,6 +1157,13 @@ export interface components {
             content: string;
             kind: string;
         };
+        CreateEntityRequest: {
+            /** @description person / project / topic / group */
+            kind: string;
+            name: string;
+            /** @description 画像摘要（关系行文，可后补） */
+            summary?: string;
+        };
         CreateProviderRequest: {
             /** @description 明文 API key（只在请求中出现，落库前加密） */
             api_key: string;
@@ -1095,6 +1191,27 @@ export interface components {
             title: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        EntityDetail: {
+            atoms: components["schemas"]["AtomDto"][];
+            entity: components["schemas"]["EntityDto"];
+            scenarios: components["schemas"]["ScenarioDto"][];
+        };
+        EntityDto: {
+            /** Format: int64 */
+            atom_count: number;
+            /** Format: uuid */
+            id: string;
+            kind: string;
+            name: string;
+            summary: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        EntityGraph: {
+            /** @description 共现边：同一原子同时关联的两个实体（weight = 共同原子数） */
+            edges: components["schemas"]["GraphEdge"][];
+            nodes: components["schemas"]["EntityDto"][];
         };
         ErrorBody: {
             code: string;
@@ -1224,6 +1341,13 @@ export interface components {
         LoginResponse: {
             /** @description 会话 token（ams_ 前缀，7 天有效；只在登录响应出现一次） */
             token: string;
+        };
+        MergeEntityRequest: {
+            /**
+             * Format: uuid
+             * @description 合并目标（幸存实体）
+             */
+            into: string;
         };
         /** @description 模型信息（provider 配置内）。 */
         ModelInfo: {
@@ -1386,6 +1510,10 @@ export interface components {
             content?: string | null;
             /** @description 只允许 "archived" / "active" */
             status?: string | null;
+        };
+        UpdateEntityRequest: {
+            name?: string | null;
+            summary?: string | null;
         };
         UpdateProviderRequest: {
             /** @description 新明文 key（可选；提供则重新加密） */
@@ -2056,6 +2184,200 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Job"][];
+                };
+            };
+        };
+    };
+    list_entities: {
+        parameters: {
+            query?: {
+                /** @description person / project / topic / group */
+                kind?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityDto"][];
+                };
+            };
+        };
+    };
+    create_entity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEntityRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityDto"];
+                };
+            };
+        };
+    };
+    entity_graph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityGraph"];
+                };
+            };
+        };
+    };
+    get_entity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityDetail"];
+                };
+            };
+        };
+    };
+    delete_entity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_entity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateEntityRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityDto"];
+                };
+            };
+        };
+    };
+    attach_atom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                atom_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    detach_atom: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                atom_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    merge_entity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergeEntityRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
                 };
             };
         };

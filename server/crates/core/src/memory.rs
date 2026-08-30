@@ -109,6 +109,42 @@ pub struct SearchResponse {
     pub query: String,
 }
 
+// ---------- 实体（记忆星系） ----------
+
+/// 实体类型（迁移 0015 CHECK 枚举）。
+pub const ENTITY_KINDS: [&str; 4] = ["person", "project", "topic", "group"];
+
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct EntityDto {
+    pub id: Uuid,
+    pub name: String,
+    pub kind: String,
+    pub summary: String,
+    pub atom_count: i64,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct EntityDetail {
+    pub entity: EntityDto,
+    pub atoms: Vec<AtomDto>,
+    pub scenarios: Vec<ScenarioDto>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct GraphEdge {
+    pub a: Uuid,
+    pub b: Uuid,
+    pub weight: i64,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct EntityGraph {
+    pub nodes: Vec<EntityDto>,
+    /// 共现边：同一原子同时关联的两个实体（weight = 共同原子数）
+    pub edges: Vec<GraphEdge>,
+}
+
 // ---------- 服务 ----------
 
 #[derive(Clone)]
@@ -405,6 +441,235 @@ impl MemoryService {
         self.persona_history(aspect)
             .await
             .map(|mut v| v.swap_remove(0))
+    }
+
+    // ---------- 实体（记忆星系） ----------
+
+    /// 活体实体列表（按记忆密度降序）。
+    pub async fn list_entities(&self, kind: Option<&str>) -> Result<Vec<EntityDto>, MemoryError> {
+        Ok(sqlx::query_as::<_, EntityDto>(
+            "SELECT e.id, e.name, e.kind, e.summary, count(ae.atom_id)::bigint AS atom_count, e.updated_at \
+             FROM entities e LEFT JOIN atom_entities ae ON ae.entity_id = e.id \
+             WHERE e.merged_into IS NULL AND ($1::text IS NULL OR e.kind = $1) \
+             GROUP BY e.id, e.name, e.kind, e.summary, e.updated_at \
+             ORDER BY atom_count DESC, e.updated_at DESC",
+        )
+        .bind(kind)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    async fn entity_row(&self, id: Uuid) -> Result<EntityDto, MemoryError> {
+        sqlx::query_as::<_, EntityDto>(
+            "SELECT e.id, e.name, e.kind, e.summary, count(ae.atom_id)::bigint AS atom_count, e.updated_at \
+             FROM entities e LEFT JOIN atom_entities ae ON ae.entity_id = e.id \
+             WHERE e.id = $1 AND e.merged_into IS NULL \
+             GROUP BY e.id, e.name, e.kind, e.summary, e.updated_at",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| MemoryError::NotFound(format!("实体 {id} 不存在")))
+    }
+
+    /// 实体详情：画像摘要 + 相关原子时间线 + 相关场景。
+    pub async fn get_entity(&self, id: Uuid) -> Result<EntityDetail, MemoryError> {
+        let entity = self.entity_row(id).await?;
+        let atoms = sqlx::query_as::<_, AtomDto>(
+            "SELECT a.* FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
+             WHERE ae.entity_id = $1 ORDER BY a.created_at DESC LIMIT 200",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+        let scenarios = sqlx::query_as::<_, ScenarioDto>(
+            "SELECT DISTINCT ON (s.id) s.* FROM scenarios s \
+             JOIN atoms a ON a.scenario_id = s.id \
+             JOIN atom_entities ae ON ae.atom_id = a.id \
+             WHERE ae.entity_id = $1 LIMIT 50",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(EntityDetail {
+            entity,
+            atoms,
+            scenarios,
+        })
+    }
+
+    /// 手动建实体（蒸馏自动抽取之外的人工入口；同名同类活体只许一个）。
+    pub async fn create_entity(
+        &self,
+        name: &str,
+        kind: &str,
+        summary: &str,
+    ) -> Result<EntityDto, MemoryError> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 60 {
+            return Err(MemoryError::BadRequest("实体名需 1~60 字".into()));
+        }
+        if !ENTITY_KINDS.contains(&kind) {
+            return Err(MemoryError::BadRequest(format!(
+                "kind 只允许 {}",
+                ENTITY_KINDS.join("/")
+            )));
+        }
+        let dup: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM entities WHERE name = $1 AND kind = $2 AND merged_into IS NULL",
+        )
+        .bind(name)
+        .bind(kind)
+        .fetch_optional(&self.pool)
+        .await?;
+        if dup.is_some() {
+            return Err(MemoryError::BadRequest(format!(
+                "同名同类实体已存在：{name}"
+            )));
+        }
+        sqlx::query("INSERT INTO entities (id, name, kind, summary) VALUES ($1, $2, $3, $4)")
+            .bind(Uuid::now_v7())
+            .bind(name)
+            .bind(kind)
+            .bind(summary)
+            .execute(&self.pool)
+            .await?;
+        self.entity_row(
+            sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM entities WHERE name = $1 AND kind = $2 AND merged_into IS NULL",
+            )
+            .bind(name)
+            .bind(kind)
+            .fetch_one(&self.pool)
+            .await?,
+        )
+        .await
+    }
+
+    pub async fn update_entity(
+        &self,
+        id: Uuid,
+        name: Option<&str>,
+        summary: Option<&str>,
+    ) -> Result<EntityDto, MemoryError> {
+        if let Some(n) = name {
+            let n = n.trim();
+            if n.is_empty() || n.chars().count() > 60 {
+                return Err(MemoryError::BadRequest("实体名需 1~60 字".into()));
+            }
+            sqlx::query("UPDATE entities SET name = $2, updated_at = now() WHERE id = $1 AND merged_into IS NULL")
+                .bind(id)
+                .bind(n)
+                .execute(&self.pool)
+                .await?;
+        }
+        if let Some(s) = summary {
+            sqlx::query("UPDATE entities SET summary = $2, updated_at = now() WHERE id = $1 AND merged_into IS NULL")
+                .bind(id)
+                .bind(s)
+                .execute(&self.pool)
+                .await?;
+        }
+        self.entity_row(id).await
+    }
+
+    pub async fn delete_entity(&self, id: Uuid) -> Result<(), MemoryError> {
+        let n = sqlx::query("DELETE FROM entities WHERE id = $1 AND merged_into IS NULL")
+            .bind(id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if n == 0 {
+            return Err(MemoryError::NotFound(format!("实体 {id} 不存在")));
+        }
+        Ok(())
+    }
+
+    /// 挂原子到实体（幂等）。
+    pub async fn attach_atom(&self, entity_id: Uuid, atom_id: Uuid) -> Result<(), MemoryError> {
+        self.entity_row(entity_id).await?;
+        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms WHERE id = $1")
+            .bind(atom_id)
+            .fetch_one(&self.pool)
+            .await?;
+        if n == 0 {
+            return Err(MemoryError::NotFound(format!("原子 {atom_id} 不存在")));
+        }
+        sqlx::query(
+            "INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2) \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(atom_id)
+        .bind(entity_id)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query("UPDATE entities SET updated_at = now() WHERE id = $1")
+            .bind(entity_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn detach_atom(&self, entity_id: Uuid, atom_id: Uuid) -> Result<(), MemoryError> {
+        let n = sqlx::query("DELETE FROM atom_entities WHERE atom_id = $1 AND entity_id = $2")
+            .bind(atom_id)
+            .bind(entity_id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if n == 0 {
+            return Err(MemoryError::NotFound(format!(
+                "原子 {atom_id} 未关联到实体 {entity_id}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// 合并实体：from 的原子关联全部改挂 into，from 置 merged_into 让出唯一名。
+    pub async fn merge_entities(&self, from: Uuid, into: Uuid) -> Result<i64, MemoryError> {
+        if from == into {
+            return Err(MemoryError::BadRequest("不能合并到自身".into()));
+        }
+        self.entity_row(from).await?;
+        self.entity_row(into).await?;
+        let moved = sqlx::query_scalar::<_, Uuid>(
+            "INSERT INTO atom_entities (atom_id, entity_id) \
+             SELECT atom_id, $2 FROM atom_entities WHERE entity_id = $1 \
+             ON CONFLICT DO NOTHING RETURNING atom_id",
+        )
+        .bind(from)
+        .bind(into)
+        .fetch_all(&self.pool)
+        .await?
+        .len() as i64;
+        sqlx::query("DELETE FROM atom_entities WHERE entity_id = $1")
+            .bind(from)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("UPDATE entities SET merged_into = $2, updated_at = now() WHERE id = $1")
+            .bind(from)
+            .bind(into)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("UPDATE entities SET updated_at = now() WHERE id = $1")
+            .bind(into)
+            .execute(&self.pool)
+            .await?;
+        Ok(moved)
+    }
+
+    /// 星系图：节点（活体实体 + 密度）+ 共现边。
+    pub async fn entity_graph(&self) -> Result<EntityGraph, MemoryError> {
+        let nodes = self.list_entities(None).await?;
+        let edges = sqlx::query_as::<_, GraphEdge>(
+            "SELECT ae1.entity_id AS a, ae2.entity_id AS b, count(*)::bigint AS weight \
+             FROM atom_entities ae1 \
+             JOIN atom_entities ae2 ON ae1.atom_id = ae2.atom_id AND ae1.entity_id < ae2.entity_id \
+             GROUP BY ae1.entity_id, ae2.entity_id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(EntityGraph { nodes, edges })
     }
 
     // ---------- 检索 ----------

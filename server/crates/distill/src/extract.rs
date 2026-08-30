@@ -121,8 +121,16 @@ async fn run_claimed(
     let total_segments = segments.len();
 
     // 3. 逐段抽取（每段独立 LLM 调用，段级事件留痕；空段显式确认「无持久洞察」）
+    /// 段内抽取产物（候选原子 + 实体挂链素材）
+    struct PendingAtom {
+        kind: String,
+        content: String,
+        confidence: f32,
+        refs: serde_json::Value,
+        entities: Vec<(String, String)>,
+    }
     let mut texts: Vec<String> = Vec::new();
-    let mut pending: Vec<(String, String, f32, serde_json::Value)> = Vec::new();
+    let mut pending: Vec<PendingAtom> = Vec::new();
     for (i, seg) in segments.iter().enumerate() {
         let user = seg
             .iter()
@@ -177,8 +185,34 @@ async fn run_claimed(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            // 实体：该条记忆的主角（人/项目/主题/群组）——name+kind 归一后落库挂链
+            let entities: Vec<(String, String)> = a
+                .get("entities")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|e| {
+                            let name = e.get("name")?.as_str()?.trim().to_string();
+                            let kind = e.get("kind").and_then(|v| v.as_str()).unwrap_or("topic");
+                            if name.is_empty()
+                                || name.chars().count() > 60
+                                || !matches!(kind, "person" | "project" | "topic" | "group")
+                            {
+                                return None;
+                            }
+                            Some((name, kind.to_string()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             texts.push(content.clone());
-            pending.push((kind, content, confidence, json!(refs)));
+            pending.push(PendingAtom {
+                kind,
+                content,
+                confidence,
+                refs: json!(refs),
+                entities,
+            });
         }
         if seg_count == 0 {
             ctx.emit(
@@ -209,7 +243,14 @@ async fn run_claimed(
     let mut candidate_ids = Vec::new();
     if !pending.is_empty() {
         let embeddings = llm.embed(&texts, ctx.job.id).await?;
-        for (i, (kind, content, confidence, refs)) in pending.into_iter().enumerate() {
+        for (i, p) in pending.into_iter().enumerate() {
+            let PendingAtom {
+                kind,
+                content,
+                confidence,
+                refs,
+                entities,
+            } = p;
             let id = Uuid::now_v7();
             let needs_review = confidence < 0.55;
             sqlx::query(
@@ -233,6 +274,42 @@ async fn run_claimed(
             .execute(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
+            // 实体挂链：同名同类活体复用（部分唯一索引），否则新建；失败不阻断蒸馏主链
+            for (name, ekind) in &entities {
+                let link = async {
+                    sqlx::query(
+                        "INSERT INTO entities (id, name, kind) VALUES ($1, $2, $3) \
+                         ON CONFLICT DO NOTHING",
+                    )
+                    .bind(Uuid::now_v7())
+                    .bind(name)
+                    .bind(ekind)
+                    .execute(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    let eid: Uuid = sqlx::query_scalar(
+                        "SELECT id FROM entities WHERE name = $1 AND kind = $2 AND merged_into IS NULL",
+                    )
+                    .bind(name)
+                    .bind(ekind)
+                    .fetch_one(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    sqlx::query(
+                        "INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2) \
+                         ON CONFLICT DO NOTHING",
+                    )
+                    .bind(id)
+                    .bind(eid)
+                    .execute(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    Ok::<(), String>(())
+                };
+                if let Err(e) = link.await {
+                    tracing::warn!(error = %e, entity = %name, "实体挂链失败（不影响原子产出）");
+                }
+            }
             candidate_ids.push(id);
         }
     }

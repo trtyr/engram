@@ -34,6 +34,9 @@ use utoipa::OpenApi;
         memory_api::list_scenarios, memory_api::get_scenario,
         memory_api::get_persona, memory_api::persona_history, memory_api::persona_rollback,
         memory_api::search, memory_api::context,
+        memory_api::list_entities, memory_api::entity_graph, memory_api::create_entity,
+        memory_api::get_entity, memory_api::update_entity, memory_api::delete_entity,
+        memory_api::attach_atom, memory_api::detach_atom, memory_api::merge_entity,
         search_api::search,
         knowledge_api::submit_url, knowledge_api::upload, knowledge_api::list_documents,
         knowledge_api::get_document, knowledge_api::document_chunks,
@@ -119,6 +122,26 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/memory/search", post(memory_api::search))
         .route("/memory/context", get(memory_api::context))
+        // 实体（记忆星系）：graph 路由先于 {id}，避免 "graph" 被当作 id
+        .route("/memory/entities/graph", get(memory_api::entity_graph))
+        .route(
+            "/memory/entities",
+            get(memory_api::list_entities).post(memory_api::create_entity),
+        )
+        .route(
+            "/memory/entities/{id}",
+            get(memory_api::get_entity)
+                .patch(memory_api::update_entity)
+                .delete(memory_api::delete_entity),
+        )
+        .route(
+            "/memory/entities/{id}/atoms/{atom_id}",
+            post(memory_api::attach_atom).delete(memory_api::detach_atom),
+        )
+        .route(
+            "/memory/entities/{id}/merge",
+            post(memory_api::merge_entity),
+        )
         .route("/search", post(search_api::search))
         .route(
             "/knowledge/documents",

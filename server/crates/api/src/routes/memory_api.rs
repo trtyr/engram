@@ -1,8 +1,8 @@
 //! 记忆域端点（memory scope）。
 
 use agent_memory_core::memory::{
-    AtomDto, ContextPack, MemoryError, MemoryService, PersonaVersion, ScenarioDto, SearchResponse,
-    SessionDto,
+    AtomDto, ContextPack, EntityDetail, EntityDto, EntityGraph, MemoryError, MemoryService,
+    PersonaVersion, ScenarioDto, SearchResponse, SessionDto,
 };
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -356,4 +356,161 @@ pub async fn context(
             .await
             .map_err(me)?,
     ))
+}
+
+// ---------- 实体（记忆星系） ----------
+
+#[derive(Deserialize, IntoParams)]
+pub struct ListEntitiesParams {
+    /// person / project / topic / group
+    pub kind: Option<String>,
+}
+
+/// 实体列表（按记忆密度降序）。
+#[utoipa::path(get, path = "/memory/entities", params(ListEntitiesParams),
+    responses((status = 200, body = [EntityDto])))]
+pub async fn list_entities(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<ListEntitiesParams>,
+) -> Result<Json<Vec<EntityDto>>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(
+        svc(&state)
+            .list_entities(p.kind.as_deref())
+            .await
+            .map_err(me)?,
+    ))
+}
+
+/// 星系图：节点 + 共现边。
+#[utoipa::path(get, path = "/memory/entities/graph",
+    responses((status = 200, body = EntityGraph)))]
+pub async fn entity_graph(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<EntityGraph>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(svc(&state).entity_graph().await.map_err(me)?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct CreateEntityRequest {
+    pub name: String,
+    /// person / project / topic / group
+    pub kind: String,
+    /// 画像摘要（关系行文，可后补）
+    #[serde(default)]
+    pub summary: String,
+}
+
+/// 手动建实体。
+#[utoipa::path(post, path = "/memory/entities", request_body = CreateEntityRequest,
+    responses((status = 201, body = EntityDto)))]
+pub async fn create_entity(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<CreateEntityRequest>,
+) -> Result<(StatusCode, Json<EntityDto>), ApiError> {
+    require_memory(&principal)?;
+    let e = svc(&state)
+        .create_entity(&req.name, &req.kind, &req.summary)
+        .await
+        .map_err(me)?;
+    Ok((StatusCode::CREATED, Json(e)))
+}
+
+/// 实体详情：画像摘要 + 相关原子时间线 + 相关场景。
+#[utoipa::path(get, path = "/memory/entities/{id}",
+    responses((status = 200, body = EntityDetail)))]
+pub async fn get_entity(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<EntityDetail>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(svc(&state).get_entity(id).await.map_err(me)?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct UpdateEntityRequest {
+    pub name: Option<String>,
+    pub summary: Option<String>,
+}
+
+/// 改名/改画像摘要。
+#[utoipa::path(patch, path = "/memory/entities/{id}", request_body = UpdateEntityRequest,
+    responses((status = 200, body = EntityDto)))]
+pub async fn update_entity(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateEntityRequest>,
+) -> Result<Json<EntityDto>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(
+        svc(&state)
+            .update_entity(id, req.name.as_deref(), req.summary.as_deref())
+            .await
+            .map_err(me)?,
+    ))
+}
+
+/// 删实体（关联原子保留，仅解除关联）。
+#[utoipa::path(delete, path = "/memory/entities/{id}",
+    responses((status = 204)))]
+pub async fn delete_entity(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    require_memory(&principal)?;
+    svc(&state).delete_entity(id).await.map_err(me)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 挂原子到实体（幂等）。
+#[utoipa::path(post, path = "/memory/entities/{id}/atoms/{atom_id}",
+    responses((status = 204)))]
+pub async fn attach_atom(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((id, atom_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    require_memory(&principal)?;
+    svc(&state).attach_atom(id, atom_id).await.map_err(me)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 摘除原子关联。
+#[utoipa::path(delete, path = "/memory/entities/{id}/atoms/{atom_id}",
+    responses((status = 204)))]
+pub async fn detach_atom(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((id, atom_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    require_memory(&principal)?;
+    svc(&state).detach_atom(id, atom_id).await.map_err(me)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct MergeEntityRequest {
+    /// 合并目标（幸存实体）
+    pub into: Uuid,
+}
+
+/// 合并实体：原子关联全部改挂目标，from 置 merged_into 让出唯一名。
+#[utoipa::path(post, path = "/memory/entities/{id}/merge", request_body = MergeEntityRequest,
+    responses((status = 200, body = Object)))]
+pub async fn merge_entity(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<MergeEntityRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_memory(&principal)?;
+    let moved = svc(&state).merge_entities(id, req.into).await.map_err(me)?;
+    Ok(Json(serde_json::json!({ "moved": moved })))
 }
