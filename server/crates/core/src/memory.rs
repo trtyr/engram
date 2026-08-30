@@ -334,6 +334,7 @@ impl MemoryService {
         content: Option<&str>,
         confidence: Option<f32>,
         status: Option<&str>,
+        needs_review: Option<bool>,
     ) -> Result<AtomDto, MemoryError> {
         let cur = sqlx::query_as::<_, AtomDto>("SELECT * FROM atoms WHERE id = $1")
             .bind(id)
@@ -361,14 +362,15 @@ impl MemoryService {
         };
 
         let row = sqlx::query_as::<_, AtomDto>(
-            "UPDATE atoms SET content = $2, confidence = $3, status = $4, \
-                 embedding = COALESCE($5, embedding), tsv = to_tsvector('simple', $6), updated_at = now() \
+            "UPDATE atoms SET content = $2, confidence = $3, status = $4, needs_review = COALESCE($5, needs_review), \
+                 embedding = COALESCE($6, embedding), tsv = to_tsvector('simple', $7), updated_at = now() \
              WHERE id = $1 RETURNING *",
         )
         .bind(id)
         .bind(&new_content)
         .bind(new_conf)
         .bind(new_status)
+        .bind(needs_review)
         .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
         .bind(agent_memory_search::tokenize::tsv_text(&new_content))
         .fetch_one(&self.pool)

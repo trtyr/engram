@@ -62,6 +62,7 @@ vi.mock('@/lib/api', () => {
       if (p.endsWith('/re-encrypt')) return { re_encrypted: state.reencryptResult }
       return {}
     }),
+    patch: vi.fn(async (_p: string, _b?: unknown) => ({})),
     put: vi.fn(async (p: string) => {
       if (p === '/wiki/purpose') return undefined
       return {}
@@ -182,6 +183,30 @@ describe('Memory 检索面板', () => {
     fireEvent.click(screen.getByText('查看'))
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '原子' }).getAttribute('aria-pressed')).toBe('true')
+    })
+  })
+})
+
+describe('人审队列', () => {
+  it('通过清 needs_review 后行消失；批量通过逐条 PATCH', async () => {
+    mockState.atoms = [
+      { id: 'r1', kind: 'fact', content: '低置信事实甲', confidence: 0.5, status: 'candidate', superseded_by: null, needs_review: true, hit_count: 0, scenario_id: null, source_refs: [], created_at: new Date().toISOString() },
+      { id: 'r2', kind: 'fact', content: '低置信事实乙', confidence: 0.52, status: 'candidate', superseded_by: null, needs_review: true, hit_count: 0, scenario_id: null, source_refs: [], created_at: new Date().toISOString() },
+    ]
+    render(wrap(<Memory />))
+    fireEvent.click(screen.getByRole('button', { name: '人审' }))
+    await screen.findByText('2 待审')
+    // 单条通过
+    fireEvent.click(screen.getAllByRole('button', { name: '通过' })[0])
+    await waitFor(() => {
+      expect(api.patch).toHaveBeenCalledWith('/memory/atoms/r1', { needs_review: false })
+      expect(screen.getByText('1 待审')).toBeInTheDocument()
+    })
+    // 勾选剩余一条 → 批量通过
+    fireEvent.click(screen.getByRole('checkbox', { name: /选中 低置信事实乙/ }))
+    fireEvent.click(screen.getByRole('button', { name: '批量通过' }))
+    await waitFor(() => {
+      expect(api.patch).toHaveBeenCalledWith('/memory/atoms/r2', { needs_review: false })
     })
   })
 })

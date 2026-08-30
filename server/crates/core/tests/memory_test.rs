@@ -141,3 +141,27 @@ async fn search_hits_bump_hit_count() {
         "context_pack 命中应回写（{before} → {after}）"
     );
 }
+
+#[tokio::test]
+async fn update_atom_can_clear_needs_review() {
+    let (pool, svc, _container) = setup().await;
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, tsv) \
+         VALUES ($1, 'fact', '低置信事实', 0.5, 'candidate', '[]'::jsonb, true, to_tsvector('simple', $2))",
+    )
+    .bind(id)
+    .bind(tsv_text("低置信事实"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 通过：清人审标记，其余不动
+    let a = svc
+        .update_atom(id, None, None, None, Some(false))
+        .await
+        .unwrap();
+    assert!(!a.needs_review, "人审通过应清 needs_review");
+    assert_eq!(a.status, "candidate");
+    assert_eq!(a.content, "低置信事实");
+}

@@ -200,6 +200,8 @@ pub struct UpdateAtomRequest {
     pub confidence: Option<f32>,
     /// 只允许 "archived" / "active"
     pub status: Option<String>,
+    /// 人审结论：true=转待审，false=通过（清标记）
+    pub needs_review: Option<bool>,
 }
 
 #[utoipa::path(patch, path = "/memory/atoms/{id}",
@@ -219,6 +221,7 @@ pub async fn update_atom(
                 req.content.as_deref(),
                 req.confidence,
                 req.status.as_deref(),
+                req.needs_review,
             )
             .await
             .map_err(me)?,
