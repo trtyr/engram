@@ -30,10 +30,10 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 const KIND_STYLE: Record<string, { dot: string; text: string }> = {
-  surprising_connection: { dot: 'bg-purple-400', text: 'text-purple-400' },
-  isolated_page: { dot: 'bg-yellow-400', text: 'text-yellow-400' },
-  sparse_community: { dot: 'bg-orange-400', text: 'text-orange-400' },
-  bridge_node: { dot: 'bg-blue-400', text: 'text-blue-400' },
+  surprising_connection: { dot: 'bg-info', text: 'text-info' },
+  isolated_page: { dot: 'bg-warning', text: 'text-warning' },
+  sparse_community: { dot: 'bg-warning', text: 'text-warning' },
+  bridge_node: { dot: 'bg-info', text: 'text-info' },
 }
 
 export default function InsightsPanel({
@@ -96,7 +96,7 @@ export default function InsightsPanel({
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/5 bg-white/[0.03] px-2 py-0.5 text-[11px] font-medium">
+                    <span className="inline-flex items-center gap-1.5 rounded border border-border px-1.5 py-px font-mono text-xs">
                       <span className={`size-1.5 rounded-full ${s.dot}`} />
                       <span className={s.text}>{KIND_LABEL[ins.kind] ?? ins.kind}</span>
                     </span>

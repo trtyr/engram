@@ -7,6 +7,7 @@ import Graph from 'graphology'
 import Sigma from 'sigma'
 import { useNavigate } from 'react-router-dom'
 import type { GraphDto } from '@/lib/api'
+import { useThemeTick } from '@/lib/theme'
 import { Empty, Tabs } from '@/components/ui-bits'
 
 const TYPE_COLOR: Record<string, string> = {
@@ -22,11 +23,24 @@ const TYPE_COLOR: Record<string, string> = {
   purpose: '#ec4899',
 }
 
-/** 12 色社区调色板（llm_wiki 对齐） */
+/** 12 色社区调色板（数据编码色，亮暗通用中明度） */
 const COMMUNITY_PALETTE = [
   '#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e', '#14b8a6',
   '#06b6d4', '#3b82f6', '#6366f1', '#a855f7', '#d946ef', '#f43f5e',
 ]
+
+/** 主题相关色（边/高亮/标签）从 token 取。 */
+function themeColors() {
+  const css = getComputedStyle(document.documentElement)
+  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback
+  return {
+    edge: v('--border', '#e5e5e5'),
+    edgeHighlighted: v('--muted-foreground', '#636365'),
+    highlight: v('--foreground', '#0a0a0a'),
+    label: v('--foreground', '#0a0a0a'),
+    grid: v('--border', '#e5e5e5'),
+  }
+}
 
 type ColorMode = 'community' | 'type'
 
@@ -41,6 +55,7 @@ export default function WikiGraph({
   const ref = useRef<HTMLDivElement>(null)
   const nav = useNavigate()
   const [mode, setMode] = useState<ColorMode>('community')
+  const themeTick = useThemeTick()
 
   const nodeColor = useMemo(() => {
     return (pageType: string, community: number) => {
@@ -54,15 +69,23 @@ export default function WikiGraph({
     const g = new Graph<Record<string, unknown>, Record<string, unknown>>({ multi: false })
     const highlightSet = new Set(highlightSlugs ?? [])
     const slugSet = new Set(graph.nodes.map((n) => n.slug))
+    // 度数 → 尺寸（重要性编码：连接越多节点越大，标签越可见）
+    const degree = new Map<string, number>()
+    for (const e of graph.edges) {
+      degree.set(e.from_slug, (degree.get(e.from_slug) ?? 0) + 1)
+      degree.set(e.to_slug, (degree.get(e.to_slug) ?? 0) + 1)
+    }
+    const tc = themeColors()
     for (const n of graph.nodes) {
       if (!g.hasNode(n.slug)) {
         const highlighted = highlightSet.size > 0 && highlightSet.has(n.slug)
+        const deg = degree.get(n.slug) ?? 0
         g.addNode(n.slug, {
           label: n.title,
           x: Math.random() * 100,
           y: Math.random() * 100,
-          size: highlighted ? 12 : 6,
-          color: highlighted ? '#ffffff' : nodeColor(n.page_type, n.community ?? 0),
+          size: highlighted ? 13 : 5 + Math.min(deg * 1.4, 8),
+          color: highlighted ? tc.highlight : nodeColor(n.page_type, n.community ?? 0),
           nodeType: n.page_type,
         })
       }
@@ -71,15 +94,19 @@ export default function WikiGraph({
       if (slugSet.has(e.from_slug) && slugSet.has(e.to_slug) && !g.hasEdge(e.from_slug, e.to_slug)) {
         const highlighted = highlightSet.size > 0 && highlightSet.has(e.from_slug) && highlightSet.has(e.to_slug)
         g.addEdge(e.from_slug, e.to_slug, {
-          color: highlighted ? '#ffffff' : '#4b5563aa',
-          size: highlighted ? 3 : 1.2,
+          color: highlighted ? tc.edgeHighlighted : tc.edge,
+          size: highlighted ? 3 : 1,
         })
       }
     }
     const renderer = new Sigma(g, ref.current, {
       renderEdgeLabels: false,
       defaultEdgeType: 'line',
-      labelRenderedSizeThreshold: 8,
+      labelRenderedSizeThreshold: 3.5,
+      labelFont: "'Geist Variable', sans-serif",
+      labelSize: 12,
+      labelWeight: '500',
+      labelColor: { color: tc.label },
     })
     renderer.on('clickNode', ({ node }) => {
       nav(`/wiki?page=${encodeURIComponent(node)}`)
@@ -91,7 +118,7 @@ export default function WikiGraph({
       if (ref.current) ref.current.style.cursor = 'default'
     })
     return () => renderer.kill()
-  }, [graph, nav, nodeColor, highlightSlugs])
+  }, [graph, nav, nodeColor, highlightSlugs, themeTick])
 
   if (graph.nodes.length === 0) {
     return <Empty text="图谱为空（ingest 后生成）" />
@@ -112,12 +139,16 @@ export default function WikiGraph({
           onChange={setMode}
         />
         {sparseComms.length > 0 && (
-          <span className="text-xs text-orange-400">
+          <span className="text-xs text-warning">
             {sparseComms.length} 个稀疏社区
           </span>
         )}
       </div>
-      <div ref={ref} className="h-[480px] w-full rounded-xl border border-border bg-card" data-testid="wiki-graph-canvas" />
+      <div
+        ref={ref}
+        className="wiki-graph-canvas h-[480px] w-full rounded-lg border border-border bg-card"
+        data-testid="wiki-graph-canvas"
+      />
       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         {mode === 'type'
           ? Object.entries(TYPE_COLOR)
@@ -140,7 +171,7 @@ export default function WikiGraph({
                   {c.cohesion > 0 ? `，凝聚 ${c.cohesion.toFixed(2)}` : ''}）
                 </span>
               ))}
-        <span className="ml-auto">点击节点跳转页面</span>
+        <span className="ml-auto">节点大小 = 连接数 · 点击节点跳转页面</span>
       </div>
     </div>
   )

@@ -146,7 +146,7 @@ export default function Knowledge() {
       ) : docs.length === 0 ? (
         <Empty text="暂无文档" />
       ) : (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
@@ -165,7 +165,7 @@ export default function Knowledge() {
                     <StatusBadge status={d.status} />
                   </td>
                   <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(d.created_at)}</td>
-                  <td className={`${tableCls.td} max-w-48 truncate text-red-400`}>{d.error ?? ''}</td>
+                  <td className={`${tableCls.td} max-w-48 truncate text-destructive`}>{d.error ?? ''}</td>
                   <td className={`${tableCls.td} whitespace-nowrap text-right`}>
                     <Button
                       variant="ghost"
@@ -210,8 +210,8 @@ function ChunksPanel({ docId }: { docId: string }) {
   return (
     <Card className="max-h-96 overflow-auto p-4">
       {failedCount > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2">
-          <span className="text-xs text-orange-400">{failedCount} 个分块嵌入失败（FTS 降级）</span>
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+          <span className="text-xs text-warning">{failedCount} 个分块嵌入失败（FTS 降级）</span>
           <Button
             size="sm"
             variant="outline"

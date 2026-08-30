@@ -1,6 +1,6 @@
 /**
- * 登录页 ——「记忆星座」主题。
- * 深色画布 + 稀疏记忆节点 + 品牌星座标记 + 单字段登录表单。
+ * 登录页 —— Engram 墨白正统。
+ * 墨点星座（记忆节点母题，无彩化）+ 单字段登录；主题切换在右上。
  */
 import { useState } from 'react'
 import type { FormEvent } from 'react'
@@ -8,6 +8,7 @@ import { Eye, EyeOff, KeyRound, Loader2 } from 'lucide-react'
 import { ApiError, api, setToken } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { BrandMark } from '@/components/ui-bits'
+import { ThemeToggle } from '@/components/ThemeToggle'
 
 /** 背景星座：稀疏的记忆节点与连接线，纯氛围，中心留白给表单。 */
 function Constellation() {
@@ -26,7 +27,7 @@ function Constellation() {
       viewBox="0 0 1440 900"
       preserveAspectRatio="xMidYMid slice"
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 size-full text-brand-strong"
+      className="pointer-events-none absolute inset-0 size-full text-foreground"
     >
       {edges.map(([a, b], i) => (
         <line
@@ -38,11 +39,11 @@ function Constellation() {
           stroke="currentColor"
           strokeWidth="1"
           strokeLinecap="round"
-          opacity="0.12"
+          opacity="0.10"
         />
       ))}
       {nodes.map(([x, y, r], i) => (
-        <circle key={`n${i}`} cx={x} cy={y} r={r} fill="currentColor" opacity="0.26" />
+        <circle key={`n${i}`} cx={x} cy={y} r={r} fill="currentColor" opacity="0.22" />
       ))}
     </svg>
   )
@@ -78,25 +79,17 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-background text-foreground">
-      {/* 顶部品牌辉光 */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-x-0 top-0 h-[34rem]"
-        style={{
-          background:
-            'radial-gradient(60% 55% at 50% 0%, oklch(0.55 0.2 264 / 0.16), transparent 70%)',
-        }}
-      />
       <Constellation />
+      <div className="absolute right-4 top-4 z-20">
+        <ThemeToggle />
+      </div>
 
       <div className="relative z-10 flex min-h-screen items-center justify-center px-6 py-16">
-        <form onSubmit={submit} className="login-enter w-full max-w-sm">
+        <form onSubmit={submit} className="w-full max-w-sm">
           <div className="flex flex-col items-center text-center">
             <BrandMark className="size-11" />
-            <h1 className="mt-5 text-2xl font-semibold tracking-tight">
-              agent-memory<span className="text-brand-strong">.</span>
-            </h1>
-            <p className="mt-2 text-sm text-muted-foreground">AI 长期记忆平台</p>
+            <h1 className="mt-5 text-2xl font-semibold tracking-tight">Engram</h1>
+            <p className="mt-2 text-sm text-muted-foreground">单用户的 AI 长期记忆仪器</p>
           </div>
 
           <div className="mt-10 space-y-4">
@@ -114,13 +107,13 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
                   autoFocus
                   autoComplete="current-password"
                   placeholder="输入密码"
-                  className="h-11 w-full rounded-lg border border-input bg-card pl-10 pr-11 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-brand/60 focus-visible:ring-2 focus-visible:ring-brand/30"
+                  className="h-10 w-full rounded-md border border-input bg-card pl-10 pr-11 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-foreground/40"
                 />
                 <button
                   type="button"
                   onClick={() => setShow((s) => !s)}
                   aria-label={show ? '隐藏密码' : '显示密码'}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
                   {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
@@ -133,13 +126,13 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
               </p>
             )}
 
-            <Button type="submit" disabled={busy} className="h-11 w-full">
+            <Button type="submit" disabled={busy} className="h-10 w-full">
               {busy && <Loader2 className="animate-spin" />}
               {busy ? '登录中…' : '登录'}
             </Button>
           </div>
 
-          <p className="mt-8 text-center text-xs tracking-wide text-muted-foreground/70">
+          <p className="mt-8 text-center font-mono text-xs text-muted-foreground/70">
             Memory · Knowledge · Wiki · CodeGraph
           </p>
         </form>

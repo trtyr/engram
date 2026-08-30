@@ -1,11 +1,34 @@
 <!doctype html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>agent-memory</title>
+    <title>Engram</title>
+    <script>
+      // 主题引导：系统跟随 + 手动覆盖（localStorage: engram-theme = light|dark），先于渲染执行防闪烁
+      ;(function () {
+        try {
+          var t = localStorage.getItem('engram-theme')
+          var dark = t ? t === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
+          document.documentElement.classList.toggle('dark', dark)
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
+    <!--
+      ENGRAM 方向契约（seed 40e8deb2 · 抽签落位 #7，用户钦点换轨 Engram 世界）
+      THESIS: 工具的最高形式是消失——纯黑白做立场，1px 发丝线做分层，彩色只留给状态语义。
+      OWN-WORLD: 白/近黑双主题同精度；hairline 边框零阴影分层；黑实心按钮为唯一强调；
+        选中态整行反转；数据列 Geist Mono；running 态脉冲点。
+      STORY: 单用户打开自己的记忆仪器：扫读资产 → 触发蒸馏（一拉揭示 L0→L3）→ 治理记忆。
+      FIRST VIEWPORT: 近黑侧栏 + 白底工作区；页头大标题 + 副题一行；统计带 mono 大数字；
+        表格 hairline 分隔；主操作黑按钮右上。
+      FORM: 墨白正统（Vercel/Geist 系，用户钦点）· 已吸收：字重层级（时刻表）、整行反转（GB）、
+        一拉揭示（斗篷）、脉冲点+mono 列（示波器）、舌片溯源（档案目录）。
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review,
+        the verdict, DESIGN.md, and every shipping raster carrying its provenance.
+    -->
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -12,10 +12,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 
-const DOMAIN_LABEL: Record<string, { label: string; cls: string }> = {
-  memory: { label: '记忆', cls: 'bg-brand/15 text-brand-strong' },
-  knowledge: { label: '知识', cls: 'bg-green-500/15 text-green-400' },
-  wiki: { label: 'Wiki', cls: 'bg-purple-500/15 text-purple-400' },
+const DOMAIN_LABEL: Record<string, string> = {
+  memory: '记忆',
+  knowledge: '知识',
+  wiki: 'Wiki',
 }
 
 /** 跨域统一检索：一次查询融合记忆 / 知识 / Wiki 三域（POST /search）。 */
@@ -66,15 +66,15 @@ function GlobalSearch() {
       {hits && hits.hits.length > 0 && (
         <ul className="mt-3 space-y-2">
           {hits.hits.map((h) => {
-            const d = DOMAIN_LABEL[h.domain] ?? { label: h.domain, cls: 'bg-muted text-muted-foreground' }
+            const label = DOMAIN_LABEL[h.domain] ?? h.domain
             return (
-              <li key={`${h.domain}-${h.id}`} className="rounded-lg border border-border/60 p-3">
+              <li key={`${h.domain}-${h.id}`} className="rounded-md border border-border p-3 transition-colors hover:border-foreground/25">
                 <div className="flex items-center gap-2">
-                  <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${d.cls}`}>{d.label}</span>
+                  <span className="rounded border border-border px-1.5 py-px font-mono text-xs text-muted-foreground">{label}</span>
                   {h.title && <span className="text-sm font-medium">{h.title}</span>}
-                  <span className="ml-auto text-xs tabular-nums text-muted-foreground">{h.score.toFixed(2)}</span>
+                  <span className="ml-auto font-mono text-xs text-muted-foreground">{h.score.toFixed(2)}</span>
                 </div>
-                <p className="mt-1 text-sm text-muted-foreground">{h.snippet}</p>
+                <p className="mt-1.5 text-sm text-muted-foreground">{h.snippet}</p>
               </li>
             )
           })}
@@ -123,13 +123,13 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border/50 sm:grid-cols-3 lg:grid-cols-5">
         {stats.map((s) => (
           <div key={s.label} className="bg-card p-4">
-            <p className="text-2xl font-semibold tabular-nums tracking-tight">{s.n.toLocaleString()}</p>
+            <p className="font-mono text-2xl font-medium tracking-tight">{s.n.toLocaleString()}</p>
             <p className="mt-1 text-xs text-muted-foreground">{s.label}</p>
           </div>
         ))}
       </div>
 
-      <Card className="overflow-hidden">
+      <Card className="overflow-x-auto">
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-medium">近期任务</h2>
         </div>
@@ -155,7 +155,7 @@ export default function Dashboard() {
                     <StatusBadge status={j.status} />
                   </td>
                   <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(j.created_at)}</td>
-                  <td className={`${tableCls.td} max-w-64 truncate text-red-400`}>{j.error ?? ''}</td>
+                  <td className={`${tableCls.td} max-w-64 truncate text-destructive`}>{j.error ?? ''}</td>
                 </tr>
               ))}
             </tbody>
@@ -163,7 +163,7 @@ export default function Dashboard() {
         )}
       </Card>
 
-      <Card className="overflow-hidden">
+      <Card className="overflow-x-auto">
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-medium">LLM 用量（近 30 天）</h2>
         </div>

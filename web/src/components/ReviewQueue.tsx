@@ -25,10 +25,10 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 const KIND_STYLE: Record<string, { dot: string; text: string }> = {
-  create_page: { dot: 'bg-blue-400', text: 'text-blue-400' },
-  deep_research: { dot: 'bg-purple-400', text: 'text-purple-400' },
+  create_page: { dot: 'bg-info', text: 'text-info' },
+  deep_research: { dot: 'bg-info', text: 'text-info' },
   skip: { dot: 'bg-gray-400', text: 'text-gray-400' },
-  flag: { dot: 'bg-orange-400', text: 'text-orange-400' },
+  flag: { dot: 'bg-warning', text: 'text-warning' },
 }
 
 const ACTIONS: Record<string, string[]> = {
@@ -61,7 +61,7 @@ export default function ReviewQueue() {
             <Card key={it.id} className="p-4" data-testid={`review-${it.kind}`}>
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-white/5 bg-white/[0.03] px-2 py-0.5 text-[11px] font-medium">
+                  <span className="inline-flex items-center gap-1.5 rounded border border-border px-1.5 py-px font-mono text-xs">
                     <span className={`size-1.5 rounded-full ${s.dot}`} />
                     <span className={s.text}>{KIND_LABEL[it.kind] ?? it.kind}</span>
                   </span>

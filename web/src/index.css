@@ -2,12 +2,14 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
+    --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -25,6 +27,9 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --color-info: var(--info);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -39,123 +44,249 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+    --color-brand: var(--brand);
+    --color-brand-strong: var(--brand-strong);
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 10px;
+    --radius-xl: 12px;
 }
 
-@theme {
-    --color-brand: oklch(0.55 0.2 264);
-    --color-brand-strong: oklch(0.72 0.16 264);
-}
-
+/*
+ * ENGRAM 墨白正统 · token 体系
+ * 立场：纯无彩做世界，彩色只承担语义（成功/警告/破坏/信息）。
+ * brand = 墨色强调（亮色近黑 / 暗色近白），黑实心按钮是唯一强调位。
+ */
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --background: #ffffff;
+    --foreground: #0a0a0a;
+    --card: #ffffff;
+    --card-foreground: #0a0a0a;
+    --popover: #ffffff;
+    --popover-foreground: #0a0a0a;
+    --primary: #0a0a0a;
+    --primary-foreground: #ffffff;
+    --secondary: #f4f4f4;
+    --secondary-foreground: #0a0a0a;
+    --muted: #f4f4f4;
+    --muted-foreground: #636365;
+    --accent: #f4f4f4;
+    --accent-foreground: #0a0a0a;
+    --destructive: #c62f2f;
+    --success: #187b36;
+    --warning: #96590a;
+    --info: #0a5fd6;
+    --border: #e5e5e5;
+    --input: #dcdcdc;
+    --ring: #0a0a0a;
+    --brand: #0a0a0a;
+    --brand-strong: #000000;
+    --chart-1: #0a0a0a;
+    --chart-2: #7a7a7e;
+    --chart-3: #b4b4b8;
+    --chart-4: #d8d8dc;
+    --chart-5: #ececf0;
+    --sidebar: #fafafa;
+    --sidebar-foreground: #3f3f42;
+    --sidebar-primary: #0a0a0a;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #f0f0f0;
+    --sidebar-accent-foreground: #0a0a0a;
+    --sidebar-border: #e5e5e5;
+    --sidebar-ring: #0a0a0a;
+    --radius: 8px;
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --background: #0a0a0a;
+    --foreground: #ededed;
+    --card: #111111;
+    --card-foreground: #ededed;
+    --popover: #111111;
+    --popover-foreground: #ededed;
+    --primary: #ededed;
+    --primary-foreground: #0a0a0a;
+    --secondary: #1c1c1c;
+    --secondary-foreground: #ededed;
+    --muted: #1a1a1a;
+    --muted-foreground: #909094;
+    --accent: #1c1c1c;
+    --accent-foreground: #ededed;
+    --destructive: #ef5555;
+    --success: #3dd68c;
+    --warning: #e0a44a;
+    --info: #55a4f3;
+    --border: #262626;
+    --input: #303030;
+    --ring: #ededed;
+    --brand: #ededed;
+    --brand-strong: #ffffff;
+    --chart-1: #ededed;
+    --chart-2: #8f8f94;
+    --chart-3: #5c5c61;
+    --chart-4: #3a3a3f;
+    --chart-5: #26262b;
+    --sidebar: #0d0d0d;
+    --sidebar-foreground: #a3a3a8;
+    --sidebar-primary: #ededed;
+    --sidebar-primary-foreground: #0a0a0a;
+    --sidebar-accent: #1c1c1c;
+    --sidebar-accent-foreground: #ededed;
+    --sidebar-border: #232323;
+    --sidebar-ring: #ededed;
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
+    * {
+        border-color: var(--border);
     }
-  body {
-    @apply bg-background text-foreground;
+    html {
+        -webkit-font-smoothing: antialiased;
     }
-  html {
-    @apply font-sans;
+    body {
+        background: var(--background);
+        color: var(--foreground);
+        font-family: var(--font-sans);
+        font-feature-settings: 'cv11', 'ss01';
+    }
+    /* 浏览器表面归属设计系统：选区、插入符、滚动条 */
+    ::selection {
+        background: var(--foreground);
+        color: var(--background);
+    }
+    ::caret-color,
+    * {
+        caret-color: var(--foreground);
+    }
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--input) transparent;
+    }
+    *::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+    *::-webkit-scrollbar-thumb {
+        background: var(--input);
+        border-radius: 0;
+        border: 3px solid var(--background);
+    }
+    *::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    :focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 2px;
+    }
+    /* 数字数据一律等宽对齐 */
+    .tabular-nums,
+    table {
+        font-variant-numeric: tabular-nums;
     }
 }
 
-/* 浏览器表面：选中、光标主题化（跟随品牌蓝紫）*/
-::selection {
-    background: oklch(0.55 0.2 264 / 0.35);
+/* Engram Markdown 排版：发丝线语言，替代 prose 默认皮肤 */
+.engram-prose {
+    color: var(--foreground);
+    font-size: 0.875rem;
+    line-height: 1.75;
 }
-input,
-textarea {
-    caret-color: oklch(0.72 0.16 264);
+.engram-prose h1,
+.engram-prose h2,
+.engram-prose h3,
+.engram-prose h4 {
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.3;
+    margin-top: 1.75em;
+    margin-bottom: 0.6em;
+}
+.engram-prose h1 { font-size: 1.375rem; }
+.engram-prose h2 { font-size: 1.125rem; }
+.engram-prose h3 { font-size: 1rem; }
+.engram-prose h1:first-child,
+.engram-prose h2:first-child { margin-top: 0; }
+.engram-prose p { margin: 0.85em 0; }
+.engram-prose ul,
+.engram-prose ol { margin: 0.85em 0; padding-left: 1.5em; }
+.engram-prose ul { list-style: disc; }
+.engram-prose ol { list-style: decimal; }
+.engram-prose li { margin: 0.3em 0; }
+.engram-prose li::marker { color: var(--muted-foreground); }
+.engram-prose a { color: var(--foreground); font-weight: 500; text-underline-offset: 4px; }
+.engram-prose blockquote {
+    border-left: 2px solid var(--border);
+    padding-left: 1em;
+    color: var(--muted-foreground);
+    margin: 1.1em 0;
+}
+.engram-prose hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+.engram-prose code {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    background: var(--muted);
+    border-radius: 4px;
+    padding: 0.15em 0.4em;
+}
+.engram-prose pre {
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.85em 1em;
+    overflow-x: auto;
+    margin: 1.1em 0;
+    line-height: 1.6;
+}
+.engram-prose pre code { background: transparent; padding: 0; font-size: 0.8125rem; }
+.engram-prose table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    margin: 1.1em 0;
+}
+.engram-prose th {
+    text-align: left;
+    font-weight: 500;
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+    border-bottom: 1px solid var(--border);
+    padding: 0.4em 0.75em;
+}
+.engram-prose td {
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    padding: 0.5em 0.75em;
+    vertical-align: top;
+}
+.engram-prose tr:last-child td { border-bottom: 1px solid var(--border); }
+.engram-prose strong { font-weight: 600; }
+.engram-prose svg { max-width: 100%; }
+
+/* 图谱画布：测量网格底纹（示波器纪律——仪器感来自刻度而非颜色） */
+.wiki-graph-canvas {
+    background-image: linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: -1px -1px;
 }
 
-/* 登录页入场：一次性起手式 */
-@keyframes login-enter {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-        filter: blur(6px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-        filter: blur(0);
-    }
+/* running 态脉冲点（示波器纪律：活动 = 细脉冲，不是彩色块）。
+   @utility 使其支持响应式变体（侧栏收起态用 md:engram-pulse 让图标呼吸）。 */
+@keyframes engram-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
 }
-.login-enter {
-    animation: login-enter 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+@utility engram-pulse {
+    animation: engram-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .engram-pulse {
+        animation: none;
+    }
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
 }

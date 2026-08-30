@@ -127,7 +127,7 @@ describe('Provider 编辑 / 删除', () => {
     render(wrap(<Settings />))
     await screen.findByText('openai')
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    const baseInput = screen.getByPlaceholderText('Base URL（OpenAI 兼容）') as HTMLInputElement
+    const baseInput = screen.getByLabelText('Base URL（OpenAI 兼容）') as HTMLInputElement
     expect(baseInput.value).toBe('https://api.openai.com/v1')
     fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
     await waitFor(() => {
@@ -209,9 +209,9 @@ describe('Wiki 搜索', () => {
 describe('主密钥重加密', () => {
   it('输入旧密钥 POST re-encrypt 并展示结果', async () => {
     mockState.reencryptResult = 2
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(wrap(<Settings />))
-    fireEvent.click(screen.getByRole('button', { name: '重加密' }))
-    const input = await screen.findByPlaceholderText('旧主密钥（64 hex）')
+    const input = await screen.findByPlaceholderText('openssl rand -hex 32 的旧值')
     fireEvent.change(input, { target: { value: 'aabbccdd' } })
     fireEvent.click(screen.getByRole('button', { name: '执行重加密' }))
     await waitFor(() => {

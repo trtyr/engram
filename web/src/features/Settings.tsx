@@ -5,13 +5,12 @@ import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/u
 import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'providers' | 'routing' | 'keys' | 'reencrypt'
+type Tab = 'providers' | 'routing' | 'keys'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'providers', label: 'Providers' },
   { value: 'routing', label: '路由' },
   { value: 'keys', label: 'API Keys' },
-  { value: 'reencrypt', label: '重加密' },
 ]
 
 export default function Settings() {
@@ -23,7 +22,11 @@ export default function Settings() {
       {tab === 'providers' && <Providers />}
       {tab === 'routing' && <Routing />}
       {tab === 'keys' && <Keys />}
-      {tab === 'reencrypt' && <ReencryptPane />}
+
+      <div className="mt-10 space-y-3">
+        <h2 className="text-sm font-semibold text-destructive">危险区域</h2>
+        <ReencryptPane />
+      </div>
     </div>
   )
 }
@@ -65,38 +68,60 @@ function Providers() {
             }
           }}
         >
-          <input
-            className={inputCls}
-            placeholder="名称"
-            value={form.name}
-            disabled={!!editingId}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-          <input
-            className={inputCls}
-            placeholder="Base URL（OpenAI 兼容）"
-            value={form.base_url}
-            onChange={(e) => setForm({ ...form, base_url: e.target.value })}
-          />
-          <input
-            className={inputCls}
-            type="password"
-            placeholder="API Key（加密存储）"
-            value={form.api_key}
-            onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-          />
-          <input
-            className={inputCls}
-            placeholder="chat 模型 ID"
-            value={form.chat_model}
-            onChange={(e) => setForm({ ...form, chat_model: e.target.value })}
-          />
-          <input
-            className={inputCls}
-            placeholder="embedding 模型 ID"
-            value={form.embed_model}
-            onChange={(e) => setForm({ ...form, embed_model: e.target.value })}
-          />
+          <div className="space-y-1.5">
+            <label htmlFor="prov-name" className="block text-xs font-medium">名称</label>
+            <input
+              id="prov-name"
+              className={`${inputCls} w-full`}
+              placeholder="SiliconFlow"
+              value={form.name}
+              disabled={!!editingId}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="prov-url" className="block text-xs font-medium">Base URL（OpenAI 兼容）</label>
+            <input
+              id="prov-url"
+              className={`${inputCls} w-full`}
+              placeholder="https://api.example.com/v1"
+              value={form.base_url}
+              onChange={(e) => setForm({ ...form, base_url: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="prov-key" className="block text-xs font-medium">
+              API Key<span className="ml-1 font-normal text-muted-foreground">（AES-GCM 加密落库{editingId ? '；留空不更新' : ''}）</span>
+            </label>
+            <input
+              id="prov-key"
+              className={`${inputCls} w-full`}
+              type="password"
+              placeholder="sk-…"
+              value={form.api_key}
+              onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="prov-chat" className="block text-xs font-medium">chat 模型 ID</label>
+            <input
+              id="prov-chat"
+              className={`${inputCls} w-full font-mono`}
+              placeholder="deepseek-ai/DeepSeek-V4"
+              value={form.chat_model}
+              onChange={(e) => setForm({ ...form, chat_model: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="prov-embed" className="block text-xs font-medium">embedding 模型 ID</label>
+            <input
+              id="prov-embed"
+              className={`${inputCls} w-full font-mono`}
+              placeholder="Qwen/Qwen3-Embedding-8B"
+              value={form.embed_model}
+              onChange={(e) => setForm({ ...form, embed_model: e.target.value })}
+            />
+          </div>
           <div className="flex items-center gap-2 md:col-span-2">
             <Button size="sm" type="submit">
               {editingId ? '保存修改' : '注册 Provider'}
@@ -128,12 +153,12 @@ function Providers() {
             <div>
               <p className="font-medium">
                 {p.name}{' '}
-                {p.is_default && <span className="ml-1 text-xs text-green-400">默认</span>}
+                {p.is_default && <span className="ml-1 text-xs text-success">默认</span>}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {p.base_url} · {p.models.map((m) => m.id).join(', ')}
               </p>
-              {testMsg[p.id] && <p className="mt-1 text-xs text-brand-strong">{testMsg[p.id]}</p>}
+              {testMsg[p.id] && <p className="mt-1 text-xs text-foreground">{testMsg[p.id]}</p>}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Button
@@ -167,9 +192,9 @@ function Providers() {
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
+                variant="destructive"
                 onClick={async () => {
-                  if (!confirm(`删除 provider「${p.name}」？`)) return
+                  if (!confirm(`删除 provider「${p.name}」？该操作不可撤销。`)) return
                   try {
                     await api.del(`/settings/llm/providers/${p.id}`)
                     load()
@@ -244,9 +269,11 @@ function Keys() {
           load()
         }}
       >
+        <label htmlFor="key-name" className="text-sm font-medium">名称</label>
         <input
+          id="key-name"
           className={`${inputCls} w-48`}
-          placeholder="名称"
+          placeholder="pi-agent"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
@@ -255,7 +282,7 @@ function Keys() {
         </Button>
       </form>
       {newKey && (
-        <Card className="border-green-500/30 bg-green-500/10 p-4">
+        <Card className="border-success/30 bg-success/10 p-4">
           <p className="text-xs text-muted-foreground">新 key（只显示这一次，给 AI 客户端用）：</p>
           <code className="mt-1.5 block break-all font-mono text-sm">{newKey}</code>
         </Card>
@@ -265,7 +292,7 @@ function Keys() {
       ) : rows.length === 0 ? (
         <Empty text="无 API key" />
       ) : (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
@@ -287,12 +314,13 @@ function Keys() {
                   </td>
                   <td className={`${tableCls.td} text-right`}>
                     {k.revoked_at ? (
-                      <span className="text-xs text-red-400">已吊销</span>
+                      <span className="text-xs text-destructive">已吊销</span>
                     ) : (
                       <Button
-                        variant="ghost"
+                        variant="destructive"
                         size="sm"
                         onClick={async () => {
+                          if (!confirm(`吊销 key「${k.name}」？使用它的 AI 将立即失权。`)) return
                           await api.post(`/settings/api-keys/${k.id}/revoke`)
                           load()
                         }}
@@ -317,20 +345,25 @@ function ReencryptPane() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   return (
-    <Card className="space-y-3 p-4">
+    <Card className="space-y-3 border-destructive/30 p-4">
       <p className="text-sm text-muted-foreground">
-        更换主密钥（AGENT_MEMORY_MASTER_KEY）后，用旧主密钥重加密所有 provider 密钥。
+        更换主密钥（AGENT_MEMORY_MASTER_KEY）后，用旧主密钥重加密所有 provider 密钥。填错旧密钥会使全部 provider 不可用。
       </p>
-      <input
-        className={`${inputCls} w-full font-mono`}
-        type="password"
-        placeholder="旧主密钥（64 hex）"
-        value={oldKey}
-        onChange={(e) => setOldKey(e.target.value)}
-      />
+      <div className="space-y-1.5">
+        <label htmlFor="reencrypt-old" className="block text-xs font-medium">旧主密钥（64 hex）</label>
+        <input
+          id="reencrypt-old"
+          className={`${inputCls} w-full font-mono`}
+          type="password"
+          placeholder="openssl rand -hex 32 的旧值"
+          value={oldKey}
+          onChange={(e) => setOldKey(e.target.value)}
+        />
+      </div>
       <div className="flex items-center gap-2">
         <Button
           size="sm"
+          variant="destructive"
           disabled={busy || !oldKey.trim()}
           onClick={async () => {
             setBusy(true)

@@ -35,7 +35,7 @@ export default function Jobs() {
       {rows.length === 0 ? (
         <Empty text="无任务" />
       ) : (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
@@ -55,7 +55,7 @@ export default function Jobs() {
                   </td>
                   <td className={`${tableCls.td} tabular-nums`}>{j.attempts}</td>
                   <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(j.created_at)}</td>
-                  <td className={`${tableCls.td} max-w-64 truncate text-red-400`}>{j.error ?? ''}</td>
+                  <td className={`${tableCls.td} max-w-64 truncate text-destructive`}>{j.error ?? ''}</td>
                 </tr>
               ))}
             </tbody>
@@ -105,7 +105,7 @@ function EventTimeline({ job, onClose }: { job: Job; onClose: () => void }) {
           {events.map((e) => (
             <div key={e.id} className="border-b border-border/50 py-1.5 text-sm last:border-0">
               <span
-                className={`mr-2 text-xs tabular-nums ${e.level === 'error' ? 'text-red-400' : 'text-muted-foreground'}`}
+                className={`mr-2 text-xs tabular-nums ${e.level === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
               >
                 {fmtTime(e.ts)}
               </span>

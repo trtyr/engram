@@ -80,7 +80,7 @@ function ProjectCard({ p, onChanged }: { p: CgProject; onChanged: () => void }) 
           files={p.stats.files ?? '?'} symbols={p.stats.symbols ?? '?'} edges={p.stats.edges ?? '?'}
         </p>
       )}
-      {p.error && <p className="mt-1 text-xs text-red-400">{p.error}</p>}
+      {p.error && <p className="mt-1 text-xs text-destructive">{p.error}</p>}
       <div className="mt-3 flex gap-2">
         <Button
           size="sm"
@@ -156,11 +156,16 @@ function QueryPlayground({ projectId }: { projectId: string }) {
           查询
         </Button>
       </div>
-      {err && <p className="mt-1.5 text-xs text-red-400">{err}</p>}
+      {err && <p className="mt-1.5 text-xs text-destructive">{err}</p>}
       {out && (
-        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-xs">
-          {out}
-        </pre>
+        <div className="mt-2 overflow-hidden rounded-md border border-border">
+          <div className="border-b border-border bg-muted/40 px-3 py-1.5 font-mono text-xs text-muted-foreground">
+            query · {kind} · {target || '—'}
+          </div>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap bg-card p-3 font-mono text-xs leading-relaxed">
+            {out}
+          </pre>
+        </div>
       )}
     </div>
   )

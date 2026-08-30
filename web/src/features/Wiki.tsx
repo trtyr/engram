@@ -141,7 +141,7 @@ function PagesPane() {
                 {p.page_type} v{p.version}
               </span>
             </div>
-            {p.origin === 'human' && <span className="mt-1 inline-block text-xs text-orange-400">人工</span>}
+            {p.origin === 'human' && <span className="mt-1 inline-block text-xs text-warning">人工</span>}
           </Card>
         ))}
       </div>
@@ -265,7 +265,7 @@ function SourcesPane() {
       {rows.length === 0 ? (
         <Empty text="暂无原料" />
       ) : (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
@@ -348,7 +348,7 @@ function LintPane() {
           </p>
           {r.issues.map((i, idx) => (
             <div key={idx} className="border-b border-border/50 py-2 text-sm last:border-0">
-              <span className="mr-2 rounded bg-yellow-500/15 px-1.5 py-0.5 text-xs text-yellow-400">
+              <span className="mr-2 rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning">
                 {i.rule}
               </span>
               <span className="font-medium">{i.slug}</span>

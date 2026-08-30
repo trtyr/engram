@@ -23,11 +23,76 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'search', label: '检索' },
 ]
 
+/** 蒸馏管线条：L0→L3 层级与计数一屏可见（签名交互——点击层级直达对应 tab）。 */
+function PipelineStrip({ onGo }: { onGo: (t: Tab) => void }) {
+  const [counts, setCounts] = useState<{ l0: number; pending: number; l1: number; l2: number; l3: number } | null>(null)
+  useEffect(() => {
+    const safeLen = (a: unknown[]) => a.length
+    Promise.all([
+      api.get<Session[]>('/memory/sessions?limit=500').catch(() => []),
+      api.get<Atom[]>('/memory/atoms?limit=500').catch(() => []),
+      api.get<Scenario[]>('/memory/scenarios?limit=500').catch(() => []),
+      api.get<Persona[]>('/memory/persona').catch(() => []),
+    ]).then(([s, a, sc, p]) => {
+      setCounts({
+        l0: safeLen(s),
+        pending: s.filter((x) => x.distill_status === 'pending' || x.distill_status === 'processing').length,
+        l1: a.filter((x) => x.status === 'active' || x.status === 'candidate').length,
+        l2: safeLen(sc),
+        l3: safeLen(p),
+      })
+    })
+  }, [])
+  const stages: { key: string; tag: string; label: string; n?: number; tab: Tab }[] = [
+    { key: 'l0', tag: 'L0', label: '会话', n: counts?.l0, tab: 'sessions' },
+    { key: 'l1', tag: 'L1', label: '原子', n: counts?.l1, tab: 'atoms' },
+    { key: 'l2', tag: 'L2', label: '场景', n: counts?.l2, tab: 'scenarios' },
+    { key: 'l3', tag: 'L3', label: '画像', n: counts?.l3, tab: 'persona' },
+  ]
+  const distilling = (counts?.pending ?? 0) > 0
+  return (
+    <div
+      className="flex flex-wrap items-stretch gap-px overflow-hidden rounded-md border border-border bg-border/60"
+      aria-label="蒸馏管线"
+    >
+      {stages.map((s, i) => (
+        <div key={s.key} className="flex items-center gap-px bg-card">
+          {i > 0 && (
+            <span
+              aria-hidden="true"
+              className={distilling ? 'engram-pulse px-1 font-mono text-xs text-info' : 'px-1 font-mono text-xs text-muted-foreground/60'}
+            >
+              →
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => onGo(s.tab)}
+            className="flex items-baseline gap-2 px-3.5 py-2.5 transition-colors hover:bg-muted"
+            title={`${s.tag} ${s.label}${s.n === undefined ? '' : `：${s.n}`}`}
+          >
+            <span className="font-mono text-xs text-muted-foreground">{s.tag}</span>
+            <span className="text-sm font-medium">{s.label}</span>
+            <span className="font-mono text-sm tabular-nums">{s.n ?? '–'}</span>
+          </button>
+        </div>
+      ))}
+      {distilling && (
+        <span className="flex items-center bg-card px-3 font-mono text-xs text-info">
+          <span className="engram-pulse mr-1.5 inline-block size-1.5 rounded-full bg-info" />
+          蒸馏中 ×{counts?.pending}
+        </span>
+      )}
+    </div>
+  )
+}
+
 export default function Memory() {
   const [tab, setTab] = useState<Tab>('sessions')
   return (
     <div className="space-y-6">
       <PageHeader title="Memory" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
+      <PipelineStrip onGo={setTab} />
       <Tabs items={TABS} value={tab} onChange={setTab} />
       {tab === 'sessions' && <Sessions />}
       {tab === 'atoms' && <Atoms />}
@@ -65,7 +130,7 @@ function Sessions() {
       {rows.length === 0 ? (
         <Empty text="暂无会话——POST /memory/sessions 写入" />
       ) : (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
@@ -81,7 +146,7 @@ function Sessions() {
                 <tr key={s.id} className={tableCls.row}>
                   <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(s.created_at)}</td>
                   <td className={tableCls.td}>{s.agent}</td>
-                  <td className={`${tableCls.td} tabular-nums`}>{s.content?.length ?? 0}</td>
+                  <td className={tableCls.tdMono}>{s.content?.length ?? 0}</td>
                   <td className={tableCls.td}>
                     <StatusBadge status={s.distill_status} />
                   </td>
@@ -104,6 +169,7 @@ function Sessions() {
               variant="destructive"
               size="sm"
               onClick={async () => {
+                if (!confirm('擦除该会话？关联原子的溯源将标记为 erased，不可恢复。')) return
                 await api.del(`/memory/sessions/${open.id}`)
                 setOpen(null)
                 load()
@@ -170,7 +236,7 @@ function Atoms() {
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <input
             type="checkbox"
-            className="size-3.5 accent-[var(--brand-strong)]"
+            className="size-3.5 accent-foreground"
             checked={review}
             onChange={(e) => setReview(e.target.checked)}
           />
@@ -179,7 +245,7 @@ function Atoms() {
       </div>
 
       {superseding && (
-        <Card className="border-orange-500/40 bg-orange-500/10 p-4" data-testid="supersede-panel">
+        <Card className="border-warning/40 bg-warning/10 p-4" data-testid="supersede-panel">
           <p className="mb-2 text-sm font-medium">supersede：输入取代旧记忆的新事实</p>
           <form
             className="flex gap-2"
@@ -213,7 +279,7 @@ function Atoms() {
       {rows.length === 0 ? (
         <Empty text="暂无原子" />
       ) : (
-        <Card className="overflow-hidden">
+        <Card className="overflow-x-auto">
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
@@ -261,7 +327,7 @@ function Atoms() {
                         className="cursor-text"
                       >
                         {a.needs_review && (
-                          <span className="mr-1.5 rounded bg-orange-500/20 px-1.5 py-0.5 text-xs text-orange-400">
+                          <span className="mr-1.5 rounded bg-warning/15 px-1.5 py-0.5 font-mono text-xs text-warning">
                             人审
                           </span>
                         )}
@@ -269,7 +335,7 @@ function Atoms() {
                       </span>
                     )}
                   </td>
-                  <td className={`${tableCls.td} tabular-nums`}>{a.confidence.toFixed(2)}</td>
+                  <td className={tableCls.tdMono}>{a.confidence.toFixed(2)}</td>
                   <td className={tableCls.td}>
                     <StatusBadge status={a.status} />
                     {a.superseded_by && (
@@ -278,7 +344,7 @@ function Atoms() {
                       </span>
                     )}
                   </td>
-                  <td className={`${tableCls.td} tabular-nums`}>{a.hit_count}</td>
+                  <td className={tableCls.tdMono}>{a.hit_count}</td>
                   <td className={`${tableCls.td} whitespace-nowrap text-right`}>
                     {a.status === 'active' && (
                       <>

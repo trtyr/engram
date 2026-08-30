@@ -1,38 +1,41 @@
 /**
- * 共享 UI 基元组件：品牌标记、卡片、页头、分段 tab、状态徽章、空态/错误态/加载态。
- * 样式常量与工具（fmtTime / tableCls / inputCls / selectCls）见 @/lib/ui。
+ * Engram 设计系统原语：墨白正统。
+ * 分层 = 1px 发丝线（零阴影）；强调 = 墨色实心；彩色只承担语义。
  */
 import type { ComponentProps, ReactNode } from 'react'
 import { CircleAlert, Inbox, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-/** 品牌标记：一颗记忆节点连着它的关联（四个记忆资产各就其位）。 */
+/** 品牌印记：三层错位方——记忆的层层留痕（L0→L2），顶层实心为「当下」。 */
 export function BrandMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 44 44" fill="none" aria-hidden="true" className={cn('size-6', className)}>
-      <g stroke="var(--brand-strong)" strokeWidth="1.5" strokeLinecap="round" opacity="0.45">
-        <path d="M22 20 13 12" />
-        <path d="M22 20 31 12" />
-        <path d="M22 20 22 34" />
-      </g>
-      <circle cx="22" cy="20" r="4.5" fill="var(--brand-strong)" />
-      <circle cx="13" cy="12" r="2.5" fill="var(--brand-strong)" opacity="0.7" />
-      <circle cx="31" cy="12" r="2.5" fill="var(--brand-strong)" opacity="0.7" />
-      <circle cx="22" cy="34" r="2.5" fill="var(--brand-strong)" opacity="0.7" />
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <rect x="3.5" y="8.5" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" opacity="0.45" />
+      <rect x="7" y="5" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5" opacity="0.7" />
+      <rect x="10.5" y="1.5" width="12" height="12" rx="2" fill="currentColor" />
     </svg>
   )
 }
 
-/** 卡片容器：统一圆角、边框、底色。 */
+/** 卡片容器：发丝线分层，无阴影。 */
 export function Card({ className, children, ...props }: ComponentProps<'div'>) {
   return (
-    <div className={cn('rounded-xl border border-border bg-card', className)} {...props}>
+    <div className={cn('rounded-lg border border-border bg-card', className)} {...props}>
       {children}
     </div>
   )
 }
 
-/** 页头：标题 + 描述 + 右侧操作区。 */
+/** 区块标题行（卡片内的节标题）：字重层级，不靠字号。 */
+export function SectionTitle({ className, children, ...props }: ComponentProps<'h2'>) {
+  return (
+    <h2 className={cn('px-4 py-2.5 text-sm font-semibold tracking-tight', className)} {...props}>
+      {children}
+    </h2>
+  )
+}
+
+/** 页头：标题 + 一行副题；操作区右侧。 */
 export function PageHeader({
   title,
   desc,
@@ -45,15 +48,15 @@ export function PageHeader({
   return (
     <div className="flex items-start justify-between gap-4">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        {desc && <p className="mt-1 text-sm text-muted-foreground">{desc}</p>}
+        <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
+        {desc && <p className="mt-0.5 text-sm text-muted-foreground">{desc}</p>}
       </div>
       {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
     </div>
   )
 }
 
-/** 分段式 tab 控件。 */
+/** 分段式 tab（aria-pressed 分段控件）：选中即整行反转（墨底白字），段间发丝分隔。 */
 export function Tabs<T extends string>({
   items,
   value,
@@ -64,17 +67,19 @@ export function Tabs<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-border bg-muted/30 p-1">
-      {items.map((it) => (
+    <div className="inline-flex max-w-full flex-wrap items-stretch rounded-md border border-border">
+      {items.map((it, i) => (
         <button
           key={it.value}
           type="button"
+          aria-pressed={value === it.value}
           onClick={() => onChange(it.value)}
           className={cn(
-            'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+            'px-3 py-1.5 text-sm font-medium transition-colors',
+            i > 0 && 'border-l border-border',
             value === it.value
-              ? 'bg-card text-foreground shadow-sm ring-1 ring-border'
-              : 'text-muted-foreground hover:text-foreground',
+              ? 'bg-foreground text-background'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
           )}
         >
           {it.label}
@@ -84,40 +89,44 @@ export function Tabs<T extends string>({
   )
 }
 
-const STATUS_STYLE: Record<string, { dot: string; text: string }> = {
-  ready: { dot: 'bg-green-400', text: 'text-green-400' },
-  succeeded: { dot: 'bg-green-400', text: 'text-green-400' },
-  active: { dot: 'bg-green-400', text: 'text-green-400' },
-  pending: { dot: 'bg-yellow-400', text: 'text-yellow-400' },
-  processing: { dot: 'bg-blue-400', text: 'text-blue-400' },
-  parsing: { dot: 'bg-blue-400', text: 'text-blue-400' },
-  chunking: { dot: 'bg-blue-400', text: 'text-blue-400' },
-  embedding: { dot: 'bg-blue-400', text: 'text-blue-400' },
-  running: { dot: 'bg-blue-400', text: 'text-blue-400' },
-  indexing: { dot: 'bg-blue-400', text: 'text-blue-400' },
-  failed: { dot: 'bg-red-400', text: 'text-red-400' },
-  dead: { dot: 'bg-red-400', text: 'text-red-400' },
-  error: { dot: 'bg-red-400', text: 'text-red-400' },
-  superseded: { dot: 'bg-gray-400', text: 'text-gray-400' },
-  archived: { dot: 'bg-gray-400', text: 'text-gray-400' },
-  candidate: { dot: 'bg-purple-400', text: 'text-purple-400' },
-  version_mismatch: { dot: 'bg-orange-400', text: 'text-orange-400' },
+/** 状态 → 语义色映射（彩色只在此处出现）。 */
+const STATUS_STYLE: Record<string, { dot: string; text: string; pulse?: boolean }> = {
+  ready: { dot: 'bg-success', text: 'text-success' },
+  succeeded: { dot: 'bg-success', text: 'text-success' },
+  active: { dot: 'bg-success', text: 'text-success' },
+  human: { dot: 'bg-success', text: 'text-success' },
+  pending: { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' },
+  processing: { dot: 'bg-info', text: 'text-info', pulse: true },
+  parsing: { dot: 'bg-info', text: 'text-info', pulse: true },
+  chunking: { dot: 'bg-info', text: 'text-info', pulse: true },
+  embedding: { dot: 'bg-info', text: 'text-info', pulse: true },
+  running: { dot: 'bg-info', text: 'text-info', pulse: true },
+  indexing: { dot: 'bg-info', text: 'text-info', pulse: true },
+  registered: { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' },
+  failed: { dot: 'bg-destructive', text: 'text-destructive' },
+  dead: { dot: 'bg-destructive', text: 'text-destructive' },
+  error: { dot: 'bg-destructive', text: 'text-destructive' },
+  superseded: { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' },
+  archived: { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' },
+  candidate: { dot: 'bg-info', text: 'text-info' },
+  version_mismatch: { dot: 'bg-warning', text: 'text-warning' },
 }
 
+/** 状态徽章：无底色，色点 + mono 状态字——状态是数据。 */
 export function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_STYLE[status] ?? { dot: 'bg-gray-400', text: 'text-gray-400' }
+  const s = STATUS_STYLE[status] ?? { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' }
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/5 bg-white/[0.03] px-2 py-0.5 text-[11px] font-medium">
-      <span className={`size-1.5 rounded-full ${s.dot}`} />
-      <span className={s.text}>{status}</span>
+    <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap font-mono text-xs', s.text)}>
+      <span className={cn('size-1.5 rounded-full', s.dot, s.pulse && 'engram-pulse')} />
+      {status}
     </span>
   )
 }
 
 export function Empty({ text }: { text: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-12 text-center">
-      <Inbox className="size-5 text-muted-foreground/60" />
+    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border py-12 text-center">
+      <Inbox className="size-5 text-muted-foreground/50" />
       <p className="text-sm text-muted-foreground">{text}</p>
     </div>
   )
@@ -125,7 +134,10 @@ export function Empty({ text }: { text: string }) {
 
 export function ErrorBox({ msg }: { msg: string }) {
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-3 text-sm text-red-400">
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-3 text-sm text-destructive"
+    >
       <CircleAlert className="mt-0.5 size-4 shrink-0" />
       <span>{msg}</span>
     </div>
@@ -134,7 +146,7 @@ export function ErrorBox({ msg }: { msg: string }) {
 
 export function Spinner({ label = '加载中…' }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+    <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground" aria-live="polite">
       <Loader2 className="size-4 animate-spin" />
       {label}
     </div>

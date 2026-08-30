@@ -67,7 +67,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
 
   // ---------- 3. Memory：写会话 ->（有 LLM 时）触发蒸馏 -> 原子出现 ----------
   await page.getByRole('link', { name: 'Memory' }).click()
-  await page.getByRole('button', { name: '会话' }).click()
+  await page.getByRole('button', { name: '会话', exact: true }).click()
   await api('POST', '/memory/sessions', {
     agent: 'e2e-browser',
     distill: 'off',
@@ -80,7 +80,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   await expect(page.getByText('e2e-browser').first(), '\u4f1a\u8bdd\u5e94\u5217\u51fa').toBeVisible({ timeout: 15_000 })
   if (hasLlm) {
     await page.getByRole('button', { name: '\u89e6\u53d1\u84b8\u998f' }).click()
-    await page.getByRole('button', { name: '\u539f\u5b50' }).click()
+    await page.getByRole('button', { name: '\u539f\u5b50', exact: true }).click()
     await expect(
       page.getByText(/Playwright/i).first(),
       '\u84b8\u998f\u5e94\u4ea7\u51fa\u542b Playwright \u7684\u539f\u5b50',
@@ -116,7 +116,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   })
   if (resp.ok()) {
     await page.reload()
-    const card = page.locator('div.rounded-xl.border', { hasText: projName }).first()
+    const card = page.locator('div.rounded-lg.border', { hasText: projName }).first()
     await card.getByRole('button', { name: /\u5efa\u7d22\u5f15/ }).click()
     await expect(card.getByText('ready', { exact: true }), 'codegraph \u7d22\u5f15\u5e94\u5b8c\u6210').toBeVisible({ timeout: 420_000 })
     await card.getByPlaceholder('\u7b26\u53f7\u6216\u95ee\u9898').fill('ni')
