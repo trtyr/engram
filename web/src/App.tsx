@@ -1,8 +1,9 @@
 /**
  * 应用壳：登录守卫 + 侧边栏七域导航。
- * 域页全部 lazy（路由级代码分割：sigma/graphology/mermaid 等重依赖随 Wiki 页按需加载）。
+ * Engram：近黑/近白侧栏，选中态整行反转；域页 lazy（路由级分割）。
+ * 侧栏四件套（frontend-polish R2）：收缩（localStorage）/ 分区 / 状态徽章 / 全局检索面板。
  */
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import {
   Brain,
@@ -10,12 +11,18 @@ import {
   LayoutDashboard,
   ListChecks,
   Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
   Settings as SettingsIcon,
   Waypoints,
 } from 'lucide-react'
 import { getToken } from '@/lib/api'
+import { useSystemStatus } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/ui-bits'
+import { ThemeToggle } from '@/components/ThemeToggle'
+import { CommandPalette } from '@/components/CommandPalette'
 import Login from '@/features/Login'
 
 const Dashboard = lazy(() => import('@/features/Dashboard'))
@@ -26,51 +33,253 @@ const CodeGraph = lazy(() => import('@/features/CodeGraph'))
 const Jobs = lazy(() => import('@/features/Jobs'))
 const Settings = lazy(() => import('@/features/Settings'))
 
-const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/memory', label: 'Memory', icon: Brain },
-  { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
-  { to: '/wiki', label: 'Wiki', icon: Network },
-  { to: '/codegraph', label: 'CodeGraph', icon: Waypoints },
-  { to: '/jobs', label: 'Jobs', icon: ListChecks },
-  { to: '/settings', label: 'Settings', icon: SettingsIcon },
-] as const
+type NavItem = {
+  to: string
+  label: string
+  icon: typeof Brain
+  badge?: (s: { failed: number; distilling: number }) => number | null
+  pulse?: (s: { failed: number; distilling: number }) => boolean
+}
 
-/** 已登录的主壳：侧边栏 + 七域路由。 */
+/** 分区语义：首屏 ｜ 资产域 ｜ 系统。 */
+const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
+  {
+    label: null,
+    items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard }],
+  },
+  {
+    label: '资产域',
+    items: [
+      { to: '/memory', label: 'Memory', icon: Brain, pulse: (s) => s.distilling > 0 },
+      { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
+      { to: '/wiki', label: 'Wiki', icon: Network },
+      { to: '/codegraph', label: 'CodeGraph', icon: Waypoints },
+    ],
+  },
+  {
+    label: '系统',
+    items: [
+      { to: '/jobs', label: 'Jobs', icon: ListChecks, badge: (s) => s.failed || null },
+      { to: '/settings', label: 'Settings', icon: SettingsIcon },
+    ],
+  },
+]
+
+/** 已登录的主壳：桌面侧边栏（可收缩）/ 移动端顶部导航条 + 七域路由。 */
 function Shell() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('engram-sidebar') === 'collapsed'
+    } catch {
+      return false
+    }
+  })
+  const [openedAt, setOpenedAt] = useState<string | null>(null)
+  const status = useSystemStatus()
+  const location = useLocation()
+  const locationKey = location.pathname + location.search
+  // 派生：路由变化后旧位置打开的面板自然关闭（浏览器返回/命中跳转统一收口）
+  const paletteOpen = openedAt !== null && openedAt === locationKey
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem('engram-sidebar', c ? 'expanded' : 'collapsed')
+      } catch {
+        /* 忽略 */
+      }
+      return !c
+    })
+  }, [])
+
+  // 全局快捷键：Cmd/Ctrl+K 切换面板；/ 直开（输入框内除外）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setOpenedAt((v) => (v !== null ? null : locationKey))
+      } else if (e.key === '/' && openedAt === null) {
+        const t = e.target as HTMLElement | null
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+        e.preventDefault()
+        setOpenedAt(locationKey)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [locationKey, openedAt])
+
   return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-card/30">
-        <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
-          <BrandMark className="size-7" />
-          <span className="text-sm font-semibold tracking-tight">agent-memory</span>
-        </div>
-        <nav className="flex-1 space-y-1 px-3 py-3">
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
-                  isActive
-                    ? 'bg-brand/10 font-medium text-brand-strong'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                )
-              }
+    <div className="flex min-h-screen md:h-screen md:flex-row flex-col">
+      <aside
+        className={cn(
+          'flex w-full shrink-0 flex-col border-b border-sidebar-border bg-sidebar transition-[width] duration-200',
+          collapsed ? 'md:w-15' : 'md:w-52',
+          'md:border-b-0 md:border-r',
+        )}
+      >
+        <div
+          className={cn(
+            'flex items-center justify-between gap-1 border-b border-sidebar-border px-4 py-3 md:py-4 md:pr-2 md:pl-2.5',
+            collapsed && 'md:flex-col md:justify-stretch md:gap-1',
+          )}
+        >
+          <div className="flex min-w-0 shrink-0 items-center gap-2.5">
+            <BrandMark
+              className={cn('shrink-0 text-sidebar-primary', collapsed ? 'md:size-6' : 'size-5')}
+            />
+            <span
+              className={cn(
+                'truncate text-sm font-semibold tracking-tight text-sidebar-accent-foreground',
+                collapsed && 'md:hidden',
+              )}
             >
-              <item.icon className="size-4 opacity-80" />
-              {item.label}
-            </NavLink>
+              Engram
+            </span>
+          </div>
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              aria-label="全局检索"
+              title="全局检索（Cmd/Ctrl+K 或 /）"
+              className={cn(
+                'rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+                collapsed ? 'md:p-2' : 'p-1.5',
+              )}
+              onClick={() => setOpenedAt(locationKey)}
+            >
+              <Search className={cn(collapsed ? 'md:size-5' : 'size-4')} aria-hidden="true" />
+            </button>
+            <div className="md:hidden">
+              <ThemeToggle />
+            </div>
+          </div>
+        </div>
+        <nav
+          className="flex gap-1 overflow-x-auto px-3 py-2 md:flex-1 md:flex-col md:overflow-visible md:py-3"
+          aria-label="主导航"
+        >
+          {NAV_GROUPS.map((group, gi) => (
+            <div key={group.label ?? 'root'} className="contents md:block">
+              {group.label && (
+                <p
+                  className={cn(
+                    'hidden px-3 pt-4 pb-1 font-mono text-[10px] tracking-wider text-muted-foreground/60 uppercase md:block',
+                    collapsed && 'md:hidden',
+                  )}
+                >
+                  {group.label}
+                </p>
+              )}
+              {gi > 0 && (
+                <div
+                  className={cn('hidden border-t border-sidebar-border md:block', collapsed ? '' : 'md:hidden')}
+                  aria-hidden="true"
+                />
+              )}
+              {group.items.map((item) => {
+                const pulsing = !!item.pulse?.(status)
+                const railLabel = pulsing ? `${item.label} · 蒸馏中` : item.label
+                return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.to === '/'}
+                  title={collapsed ? railLabel : undefined}
+                  aria-label={collapsed ? railLabel : undefined}
+                  className={({ isActive }) =>
+                    cn(
+                      'relative flex shrink-0 items-center gap-2.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                      collapsed && 'md:justify-center md:px-0 md:py-2',
+                      isActive
+                        ? 'bg-foreground text-background'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                    )
+                  }
+                >
+                  {/* 收起态：脉冲点让位，图标自身呼吸（md:engram-pulse）+ 放大到 20px */}
+                  <item.icon
+                    className={cn(
+                      'shrink-0',
+                      collapsed ? 'md:size-5' : 'size-4',
+                      collapsed && pulsing && 'md:engram-pulse',
+                    )}
+                    aria-hidden="true"
+                  />
+                  <span className={cn(collapsed && 'md:hidden')}>{item.label}</span>
+                  {item.badge?.(status) != null && (
+                    <>
+                      {/* 展开态 / 移动端：计数芯片 */}
+                      <span
+                        className={cn(
+                          'ml-auto rounded border border-destructive/40 px-1 font-mono text-[10px] leading-4 text-destructive',
+                          collapsed && 'md:hidden',
+                        )}
+                      >
+                        {item.badge!(status)}
+                      </span>
+                      {/* 收起态（桌面）：角标圆点 */}
+                      <span
+                        className={cn(
+                          'absolute top-1 right-1 hidden size-1.5 rounded-full bg-destructive md:block',
+                          !collapsed && 'md:hidden',
+                        )}
+                        aria-hidden="true"
+                      />
+                    </>
+                  )}
+                  {pulsing && (
+                    <span
+                      className={cn(
+                        'ml-auto size-1.5 shrink-0 rounded-full bg-info engram-pulse',
+                        collapsed && 'md:hidden',
+                      )}
+                      aria-label="蒸馏进行中"
+                    />
+                  )}
+                </NavLink>
+                )
+              })}
+            </div>
           ))}
         </nav>
-        <div className="border-t border-border px-4 py-3">
-          <p className="text-xs text-muted-foreground/70">v0.1.0</p>
+        <div
+          className={cn(
+            'flex items-center justify-between border-t border-sidebar-border px-2.5 py-2.5',
+            collapsed && 'md:flex-col md:justify-stretch md:gap-1',
+          )}
+        >
+          <button
+            type="button"
+            aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            className={cn(
+              'hidden rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:block',
+              collapsed ? 'md:p-2' : 'p-1.5',
+            )}
+            onClick={toggleCollapsed}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="md:size-5" aria-hidden="true" />
+            ) : (
+              <PanelLeftClose className="size-4" aria-hidden="true" />
+            )}
+          </button>
+          <p
+            className={cn(
+              'pl-1 font-mono text-xs text-muted-foreground/70',
+              collapsed && 'md:hidden',
+            )}
+          >
+            v{__APP_VERSION__}
+          </p>
+          <ThemeToggle iconClass={collapsed ? 'md:size-5' : 'size-4'} />
         </div>
       </aside>
       <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-6xl px-6 py-8 lg:px-8">
+        {/* 1440 封顶 + 24px 边距：常用屏幕（≤1512）两种侧栏状态下内容都撑满可用宽，
+            收缩释放的宽度交给内容而非空白；超大屏居中封顶防表格无限拉伸 */}
+        <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-6">
           <Suspense fallback={<div className="min-h-40" />}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
@@ -84,6 +293,7 @@ function Shell() {
           </Suspense>
         </div>
       </main>
+      {paletteOpen && <CommandPalette onClose={() => setOpenedAt(null)} />}
     </div>
   )
 }
@@ -105,6 +315,13 @@ export default function App() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 会话中途失效（api 层 401 广播）→ 回登录页，不再死加载
+  useEffect(() => {
+    const onExpired = () => setAuthed(false)
+    window.addEventListener('engram-auth-expired', onExpired)
+    return () => window.removeEventListener('engram-auth-expired', onExpired)
   }, [])
 
   // 登录成功的状态上抛（Login 组件 prop）

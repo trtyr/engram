@@ -37,7 +37,13 @@ async function req<T>(method: string, path: string, body?: unknown, raw = false)
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (resp.status === 401) {
+    // 会话中途失效 → 广播全局事件（App 监听后回登录页）。登录接口的密码错误
+    // 不带 token，不会触发广播。
+    const hadToken = !!getToken()
     clearToken()
+    if (hadToken && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('engram-auth-expired'))
+    }
     throw new ApiError(401, 'unauthorized', '未认证', false)
   }
   if (!resp.ok) {
@@ -70,7 +76,11 @@ export const api = {
     if (getToken()) headers.authorization = `Bearer ${getToken()}`
     const resp = await fetch(`${BASE}${p}`, { method: 'POST', headers, body: fd })
     if (resp.status === 401) {
+      const hadToken = !!getToken()
       clearToken()
+      if (hadToken) {
+        window.dispatchEvent(new CustomEvent('engram-auth-expired'))
+      }
       throw new ApiError(401, 'unauthorized', '未认证', false)
     }
     if (!resp.ok) {
