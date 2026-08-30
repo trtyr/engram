@@ -1,6 +1,6 @@
-/** Knowledge 域：文档表格 + 上传/URL + 分块预览 + 检索。 */
-import { Fragment, useEffect, useRef, useState } from 'react'
-import { Link2, Upload } from 'lucide-react'
+/** Knowledge 域：左目录右阅读的主从版式 + 摄取/URL + 知识块检索。 */
+import { useEffect, useRef, useState } from 'react'
+import { Link2, Search, Upload } from 'lucide-react'
 import { api, type ChunkHit, type Document } from '@/lib/api'
 import {
   Card,
@@ -10,7 +10,7 @@ import {
   Spinner,
   StatusBadge,
 } from '@/components/ui-bits'
-import { fmtTime, inputCls, tableCls } from '@/lib/ui'
+import { fmtTime, relTime, inputCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -31,7 +31,8 @@ export default function Knowledge() {
   const [docs, setDocs] = useState<Document[] | null>(null)
   const [err, setErr] = useState('')
   const [url, setUrl] = useState('')
-  const [openChunks, setOpenChunks] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
+  const [filter, setFilter] = useState('')
   const [dragging, setDragging] = useState(false)
   const [ingesting, setIngesting] = useState(false)
   const [notice, setNotice] = useState('')
@@ -65,6 +66,13 @@ export default function Knowledge() {
       setIngesting(false)
     }
   }
+
+  // 目录列表（标题过滤，客户端）
+  const visibleDocs = (docs ?? []).filter((d) => !filter || d.title.toLowerCase().includes(filter.toLowerCase()))
+  // 有效选中：显式选中 → 失效时回退首篇（新建/删除后无空窗）
+  const activeId =
+    selected && visibleDocs.some((d) => d.id === selected) ? selected : (visibleDocs[0]?.id ?? null)
+  const activeDoc = (docs ?? []).find((d) => d.id === activeId) ?? null
 
   return (
     <div className="space-y-6">
@@ -137,8 +145,8 @@ export default function Knowledge() {
             </Button>
           </form>
         </div>
-        <p className="mt-2.5 flex items-center gap-2 text-xs text-muted-foreground/70">
-          <span>支持 pdf / docx / html / md / txt，或直接把文件拖进这个框</span>
+        <p className="mt-2.5 text-xs text-muted-foreground/70">
+          支持 pdf / docx / html / md / txt，或直接把文件拖进这个框
         </p>
         <p className="mt-1 min-h-4 text-xs">
           {notice && (
@@ -168,7 +176,7 @@ export default function Knowledge() {
           className={`${inputCls} flex-1`}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="检索知识库…"
+          placeholder="检索知识库…（命中可直接打开对应文档）"
         />
         <Button type="submit" disabled={searching}>
           {searching ? '检索中…' : '检索'}
@@ -180,7 +188,12 @@ export default function Knowledge() {
             <Empty text="无命中知识块" />
           ) : (
             hits.map((h) => (
-              <div key={h.chunk_id} className="border-b border-border/50 py-2.5 text-sm last:border-0">
+              <button
+                key={h.chunk_id}
+                type="button"
+                className="block w-full border-b border-border/50 py-2.5 text-left text-sm transition-colors last:border-0 hover:bg-muted/40"
+                onClick={() => setSelected(h.document_id)}
+              >
                 <p className="mb-1 flex flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground">
                   <span className="rounded border border-border px-1.5 py-px">{h.document_title}</span>
                   <span>#{h.seq}</span>
@@ -191,8 +204,8 @@ export default function Knowledge() {
                   )}
                   <span className="ml-auto">{h.score.toFixed(3)}</span>
                 </p>
-                <p>{h.snippet}</p>
-              </div>
+                <p className="line-clamp-2">{h.snippet}</p>
+              </button>
             ))
           )}
         </Card>
@@ -200,131 +213,168 @@ export default function Knowledge() {
 
       {docs === null ? (
         <Spinner />
-      ) : docs.length === 0 ? (
-        <Empty text="暂无文档——拖拽文件到上方摄取区，或粘贴 URL 开始构建知识库" />
       ) : (
-        <Card className="overflow-x-auto">
-          <table className={tableCls.root}>
-            <thead className={tableCls.thead}>
-              <tr>
-                <th className={tableCls.th}>标题</th>
-                <th className={tableCls.th}>来源</th>
-                <th className={tableCls.th}>状态</th>
-                <th className={tableCls.th}>时间</th>
-                <th className={tableCls.th}>错误</th>
-                <th className={tableCls.th} />
-              </tr>
-            </thead>
-            <tbody>
-              {docs.map((d) => (
-                <Fragment key={d.id}>
-                  <tr className={tableCls.row}>
-                    <td className={`${tableCls.td} max-w-72 truncate font-medium`} title={d.title}>
-                      {d.title}
-                    </td>
-                    <td className={`${tableCls.tdMono}`} title={d.source_uri || mimeTag(d.mime)}>
-                      {d.source_uri ? (
-                        <Link2 className="size-3.5 text-muted-foreground" aria-label="URL 摄取" />
-                      ) : (
-                        mimeTag(d.mime)
+        <div className="flex flex-col gap-4 lg:flex-row">
+          {/* 左：文档目录 */}
+          <Card className="overflow-hidden lg:w-80 lg:shrink-0 lg:self-start">
+            <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+              <span className="font-mono text-xs text-muted-foreground">{visibleDocs.length} 篇</span>
+              <div className="relative ml-auto">
+                <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                <input
+                  className="w-36 rounded-md border border-border bg-card py-1 pl-7 pr-2 text-xs outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-foreground/40"
+                  placeholder="过滤标题…"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+              </div>
+            </div>
+            {visibleDocs.length === 0 ? (
+              <div className="p-4">
+                <Empty text={docs.length === 0 ? '暂无文档——拖拽文件到上方摄取区，或粘贴 URL' : '无匹配标题'} />
+              </div>
+            ) : (
+              <ul className="max-h-64 divide-y divide-border/60 overflow-auto lg:max-h-[calc(100vh-16rem)]">
+                {visibleDocs.map((d) => (
+                  <li key={d.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelected(d.id)}
+                      aria-current={d.id === activeId ? 'true' : undefined}
+                      className={cn(
+                        'w-full px-3 py-2 text-left transition-colors',
+                        d.id === activeId ? 'bg-foreground text-background' : 'hover:bg-muted/40',
                       )}
-                    </td>
-                    <td className={tableCls.td}>
-                      <StatusBadge status={d.status} />
-                    </td>
-                    <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(d.created_at)}</td>
-                    <td className={`${tableCls.td} max-w-48 truncate text-destructive`} title={d.error ?? undefined}>
-                      {d.error ?? ''}
-                    </td>
-                    <td className={`${tableCls.td} whitespace-nowrap text-right`}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="mr-1"
-                        aria-expanded={openChunks === d.id}
-                        onClick={() => setOpenChunks(openChunks === d.id ? null : d.id)}
-                      >
-                        {openChunks === d.id ? '收起' : '阅读'}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={async () => {
-                          if (!confirm(`删除文档「${d.title}」？分块与嵌入向量将一并删除，不可恢复。`)) return
-                          await api.del(`/knowledge/documents/${d.id}`)
-                          if (openChunks === d.id) setOpenChunks(null)
-                          load()
-                        }}
-                      >
-                        删除
-                      </Button>
-                    </td>
-                  </tr>
-                  {/* 手风琴：分块预览紧贴该行下方展开，视线不断裂 */}
-                  {openChunks === d.id && (
-                    <tr>
-                      <td colSpan={6} className="border-b border-border p-0">
-                        <ChunksPanel docId={d.id} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+                    >
+                      <p className="truncate text-sm font-medium">{d.title}</p>
+                      <p className={cn(
+                        'mt-0.5 flex items-center gap-1.5 font-mono text-xs',
+                        d.id === activeId ? 'text-background/70' : 'text-muted-foreground',
+                      )}>
+                        {d.source_uri ? <Link2 className="size-3" aria-label="URL 摄取" /> : <span>{mimeTag(d.mime)}</span>}
+                        <span className="truncate">{relTime(d.created_at)}</span>
+                        {['pending', 'parsing', 'chunking', 'embedding'].includes(d.status) && (
+                          <span className={cn('size-1.5 rounded-full bg-info', d.id === activeId ? '' : 'engram-pulse')} />
+                        )}
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          {/* 右：阅读区 */}
+          <div className="min-w-0 flex-1">
+            {activeDoc ? (
+              <DocReader
+                key={activeDoc.id}
+                doc={activeDoc}
+                onDeleted={() => {
+                  setSelected(null)
+                  load()
+                }}
+              />
+            ) : (
+              <Card className="p-4">
+                <Empty text="从左侧选择一篇文档开始阅读" />
+              </Card>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
 }
 
-function ChunksPanel({ docId }: { docId: string }) {
+/** 阅读区：文档头（标题/来源/状态/操作）+ 分块连成的整篇成文。 */
+function DocReader({ doc, onDeleted }: { doc: Document; onDeleted: () => void }) {
   const [rows, setRows] = useState<{ seq: number; content: string; embed_failed: boolean }[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   useEffect(() => {
-    api.get<typeof rows>(`/knowledge/documents/${docId}/chunks`).then(setRows).catch(() => setRows([]))
-  }, [docId])
-  if (!rows) return <Spinner />
-  const failedCount = rows.filter((c) => c.embed_failed).length
+    api.get<typeof rows>(`/knowledge/documents/${doc.id}/chunks`).then(setRows).catch(() => setRows([]))
+  }, [doc.id])
+  const failedCount = (rows ?? []).filter((c) => c.embed_failed).length
   return (
-    <div className="max-h-[70vh] overflow-auto bg-muted/30 px-4 py-3">
-      {failedCount > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
-          <span className="text-xs text-warning">{failedCount} 个分块嵌入失败（FTS 降级）</span>
+    <Card className="overflow-hidden">
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold tracking-tight">{doc.title}</h2>
+            <p className="mt-1 flex flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground">
+              <StatusBadge status={doc.status} />
+              {doc.source_uri ? (
+                <span className="truncate" title={doc.source_uri}>
+                  <Link2 className="mr-0.5 inline size-3" aria-label="URL 摄取" />
+                  {doc.source_uri}
+                </span>
+              ) : (
+                <span>{mimeTag(doc.mime)}</span>
+              )}
+              <span>{fmtTime(doc.created_at)}</span>
+            </p>
+          </div>
           <Button
+            variant="ghost"
             size="sm"
-            variant="outline"
-            disabled={busy}
+            className="hover:bg-destructive/10 hover:text-destructive"
             onClick={async () => {
-              setBusy(true)
-              setMsg('')
-              try {
-                await api.post(`/knowledge/documents/${docId}/re-embed`)
-                setMsg('重嵌任务已入队')
-              } catch (ex) {
-                setMsg(ex instanceof Error ? ex.message : '重嵌失败')
-              } finally {
-                setBusy(false)
-              }
+              if (!confirm(`删除文档「${doc.title}」？分块与嵌入向量将一并删除，不可恢复。`)) return
+              await api.del(`/knowledge/documents/${doc.id}`)
+              onDeleted()
             }}
           >
-            {busy ? '入队中…' : '重嵌缺失块'}
+            删除
           </Button>
-          {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
         </div>
-      )}
-      {/* 阅读视图：分块连成整篇可读；块的 seq/FTS 调试信息退到悬停 title */}
-      <p className="mb-3 font-mono text-xs text-muted-foreground/70">
-        共 {rows.length} 块 · 全文 {rows.reduce((s, c) => s + c.content.length, 0).toLocaleString()} 字
-      </p>
-      <div className="space-y-3 text-sm leading-relaxed">
-        {rows.map((c) => (
-          <p key={c.seq} title={`#${c.seq}${c.embed_failed ? ' · FTS 降级' : ''}`}>
-            {c.content}
-          </p>
-        ))}
+        {doc.error && <p className="mt-2 text-xs text-destructive">{doc.error}</p>}
       </div>
-    </div>
+
+      <div className="px-4 py-4">
+        {rows === null ? (
+          <Spinner />
+        ) : (
+          <>
+            {failedCount > 0 && (
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+                <span className="text-xs text-warning">{failedCount} 个分块嵌入失败（FTS 降级）</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true)
+                    setMsg('')
+                    try {
+                      await api.post(`/knowledge/documents/${doc.id}/re-embed`)
+                      setMsg('重嵌任务已入队')
+                    } catch (ex) {
+                      setMsg(ex instanceof Error ? ex.message : '重嵌失败')
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}
+                >
+                  {busy ? '入队中…' : '重嵌缺失块'}
+                </Button>
+                {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+              </div>
+            )}
+            <p className="mb-3 font-mono text-xs text-muted-foreground/70">
+              共 {rows.length} 块 · 全文 {rows.reduce((s, c) => s + c.content.length, 0).toLocaleString()} 字
+            </p>
+            {/* 阅读视图：分块连成整篇；块的 seq/FTS 调试信息退到悬停 title */}
+            <div className="max-w-[70ch] space-y-3 text-sm leading-relaxed">
+              {rows.map((c) => (
+                <p key={c.seq} title={`#${c.seq}${c.embed_failed ? ' · FTS 降级' : ''}`}>
+                  {c.content}
+                </p>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
   )
 }

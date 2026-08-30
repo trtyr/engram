@@ -217,8 +217,9 @@ describe('Knowledge re-embed', () => {
       { seq: 2, content: '块2', embed_failed: false },
     ]
     render(wrap(<Knowledge />))
-    await screen.findByText('doc')
-    fireEvent.click(screen.getByRole('button', { name: '阅读' }))
+    // 主从版式：目录项 + 阅读区标题都显示文档名
+    await screen.findAllByText('doc')
+    // 主从版式：首篇自动选中，阅读区直接可见
     await screen.findByText('1 个分块嵌入失败（FTS 降级）')
     fireEvent.click(screen.getByRole('button', { name: '重嵌缺失块' }))
     await waitFor(() => {

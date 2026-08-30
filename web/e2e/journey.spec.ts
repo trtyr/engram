@@ -58,12 +58,12 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
     mimeType: 'text/markdown',
     buffer: Buffer.from(mdContent, 'utf-8'),
   })
-  await expect(
-    page.getByRole('row', { name: /playwright-guide/ }).getByText('ready', { exact: true }),
-    '\u6587\u6863\u5e94\u63a8\u8fdb\u5230 ready',
-  ).toBeVisible({ timeout: 240_000 })
-  await page.getByRole('row', { name: /playwright-guide/ }).getByRole('button', { name: '\u5206\u5757' }).click()
-  await expect(page.getByText(/#\d+/).first(), '\u5206\u5757\u9884\u89c8\u5e94\u5c55\u793a').toBeVisible({ timeout: 30_000 })
+  // 主从版式：上传后文档出现在左侧目录，点开等 ready
+  const docBtn = page.getByRole('button', { name: /playwright-guide/ })
+  await expect(docBtn, '文档应出现在目录').toBeVisible({ timeout: 240_000 })
+  await docBtn.click()
+  await expect(page.getByText('ready', { exact: true }), '文档应推进到 ready').toBeVisible({ timeout: 240_000 })
+  await expect(page.getByText(/共 \d+ 块/), '阅读区应显示分块成文').toBeVisible({ timeout: 30_000 })
 
   // ---------- 3. Memory：写会话 ->（有 LLM 时）触发蒸馏 -> 原子出现 ----------
   await page.getByRole('link', { name: 'Memory' }).click()

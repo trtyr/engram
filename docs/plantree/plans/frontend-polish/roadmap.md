@@ -70,6 +70,13 @@
    - 检索结果样式统一（标题 chip + #seq + FTS 徽章 + score 右对齐 mono；空命中 Empty）
    - rounded-xl → lg 统一；空态引导文案
    - 实测：手风琴/confirm 取消不删/真文件摄取反馈/双主题截图；28/28 + e2e PASS
+0i. **Knowledge 主从版式**（用户「左侧目录右侧查看，像 Wiki 那种；Wiki 也难看」）：
+   - 表格式列表 → 左目录（lg:w-80：标题/来源图标/相对时间/处理中脉冲点 + 标题过滤器 +
+     N 篇计数）+ 右阅读区（文档头：标题/StatusBadge/来源全链/时间/删除；正文 70ch 成文）
+   - 选中态整行反转（Engram 导航语言）；首篇自动选中、删除/过滤后回退首篇无空窗
+   - 检索命中行可点开对应文档（document_id 直达）；分块调试信息在段落 title
+   - e2e journey 选择器同步（row → 目录按钮 + 阅读区断言）；28/28 + e2e PASS
+   - Wiki 主从版式为下一项
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
