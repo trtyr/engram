@@ -165,3 +165,31 @@ async fn update_atom_can_clear_needs_review() {
     assert_eq!(a.status, "candidate");
     assert_eq!(a.content, "低置信事实");
 }
+
+/// 实体透镜进 context_pack：AI 冷启动能看到用户世界里的人与事。
+/// 有 query 按 token 相关命中，无 query 按密度头部。
+#[tokio::test]
+async fn context_pack_carries_entity_lenses() {
+    let (_pool, svc, _container) = setup().await;
+
+    let zhang = svc
+        .create_entity("张三", "person", "同事，负责后端")
+        .await
+        .unwrap();
+    let _cook = svc.create_entity("烹饪", "topic", "").await.unwrap();
+
+    // 有 query：token 相关——「张三」命中人物实体
+    let pack = svc.context_pack(Some("张三"), 10, 10_000).await.unwrap();
+    assert!(
+        pack.entities.iter().any(|e| e.id == zhang.id),
+        "query 张三 → 实体透镜应含张三，实得 {:?}",
+        pack.entities
+            .iter()
+            .map(|e| e.name.clone())
+            .collect::<Vec<String>>()
+    );
+
+    // 无 query：密度头部（两实体密度同为 0 时取 updated_at 头部，非空即可）
+    let pack = svc.context_pack(None, 10, 10_000).await.unwrap();
+    assert!(!pack.entities.is_empty(), "无 query → 实体透镜应有密度头部");
+}

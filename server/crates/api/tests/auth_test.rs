@@ -166,6 +166,99 @@ async fn auth_401_403_matrix() {
     );
 }
 
+/// amk_ key + memory scope 全旅程（AI 消费者契约面）：
+/// 写会话→列表→原子→实体→检索→context→蒸馏→嵌入状态全通；跨域 403。
+#[tokio::test]
+async fn api_key_memory_journey() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let key = create_key(&app, &admin, &["memory"]).await;
+
+    let send = |app: &Router, method: &str, uri: &str, body: Option<&str>| {
+        let mut b = Request::builder().method(method).uri(uri);
+        if body.is_some() {
+            b = b.header("content-type", "application/json");
+        }
+        app.clone().oneshot(
+            b.header("authorization", format!("Bearer {key}"))
+                .body(Body::from(body.unwrap_or_default().to_string()))
+                .unwrap(),
+        )
+    };
+
+    // 写会话（turns 契约 + distill off 防触发无 provider 蒸馏）
+    let resp = send(
+        &app,
+        "POST",
+        "/memory/sessions",
+        Some(r#"{"agent":"ai-key","turns":[{"speaker":"user","text":"张三生日是 3 月 5 日"}],"distill":"off"}"#),
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "key 应能写会话");
+
+    // 读路径全家通
+    for uri in [
+        "/memory/sessions?limit=5",
+        "/memory/atoms?limit=5",
+        "/memory/scenarios?limit=5",
+        "/memory/persona",
+        "/memory/entities",
+        "/memory/entities/graph",
+        "/memory/embeddings/status",
+    ] {
+        let resp = send(&app, "GET", uri, None).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "GET {uri} 应 200");
+    }
+
+    // 写路径：原子 + 实体 + 检索 + context + 蒸馏
+    let resp = send(
+        &app,
+        "POST",
+        "/memory/atoms",
+        Some(r#"{"kind":"fact","content":"张三的生日是 3 月 5 日","confidence":0.9}"#),
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "key 应能直写原子");
+    let resp = send(
+        &app,
+        "POST",
+        "/memory/entities",
+        Some(r#"{"name":"张三","kind":"person","summary":""}"#),
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "key 应能建实体");
+    let resp = send(
+        &app,
+        "POST",
+        "/memory/search",
+        Some(r#"{"query":"张三 生日","limit":5}"#),
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "key 应能检索");
+    let resp = send(&app, "GET", "/memory/context?query=张三", None)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "key 应能取 context_pack");
+    let resp = send(&app, "POST", "/memory/distill", Some("{}"))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::ACCEPTED,
+        "key 应能触发蒸馏（202）"
+    );
+
+    // 跨域越权：memory-only key 摸别的域必须 403
+    for uri in ["/knowledge/documents", "/wiki/pages", "/codegraph/projects"] {
+        let resp = send(&app, "GET", uri, None).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "GET {uri} 应 403");
+    }
+}
+
 #[tokio::test]
 async fn openapi_snapshot() {
     let (app, _pg) = app().await;

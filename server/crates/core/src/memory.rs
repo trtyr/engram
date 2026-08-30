@@ -91,6 +91,8 @@ pub struct ContextPack {
     pub scenarios: Vec<ScenarioDto>,
     /// L1：补充原子
     pub atoms: Vec<AtomDto>,
+    /// 实体透镜：用户世界里的人/项目/主题（有 query 按相关，无 query 按密度头部）
+    pub entities: Vec<EntityDto>,
     pub meta: ContextMeta,
 }
 
@@ -116,7 +118,7 @@ pub struct SearchResponse {
 /// 实体类型（迁移 0015 CHECK 枚举）。
 pub const ENTITY_KINDS: [&str; 4] = ["person", "project", "topic", "group"];
 
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct EntityDto {
     pub id: Uuid,
     pub name: String,
@@ -876,8 +878,57 @@ impl MemoryService {
             }
         }
 
+        // 实体透镜（小预算 ~20%）：AI 冷启动要知道用户世界里都有谁。
+        // 有 query 走 token 相关（纯 jieba，不依赖向量）；无 query 按密度头部。best-effort。
+        let ent_budget = (budget_items / 5).max(2);
+        let entity_ids: Vec<Uuid> = match query {
+            Some(q) => agent_memory_search::search_entities(&self.pool, q, ent_budget as i64)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|h| h.id)
+                .collect(),
+            None => self
+                .list_entities(None)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .take(ent_budget)
+                .map(|e| e.id)
+                .collect(),
+        };
+        let mut out_entities = Vec::new();
+        if !entity_ids.is_empty() {
+            let rows: Vec<EntityDto> = sqlx::query_as(
+                "SELECT id, name, kind, summary, \
+                 (SELECT count(*) FROM atom_entities ae WHERE ae.entity_id = entities.id) AS atom_count, \
+                 updated_at FROM entities WHERE id = ANY($1) AND merged_into IS NULL",
+            )
+                    .bind(&entity_ids)
+                    .fetch_all(&self.pool)
+                    .await?;
+            // 保持命中序（query 路径相关性优先；无 query 路径密度优先）
+            let by_id: std::collections::HashMap<Uuid, EntityDto> =
+                rows.into_iter().map(|e| (e.id, e)).collect();
+            for id in entity_ids {
+                if let Some(e) = by_id.get(&id).cloned() {
+                    if count(
+                        &format!("{}{}", e.name, e.summary),
+                        &mut chars_used,
+                        &mut truncated,
+                    ) {
+                        out_entities.push(e);
+                    } else {
+                        truncated = true;
+                        break;
+                    }
+                }
+            }
+        }
+
         // L1 补充（预算剩余）：有 query 按语义相关（search_atoms），否则 hit_count
-        let remaining = budget_items.saturating_sub(persona.len() + out_scenarios.len());
+        let remaining =
+            budget_items.saturating_sub(persona.len() + out_scenarios.len() + out_entities.len());
         let atoms: Vec<AtomDto> = match query {
             Some(q) => {
                 let hits =
@@ -922,6 +973,7 @@ impl MemoryService {
             persona,
             scenarios: out_scenarios,
             atoms: out_atoms,
+            entities: out_entities,
             meta: ContextMeta {
                 chars_used,
                 truncated,

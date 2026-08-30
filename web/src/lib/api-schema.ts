@@ -1175,6 +1175,8 @@ export interface components {
         ContextPack: {
             /** @description L1：补充原子 */
             atoms: components["schemas"]["AtomDto"][];
+            /** @description 实体透镜：用户世界里的人/项目/主题（有 query 按相关，无 query 按密度头部） */
+            entities: components["schemas"]["EntityDto"][];
             meta: components["schemas"]["ContextMeta"];
             /** @description L3：画像分面（当前版本，全量） */
             persona: components["schemas"]["PersonaVersion"][];
