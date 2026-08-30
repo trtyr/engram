@@ -10,6 +10,7 @@ import {
   BookOpen,
   LayoutDashboard,
   ListChecks,
+  LogOut,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,7 +18,7 @@ import {
   Settings as SettingsIcon,
   Waypoints,
 } from 'lucide-react'
-import { getToken } from '@/lib/api'
+import { clearToken, getToken } from '@/lib/api'
 import { useSystemStatus } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/ui-bits'
@@ -66,7 +67,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
 ]
 
 /** 已登录的主壳：桌面侧边栏（可收缩）/ 移动端顶部导航条 + 七域路由。 */
-function Shell() {
+function Shell({ onLogout }: { onLogout: () => void }) {
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem('engram-sidebar') === 'collapsed'
@@ -274,6 +275,19 @@ function Shell() {
             v{__APP_VERSION__}
           </p>
           <ThemeToggle iconClass={collapsed ? 'md:size-5' : 'size-4'} />
+          {/* 登出：系统区最后一项（展开态远端角落 / 收起态堆叠底部）；hover 走 destructive 语义 */}
+          <button
+            type="button"
+            aria-label="登出"
+            title="登出"
+            className={cn(
+              'rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive',
+              collapsed && 'md:p-2',
+            )}
+            onClick={onLogout}
+          >
+            <LogOut className={cn(collapsed ? 'md:size-5' : 'size-4')} aria-hidden="true" />
+          </button>
         </div>
       </aside>
       <main className="flex-1 overflow-auto">
@@ -327,6 +341,12 @@ export default function App() {
   // 登录成功的状态上抛（Login 组件 prop）
   const onAuthed = useCallback(() => setAuthed(true), [])
 
+  // 登出：客户端清除会话（后端无 logout 端点，ams_ 随 TTL 自然过期），authed=false 路由自动回 /login
+  const onLogout = useCallback(() => {
+    clearToken()
+    setAuthed(false)
+  }, [])
+
   if (authed === null) return <div className="min-h-screen" />
 
   return (
@@ -335,7 +355,7 @@ export default function App() {
         path="/login"
         element={authed ? <Navigate to="/" replace /> : <Login onAuthed={onAuthed} />}
       />
-      <Route path="/*" element={authed ? <Shell /> : <Navigate to="/login" replace />} />
+      <Route path="/*" element={authed ? <Shell onLogout={onLogout} /> : <Navigate to="/login" replace />} />
     </Routes>
   )
 }

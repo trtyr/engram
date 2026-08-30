@@ -45,6 +45,10 @@
    收缩释放的宽度全变成居中空白（1512 屏：展开 ~84px/侧 → 收起 ~158px/侧）。改为
    **max-w-[1440px] + 24px 边距**：1512 屏两种状态边距恒为 24px（收起仅 +6px），1920 超大屏
    居中封顶防表格无限拉伸。验证：内容宽 1304(展开)/1440(收起)、26/26、lint 0。
+0f. **登出**（用户指出「登进来不能退出，离谱」）：footer 系统区末位加登出按钮——展开态远端角落、
+   收起态堆叠底部（36px，hover destructive 语义红）；客户端清 token 回登录页（后端无 logout
+   端点，ams_ 随 TTL 过期——MVP 取舍已注释在代码）。验证：双态点击 → /login + token null、
+   零溢出、26/26。
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
