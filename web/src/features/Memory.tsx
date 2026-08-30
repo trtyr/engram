@@ -1,6 +1,6 @@
 /** Memory 域：会话 / 原子 / 场景 / 画像 / 检索。 */
-import { useEffect, useState } from 'react'
-import { api, type Atom, type Persona, type Scenario, type Session } from '@/lib/api'
+import { Fragment, useEffect, useState } from 'react'
+import { api, type Atom, type Job, type Persona, type Scenario, type Session } from '@/lib/api'
 import {
   Card,
   Empty,
@@ -10,8 +10,10 @@ import {
   StatusBadge,
   Tabs,
 } from '@/components/ui-bits'
-import { fmtTime, inputCls, selectCls, tableCls } from '@/lib/ui'
+import { fmtTime, relTime, inputCls, selectCls, tableCls } from '@/lib/ui'
+import { useSystemStatus } from '@/lib/status'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 type Tab = 'sessions' | 'atoms' | 'scenarios' | 'persona' | 'search'
 
@@ -22,6 +24,29 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'persona', label: '画像' },
   { value: 'search', label: '检索' },
 ]
+
+/** 原子 kind 中英对照（蒸馏产出的 8 类记忆形态）。 */
+const KIND_LABEL: Record<string, string> = {
+  preference: '偏好',
+  fact: '事实',
+  decision: '决策',
+  event: '事件',
+  insight: '洞察',
+  correction: '修正',
+  failure: '教训',
+  convention: '惯例',
+}
+
+/** 画像分面中英对照（迁移 0005 CHECK 枚举的 7 个分面）。 */
+const ASPECT_LABEL: Record<string, string> = {
+  identity: '身份',
+  preferences: '偏好',
+  skills: '技能',
+  constraints: '约束',
+  communication_style: '沟通风格',
+  goals: '目标',
+  routines: '例行',
+}
 
 /** 蒸馏管线条：L0→L3 层级与计数一屏可见（签名交互——点击层级直达对应 tab）。 */
 function PipelineStrip({ onGo }: { onGo: (t: Tab) => void }) {
@@ -91,7 +116,7 @@ export default function Memory() {
   const [tab, setTab] = useState<Tab>(() => {
     // 支持 ?tab= 深链（Dashboard 管线主视觉点击穿透）：仅首次挂载读一次
     const t = new URLSearchParams(window.location.search).get('tab')
-    const valid: readonly string[] = ['sessions', 'atoms', 'scenarios', 'persona']
+    const valid: readonly string[] = ['sessions', 'atoms', 'scenarios', 'persona', 'search']
     return valid.includes(t ?? '') ? (t as Tab) : 'sessions'
   })
   return (
@@ -103,15 +128,17 @@ export default function Memory() {
       {tab === 'atoms' && <Atoms />}
       {tab === 'scenarios' && <Scenarios />}
       {tab === 'persona' && <PersonaView />}
-      {tab === 'search' && <SearchPane />}
+      {tab === 'search' && <SearchPane onGoAtoms={() => setTab('atoms')} />}
     </div>
   )
 }
 
 function Sessions() {
   const [rows, setRows] = useState<Session[] | null>(null)
-  const [open, setOpen] = useState<Session | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
   const [err, setErr] = useState('')
+  const [distillBusy, setDistillBusy] = useState(false)
+  const [notice, setNotice] = useState('')
   const load = () => api.get<Session[]>('/memory/sessions?limit=50').then(setRows).catch((e) => setErr(e.message))
   useEffect(() => {
     load()
@@ -121,19 +148,34 @@ function Sessions() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <p className="min-h-5 text-xs text-muted-foreground">
+          {notice && <span className={notice.includes('失败') ? 'text-destructive' : 'text-info'}>{notice}</span>}
+        </p>
         <Button
           size="sm"
+          disabled={distillBusy}
           onClick={async () => {
-            await api.post('/memory/distill', { full: false })
-            load()
+            setDistillBusy(true)
+            setNotice('')
+            try {
+              // 202 返回入队的 Job[]——空数组 = 没有待蒸馏会话
+              const jobs = await api.post<Job[]>('/memory/distill', { full: false })
+              setNotice(jobs.length > 0 ? `已入队 ${jobs.length} 个蒸馏任务，产出将陆续出现在 L1` : '没有待蒸馏的会话')
+              load()
+            } catch (e) {
+              setNotice(e instanceof Error ? `触发失败：${e.message}` : '触发失败')
+            } finally {
+              setDistillBusy(false)
+            }
           }}
         >
-          触发蒸馏
+          {distillBusy ? '提交中…' : '触发蒸馏'}
         </Button>
       </div>
+
       {rows.length === 0 ? (
-        <Empty text="暂无会话——POST /memory/sessions 写入" />
+        <Empty text="暂无会话——对话通过 API / MCP 写入后在此列出，蒸馏沉淀为 L1 原子" />
       ) : (
         <Card className="overflow-x-auto">
           <table className={tableCls.root}>
@@ -148,49 +190,68 @@ function Sessions() {
             </thead>
             <tbody>
               {rows.map((s) => (
-                <tr key={s.id} className={tableCls.row}>
-                  <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(s.created_at)}</td>
-                  <td className={tableCls.td}>{s.agent}</td>
-                  <td className={tableCls.tdMono}>{s.content?.length ?? 0}</td>
-                  <td className={tableCls.td}>
-                    <StatusBadge status={s.distill_status} />
-                  </td>
-                  <td className={`${tableCls.td} text-right`}>
-                    <Button variant="ghost" size="sm" onClick={() => setOpen(s)}>
-                      详情
-                    </Button>
-                  </td>
-                </tr>
+                <Fragment key={s.id}>
+                  <tr className={tableCls.row}>
+                    <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(s.created_at)}</td>
+                    <td className={tableCls.td}>{s.agent}</td>
+                    <td className={tableCls.tdMono}>{s.content?.length ?? 0}</td>
+                    <td className={tableCls.td}>
+                      <StatusBadge status={s.distill_status} />
+                    </td>
+                    <td className={`${tableCls.td} text-right`}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-expanded={openId === s.id}
+                        onClick={() => setOpenId(openId === s.id ? null : s.id)}
+                      >
+                        {openId === s.id ? '收起' : '详情'}
+                      </Button>
+                    </td>
+                  </tr>
+                  {/* 手风琴：紧贴该行下方展开逐轮对话，视线不断裂 */}
+                  {openId === s.id && (
+                    <tr>
+                      <td colSpan={5} className="border-b border-border p-0">
+                        <div className="bg-muted/30 px-4 py-3">
+                          <div className="mb-2.5 flex items-center justify-between">
+                            <p className="font-mono text-xs text-muted-foreground">{s.id}</p>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={async () => {
+                                if (!confirm('擦除该会话？关联原子的溯源将标记为 erased，不可恢复。')) return
+                                await api.del(`/memory/sessions/${s.id}`)
+                                setOpenId(null)
+                                load()
+                              }}
+                            >
+                              擦除
+                            </Button>
+                          </div>
+                          <div className="space-y-1.5">
+                            {s.content?.map((t, i) => (
+                              <div key={i} className="flex gap-2 text-sm">
+                                <span className="w-14 shrink-0 font-mono text-xs leading-5 text-muted-foreground">
+                                  {t.speaker}
+                                </span>
+                                {t.ts && (
+                                  <span className="shrink-0 font-mono text-xs leading-5 text-muted-foreground/60">
+                                    {fmtTime(t.ts)}
+                                  </span>
+                                )}
+                                <span className="flex-1">{t.text}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
-        </Card>
-      )}
-      {open && (
-        <Card className="p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="font-mono text-xs text-muted-foreground">{open.id}</p>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={async () => {
-                if (!confirm('擦除该会话？关联原子的溯源将标记为 erased，不可恢复。')) return
-                await api.del(`/memory/sessions/${open.id}`)
-                setOpen(null)
-                load()
-              }}
-            >
-              擦除
-            </Button>
-          </div>
-          <div className="space-y-2">
-            {open.content?.map((t, i) => (
-              <div key={i} className="flex gap-2 text-sm">
-                <span className="w-16 shrink-0 text-muted-foreground">{t.speaker}:</span>
-                <span className="flex-1">{t.text}</span>
-              </div>
-            ))}
-          </div>
         </Card>
       )}
     </div>
@@ -205,6 +266,8 @@ function Atoms() {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [superseding, setSuperseding] = useState<string | null>(null)
+  // 蒸馏进行中（系统状态轮询源）才有新原子产出——闲时不轮询，省请求
+  const { distilling } = useSystemStatus()
   const params = () => {
     const p = new URLSearchParams({ limit: '200' })
     if (kind) p.set('kind', kind)
@@ -218,12 +281,12 @@ function Atoms() {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, review])
-  // 蒸馏后台进行时轮询（有 pending 会话即可能有新原子；全部处理完则停）
   useEffect(() => {
+    if (!distilling) return
     const t = setInterval(load, 5000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, review])
+  }, [distilling, kind, review])
   if (err) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
 
@@ -235,7 +298,9 @@ function Atoms() {
         <select className={selectCls} value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">全部 kind</option>
           {kinds.map((k) => (
-            <option key={k}>{k}</option>
+            <option key={k} value={k}>
+              {KIND_LABEL[k] ?? k} {k}
+            </option>
           ))}
         </select>
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -282,105 +347,127 @@ function Atoms() {
       )}
 
       {rows.length === 0 ? (
-        <Empty text="暂无原子" />
+        <Empty text="暂无原子——会话蒸馏后在 L1 层沉淀记忆原子" />
       ) : (
-        <Card className="overflow-x-auto">
-          <table className={tableCls.root}>
-            <thead className={tableCls.thead}>
-              <tr>
-                <th className={tableCls.th}>kind</th>
-                <th className={tableCls.th}>内容</th>
-                <th className={tableCls.th}>置信</th>
-                <th className={tableCls.th}>状态</th>
-                <th className={tableCls.th}>命中</th>
-                <th className={tableCls.th} />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((a) => (
-                <tr key={a.id} className={tableCls.row}>
-                  <td className={`${tableCls.td} text-muted-foreground`}>{a.kind}</td>
-                  <td className={tableCls.td}>
-                    {editing === a.id ? (
-                      <span className="flex items-center gap-1.5">
-                        <input
-                          data-testid={`atom-edit-${a.id}`}
-                          className={`${inputCls} w-72`}
-                          value={draft}
-                          onChange={(e) => setDraft(e.target.value)}
-                          onKeyDown={async (e) => {
-                            if (e.key === 'Enter') {
-                              await api.patch(`/memory/atoms/${a.id}`, { content: draft })
-                              setEditing(null)
-                              setRows(await api.get<Atom[]>(`/memory/atoms?${params()}`))
-                            }
-                            if (e.key === 'Escape') setEditing(null)
-                          }}
-                        />
-                        <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
-                          取消
-                        </Button>
-                      </span>
-                    ) : (
-                      <span
-                        data-testid={`atom-content-${a.id}`}
-                        onDoubleClick={() => {
-                          setEditing(a.id)
-                          setDraft(a.content)
-                        }}
-                        title="双击编辑"
-                        className="cursor-text"
-                      >
-                        {a.needs_review && (
-                          <span className="mr-1.5 rounded bg-warning/15 px-1.5 py-0.5 font-mono text-xs text-warning">
-                            人审
+        <>
+          <Card className="overflow-x-auto">
+            <table className={tableCls.root}>
+              <thead className={tableCls.thead}>
+                <tr>
+                  <th className={tableCls.th}>kind</th>
+                  <th className={tableCls.th}>内容</th>
+                  <th className={tableCls.th}>置信</th>
+                  <th className={tableCls.th}>状态</th>
+                  <th className={tableCls.th}>溯源</th>
+                  <th className={tableCls.th}>命中</th>
+                  <th className={tableCls.th} />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((a) => {
+                  const refIds = (a.source_refs ?? [])
+                    .map((r) => (r.session_id ? r.session_id.slice(0, 8) + (r.erased ? '（已擦除）' : '') : ''))
+                    .filter(Boolean)
+                    .join(' · ')
+                  return (
+                    <tr key={a.id} className={tableCls.row}>
+                      <td className={tableCls.td}>
+                        {/* 中英对照：中文为主（可读），kind 英文 mono 为数据标识 */}
+                        <span className="block text-sm">{KIND_LABEL[a.kind] ?? a.kind}</span>
+                        <span className="block font-mono text-xs text-muted-foreground">{a.kind}</span>
+                      </td>
+                      <td className={tableCls.td}>
+                        {editing === a.id ? (
+                          <span className="flex items-center gap-1.5">
+                            <input
+                              data-testid={`atom-edit-${a.id}`}
+                              className={`${inputCls} w-72`}
+                              value={draft}
+                              onChange={(e) => setDraft(e.target.value)}
+                              onKeyDown={async (e) => {
+                                if (e.key === 'Enter') {
+                                  await api.patch(`/memory/atoms/${a.id}`, { content: draft })
+                                  setEditing(null)
+                                  setRows(await api.get<Atom[]>(`/memory/atoms?${params()}`))
+                                }
+                                if (e.key === 'Escape') setEditing(null)
+                              }}
+                            />
+                            <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
+                              取消
+                            </Button>
+                          </span>
+                        ) : (
+                          <span
+                            data-testid={`atom-content-${a.id}`}
+                            onDoubleClick={() => {
+                              setEditing(a.id)
+                              setDraft(a.content)
+                            }}
+                            title="双击编辑"
+                            className="-mx-1 cursor-text rounded-sm px-1 transition-colors hover:bg-muted/40"
+                          >
+                            {a.needs_review && (
+                              <span className="mr-1.5 rounded bg-warning/15 px-1.5 py-0.5 font-mono text-xs text-warning">
+                                人审
+                              </span>
+                            )}
+                            {a.content}
                           </span>
                         )}
-                        {a.content}
-                      </span>
-                    )}
-                  </td>
-                  <td className={tableCls.tdMono}>{a.confidence.toFixed(2)}</td>
-                  <td className={tableCls.td}>
-                    <StatusBadge status={a.status} />
-                    {a.superseded_by && (
-                      <span className="ml-1.5 font-mono text-xs text-muted-foreground">
-                        → {a.superseded_by.slice(0, 8)}
-                      </span>
-                    )}
-                  </td>
-                  <td className={tableCls.tdMono}>{a.hit_count}</td>
-                  <td className={`${tableCls.td} whitespace-nowrap text-right`}>
-                    {a.status === 'active' && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="mr-1"
-                          data-testid={`atom-supersede-${a.id}`}
-                          onClick={() => setSuperseding(a.id)}
-                        >
-                          supersede
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          data-testid={`atom-archive-${a.id}`}
-                          onClick={async () => {
-                            await api.patch(`/memory/atoms/${a.id}`, { status: 'archived' })
-                            setRows(rows.filter((r) => r.id !== a.id))
-                          }}
-                        >
-                          归档
-                        </Button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+                      </td>
+                      <td className={cn(tableCls.tdMono, a.confidence < 0.6 && 'text-warning')} title="置信度（低于 0.60 黄色提示）">
+                        {a.confidence.toFixed(2)}
+                      </td>
+                      <td className={tableCls.td}>
+                        <StatusBadge status={a.status} />
+                        {a.superseded_by && (
+                          <span className="ml-1.5 font-mono text-xs text-muted-foreground">
+                            → {a.superseded_by.slice(0, 8)}
+                          </span>
+                        )}
+                      </td>
+                      <td className={tableCls.tdMono} title={refIds || '无溯源'}>
+                        {a.source_refs?.length ?? 0}
+                      </td>
+                      <td className={tableCls.tdMono}>{a.hit_count}</td>
+                      <td className={`${tableCls.td} whitespace-nowrap text-right`}>
+                        {a.status === 'active' && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="mr-1"
+                              data-testid={`atom-supersede-${a.id}`}
+                              title="用新事实取代该记忆"
+                              onClick={() => setSuperseding(a.id)}
+                            >
+                              取代
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              data-testid={`atom-archive-${a.id}`}
+                              onClick={async () => {
+                                await api.patch(`/memory/atoms/${a.id}`, { status: 'archived' })
+                                setRows(rows.filter((r) => r.id !== a.id))
+                              }}
+                            >
+                              归档
+                            </Button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </Card>
+          {rows.length === 200 && (
+            <p className="text-xs text-muted-foreground">已显示前 200 条——收窄 kind / 人审筛选，或提高 limit 查看更多</p>
+          )}
+        </>
       )}
     </div>
   )
@@ -388,20 +475,47 @@ function Atoms() {
 
 function Scenarios() {
   const [rows, setRows] = useState<Scenario[] | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
   useEffect(() => {
     api.get<Scenario[]>('/memory/scenarios').then(setRows).catch(() => {})
   }, [])
   if (!rows) return <Spinner />
-  if (rows.length === 0) return <Empty text="暂无场景（蒸馏组织阶段产出）" />
+  if (rows.length === 0) return <Empty text="暂无场景——蒸馏组织阶段把相关原子聚合成场景" />
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {rows.map((s) => (
         <Card key={s.id} className="p-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-medium">{s.topic}</h3>
-            <span className="text-xs text-muted-foreground">v{s.version}</span>
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              className="text-left font-medium transition-colors hover:text-muted-foreground"
+              onClick={() => setOpenId(openId === s.id ? null : s.id)}
+              aria-expanded={openId === s.id}
+              title="点击展开/收起聚合的原子"
+            >
+              {s.topic}
+            </button>
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">v{s.version}</span>
           </div>
           <p className="mt-1.5 text-sm text-muted-foreground">{s.summary}</p>
+          <p className="mt-3 flex items-center gap-2 font-mono text-xs text-muted-foreground/70">
+            <span>{s.atom_refs.length} 原子</span>
+            <span aria-hidden="true">·</span>
+            <span>{relTime(s.updated_at)}</span>
+          </p>
+          {/* 展开看场景聚合的原子清单（L2 的溯源面） */}
+          {openId === s.id && (
+            <div className="mt-3 border-t border-border pt-2.5">
+              <p className="mb-1.5 font-mono text-xs text-muted-foreground">atom_refs</p>
+              <ul className="space-y-1">
+                {s.atom_refs.map((id) => (
+                  <li key={id} className="font-mono text-xs text-muted-foreground">
+                    {id}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Card>
       ))}
     </div>
@@ -410,73 +524,93 @@ function Scenarios() {
 
 function PersonaView() {
   const [rows, setRows] = useState<Persona[] | null>(null)
-  const [history, setHistory] = useState<{ aspect: string; versions: Persona[] } | null>(null)
+  // 历史随卡片内展开（per-aspect 按需拉取），不再全局面板
+  const [openAspect, setOpenAspect] = useState<string | null>(null)
+  const [history, setHistory] = useState<Persona[] | null>(null)
   useEffect(() => {
     api.get<Persona[]>('/memory/persona').then(setRows).catch(() => {})
   }, [])
   if (!rows) return <Spinner />
-  if (rows.length === 0) return <Empty text="画像为空（蒸馏 persona 阶段产出）" />
+  if (rows.length === 0) return <Empty text="画像为空——蒸馏 persona 阶段从原子与场景提炼长期画像" />
+
+  const loadHistory = async (aspect: string) => {
+    if (openAspect === aspect) {
+      setOpenAspect(null)
+      setHistory(null)
+      return
+    }
+    setHistory(null)
+    setOpenAspect(aspect)
+    setHistory(await api.get<Persona[]>(`/memory/persona/history?aspect=${aspect}`))
+  }
+
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2">
-        {rows.map((p) => (
-          <Card key={p.id} className="p-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium">{p.aspect}</h3>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">v{p.version}</span>
+    <div className="grid items-start gap-4 md:grid-cols-2">
+      {rows.map((p) => (
+        <Card key={p.id} className="p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="font-medium">{ASPECT_LABEL[p.aspect] ?? p.aspect}</h3>
+              <p className="font-mono text-xs text-muted-foreground">{p.aspect}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span className="font-mono text-xs text-muted-foreground">v{p.version}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-expanded={openAspect === p.aspect}
+                onClick={() => loadHistory(p.aspect)}
+              >
+                历史
+              </Button>
+              {p.version > 1 && (
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   onClick={async () => {
-                    const h = await api.get<Persona[]>(`/memory/persona/history?aspect=${p.aspect}`)
-                    setHistory({ aspect: p.aspect, versions: h })
+                    if (!confirm(`回滚 ${ASPECT_LABEL[p.aspect] ?? p.aspect} 到 v${p.version - 1}？当前版本会存入历史。`)) return
+                    await api.post('/memory/persona/rollback', { aspect: p.aspect, to_version: p.version - 1 })
+                    const np = await api.get<Persona[]>('/memory/persona')
+                    setRows(np)
+                    // 历史面板保持展开并刷新——回滚效果在版本列表里立刻可见
+                    if (openAspect === p.aspect) {
+                      setHistory(await api.get<Persona[]>(`/memory/persona/history?aspect=${p.aspect}`))
+                    }
                   }}
                 >
-                  历史
+                  回滚 v{p.version - 1}
                 </Button>
-                {p.version > 1 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      await api.post('/memory/persona/rollback', { aspect: p.aspect, to_version: p.version - 1 })
-                      const np = await api.get<Persona[]>('/memory/persona')
-                      setRows(np)
-                    }}
-                  >
-                    回滚 v{p.version - 1}
-                  </Button>
-                )}
-              </div>
+              )}
             </div>
-            <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{p.content}</p>
-          </Card>
-        ))}
-      </div>
-      {history && (
-        <Card className="p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-medium">{history.aspect} 版本历史</h3>
-            <Button variant="ghost" size="sm" onClick={() => setHistory(null)}>
-              关闭
-            </Button>
           </div>
-          {history.versions.map((v) => (
-            <div key={v.id} className="mb-2 border-b border-border/50 pb-2 text-sm last:border-0">
-              <span className="mr-2 rounded bg-white/5 px-1.5 py-0.5 text-xs">v{v.version}</span>
-              <span className="text-muted-foreground">{fmtTime(v.created_at)}</span>
-              <p className="mt-1">{v.content}</p>
+          <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{p.content}</p>
+          <p className="mt-3 font-mono text-xs text-muted-foreground/70">{relTime(p.created_at)}</p>
+          {openAspect === p.aspect && (
+            <div className="mt-3 border-t border-border pt-2.5">
+              {history === null ? (
+                <p className="font-mono text-xs text-muted-foreground">加载历史…</p>
+              ) : (
+                history.map((v) => (
+                  <div key={v.id} className="mb-2.5 border-b border-border/50 pb-2.5 text-sm last:mb-0 last:border-0 last:pb-0">
+                    <span className="mr-2 rounded border border-border px-1.5 py-px font-mono text-xs text-muted-foreground">
+                      v{v.version}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{fmtTime(v.created_at)}</span>
+                    <p className="mt-1">{v.content}</p>
+                  </div>
+                ))
+              )}
             </div>
-          ))}
+          )}
         </Card>
-      )}
+      ))}
     </div>
   )
 }
 
-function SearchPane() {
+function SearchPane({ onGoAtoms }: { onGoAtoms: () => void }) {
   const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(false)
   const [archiveMsg, setArchiveMsg] = useState('')
   const [r, setR] = useState<{
     l1: { id: string; snippet: string; score: number }[]
@@ -484,24 +618,34 @@ function SearchPane() {
     l3: Persona[]
   } | null>(null)
   const [err, setErr] = useState('')
+  const empty = r !== null && r.l1.length + r.l2.length + r.l3.length === 0
   return (
     <div className="space-y-4">
       <form
         className="flex gap-2"
         onSubmit={async (e) => {
           e.preventDefault()
+          if (busy || !q.trim()) return
+          setBusy(true)
+          setErr('')
+          setArchiveMsg('')
           try {
             setR(await api.post('/memory/search', { query: q, max_items: 10 }))
           } catch (ex) {
             setErr(ex instanceof Error ? ex.message : '检索失败')
+          } finally {
+            setBusy(false)
           }
         }}
       >
         <input className={`${inputCls} flex-1`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="中文检索记忆…" />
-        <Button type="submit">检索</Button>
+        <Button type="submit" disabled={busy}>
+          {busy ? '检索中…' : '检索'}
+        </Button>
       </form>
       {err && <ErrorBox msg={err} />}
-      {r && (
+      {empty && <Empty text="无匹配记忆——换个说法或先在会话/知识里积累素材" />}
+      {r && !empty && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium">检索结果</h3>
@@ -525,12 +669,24 @@ function SearchPane() {
               存档到 wiki
             </Button>
           </div>
-          {archiveMsg && <p className="text-xs text-muted-foreground">{archiveMsg}</p>}
+          {archiveMsg && (
+            <p className={cn('text-xs', archiveMsg.includes('失败') ? 'text-destructive' : 'text-success')}>{archiveMsg}</p>
+          )}
           <Card className="divide-y divide-border/50 p-1">
             <ResultSection title="L1 原子" count={r.l1.length}>
               {r.l1.map((h) => (
-                <p key={h.id} className="py-2 text-sm">
-                  {h.snippet} <span className="text-xs tabular-nums text-muted-foreground">({h.score.toFixed(3)})</span>
+                <p key={h.id} className="flex items-start gap-2 py-2 text-sm">
+                  <span className="flex-1">
+                    {h.snippet}
+                    <span className="ml-2 font-mono text-xs text-muted-foreground">{h.score.toFixed(3)}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 text-xs text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
+                    onClick={onGoAtoms}
+                  >
+                    查看
+                  </button>
                 </p>
               ))}
             </ResultSection>

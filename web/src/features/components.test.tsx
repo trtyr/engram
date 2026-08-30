@@ -192,7 +192,8 @@ describe('Persona 版本历史与回滚', () => {
     fireEvent.click(screen.getByRole('button', { name: '历史' }))
     await screen.findByText('用户居住在上海。v1')
     expect(screen.getByText('用户居住在上海。v1')).toBeInTheDocument()
-    // 回滚（v2 > 1 显示回滚按钮）
+    // 回滚（v2 > 1 显示回滚按钮；新加了 confirm 守卫）
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     fireEvent.click(screen.getByRole('button', { name: /回滚 v1/ }))
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith('/memory/persona/rollback', { aspect: 'identity', to_version: 1 })

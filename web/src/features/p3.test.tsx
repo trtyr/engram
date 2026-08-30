@@ -31,6 +31,7 @@ vi.mock('@/lib/api', () => {
     sessions: [] as { id: string; agent: string; content: { speaker: string; text: string; ts?: string }[]; distill_status: string; created_at: string }[],
     atoms: [] as { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; needs_review: boolean; hit_count: number; scenario_id: string | null; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[],
     usage: [] as { id: number; provider: string; model: string; purpose: string; input_tokens: number; output_tokens: number; latency_ms: number; job_id: number | null; ts: string }[],
+    memorySearch: null as { l1: { id: string; snippet: string; score: number }[]; l2: { id: string; title: string | null; snippet: string }[]; l3: unknown[] } | null,
   }
   const api = {
     get: vi.fn(async (p: string) => {
@@ -50,6 +51,7 @@ vi.mock('@/lib/api', () => {
     }),
     post: vi.fn(async (p: string, _b?: unknown) => {
       if (p === '/search') return state.searchResult
+      if (p === '/memory/search') return state.memorySearch
       if (p.includes('/re-embed')) return undefined
       if (p === '/wiki/search') return state.wikiSearchResult
       if (p.endsWith('/re-encrypt')) return { re_encrypted: state.reencryptResult }
@@ -78,11 +80,13 @@ interface MockState {
   sessions: { id: string; agent: string; content: { speaker: string; text: string; ts?: string }[]; distill_status: string; created_at: string }[]
   atoms: { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; needs_review: boolean; hit_count: number; scenario_id: string | null; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[]
   usage: { id: number; provider: string; model: string; purpose: string; input_tokens: number; output_tokens: number; latency_ms: number; job_id: number | null; ts: string }[]
+  memorySearch: { l1: { id: string; snippet: string; score: number }[]; l2: { id: string; title: string | null; snippet: string }[]; l3: unknown[] } | null
 }
 
 const mockState = (api as unknown as { __state: MockState }).__state
 
 import Dashboard from '@/features/Dashboard'
+import Memory from '@/features/Memory'
 import Settings from '@/features/Settings'
 import Knowledge from '@/features/Knowledge'
 import Wiki from '@/features/Wiki'
@@ -98,6 +102,10 @@ beforeEach(() => {
   mockState.purpose = { goals: [], key_questions: [], scope: [] }
   mockState.wikiSearchResult = null
   mockState.reencryptResult = 0
+  mockState.sessions = []
+  mockState.atoms = []
+  mockState.usage = []
+  mockState.memorySearch = null
 })
 
 describe('Dashboard 概览：管线主视觉 + 用量图', () => {
@@ -135,6 +143,27 @@ describe('Dashboard 概览：管线主视觉 + 用量图', () => {
     const todayBar = document.querySelector('svg[role="img"] rect:last-of-type title')
     expect(todayBar?.textContent).toContain('1,000 tokens')
     expect(todayBar?.textContent).toContain('1 次调用')
+  })
+})
+
+describe('Memory 检索面板', () => {
+  it('L1 命中行「查看」跳到原子 tab', async () => {
+    mockState.memorySearch = { l1: [{ id: 'a1', snippet: '命中片段', score: 0.912 }], l2: [], l3: [] }
+    render(wrap(<Memory />))
+    fireEvent.click(screen.getByRole('button', { name: '检索' }))
+    fireEvent.change(screen.getByPlaceholderText('中文检索记忆…'), { target: { value: '命中' } })
+    // 名为「检索」的按钮有两个（tab + 表单提交），点最后一个（提交）
+    fireEvent.click(screen.getAllByRole('button', { name: '检索' }).at(-1)!)
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith('/memory/search', { query: '命中', max_items: 10 })
+      expect(screen.getByText('查看')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('查看'))
+    await waitFor(() => {
+      // 原子 tab 被激活（选中态反转）
+      const atomTab = screen.getByRole('button', { name: '原子' })
+      expect(atomTab.getAttribute('aria-pressed')).toBe('true')
+    })
   })
 })
 
