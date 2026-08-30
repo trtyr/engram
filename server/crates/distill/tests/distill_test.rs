@@ -564,3 +564,83 @@ async fn arbitrate_null_embedding_falls_back_to_fts() {
     env.handle.shutdown();
     env.handle.join().await;
 }
+
+/// 实体抽取挂链（社交记忆）：atoms 带 entities 字段 → 原子、实体、关联三表齐落；
+/// 同名同类活体只建一次；无实体的原子不产生关联。
+#[tokio::test]
+async fn extract_creates_and_links_entities() {
+    let env = setup(vec![
+        json!({"atoms": [
+            {"kind": "fact", "content": "张三建议用户用 Rust 重写索引层", "confidence": 0.9, "turn_refs": [1],
+             "entities": [{"name": "张三", "kind": "person"}, {"name": "Engram", "kind": "project"}]},
+            {"kind": "fact", "content": "张三的生日是 3 月 5 日", "confidence": 0.85, "turn_refs": [1],
+             "entities": [{"name": "张三", "kind": "person"}]},
+            {"kind": "preference", "content": "用户喜欢暗色主题", "confidence": 0.9, "turn_refs": [1]}
+        ]}),
+        // arbitrate：占位 id 不命中 → 兜底转正
+        json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
+        json!({"actions": []}),
+    ])
+    .await;
+
+    let sid = Uuid::now_v7();
+    sqlx::query("INSERT INTO raw_sessions (id, agent, content) VALUES ($1, 'pi', $2)")
+        .bind(sid)
+        .bind(session(&[(
+            "user",
+            "和张三聊了 Engram 重构，顺便他提到生日是 3 月 5 日；我说我喜欢暗色主题",
+        )]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "extract_atoms").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "extract 应成功: {:?}",
+        j.error
+    );
+    wait_done(&env.queue, "arbitrate_atoms").await;
+
+    let atom_n: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(atom_n, 3);
+
+    // 同名同类活体只建一次：张三 1 行 + Engram 1 行
+    let zhang_n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM entities WHERE name = '张三' AND kind = 'person' AND merged_into IS NULL")
+        .fetch_one(&env.pool).await.unwrap();
+    assert_eq!(zhang_n, 1, "同名同类实体应复用单行");
+    let entity_n: i64 = sqlx::query_scalar("SELECT count(*) FROM entities")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(entity_n, 2);
+
+    // 关联：原子1→(张三,Engram) + 原子2→张三 = 3 条；原子3 无实体零关联
+    let link_n: i64 = sqlx::query_scalar("SELECT count(*) FROM atom_entities")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(link_n, 3);
+
+    // 张三密度 = 2（两条原子挂他）
+    let zhang_density: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM atom_entities ae JOIN entities e ON e.id = ae.entity_id \
+         WHERE e.name = '张三'",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(zhang_density, 2);
+
+    env.handle.shutdown();
+    env.handle.join().await;
+}
