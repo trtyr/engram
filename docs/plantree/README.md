@@ -6,7 +6,7 @@ agent-memory 仓库的规划树根。项目级基线由 [baseline/](baseline/REA
 
 | Plan | Status | Current Phase | Last Landed | Next Target |
 |---|---|---|---|---|
-| [frontend-polish](plans/frontend-polish/README.md) | In Progress | R1+R2 已落地（2026-08-30） | 双 P1 修复 + /jobs Accept 分流 + 侧栏四件套（收缩/徽章/检索/分区） | R3 移动端与可达性 |
+| [frontend-polish](plans/frontend-polish/README.md) | In Progress | R1+R2 已落地并推送（ffc5568 双绿） | 双 P1 修复 + /jobs Accept 分流 + 侧栏四件套（收缩/徽章/检索/分区）+ 六轮视觉修复 | R3 移动端与可达性 |
 
 ## Registered Roots
 
