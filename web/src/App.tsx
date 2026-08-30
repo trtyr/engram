@@ -250,22 +250,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             collapsed && 'md:flex-col md:justify-stretch md:gap-1',
           )}
         >
-          <button
-            type="button"
-            aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
-            title={collapsed ? '展开侧边栏' : '收起侧边栏'}
-            className={cn(
-              'hidden rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:block',
-              collapsed ? 'md:p-2' : 'p-1.5',
-            )}
-            onClick={toggleCollapsed}
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="md:size-5" aria-hidden="true" />
-            ) : (
-              <PanelLeftClose className="size-4" aria-hidden="true" />
-            )}
-          </button>
+          {/* 系统区：左=版本信息，右=动作簇（收起/主题/登出贴排）；收起态整列纵向堆叠 */}
           <p
             className={cn(
               'pl-1 font-mono text-xs text-muted-foreground/70',
@@ -274,20 +259,38 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           >
             v{__APP_VERSION__}
           </p>
-          <ThemeToggle iconClass={collapsed ? 'md:size-5' : 'size-4'} />
-          {/* 登出：系统区最后一项（展开态远端角落 / 收起态堆叠底部）；hover 走 destructive 语义 */}
-          <button
-            type="button"
-            aria-label="登出"
-            title="登出"
-            className={cn(
-              'rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive',
-              collapsed && 'md:p-2',
-            )}
-            onClick={onLogout}
-          >
-            <LogOut className={cn(collapsed ? 'md:size-5' : 'size-4')} aria-hidden="true" />
-          </button>
+          <div className={cn('flex items-center gap-0.5', collapsed && 'md:flex-col md:gap-1')}>
+            <button
+              type="button"
+              aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+              title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+              className={cn(
+                'hidden rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:block',
+                collapsed ? 'md:p-2' : 'p-1.5',
+              )}
+              onClick={toggleCollapsed}
+            >
+              {collapsed ? (
+                <PanelLeftOpen className="md:size-5" aria-hidden="true" />
+              ) : (
+                <PanelLeftClose className="size-4" aria-hidden="true" />
+              )}
+            </button>
+            <ThemeToggle iconClass={collapsed ? 'md:size-5' : 'size-4'} />
+            {/* 登出：动作簇末位；hover 走 destructive 语义 */}
+            <button
+              type="button"
+              aria-label="登出"
+              title="登出"
+              className={cn(
+                'rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive',
+                collapsed && 'md:p-2',
+              )}
+              onClick={onLogout}
+            >
+              <LogOut className={cn(collapsed ? 'md:size-5' : 'size-4')} aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </aside>
       <main className="flex-1 overflow-auto">
