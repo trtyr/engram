@@ -30,6 +30,16 @@ pub fn extract_system() -> String {
 输出严格 JSON：{\"atoms\":[{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"turn_refs\":[1],\"entities\":[{\"name\":\"张三\",\"kind\":\"person\"}]}]}".into()
 }
 
+/// 实体档案聚合：从记忆切片生成实体画像摘要（切片视图，非独立记忆系统）。
+pub fn entity_portrait_system() -> String {
+    "你是一个记忆档案员。给你一个实体（人物/项目/主题/群组）以及用户记忆中涉及它的事实列表，请聚合为一段简明的实体档案。
+
+规则：
+1. 2~3 句中文，陈述式，只依据给出的事实，不要臆测。
+2. 概括这个实体与用户的关系及关键特征（职责/偏好/约定/近况），信息以最近的为准。
+3. 输出严格 JSON：{\"summary\":\"...\"}".into()
+}
+
 /// L1 仲裁：候选 × 既有相似 → 新增/重复/矛盾。
 pub fn arbitrate_system() -> String {
     "你是一个记忆仲裁器。对每条候选记忆（candidate），结合与其相似的既有记忆（existing）判定：

@@ -565,6 +565,133 @@ async fn arbitrate_null_embedding_falls_back_to_fts() {
     env.handle.join().await;
 }
 
+/// 实体档案自动生成：consolidate 对高密度滞后实体 LLM 聚合摘要；
+/// 低密度（<3 原子）与摘要新鲜的实体跳过；LLM 失败仅告警不拖垮主链。
+#[tokio::test]
+async fn consolidate_generates_entity_portraits() {
+    // mock 队列：近重复合并无候选（原子无嵌入 → 不调 LLM）；张三档案一份；
+    // 李四（LLM 故障路径）由独立用例覆盖——本用例只验证生成与跳过逻辑
+    let env = setup(vec![
+        json!({"summary": "张三是用户的同事，负责后端；近期与用户协作 Engram 索引层重写。"}),
+    ])
+    .await;
+
+    // 张三：3 条原子、空摘要 → 应生成档案
+    let zhang: Uuid = sqlx::query_scalar(
+        "INSERT INTO entities (id, name, kind, summary) VALUES ($1, '张三', 'person', '') RETURNING id")
+        .bind(Uuid::now_v7())
+        .fetch_one(&env.pool).await.unwrap();
+    for i in 0..3 {
+        let aid = Uuid::now_v7();
+        sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
+                     VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $3))")
+            .bind(aid)
+            .bind(format!("关于张三的事实 {i}"))
+            .bind(format!("zhangsan {i}"))
+            .execute(&env.pool).await.unwrap();
+        sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
+            .bind(aid)
+            .bind(zhang)
+            .execute(&env.pool)
+            .await
+            .unwrap();
+    }
+    // Engram：2 条原子（低于 3 密度阈值）→ 跳过
+    let eng: Uuid = sqlx::query_scalar(
+        "INSERT INTO entities (id, name, kind, summary) VALUES ($1, 'Engram', 'project', '') RETURNING id")
+        .bind(Uuid::now_v7())
+        .fetch_one(&env.pool).await.unwrap();
+    for i in 0..2 {
+        let aid = Uuid::now_v7();
+        sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
+                     VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $3))")
+            .bind(aid)
+            .bind(format!("Engram 项目事实 {i}"))
+            .bind(format!("engram {i}"))
+            .execute(&env.pool).await.unwrap();
+        sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
+            .bind(aid)
+            .bind(eng)
+            .execute(&env.pool)
+            .await
+            .unwrap();
+    }
+    // 王五：摘要新鲜（updated_at 晚于所有原子）→ 跳过
+    let wang: Uuid = sqlx::query_scalar(
+        "INSERT INTO entities (id, name, kind, summary, updated_at) \
+         VALUES ($1, '王五', 'person', '已有新鲜档案', now()) RETURNING id",
+    )
+    .bind(Uuid::now_v7())
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    let aid = Uuid::now_v7();
+    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
+                 VALUES ($1, 'fact', '王五旧事实', 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $2))")
+        .bind(aid).bind("wangwu old")
+        .execute(&env.pool).await.unwrap();
+    sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
+        .bind(aid)
+        .bind(wang)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    // 王五原子数只有 1（低于阈值，双保险跳过）——再补两条使密度=3，验证「新鲜摘要」才是跳过原因
+    for i in 0..2 {
+        let a2 = Uuid::now_v7();
+        sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv, created_at) \
+                     VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $3), now() - interval '1 day')")
+            .bind(a2)
+            .bind(format!("王五更旧事实 {i}"))
+            .bind(format!("wangwu {i}"))
+            .execute(&env.pool).await.unwrap();
+        sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
+            .bind(a2)
+            .bind(wang)
+            .execute(&env.pool)
+            .await
+            .unwrap();
+    }
+
+    env.queue
+        .enqueue(JobTemplate::new("consolidate"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "consolidate").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "consolidate 应成功: {:?}",
+        j.error
+    );
+
+    // 张三：档案已生成；Engram/王五：仍是原值
+    let zhang_summary: String = sqlx::query_scalar("SELECT summary FROM entities WHERE id = $1")
+        .bind(zhang)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert!(
+        zhang_summary.contains("张三"),
+        "张三档案应已生成：{zhang_summary}"
+    );
+    let eng_summary: String = sqlx::query_scalar("SELECT summary FROM entities WHERE id = $1")
+        .bind(eng)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(eng_summary, "", "低密度实体应跳过");
+    let wang_summary: String = sqlx::query_scalar("SELECT summary FROM entities WHERE id = $1")
+        .bind(wang)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(wang_summary, "已有新鲜档案", "摘要新鲜应跳过");
+
+    env.handle.shutdown();
+    env.handle.join().await;
+}
+
 /// 实体抽取挂链（社交记忆）：atoms 带 entities 字段 → 原子、实体、关联三表齐落；
 /// 同名同类活体只建一次；无实体的原子不产生关联。
 #[tokio::test]

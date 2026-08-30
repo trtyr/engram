@@ -13,14 +13,15 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     let pool = ctx.pool();
 
     // 1. 近重复聚类：每条 active atom 的 top-3 向量近邻（余弦距离 < 0.25 视为疑似）
+    //    修：LATERAL 输出补 embedding 列（外层 array_agg 排序需要）+ 内层按距离排序取真 top-3
     let rows: Vec<(Uuid, String, Vec<Uuid>)> = sqlx::query_as::<_, (Uuid, String, Vec<Uuid>)>(
         "WITH near AS ( \
             SELECT a.id, a.content, array_agg(b.id ORDER BY a.embedding <=> b.embedding) AS nbrs \
             FROM atoms a JOIN LATERAL ( \
-                SELECT id FROM atoms b \
+                SELECT b.id, b.embedding FROM atoms b \
                 WHERE b.status = 'active' AND b.id != a.id AND b.embedding IS NOT NULL \
                   AND a.embedding IS NOT NULL AND a.embedding <=> b.embedding < 0.25 \
-                LIMIT 3 \
+                ORDER BY a.embedding <=> b.embedding LIMIT 3 \
             ) b ON true \
             WHERE a.status = 'active' AND a.embedding IS NOT NULL \
             GROUP BY a.id, a.content \
@@ -117,7 +118,77 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         }
     }
 
-    // 2. stale 降权：90 天零命中 + 低置信 → confidence * 0.7
+    // 2.5 实体档案：高密度实体（≥3 原子）且摘要滞后（空摘要或有更新原子）→ LLM 聚合切片。
+    //     best-effort：单实体失败（含无 provider）仅告警跳过，绝不拖垮 consolidate 主链。
+    let portrait_candidates: Vec<(Uuid, String, String)> =
+        sqlx::query_as::<_, (Uuid, String, String)>(
+            "SELECT e.id, e.name, e.kind FROM entities e \
+         JOIN atom_entities ae ON ae.entity_id = e.id \
+         JOIN atoms a ON a.id = ae.atom_id \
+         WHERE e.merged_into IS NULL \
+         GROUP BY e.id, e.name, e.kind, e.summary, e.updated_at \
+         HAVING count(ae.atom_id) >= 3 AND (e.summary = '' OR max(a.created_at) > e.updated_at) \
+         ORDER BY count(ae.atom_id) DESC LIMIT 10",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    let mut portraits = 0usize;
+    for (eid, name, kind) in &portrait_candidates {
+        let atoms: Vec<String> = sqlx::query_scalar(
+            "SELECT a.content FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
+             WHERE ae.entity_id = $1 ORDER BY a.created_at DESC LIMIT 20",
+        )
+        .bind(eid)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        let user = format!(
+            "实体：{name}（{kind}）\n\n涉及记忆：\n{}",
+            atoms
+                .iter()
+                .map(|c| format!("- {c}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let portrait = async {
+            let out = crate::llm_port::chat_json_retrying(
+                &ctx,
+                llm.as_ref(),
+                agent_memory_llm::types::Purpose::Consolidate,
+                &prompts::entity_portrait_system(),
+                &user,
+                ctx.job.id,
+            )
+            .await?;
+            let summary = out
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if summary.is_empty() {
+                return Ok::<Option<String>, JobError>(None); // 模型没给 → 跳过，不算失败
+            }
+            sqlx::query("UPDATE entities SET summary = $2, updated_at = now() WHERE id = $1")
+                .bind(eid)
+                .bind(&summary)
+                .execute(pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+            Ok(Some(summary))
+        };
+        match portrait.await {
+            Ok(Some(_)) => portraits += 1,
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, entity = %name, "实体档案生成失败（跳过，不影响主链）");
+            }
+        }
+    }
+
+    // 3. stale 降权：90 天零命中 + 低置信 → confidence * 0.7
     // B10：不再刷新 updated_at（旧写法降权动作自身刷新时间戳，条件自锁只能降一次）；
     // 判龄改 created_at（原子出生日，不受任何后续写动作影响）
     let stale = sqlx::query(
@@ -131,7 +202,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     .rows_affected();
 
     ctx.emit(
-        &format!("整理：合并 {merged} 条近重复，降权 {stale} 条 stale"),
+        &format!("整理：合并 {merged} 条近重复，降权 {stale} 条 stale，实体档案 {portraits} 份"),
         None,
     )
     .await
