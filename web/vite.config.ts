@@ -4,9 +4,16 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// 版本单一来源：server/Cargo.toml [workspace.package] version（构建期注入，前端不再手写）
-const serverToml = readFileSync(new URL('../server/Cargo.toml', import.meta.url), 'utf8')
-const APP_VERSION = serverToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? 'dev'
+// 版本单一来源：server/Cargo.toml [workspace.package] version（构建期注入，前端不再手写）。
+// 防御：文件缺席（如裁剪过的构建上下文）时退回 'dev'，不让版本注入破坏构建。
+const VERSION_FALLBACK = 'dev'
+let APP_VERSION = VERSION_FALLBACK
+try {
+  const serverToml = readFileSync(new URL('../server/Cargo.toml', import.meta.url), 'utf8')
+  APP_VERSION = serverToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? VERSION_FALLBACK
+} catch {
+  /* server/Cargo.toml 不可达——用 fallback */
+}
 
 // https://vite.dev/config/
 export default defineConfig({

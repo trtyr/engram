@@ -5,6 +5,8 @@ WORKDIR /build/web
 RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml web/.npmrc ./
 RUN pnpm install --frozen-lockfile
+# vite.config.ts 构建期读 server/Cargo.toml 注入版本（__APP_VERSION__ 单一来源）
+COPY server/Cargo.toml /build/server/Cargo.toml
 COPY web/ ./
 RUN pnpm run build
 
