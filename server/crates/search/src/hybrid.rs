@@ -16,6 +16,8 @@ pub struct SearchHit {
     pub snippet: String,
     /// 额外定位信息（如 atom kind / scenario topic）
     pub kind: Option<String>,
+    /// O2：待人审标记——l1 命中携带（AI 引用前该向用户确认；其余层 None）
+    pub needs_review: Option<bool>,
 }
 
 const RRF_K: i32 = 60;
@@ -47,7 +49,7 @@ pub async fn search_atoms(
         );
     }
 
-    qb.push("SELECT a.id, a.kind, a.content, COALESCE(1.0/(");
+    qb.push("SELECT a.id, a.kind, a.content, a.needs_review, COALESCE(1.0/(");
     qb.push_bind(RRF_K);
     qb.push(" + fts.rank), 0)");
     if has_vec {
@@ -75,6 +77,7 @@ pub async fn search_atoms(
             title: None,
             snippet: r.get("content"),
             kind: r.get("kind"),
+            needs_review: r.get("needs_review"),
         })
         .collect())
 }
@@ -132,6 +135,7 @@ pub async fn search_scenarios(
             title: r.get::<Option<String>, _>("topic"),
             snippet: r.get("summary"),
             kind: None,
+            needs_review: None,
         })
         .collect())
 }
@@ -172,6 +176,7 @@ pub async fn search_entities(
                 title: Some(name),
                 snippet: summary,
                 kind: Some(kind),
+                needs_review: None,
             })
         })
         .collect();

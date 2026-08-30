@@ -1229,7 +1229,7 @@ export interface components {
             kind: string;
             /**
              * Format: date-time
-             * @description 事件时间（ISO8601；"下周三"这类相对时间解析后的绝对值）
+             * @description 事件时间（ISO8601 或 date-only；"下周三"这类相对时间解析后的绝对值）
              */
             occurred_at?: string | null;
             /**
@@ -1537,6 +1537,8 @@ export interface components {
             id: string;
             /** @description 额外定位信息（如 atom kind / scenario topic） */
             kind?: string | null;
+            /** @description O2：待人审标记——l1 命中携带（AI 引用前该向用户确认；其余层 None） */
+            needs_review?: boolean | null;
             /**
              * Format: double
              * @description RRF 融合分
