@@ -73,6 +73,13 @@ async fn unified_search_fuses_three_domains() {
     .await
     .unwrap();
 
+    // 4. entity：Rust 异步主题实体（名字含 Rust → token 命中）
+    sqlx::query("INSERT INTO entities (id, name, kind, summary) VALUES ($1, 'Rust 异步', 'topic', '持续学习主题')")
+        .bind(Uuid::now_v7())
+        .execute(&pool)
+        .await
+        .unwrap();
+
     // 统一检索
     let hits = svc.search("Rust", 20).await.expect("统一检索");
 
@@ -90,6 +97,10 @@ async fn unified_search_fuses_three_domains() {
     assert!(
         domains.contains("wiki"),
         "应包含 wiki 域命中，got: {domains:?}"
+    );
+    assert!(
+        domains.contains("entity"),
+        "应包含 entity 域命中（实体进统一检索），got: {domains:?}"
     );
 
     // 每个命中都带域标签 + 非零分数（域内 rank 归一化后）

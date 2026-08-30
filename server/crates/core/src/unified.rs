@@ -78,11 +78,12 @@ impl UnifiedSearch {
         );
         let wiki = WikiService::new(self.pool.clone(), self.registry.clone());
 
-        // 三域并行检索（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
-        let (mem_res, know_res, wiki_res) = tokio::join!(
+        // 三域并行检索 + 实体层（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
+        let (mem_res, know_res, wiki_res, ent_res) = tokio::join!(
             mem.search(query, &["l1", "l2"], per_domain),
             know.search(query, per_domain),
             wiki.search(query, per_domain),
+            agent_memory_search::search_entities(&self.pool, query, per_domain),
         );
 
         let mut merged: Vec<UnifiedHit> = Vec::new();
@@ -125,6 +126,22 @@ impl UnifiedSearch {
             }
         } else {
             tracing::warn!("统一检索：knowledge 域失败，跳过");
+        }
+
+        // 实体域：主角先行（palette 命中实体 → 直达星系详情）
+        if let Ok(hits) = ent_res {
+            for h in hits {
+                merged.push(UnifiedHit {
+                    domain: "entity".into(),
+                    id: h.id,
+                    title: h.title,
+                    snippet: h.snippet,
+                    score: 0.0,
+                    extra: serde_json::json!({ "kind": h.kind }),
+                });
+            }
+        } else {
+            tracing::warn!("统一检索：entity 域失败，跳过");
         }
 
         if let Ok(res) = wiki_res {

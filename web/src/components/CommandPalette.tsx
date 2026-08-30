@@ -11,12 +11,14 @@ import { cn } from '@/lib/utils'
 import { inputCls } from '@/lib/ui'
 
 const DOMAIN_LABEL: Record<string, string> = {
+  entity: '实体',
   memory: '记忆',
   knowledge: '知识',
   wiki: 'Wiki',
 }
 
-function domainRoute(domain: string): string {
+function domainRoute(domain: string, id?: string): string {
+  if (domain === 'entity') return id ? `/memory?tab=galaxy&entity=${id}` : '/memory'
   if (domain === 'memory') return '/memory'
   if (domain === 'knowledge') return '/knowledge'
   if (domain === 'wiki') return '/wiki'
@@ -51,7 +53,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const hit = hits?.hits[i]
     if (!hit) return
     onClose()
-    nav(domainRoute(hit.domain))
+    nav(domainRoute(hit.domain, hit.id))
   }
 
   return (

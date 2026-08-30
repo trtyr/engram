@@ -7,6 +7,6 @@ pub mod hybrid;
 pub mod rrf;
 pub mod tokenize;
 
-pub use hybrid::{SearchHit, search_atoms, search_scenarios};
+pub use hybrid::{SearchHit, search_atoms, search_entities, search_scenarios};
 pub use rrf::rrf_merge;
 pub use tokenize::{tsv_query, tsv_text};

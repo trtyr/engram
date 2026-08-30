@@ -1,5 +1,6 @@
 /** Memory 域：会话 / 原子 / 场景 / 画像 / 检索。 */
 import { Fragment, useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { api, type Atom, type Job, type Persona, type Scenario, type Session } from '@/lib/api'
 import Galaxy from '@/features/Galaxy'
 import {
@@ -114,26 +115,49 @@ function PipelineStrip({ onGo }: { onGo: (t: Tab) => void }) {
   )
 }
 
-export default function Memory() {
+/** 路由入口：按 search 键重挂载——palette/概览带 ?tab=&entity= 深链进来时重新读参。 */
+export default function MemoryRoute() {
+  const search = useLocation().search
+  return <MemoryPage key={search} />
+}
+
+function MemoryPage() {
   const [tab, setTab] = useState<Tab>(() => {
-    // 支持 ?tab= 深链（Dashboard 管线主视觉点击穿透）：仅首次挂载读一次
+    // 支持 ?tab= 深链（Dashboard 管线主视觉点击穿透 / palette 实体直达）：仅首次挂载读一次
     const t = new URLSearchParams(window.location.search).get('tab')
     const valid: readonly string[] = ['galaxy', 'sessions', 'atoms', 'scenarios', 'persona', 'search']
     return valid.includes(t ?? '') ? (t as Tab) : 'galaxy'
   })
+  // palette 实体命中直达：?entity=<id> → 星系选中该实体
+  const [galaxyEntity, setGalaxyEntity] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get('entity'),
+  )
   return (
     <div className="space-y-6">
       <PageHeader title="用户记忆" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
       <PipelineStrip onGo={setTab} />
       <Tabs items={TABS} value={tab} onChange={setTab} />
       {tab === 'galaxy' && (
-        <Galaxy onGoPersona={() => setTab('persona')} onGoAtoms={() => setTab('atoms')} />
+        <Galaxy
+          key={galaxyEntity ?? 'none'}
+          initialEntity={galaxyEntity}
+          onGoPersona={() => setTab('persona')}
+          onGoAtoms={() => setTab('atoms')}
+        />
       )}
       {tab === 'sessions' && <Sessions />}
       {tab === 'atoms' && <Atoms />}
       {tab === 'scenarios' && <Scenarios />}
       {tab === 'persona' && <PersonaView />}
-      {tab === 'search' && <SearchPane onGoAtoms={() => setTab('atoms')} />}
+      {tab === 'search' && (
+        <SearchPane
+          onGoAtoms={() => setTab('atoms')}
+          onGoEntity={(id) => {
+            setGalaxyEntity(id)
+            setTab('galaxy')
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -613,17 +637,32 @@ function PersonaView() {
   )
 }
 
-function SearchPane({ onGoAtoms }: { onGoAtoms: () => void }) {
+interface EntityHit {
+  id: string
+  title: string | null
+  snippet: string
+  score: number
+  kind: string | null
+}
+
+function SearchPane({
+  onGoAtoms,
+  onGoEntity,
+}: {
+  onGoAtoms: () => void
+  onGoEntity: (id: string) => void
+}) {
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
   const [archiveMsg, setArchiveMsg] = useState('')
   const [r, setR] = useState<{
+    entities: EntityHit[]
     l1: { id: string; snippet: string; score: number }[]
     l2: { id: string; title: string | null; snippet: string }[]
     l3: Persona[]
   } | null>(null)
   const [err, setErr] = useState('')
-  const empty = r !== null && r.l1.length + r.l2.length + r.l3.length === 0
+  const empty = r !== null && r.entities.length + r.l1.length + r.l2.length + r.l3.length === 0
   return (
     <div className="space-y-4">
       <form
@@ -678,6 +717,27 @@ function SearchPane({ onGoAtoms }: { onGoAtoms: () => void }) {
             <p className={cn('text-xs', archiveMsg.includes('失败') ? 'text-destructive' : 'text-success')}>{archiveMsg}</p>
           )}
           <Card className="divide-y divide-border/50 p-1">
+            {r.entities.length > 0 && (
+              <ResultSection title="实体" count={r.entities.length}>
+                {r.entities.map((e) => (
+                  <button
+                    key={e.id}
+                    type="button"
+                    className="flex w-full items-center gap-2 py-2 text-left text-sm transition-colors hover:text-foreground"
+                    onClick={() => onGoEntity(e.id)}
+                  >
+                    <span className="font-medium">{e.title}</span>
+                    {e.kind && (
+                      <span className="rounded border border-border px-1.5 py-px font-mono text-xs text-muted-foreground">
+                        {e.kind}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{e.snippet}</span>
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{e.score.toFixed(1)}</span>
+                  </button>
+                ))}
+              </ResultSection>
+            )}
             <ResultSection title="L1 原子" count={r.l1.length}>
               {r.l1.map((h) => (
                 <p key={h.id} className="flex items-start gap-2 py-2 text-sm">

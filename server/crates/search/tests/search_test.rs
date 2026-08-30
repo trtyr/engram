@@ -70,3 +70,38 @@ async fn chinese_hybrid_search_hits() {
         hits.iter().map(|h| &h.snippet).collect::<Vec<_>>()
     );
 }
+
+#[tokio::test]
+async fn entity_token_search_prefers_name_hit() {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
+
+    sqlx::query("INSERT INTO entities (id, name, kind, summary) VALUES ($1, '张三', 'person', '同事，负责后端')")
+        .bind(uuid::Uuid::new_v4()).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO entities (id, name, kind, summary) VALUES ($1, '李四', 'person', '骑行爱好者，周末环湖')")
+        .bind(uuid::Uuid::new_v4()).execute(&pool).await.unwrap();
+
+    // 名字命中：搜「张三」只给张三
+    let hits = agent_memory_search::search_entities(&pool, "张三", 5)
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].title.as_deref(), Some("张三"));
+    assert_eq!(hits[0].kind.as_deref(), Some("person"));
+
+    // 摘要命中：搜「骑行」给李四（弱命中也是命中）
+    let hits = agent_memory_search::search_entities(&pool, "骑行", 5)
+        .await
+        .unwrap();
+    assert!(hits.iter().any(|h| h.title.as_deref() == Some("李四")));
+
+    // 无命中：空结果
+    let hits = agent_memory_search::search_entities(&pool, "王五", 5)
+        .await
+        .unwrap();
+    assert!(hits.is_empty());
+}

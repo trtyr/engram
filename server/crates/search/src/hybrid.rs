@@ -135,3 +135,51 @@ pub async fn search_scenarios(
         })
         .collect())
 }
+
+/// 实体检索（token 命中，名字加权）。实体无嵌入/FTS 索引且体量小——名字与摘要的
+/// jieba token 直接匹配，名字命中权重 1.0、摘要命中 0.3：搜「张三」应先给实体本人。
+pub async fn search_entities(
+    pool: &PgPool,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<SearchHit>, sqlx::Error> {
+    let tokens = crate::tokenize::tokenize(query);
+    if tokens.is_empty() {
+        return Ok(vec![]);
+    }
+    let qset: std::collections::HashSet<String> = tokens.into_iter().collect();
+    let rows: Vec<(Uuid, String, String, String)> = sqlx::query_as(
+        "SELECT id, name, kind, summary FROM entities WHERE merged_into IS NULL LIMIT 500",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut hits: Vec<SearchHit> = rows
+        .into_iter()
+        .filter_map(|(id, name, kind, summary)| {
+            let name_tokens: std::collections::HashSet<String> =
+                crate::tokenize::tokenize(&name).into_iter().collect();
+            let sum_tokens: std::collections::HashSet<String> =
+                crate::tokenize::tokenize(&summary).into_iter().collect();
+            let name_hits = name_tokens.intersection(&qset).count();
+            let sum_hits = sum_tokens.intersection(&qset).count();
+            let score = name_hits as f64 + sum_hits as f64 * 0.3;
+            if score <= 0.0 {
+                return None;
+            }
+            Some(SearchHit {
+                id,
+                score,
+                title: Some(name),
+                snippet: summary,
+                kind: Some(kind),
+            })
+        })
+        .collect();
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits.truncate(limit.max(0) as usize);
+    Ok(hits)
+}

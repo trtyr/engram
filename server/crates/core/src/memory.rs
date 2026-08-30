@@ -103,6 +103,8 @@ pub struct ContextMeta {
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct SearchResponse {
+    /// 实体命中（主角先行——搜人名/项目名先给实体再给相关原子）
+    pub entities: Vec<SearchHit>,
     pub l1: Vec<SearchHit>,
     pub l2: Vec<SearchHit>,
     pub l3: Vec<PersonaVersion>,
@@ -713,10 +715,18 @@ impl MemoryService {
             .try_embed(&[query.to_string()])
             .await
             .and_then(|v| v.first().cloned());
-        let want_l1 = layers.is_empty() || layers.contains(&"l1");
-        let want_l2 = layers.is_empty() || layers.contains(&"l2");
-        let want_l3 = layers.is_empty() || layers.contains(&"l3");
+        let all = layers.is_empty();
+        let want_e = all || layers.contains(&"entities");
+        let want_l1 = all || layers.contains(&"l1");
+        let want_l2 = all || layers.contains(&"l2");
+        let want_l3 = all || layers.contains(&"l3");
 
+        // 实体：token 命中（名字加权）——主角先行
+        let entities = if want_e {
+            agent_memory_search::search_entities(&self.pool, query, max_items).await?
+        } else {
+            vec![]
+        };
         let l1 = if want_l1 {
             search_atoms(&self.pool, query, qv.as_deref(), max_items).await?
         } else {
@@ -727,14 +737,23 @@ impl MemoryService {
         } else {
             vec![]
         };
-        // L3：小体量，token 命中过滤
+        // L3：小体量——jieba 分词双侧匹配打分排序（弃子串 contains：跨词边界/无序不可靠）
         let l3 = if want_l3 {
             let tokens: std::collections::HashSet<String> = tokenize(query).into_iter().collect();
-            self.persona()
+            let mut scored: Vec<(usize, PersonaVersion)> = self
+                .persona()
                 .await?
                 .into_iter()
-                .filter(|p| tokens.iter().any(|t| p.content.contains(t.as_str())))
-                .collect()
+                .map(|p| {
+                    let ct: std::collections::HashSet<String> =
+                        tokenize(&p.content).into_iter().collect();
+                    let s = tokens.intersection(&ct).count();
+                    (s, p)
+                })
+                .filter(|(s, _)| *s > 0)
+                .collect();
+            scored.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
+            scored.into_iter().map(|(_, p)| p).collect()
         } else {
             vec![]
         };
@@ -742,6 +761,7 @@ impl MemoryService {
         self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
         self.fire_hit_feedback("scenarios", l2.iter().map(|h| h.id).collect());
         Ok(SearchResponse {
+            entities,
             l1,
             l2,
             l3,

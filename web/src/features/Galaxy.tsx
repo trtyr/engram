@@ -27,15 +27,17 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 export default function Galaxy({
+  initialEntity,
   onGoPersona,
   onGoAtoms,
 }: {
+  initialEntity?: string | null
   onGoPersona: () => void
   onGoAtoms: () => void
 }) {
   const [graph, setGraph] = useState<EntityGraph | null>(null)
   const [err, setErr] = useState('')
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(initialEntity ?? null)
   const [q, setQ] = useState('')
   const [kind, setKind] = useState('')
   const [creating, setCreating] = useState(false)
