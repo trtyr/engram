@@ -6,6 +6,16 @@ export function fmtTime(iso: string): string {
 }
 
 /** 统一表格样式：发丝线 + 等宽数字。 */
+/** 相对时间：feed/活动流的紧凑展示（超过 7 天退回绝对时间）。 */
+export function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天前`
+  return fmtTime(iso)
+}
+
 export const tableCls = {
   root: 'w-full text-sm',
   thead: 'border-b border-border text-left',

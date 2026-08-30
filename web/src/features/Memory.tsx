@@ -88,7 +88,12 @@ function PipelineStrip({ onGo }: { onGo: (t: Tab) => void }) {
 }
 
 export default function Memory() {
-  const [tab, setTab] = useState<Tab>('sessions')
+  const [tab, setTab] = useState<Tab>(() => {
+    // 支持 ?tab= 深链（Dashboard 管线主视觉点击穿透）：仅首次挂载读一次
+    const t = new URLSearchParams(window.location.search).get('tab')
+    const valid: readonly string[] = ['sessions', 'atoms', 'scenarios', 'persona']
+    return valid.includes(t ?? '') ? (t as Tab) : 'sessions'
+  })
   return (
     <div className="space-y-6">
       <PageHeader title="Memory" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />

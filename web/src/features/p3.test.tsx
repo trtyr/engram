@@ -28,18 +28,24 @@ vi.mock('@/lib/api', () => {
     purpose: { goals: [], key_questions: [], scope: [] } as { goals: string[]; key_questions: string[]; scope: string[] },
     wikiSearchResult: null as { purpose: { goals: string[]; key_questions: string[]; scope: string[] }; pages: WikiPageM[] } | null,
     reencryptResult: 0 as number,
+    sessions: [] as { id: string; agent: string; content: { speaker: string; text: string; ts?: string }[]; distill_status: string; created_at: string }[],
+    atoms: [] as { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; needs_review: boolean; hit_count: number; scenario_id: string | null; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[],
+    usage: [] as { id: number; provider: string; model: string; purpose: string; input_tokens: number; output_tokens: number; latency_ms: number; job_id: number | null; ts: string }[],
   }
   const api = {
     get: vi.fn(async (p: string) => {
       if (p.startsWith('/settings/llm/providers')) return state.providers
       if (p.startsWith('/knowledge/documents/') && p.endsWith('/chunks')) return state.chunks
       if (p.startsWith('/knowledge/documents')) return state.docs
-      if (p.startsWith('/memory/atoms')) return []
+      if (p.startsWith('/memory/sessions')) return state.sessions
+      if (p.startsWith('/memory/atoms')) return state.atoms
+      if (p.startsWith('/memory/scenarios')) return []
       if (p.startsWith('/wiki/pages')) return []
       if (p === '/wiki/purpose') return state.purpose
       if (p.startsWith('/memory/persona')) return []
+      if (p.startsWith('/codegraph/projects')) return []
       if (p.startsWith('/jobs')) return []
-      if (p.startsWith('/llm/usage')) return []
+      if (p.startsWith('/llm/usage')) return state.usage
       return []
     }),
     post: vi.fn(async (p: string, _b?: unknown) => {
@@ -69,6 +75,9 @@ interface MockState {
   purpose: { goals: string[]; key_questions: string[]; scope: string[] }
   wikiSearchResult: { purpose: { goals: string[]; key_questions: string[]; scope: string[] }; pages: WikiPageM[] } | null
   reencryptResult: number
+  sessions: { id: string; agent: string; content: { speaker: string; text: string; ts?: string }[]; distill_status: string; created_at: string }[]
+  atoms: { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; needs_review: boolean; hit_count: number; scenario_id: string | null; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[]
+  usage: { id: number; provider: string; model: string; purpose: string; input_tokens: number; output_tokens: number; latency_ms: number; job_id: number | null; ts: string }[]
 }
 
 const mockState = (api as unknown as { __state: MockState }).__state
@@ -91,25 +100,41 @@ beforeEach(() => {
   mockState.reencryptResult = 0
 })
 
-describe('跨域统一检索 GlobalSearch', () => {
-  it('输入 query 后调 POST /search 并展示 domain 标签', async () => {
-    mockState.searchResult = {
-      query: 'tokio',
-      hits: [
-        { id: 'h1', domain: 'memory', score: 0.9, snippet: '记忆片段', title: '偏好' },
-        { id: 'h2', domain: 'wiki', score: 0.8, snippet: 'wiki 片段', title: 'Tokio' },
-      ],
-    }
+describe('Dashboard 概览：管线主视觉 + 用量图', () => {
+  it('L0-L3 大数字与近7天增量来自 sessions/atoms 数据', async () => {
+    const now = new Date().toISOString()
+    mockState.sessions = [
+      { id: 's1', agent: 'a', content: [], distill_status: 'completed', created_at: now },
+      { id: 's2', agent: 'a', content: [], distill_status: 'completed', created_at: now },
+      { id: 's3', agent: 'a', content: [], distill_status: 'completed', created_at: '2026-01-01T00:00:00Z' },
+    ]
+    mockState.atoms = [
+      { id: 'a1', kind: 'preference', content: 'x', confidence: 1, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, scenario_id: null, source_refs: [], created_at: now },
+      { id: 'a2', kind: 'preference', content: 'x', confidence: 1, status: 'superseded', superseded_by: 'a1', needs_review: false, hit_count: 0, scenario_id: null, source_refs: [], created_at: '2026-01-01T00:00:00Z' },
+    ]
     render(wrap(<Dashboard />))
-    const input = await screen.findByPlaceholderText(/跨域检索/)
-    fireEvent.change(input, { target: { value: 'tokio' } })
-    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith('/search', { query: 'tokio', limit: 10 })
-      expect(screen.getByText('记忆')).toBeInTheDocument()
-      expect(screen.getByText('Wiki')).toBeInTheDocument()
-      expect(screen.getByText('Tokio')).toBeInTheDocument()
+      // L0 = 3 会话，增量 +2（一条在 7 天外）；L1 = 1 活跃原子（superseded 不计），增量 +1
+      expect(screen.getByText('3').closest('button')).toHaveAttribute('aria-label', '会话 3，跳转到记忆 会话')
+      expect(screen.getByText('1').closest('button')).toHaveAttribute('aria-label', '原子 1，跳转到记忆 原子')
+      expect(screen.getAllByText('+2 近7天').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('+1 近7天').length).toBeGreaterThanOrEqual(1)
     })
+  })
+
+  it('用量行按日分桶渲染 30 根柱，今日柱有明细 title', async () => {
+    const today = new Date().toISOString().slice(0, 10)
+    mockState.usage = [
+      { id: 1, provider: 'p', model: 'm', purpose: 'extract', input_tokens: 800, output_tokens: 200, latency_ms: 100, job_id: null, ts: `${today}T10:00:00Z` },
+    ]
+    render(wrap(<Dashboard />))
+    await waitFor(() => {
+      const rects = document.querySelectorAll('svg[role="img"] rect')
+      expect(rects.length).toBe(30)
+    })
+    const todayBar = document.querySelector('svg[role="img"] rect:last-of-type title')
+    expect(todayBar?.textContent).toContain('1,000 tokens')
+    expect(todayBar?.textContent).toContain('1 次调用')
   })
 })
 
