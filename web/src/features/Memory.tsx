@@ -19,15 +19,6 @@ import { cn } from '@/lib/utils'
 
 type Tab = 'galaxy' | 'sessions' | 'atoms' | 'review' | 'scenarios' | 'persona' | 'search'
 
-const TABS: { value: Tab; label: string }[] = [
-  { value: 'galaxy', label: '星系' },
-  { value: 'sessions', label: '会话' },
-  { value: 'atoms', label: '原子' },
-  { value: 'review', label: '人审' },
-  { value: 'scenarios', label: '场景' },
-  { value: 'persona', label: '画像' },
-]
-
 /** 原子 kind 中英对照（蒸馏产出的 8 类记忆形态）。 */
 const KIND_LABEL: Record<string, string> = {
   preference: '偏好',
@@ -50,70 +41,7 @@ const ASPECT_LABEL: Record<string, string> = {
   goals: '目标',
   routines: '例行',
 }
-
-/** 蒸馏管线条：L0→L3 层级与计数一屏可见（签名交互——点击层级直达对应 tab）。 */
-function PipelineStrip({ onGo }: { onGo: (t: Tab) => void }) {
-  const [counts, setCounts] = useState<{ l0: number; pending: number; l1: number; l2: number; l3: number } | null>(null)
-  useEffect(() => {
-    const safeLen = (a: unknown[]) => a.length
-    Promise.all([
-      api.get<Session[]>('/memory/sessions?limit=500').catch(() => []),
-      api.get<Atom[]>('/memory/atoms?limit=500').catch(() => []),
-      api.get<Scenario[]>('/memory/scenarios?limit=500').catch(() => []),
-      api.get<Persona[]>('/memory/persona').catch(() => []),
-    ]).then(([s, a, sc, p]) => {
-      setCounts({
-        l0: safeLen(s),
-        pending: s.filter((x) => x.distill_status === 'pending' || x.distill_status === 'processing').length,
-        l1: a.filter((x) => x.status === 'active' || x.status === 'candidate').length,
-        l2: safeLen(sc),
-        l3: safeLen(p),
-      })
-    })
-  }, [])
-  const stages: { key: string; tag: string; label: string; n?: number; tab: Tab }[] = [
-    { key: 'l0', tag: 'L0', label: '会话', n: counts?.l0, tab: 'sessions' },
-    { key: 'l1', tag: 'L1', label: '原子', n: counts?.l1, tab: 'atoms' },
-    { key: 'l2', tag: 'L2', label: '场景', n: counts?.l2, tab: 'scenarios' },
-    { key: 'l3', tag: 'L3', label: '画像', n: counts?.l3, tab: 'persona' },
-  ]
-  const distilling = (counts?.pending ?? 0) > 0
-  return (
-    <div
-      className="flex flex-wrap items-stretch gap-px overflow-hidden rounded-md border border-border bg-border/60"
-      aria-label="蒸馏管线"
-    >
-      {stages.map((s, i) => (
-        <div key={s.key} className="flex items-center gap-px bg-card">
-          {i > 0 && (
-            <span
-              aria-hidden="true"
-              className={distilling ? 'engram-pulse px-1 font-mono text-xs text-info' : 'px-1 font-mono text-xs text-muted-foreground/60'}
-            >
-              →
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => onGo(s.tab)}
-            className="flex items-baseline gap-2 px-3.5 py-2.5 transition-colors hover:bg-muted"
-            title={`${s.tag} ${s.label}${s.n === undefined ? '' : `：${s.n}`}`}
-          >
-            <span className="font-mono text-xs text-muted-foreground">{s.tag}</span>
-            <span className="text-sm font-medium">{s.label}</span>
-            <span className="font-mono text-sm tabular-nums">{s.n ?? '–'}</span>
-          </button>
-        </div>
-      ))}
-      {distilling && (
-        <span className="flex items-center bg-card px-3 font-mono text-xs text-info">
-          <span className="engram-pulse mr-1.5 inline-block size-1.5 rounded-full bg-info" />
-          蒸馏中 ×{counts?.pending}
-        </span>
-      )}
-    </div>
-  )
-}
+/** 蒸馏管线条：已退役——计数融进 tab 标签（Tabs 的 count/pulse），省一整行 chrome。 */
 
 /** 路由入口：按 search 键重挂载——palette/概览带 ?tab=&entity= 深链进来时重新读参。 */
 export default function MemoryRoute() {
@@ -128,16 +56,43 @@ function MemoryPage() {
     const valid: readonly string[] = ['galaxy', 'sessions', 'atoms', 'review', 'scenarios', 'persona', 'search']
     return valid.includes(t ?? '') ? (t as Tab) : 'galaxy'
   })
-  // palette 实体命中直达：?entity=<id> → 星系选中该实体
+  // palette 实体命中直达：?entity=<id> → 圈子选中该实体
   const [galaxyEntity, setGalaxyEntity] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get('entity'),
   )
+  // tab 计数（原管线条带的职责）：挂载时取一次；蒸馏脉冲只表「正在炼」（processing）
+  const [counts, setCounts] = useState<{ l0: number; l1: number; l2: number; l3: number; review: number } | null>(null)
+  useEffect(() => {
+    Promise.all([
+      api.get<Session[]>('/memory/sessions?limit=500').catch(() => []),
+      api.get<Atom[]>('/memory/atoms?limit=500').catch(() => []),
+      api.get<Scenario[]>('/memory/scenarios?limit=500').catch(() => []),
+      api.get<Persona[]>('/memory/persona').catch(() => []),
+    ]).then(([s, a, sc, p]) => {
+      setCounts({
+        l0: s.length,
+        l1: a.filter((x) => x.status === 'active' || x.status === 'candidate').length,
+        l2: sc.length,
+        l3: p.length,
+        review: a.filter((x) => x.needs_review).length,
+      })
+    })
+  }, [])
+  const { distilling } = useSystemStatus()
+
+  const tabs = [
+    { value: 'galaxy' as Tab, label: '圈子' },
+    { value: 'sessions' as Tab, label: '会话', count: counts?.l0, pulse: distilling > 0 },
+    { value: 'atoms' as Tab, label: '原子', count: counts?.l1 },
+    { value: 'review' as Tab, label: '人审', count: counts?.review },
+    { value: 'scenarios' as Tab, label: '场景', count: counts?.l2 },
+    { value: 'persona' as Tab, label: '画像', count: counts?.l3 },
+  ]
+
   return (
     <div className="space-y-6">
       <PageHeader title="用户记忆" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
-      {/* 管线条带在星系 tab 隐藏（星系本身即全景导航，双头部冗余） */}
-      {tab !== 'galaxy' && <PipelineStrip onGo={setTab} />}
-      <Tabs items={TABS} value={tab} onChange={setTab} />
+      <Tabs items={tabs} value={tab} onChange={setTab} />
       {tab === 'galaxy' && (
         <Galaxy
           key={galaxyEntity ?? 'none'}
@@ -177,11 +132,18 @@ function Sessions() {
   if (err) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
 
+  // 积压（pending 未蒸馏）是存量不是进行时——灰字静默，不全局闪
+  const backlog = rows.filter((s) => s.distill_status === 'pending').length
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="min-h-5 text-xs text-muted-foreground">
-          {notice && <span className={notice.includes('失败') ? 'text-destructive' : 'text-info'}>{notice}</span>}
+          {notice ? (
+            <span className={notice.includes('失败') ? 'text-destructive' : 'text-info'}>{notice}</span>
+          ) : (
+            backlog > 0 && <span>{backlog} 条未蒸馏</span>
+          )}
         </p>
         <Button
           size="sm"
@@ -212,10 +174,11 @@ function Sessions() {
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
-                <th className={tableCls.th}>时间</th>
+                <th className={tableCls.th}>预览</th>
                 <th className={tableCls.th}>Agent</th>
                 <th className={tableCls.th}>轮次</th>
                 <th className={tableCls.th}>蒸馏</th>
+                <th className={tableCls.th}>时间</th>
                 <th className={tableCls.th} />
               </tr>
             </thead>
@@ -223,12 +186,15 @@ function Sessions() {
               {rows.map((s) => (
                 <Fragment key={s.id}>
                   <tr className={tableCls.row}>
-                    <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(s.created_at)}</td>
-                    <td className={tableCls.td}>{s.agent}</td>
+                    <td className={`${tableCls.td} max-w-96 truncate font-medium`} title={s.content?.[0]?.text ?? ''}>
+                      {s.content?.[0]?.text ?? '（空会话）'}
+                    </td>
+                    <td className={`${tableCls.tdMono}`}>{s.agent}</td>
                     <td className={tableCls.tdMono}>{s.content?.length ?? 0}</td>
                     <td className={tableCls.td}>
                       <StatusBadge status={s.distill_status} />
                     </td>
+                    <td className={`${tableCls.td} whitespace-nowrap text-muted-foreground`}>{fmtTime(s.created_at)}</td>
                     <td className={`${tableCls.td} text-right`}>
                       <Button
                         variant="ghost"
@@ -243,7 +209,7 @@ function Sessions() {
                   {/* 手风琴：紧贴该行下方展开逐轮对话，视线不断裂 */}
                   {openId === s.id && (
                     <tr>
-                      <td colSpan={5} className="border-b border-border p-0">
+                      <td colSpan={6} className="border-b border-border p-0">
                         <div className="bg-muted/30 px-4 py-3">
                           <div className="mb-2.5 flex items-center justify-between">
                             <p className="font-mono text-xs text-muted-foreground">{s.id}</p>

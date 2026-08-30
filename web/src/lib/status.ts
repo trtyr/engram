@@ -2,8 +2,8 @@
  * 系统状态单例：全站共享一份 10s 轮询（侧栏徽章 / 概览 / 原子条件轮询都订同一份，
  * 网络面板只出现一个轮询流）。
  * - failed：failed/dead 任务数（任务导航项红字计数）
- * - distilling：待蒸馏会话数（pending/processing）——与管线条带/星系同口径：
- *   「还有 N 条对话没炼完」，不数任务（两个口径的数字曾经同屏打架）。
+ * - distilling：**正在蒸馏**的会话数（processing）——脉冲只表进行中；
+ *   pending 积压是存量不是进行时，归会话页灰字展示，不全局闪。
  * 页面不可见时跳过本轮，失败静默不打扰。
  */
 import { useEffect, useState } from 'react'
@@ -30,8 +30,7 @@ async function tick() {
     ])
     data = {
       failed: jobs.filter((j) => j.status === 'failed' || j.status === 'dead').length,
-      distilling: sessions.filter((s) => s.distill_status === 'pending' || s.distill_status === 'processing')
-        .length,
+      distilling: sessions.filter((s) => s.distill_status === 'processing').length,
     }
     listeners.forEach((l) => l())
   } catch {

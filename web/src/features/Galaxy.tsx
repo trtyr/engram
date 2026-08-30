@@ -1,5 +1,5 @@
 /**
- * 星系 tab：左实体列表（搜索/类型过滤/密度排序/新建）+ 右侧默认关系图谱，
+ * 圈子 tab：左实体列表（搜索/类型过滤/密度排序/新建）+ 右侧默认关系图谱，
  * 点击节点或列表项进入实体详情（画像摘要/原子时间线/相关场景/挂摘/合并）。
  */
 import { Suspense, lazy, useEffect, useState } from 'react'
@@ -165,7 +165,7 @@ export default function Galaxy({
           />
         ) : visible.length === 0 && graph.nodes.length === 0 ? (
           <Card className="p-4">
-            <Empty text="星系还是空的——蒸馏会自动从会话中抽取实体，或先手动新建一个" />
+            <Empty text="圈子是你的记忆世界：人物 / 项目 / 主题。蒸馏会自动把对话里的人和事挂进来，也可以先手动新建" />
           </Card>
         ) : (
           <div className="space-y-3">

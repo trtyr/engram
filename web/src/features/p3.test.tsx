@@ -171,7 +171,7 @@ describe('Memory 检索面板（?tab=search 深链直达，tab 条已收敛入�
     })
     fireEvent.click(screen.getByText('张三'))
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '星系' }).getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByRole('button', { name: '圈子' }).getAttribute('aria-pressed')).toBe('true')
     })
   })
 

@@ -56,13 +56,14 @@ export function PageHeader({
   )
 }
 
-/** 分段式 tab（aria-pressed 分段控件）：选中即整行反转（墨底白字），段间发丝分隔。 */
+/** 分段式 tab（aria-pressed 分段控件）：选中即整行反转（墨底白字），段间发丝分隔。
+ * 计数/脉冲是视觉附加（aria-hidden）——button 的 accessible name 恒为裸 label。 */
 export function Tabs<T extends string>({
   items,
   value,
   onChange,
 }: {
-  items: { value: T; label: string }[]
+  items: { value: T; label: string; count?: number; pulse?: boolean }[]
   value: T
   onChange: (v: T) => void
 }) {
@@ -73,6 +74,7 @@ export function Tabs<T extends string>({
           key={it.value}
           type="button"
           aria-pressed={value === it.value}
+          aria-label={it.label}
           onClick={() => onChange(it.value)}
           className={cn(
             'px-3 py-1.5 text-sm font-medium transition-colors',
@@ -83,6 +85,14 @@ export function Tabs<T extends string>({
           )}
         >
           {it.label}
+          {it.count !== undefined && (
+            <span aria-hidden="true" className={cn('ml-1.5 font-mono text-xs tabular-nums', value === it.value ? 'text-background/70' : 'text-muted-foreground/70')}>
+              {it.count}
+            </span>
+          )}
+          {it.pulse && (
+            <span aria-hidden="true" className="ml-1.5 inline-block size-1.5 translate-y-px rounded-full bg-info engram-pulse" />
+          )}
         </button>
       ))}
     </div>

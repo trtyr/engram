@@ -104,6 +104,14 @@
      /jobs 轮询单例化（12s 实测 2 次）；检索 tab 收敛入 palette（深链保留）、
      星系隐藏条带、palette 记忆→原子
    - 全门禁：cargo 107 / vitest 30 / build lint 0 / e2e PASS
+0l. **用户四问的仪表盘校正**（条带消失之谜/圈子何用/蒸馏×15 撒谎/会话表太空）：
+   - 管线条带退役：计数融进 tab 标签（会话 17 · 原子 9 · 人审 N…，aria-label 保裸名
+     测试零改），L0→L3 故事由圈子中心图讲——一行 chrome 归零
+   - 星系改名「圈子」（用户自己的比喻：以用户为中心的社交圈）；空态讲清功能
+   - 蒸馏脉冲口径再修：processing（真在炼）才脉冲——上一轮改成 pending+processing
+     是倒退（e2e 存量 pending 会话导致 ×15 常驻闪烁）；积压改会话页灰字「N 条未蒸馏」
+   - 会话表加预览列（首条用户消息为主内容，max-w-96 截断），时间移末列
+   - 实测：tabs 带计数+脉冲、条带零残留、预览/积压灰字、e2e PASS 20s
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
