@@ -134,6 +134,19 @@
      needs_review 持久标记/L2 快照语义/base_url 不带 v1
    - cargo 111（+revoked_401 +llm_scope 两测试）；newapi provider 实配（MiniMax-M3
      + bge-m3，连通 chat 1110ms / embed 579ms×1024 维），蒸馏链真 provider 全通
+0p. **测试方第二波落地**（c75f668+fc0c193，2026-08-31 深夜——10 议题裁决后当晚交付 7 项）：
+   - 时间表达力（议题二）：atoms.occurred_at/valid_until（0016）+ extract prompt
+     今天日期锚（相对时间→绝对）+ API 宽容时间反序列化（date-only 与蒸馏层同语义
+     ——守夜复测逮到两层打架 422，fc0c193 修）
+   - place 实体类型（议题六）：CHECK 扩 5 类 + prompt/CLI/web 配色；判例表进文档
+   - session-append（议题一 b）：增量落库（pending-only，agent 补记，30s 防抖共享）
+   - 实体级遗忘（议题四）：?forget=true 级联归档→摘链→删实体+墓碑；手动 correction
+     superseded_by 取代链补通（犹豫点③关闭）
+   - 人审代问（议题三）：context_pack.pending_review ≤5 条
+   - no_feedback（议题八/B6）：search+context 不回写热度
+   - 文档：confidence 校准锚（犹豫点①）/30s 防抖（②）/L2 快照定位/arbitrate 规则
+   - cargo 117（+6）；pi harness 钩子配方（测试方供）记入 testing.md 路线；testing.md
+     重写为全能力版本
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
