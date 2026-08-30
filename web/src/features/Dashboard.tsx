@@ -216,7 +216,7 @@ export default function Dashboard() {
       sub: processingDocs.length > 0 ? `${processingDocs.length} 处理中` : `共 ${core.docs.length}`,
     },
     { label: 'Wiki 页面', n: wikiPages.length.toLocaleString(), sub: `共 ${core.pages.length}` },
-    { label: 'CodeGraph 项目', n: (cg?.length ?? 0).toLocaleString(), sub: '已注册' },
+    { label: '代码图谱项目', n: (cg?.length ?? 0).toLocaleString(), sub: '已注册' },
     { label: 'LLM tokens', n: totalTokens.toLocaleString(), sub: '近 30 天' },
   ]
 
@@ -225,7 +225,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Dashboard" desc="记忆资产、系统活动与用量的概览" />
+      <PageHeader title="概览" desc="记忆资产、系统活动与用量的概览" />
 
       <PipelineHero stages={stages} distilling={distilling} />
 

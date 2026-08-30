@@ -19,7 +19,7 @@ export default function CodeGraph() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="CodeGraph" desc="代码知识图谱：注册 → 建索引 → 符号查询" />
+      <PageHeader title="代码图谱" desc="代码知识图谱：注册 → 建索引 → 符号查询" />
 
       <form
         className="flex flex-wrap gap-2"

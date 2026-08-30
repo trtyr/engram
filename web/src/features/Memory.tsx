@@ -121,7 +121,7 @@ export default function Memory() {
   })
   return (
     <div className="space-y-6">
-      <PageHeader title="Memory" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
+      <PageHeader title="用户记忆" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
       <PipelineStrip onGo={setTab} />
       <Tabs items={TABS} value={tab} onChange={setTab} />
       {tab === 'sessions' && <Sessions />}

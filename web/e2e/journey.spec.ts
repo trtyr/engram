@@ -47,10 +47,10 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   await page.goto('/')
   await page.getByLabel('管理员密码').fill(ADMIN_PW)
   await page.getByRole('button', { name: '登录' }).click()
-  await expect(page.getByRole('link', { name: 'Memory' })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole('link', { name: '用户记忆' })).toBeVisible({ timeout: 10_000 })
 
   // ---------- 2. Knowledge：上传 -> ready -> 分块预览 ----------
-  await page.getByRole('link', { name: 'Knowledge' }).click()
+  await page.getByRole('link', { name: '知识库' }).click()
   await expect(page.getByTestId('dropzone'), '拖拽上传区应存在').toBeVisible()
   const mdContent = '# Playwright \u4e4b\u65c5\n\nPlaywright \u9a71\u52a8\u771f\u5b9e\u6d4f\u89c8\u5668\u5b8c\u6210\u7aef\u5230\u7aef\u9a8c\u8bc1\u3002\n\n## \u65ad\u8a00\u6a21\u578b\n\nexpect(locator).toBeVisible() \u662f\u81ea\u52a8\u91cd\u8bd5\u65ad\u8a00\u3002\n\n## \u8865\u5145\n\n' + '\u6d4b\u8bd5\u6700\u4f73\u5b9e\u8df5\u8865\u5145\u5185\u5bb9\u3002'.repeat(40)
   await page.setInputFiles('input[type=file]', {
@@ -66,7 +66,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   await expect(page.getByText(/共 \d+ 块/), '阅读区应显示分块成文').toBeVisible({ timeout: 30_000 })
 
   // ---------- 3. Memory：写会话 ->（有 LLM 时）触发蒸馏 -> 原子出现 ----------
-  await page.getByRole('link', { name: 'Memory' }).click()
+  await page.getByRole('link', { name: '用户记忆' }).click()
   await page.getByRole('button', { name: '会话', exact: true }).click()
   await api('POST', '/memory/sessions', {
     agent: 'e2e-browser',
@@ -108,7 +108,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   }
 
   // ---------- 5. CodeGraph：注册 -> 索引 -> 查询 ----------
-  await page.getByRole('link', { name: 'CodeGraph' }).click()
+  await page.getByRole('link', { name: '代码图谱' }).click()
   const projName = `e2e-cg-${Date.now()}`
   const resp = await page.request.post(`${BASE}/codegraph/projects`, {
     headers: { authorization: `Bearer ${aiKey}` },
@@ -128,7 +128,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   }
 
   // ---------- 6. Jobs：事件时间线 ----------
-  await page.getByRole('link', { name: 'Jobs' }).click()
+  await page.getByRole('link', { name: '任务' }).click()
   await expect(page.getByRole('combobox').first()).toBeVisible()
   await page.locator('tbody tr').first().click()
   await expect(page.getByText(/\u4efb\u52a1|\u5165\u961f/).first(), '\u4e8b\u4ef6\u65f6\u95f4\u7ebf\u5e94\u5c55\u793a').toBeVisible({ timeout: 15_000 })

@@ -76,7 +76,7 @@ export default function Knowledge() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Knowledge" desc="文档 / URL 摄取 → 分块 → 嵌入 → 混合检索" />
+      <PageHeader title="知识库" desc="文档 / URL 摄取 → 分块 → 嵌入 → 混合检索" />
 
       <div
         className={cn(

@@ -24,7 +24,7 @@ export default function Jobs() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Jobs" desc="后台任务队列与事件时间线">
+      <PageHeader title="任务" desc="后台任务队列与事件时间线">
         <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">全部状态</option>
           {['pending', 'running', 'succeeded', 'failed', 'dead'].map((s) => (

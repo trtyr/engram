@@ -46,22 +46,22 @@ type NavItem = {
 const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
   {
     label: null,
-    items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard }],
+    items: [{ to: '/', label: '概览', icon: LayoutDashboard }],
   },
   {
     label: '资产域',
     items: [
-      { to: '/memory', label: 'Memory', icon: Brain, pulse: (s) => s.distilling > 0 },
-      { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
+      { to: '/memory', label: '用户记忆', icon: Brain, pulse: (s) => s.distilling > 0 },
+      { to: '/knowledge', label: '知识库', icon: BookOpen },
       { to: '/wiki', label: 'Wiki', icon: Network },
-      { to: '/codegraph', label: 'CodeGraph', icon: Waypoints },
+      { to: '/codegraph', label: '代码图谱', icon: Waypoints },
     ],
   },
   {
     label: '系统',
     items: [
-      { to: '/jobs', label: 'Jobs', icon: ListChecks, badge: (s) => s.failed || null },
-      { to: '/settings', label: 'Settings', icon: SettingsIcon },
+      { to: '/jobs', label: '任务', icon: ListChecks, badge: (s) => s.failed || null },
+      { to: '/settings', label: '设置', icon: SettingsIcon },
     ],
   },
 ]

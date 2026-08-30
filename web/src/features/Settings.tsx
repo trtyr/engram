@@ -17,7 +17,7 @@ export default function Settings() {
   const [tab, setTab] = useState<Tab>('providers')
   return (
     <div className="space-y-6">
-      <PageHeader title="Settings" desc="LLM 供应商、模型路由与 API 密钥" />
+      <PageHeader title="设置" desc="LLM 供应商、模型路由与 API 密钥" />
       <Tabs items={TABS} value={tab} onChange={setTab} />
       {tab === 'providers' && <Providers />}
       {tab === 'routing' && <Routing />}
