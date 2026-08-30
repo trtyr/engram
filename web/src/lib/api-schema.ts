@@ -1549,6 +1549,8 @@ export interface components {
             /** Format: float */
             confidence?: number | null;
             content?: string | null;
+            /** @description 人审结论：true=转待审，false=通过（清标记） */
+            needs_review?: boolean | null;
             /** @description 只允许 "archived" / "active" */
             status?: string | null;
         };
