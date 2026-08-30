@@ -405,6 +405,8 @@ impl MemoryService {
         Ok(row)
     }
 
+    // 选项袋式更新：8 个可选字段一一对应列；struct 化留给下一轮接口收敛
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_atom(
         &self,
         id: Uuid,

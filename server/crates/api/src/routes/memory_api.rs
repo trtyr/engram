@@ -173,13 +173,43 @@ pub struct CreateAtomRequest {
     pub content: String,
     #[serde(default = "default_conf")]
     pub confidence: f32,
-    /// 事件时间（ISO8601；"下周三"这类相对时间解析后的绝对值）
+    /// 事件时间（ISO8601 或 date-only；"下周三"这类相对时间解析后的绝对值）
+    #[serde(default, deserialize_with = "opt_flex_dt")]
     pub occurred_at: Option<chrono::DateTime<chrono::Utc>>,
     /// 有效期（ISO8601；到期事件可过滤/降权）
     pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 fn default_conf() -> f32 {
     0.9
+}
+
+/// 宽容时间反序列化：RFC3339 全形态或 date-only（"2026-09-02" → 当日零点 UTC）——
+/// 与 distill 层 parse_iso 同一套语义，API/蒸馏两层不再打架。
+fn parse_flex_datetime(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let t = s.trim();
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(t) {
+        return Some(dt.into());
+    }
+    chrono::NaiveDate::parse_from_str(t, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .map(|ndt| chrono::DateTime::from_naive_utc_and_offset(ndt, chrono::Utc))
+}
+
+fn opt_flex_dt<'de, D>(d: D) -> Result<Option<chrono::DateTime<chrono::Utc>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: Option<String> = Option::deserialize(d)?;
+    match raw {
+        None => Ok(None),
+        Some(s) => match parse_flex_datetime(&s) {
+            Some(dt) => Ok(Some(dt)),
+            None => Err(serde::de::Error::custom(format!(
+                "无法解析时间 {s:?}：期望 ISO8601（2026-09-02 或 2026-09-02T00:00:00Z）"
+            ))),
+        },
+    }
 }
 
 /// 追加轮次到既有会话（自动节律 b 配套：长对话分片落库，不等收尾）。
@@ -245,7 +275,9 @@ pub struct UpdateAtomRequest {
     pub needs_review: Option<bool>,
     /// correction 取代链：本原子被哪条新原子取代（arbitrate 自动维护，手动 correction 补链）
     pub superseded_by: Option<Uuid>,
+    #[serde(default, deserialize_with = "opt_flex_dt")]
     pub occurred_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default, deserialize_with = "opt_flex_dt")]
     pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
