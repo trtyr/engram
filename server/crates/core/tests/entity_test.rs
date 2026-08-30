@@ -157,3 +157,17 @@ async fn merge_moves_atom_links_and_counts() {
         .unwrap();
     assert_eq!(left, 0, "删赢家应连带清掉墓碑，两行都不剩");
 }
+
+/// 议题六：place 是合法实体类型（淀山湖案——地点是用户世界的高频透镜）。
+#[tokio::test]
+async fn place_is_a_valid_entity_kind() {
+    let (_pool, svc, _container) = setup().await;
+    let e = svc
+        .create_entity("淀山湖", "place", "周末骑行常去")
+        .await
+        .unwrap();
+    assert_eq!(e.kind, "place");
+    // 旧四类不受影响
+    let p = svc.create_entity("张三", "person", "").await.unwrap();
+    assert_eq!(p.kind, "person");
+}

@@ -121,6 +121,19 @@
      fallback 护栏）+ references/memory-api.md（全端点+心法，逐例实测；逮到文档
      layers 应为数组、字段是 max_items 不是 limit——脚本同错同修）
    - cargo 109 / api_key_memory_journey + context_pack_carries_entity_lenses 新测试
+0n. **测试方 A 档四修 + 平台面开放**（fdfd77d，2026-08-31 深夜 AI 互测第一波）：
+   - A1 直写低置信绕过人审（三方打架实锤）→ create_atom 与蒸馏链同规则 <0.55 进人审
+   - A4 直写无去重 → 同 kind+内容幂等返回已有原子（近重复仍归 arbitrate）
+   - A6 atom_refs 嵌套/扁平混型 → organize UPDATE 的 UNION ALL 整数组当单元素并进
+     agg——两侧都展开成标量；存量数据修平
+   - 401 区分「已撤销」vs「不存在」（测试方排查建议）
+   - **llm scope 上线**（用户拍板：除 amk_ 管理外全暴露）：providers/路由/连通/用量
+     8 端点放开；api-keys 管理与 re-encrypt 仍仅管理员
+   - 脚本平台面：providers/provider-add/update/delete/test + routing/routing-put +
+     jobs/ready + scenarios（A2 全 id、A5 轮次列、B3 同步）；文档补分数语义/幂等/
+     needs_review 持久标记/L2 快照语义/base_url 不带 v1
+   - cargo 111（+revoked_401 +llm_scope 两测试）；newapi provider 实配（MiniMax-M3
+     + bge-m3，连通 chat 1110ms / embed 579ms×1024 维），蒸馏链真 provider 全通
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。

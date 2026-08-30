@@ -566,6 +566,7 @@ async fn openapi_snapshot() {
             "/memory/search",
             "/memory/sessions",
             "/memory/sessions/{id}",
+            "/memory/sessions/{id}/append",
             "/ready",
             "/search",
             "/settings/api-keys",

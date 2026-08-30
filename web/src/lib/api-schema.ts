@@ -435,7 +435,6 @@ export interface paths {
         get: operations["get_entity"];
         put?: never;
         post?: never;
-        /** 删实体（关联原子保留，仅解除关联）。 */
         delete: operations["delete_entity"];
         options?: never;
         head?: never;
@@ -621,6 +620,22 @@ export interface paths {
         post?: never;
         /** 擦除会话（引用它的原子来源标记失效）。 */
         delete: operations["erase_session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/sessions/{id}/append": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["append_session"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1079,6 +1094,14 @@ export interface components {
             revoked_at?: string | null;
             scopes: string[];
         };
+        /** @description 追加轮次到既有会话（自动节律 b 配套：长对话分片落库，不等收尾）。 */
+        AppendSessionRequest: {
+            /** @description 补记会话归属（pi extension 传 session/model 名；不传保持原值） */
+            agent?: string | null;
+            /** @description auto（默认，防抖）| off */
+            distill?: string;
+            turns: Record<string, never>;
+        };
         ApplyProposalRequest: {
             content: string;
             slug: string;
@@ -1101,6 +1124,11 @@ export interface components {
             id: string;
             kind: string;
             needs_review: boolean;
+            /**
+             * Format: date-time
+             * @description 事件时间（extract 以当天为锚把相对时间解析成绝对；created_at 只是记录时间）
+             */
+            occurred_at?: string | null;
             /** Format: uuid */
             scenario_id?: string | null;
             source_refs: Record<string, never>;
@@ -1109,6 +1137,11 @@ export interface components {
             superseded_by?: string | null;
             /** Format: date-time */
             updated_at: string;
+            /**
+             * Format: date-time
+             * @description 有效期（到期事件可过滤/降权）
+             */
+            valid_until?: string | null;
         };
         CascadeReport: {
             cleaned_links: number;
@@ -1178,6 +1211,8 @@ export interface components {
             /** @description 实体透镜：用户世界里的人/项目/主题（有 query 按相关，无 query 按密度头部） */
             entities: components["schemas"]["EntityDto"][];
             meta: components["schemas"]["ContextMeta"];
+            /** @description 待人审项（≤5 条）——AI 在对话中顺口确认后 atom-patch 回写 */
+            pending_review: components["schemas"]["AtomDto"][];
             /** @description L3：画像分面（当前版本，全量） */
             persona: components["schemas"]["PersonaVersion"][];
             /** @description L2：相关/最近场景 */
@@ -1192,6 +1227,16 @@ export interface components {
             confidence?: number;
             content: string;
             kind: string;
+            /**
+             * Format: date-time
+             * @description 事件时间（ISO8601；"下周三"这类相对时间解析后的绝对值）
+             */
+            occurred_at?: string | null;
+            /**
+             * Format: date-time
+             * @description 有效期（ISO8601；到期事件可过滤/降权）
+             */
+            valid_until?: string | null;
         };
         CreateEntityRequest: {
             /** @description person / project / topic / group */
@@ -1553,8 +1598,17 @@ export interface components {
             content?: string | null;
             /** @description 人审结论：true=转待审，false=通过（清标记） */
             needs_review?: boolean | null;
+            /** Format: date-time */
+            occurred_at?: string | null;
             /** @description 只允许 "archived" / "active" */
             status?: string | null;
+            /**
+             * Format: uuid
+             * @description correction 取代链：本原子被哪条新原子取代（arbitrate 自动维护，手动 correction 补链）
+             */
+            superseded_by?: string | null;
+            /** Format: date-time */
+            valid_until?: string | null;
         };
         UpdateEntityRequest: {
             name?: string | null;
@@ -2193,6 +2247,8 @@ export interface operations {
                 query?: string | null;
                 budget_items?: number | null;
                 budget_chars?: number | null;
+                /** @description true = 命中不回写热度（harness 注入/测试用） */
+                no_feedback?: boolean;
             };
             header?: never;
             path?: never;
@@ -2339,7 +2395,10 @@ export interface operations {
     };
     delete_entity: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description true = 实体级遗忘：挂链 active 原子全部归档，再删实体 */
+                forget?: boolean | null;
+            };
             header?: never;
             path: {
                 id: string;
@@ -2348,6 +2407,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description forget=true 时返回 {archived: N} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -2677,6 +2743,38 @@ export interface operations {
         requestBody?: never;
         responses: {
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    append_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppendSessionRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDto"];
+                };
+            };
+            /** @description 已蒸馏会话不可追加 */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

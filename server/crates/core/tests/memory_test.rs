@@ -5,7 +5,7 @@
 
 mod support;
 
-use agent_memory_core::memory::MemoryService;
+use agent_memory_core::memory::{MemoryError, MemoryService};
 use agent_memory_llm::{KeyCipher, ProviderRegistry};
 use agent_memory_search::tokenize::tsv_text;
 use sqlx::PgPool;
@@ -51,7 +51,7 @@ async fn context_pack_l1_is_query_relevant_not_hit_count() {
     let irrelevant = insert_atom(&pool, "用户喜欢在家做中式烹饪料理", 100).await;
 
     let pack = svc
-        .context_pack(Some("Rust"), 10, 10_000)
+        .context_pack(Some("Rust"), 10, 10_000, false)
         .await
         .expect("context_pack");
 
@@ -94,7 +94,7 @@ async fn search_hits_bump_hit_count() {
     .await
     .unwrap();
 
-    let _ = svc.search("Rust", &[], 10).await.expect("search");
+    let _ = svc.search("Rust", &[], 10, false).await.expect("search");
 
     // 回写是异步的：轮询等它落地
     let mut atom_hits = 0i32;
@@ -123,7 +123,10 @@ async fn search_hits_bump_hit_count() {
 
     // context_pack 读路径同样计数（有 query 时 L1 走 search_atoms）
     let before = atom_hits;
-    let _ = svc.context_pack(Some("Rust"), 10, 10_000).await.unwrap();
+    let _ = svc
+        .context_pack(Some("Rust"), 10, 10_000, false)
+        .await
+        .unwrap();
     let mut after = before;
     for _ in 0..50 {
         after = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
@@ -158,7 +161,7 @@ async fn update_atom_can_clear_needs_review() {
 
     // 通过：清人审标记，其余不动
     let a = svc
-        .update_atom(id, None, None, None, Some(false))
+        .update_atom(id, None, None, None, Some(false), None, None, None)
         .await
         .unwrap();
     assert!(!a.needs_review, "人审通过应清 needs_review");
@@ -179,7 +182,10 @@ async fn context_pack_carries_entity_lenses() {
     let _cook = svc.create_entity("烹饪", "topic", "").await.unwrap();
 
     // 有 query：token 相关——「张三」命中人物实体
-    let pack = svc.context_pack(Some("张三"), 10, 10_000).await.unwrap();
+    let pack = svc
+        .context_pack(Some("张三"), 10, 10_000, false)
+        .await
+        .unwrap();
     assert!(
         pack.entities.iter().any(|e| e.id == zhang.id),
         "query 张三 → 实体透镜应含张三，实得 {:?}",
@@ -190,6 +196,185 @@ async fn context_pack_carries_entity_lenses() {
     );
 
     // 无 query：密度头部（两实体密度同为 0 时取 updated_at 头部，非空即可）
-    let pack = svc.context_pack(None, 10, 10_000).await.unwrap();
+    let pack = svc.context_pack(None, 10, 10_000, false).await.unwrap();
     assert!(!pack.entities.is_empty(), "无 query → 实体透镜应有密度头部");
+}
+
+/// 议题一 b：append_session 增量写——pending 可追加、已蒸馏拒绝、agent 可补记。
+#[tokio::test]
+async fn append_session_semantics() {
+    let (_pool, svc, _container) = setup().await;
+    let s = svc
+        .write_session(
+            "pi-ext",
+            serde_json::json!([{"speaker":"user","text":"第一轮"}]),
+            "off",
+        )
+        .await
+        .unwrap();
+
+    // pending 可追加，轮次合并
+    let s2 = svc
+        .append_session(
+            s.id,
+            serde_json::json!([{"speaker":"assistant","text":"收到"},{"speaker":"user","text":"继续"}]),
+            None,
+            "off",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        s2.content.as_array().map(|a| a.len()),
+        Some(3),
+        "追加后 3 轮"
+    );
+    assert_eq!(s2.agent, "pi-ext", "不传 agent 保持原值");
+
+    // agent 补记（COALESCE）
+    let s3 = svc
+        .append_session(
+            s.id,
+            serde_json::json!([{"speaker":"user","text":"第四轮"}]),
+            Some("pi-claude"),
+            "off",
+        )
+        .await
+        .unwrap();
+    assert_eq!(s3.agent, "pi-claude", "补记 agent 应生效");
+
+    // 已蒸馏拒绝
+    sqlx::query("UPDATE raw_sessions SET distill_status = 'done' WHERE id = $1")
+        .bind(s.id)
+        .execute(&_pool)
+        .await
+        .unwrap();
+    let err = svc
+        .append_session(
+            s.id,
+            serde_json::json!([{"speaker":"user","text":"迟到"}]),
+            None,
+            "off",
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, MemoryError::BadRequest(_)), "已蒸馏应 400");
+}
+
+/// 议题四：实体级遗忘——挂链 active 原子归档、非 active 不动、实体+墓碑消失。
+#[tokio::test]
+async fn forget_entity_archives_linked_atoms() {
+    let (pool, svc, _container) = setup().await;
+    let e = svc.create_entity("小王", "person", "").await.unwrap();
+    let a1 = insert_atom(&pool, "小王 pace 偏慢", 0).await;
+    let a2 = insert_atom(&pool, "小王 也要去骑行", 0).await;
+    // 预置一条已归档的挂链原子（不应被二次动）
+    let a3 = insert_atom(&pool, "小王 的旧记录", 0).await;
+    sqlx::query("UPDATE atoms SET status = 'archived' WHERE id = $1")
+        .bind(a3)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for a in [a1, a2, a3] {
+        svc.attach_atom(e.id, a).await.unwrap();
+    }
+
+    let n = svc.forget_entity(e.id).await.unwrap();
+    assert_eq!(n, 2, "只归档 2 条 active（archived 不动）");
+
+    for a in [a1, a2] {
+        let st: String = sqlx::query_scalar("SELECT status FROM atoms WHERE id = $1")
+            .bind(a)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(st, "archived");
+    }
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM entities")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "实体应删除");
+}
+
+/// 议题二：直写带事件时间；correction 手动补 superseded_by 取代链。
+#[tokio::test]
+async fn atom_time_and_supersede_chain() {
+    let (_pool, svc, _container) = setup().await;
+    let old = svc
+        .create_atom("fact", "张三的生日是 3 月 5 日", 0.9, None, None)
+        .await
+        .unwrap();
+    assert!(old.occurred_at.is_none());
+
+    let occ = "2026-09-02T00:00:00Z"
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap();
+    let new = svc
+        .create_atom(
+            "correction",
+            "张三的生日是 3 月 15 日",
+            0.95,
+            Some(occ),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(new.occurred_at, Some(occ), "直写应携带事件时间");
+
+    // 手动 correction：归档旧原子并补取代链
+    let archived = svc
+        .update_atom(
+            old.id,
+            None,
+            None,
+            Some("archived"),
+            None,
+            Some(new.id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(archived.status, "archived");
+    assert_eq!(archived.superseded_by, Some(new.id), "取代链应指向新原子");
+}
+
+/// 议题三：context_pack 带人审队列（代问）；no_feedback 不刷热度。
+#[tokio::test]
+async fn context_pack_pending_review_and_no_feedback() {
+    let (pool, svc, _container) = setup().await;
+    let hot = insert_atom(&pool, "用户偏好深色主题", 50).await;
+
+    // 造一条待人审原子
+    let pr = svc
+        .create_atom("fact", "待确认：张三生日 3 月 15 日", 0.3, None, None)
+        .await
+        .unwrap();
+    assert!(pr.needs_review);
+
+    let pack = svc
+        .context_pack(Some("张三"), 10, 10_000, false)
+        .await
+        .unwrap();
+    assert!(
+        pack.pending_review.iter().any(|a| a.id == pr.id),
+        "人审队列应进 context_pack 供 AI 代问"
+    );
+
+    // no_feedback=true：hit_count 不涨
+    let before: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
+        .bind(hot)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let _ = svc
+        .context_pack(Some("深色主题"), 10, 10_000, true)
+        .await
+        .unwrap();
+    let after: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
+        .bind(hot)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(before, after, "no_feedback 不应刷热度");
 }

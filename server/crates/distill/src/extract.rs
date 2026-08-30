@@ -8,6 +8,19 @@ use uuid::Uuid;
 use crate::llm_port::LlmRef;
 use crate::prompts;
 
+/// 宽容 ISO8601 解析：完整 RFC3339 或 date-only（"2026-09-02" → 当日零点 UTC）。
+/// LLM 输出的时间五花八门，这里只接受这两种最常见形态，其余静默丢弃（时间字段可选）。
+fn parse_iso(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let t = s.trim();
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(t) {
+        return Some(dt.into());
+    }
+    chrono::NaiveDate::parse_from_str(t, "%Y-%m-%d")
+        .ok()
+        .map(|d| d.and_hms_opt(0, 0, 0).unwrap())
+        .map(|ndt| chrono::DateTime::from_naive_utc_and_offset(ndt, chrono::Utc))
+}
+
 /// 原始会话行（extract 内部用）。
 struct SessionRow {
     id: Uuid,
@@ -128,6 +141,8 @@ async fn run_claimed(
         confidence: f32,
         refs: serde_json::Value,
         entities: Vec<(String, String)>,
+        occurred_at: Option<chrono::DateTime<chrono::Utc>>,
+        valid_until: Option<chrono::DateTime<chrono::Utc>>,
     }
     let mut texts: Vec<String> = Vec::new();
     let mut pending: Vec<PendingAtom> = Vec::new();
@@ -185,6 +200,15 @@ async fn run_claimed(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            // 议题二：相对时间已由 prompt（今天锚）让 LLM 换算成 ISO8601；这里宽容解析
+            let occurred_at = a
+                .get("occurred_at")
+                .and_then(|v| v.as_str())
+                .and_then(parse_iso);
+            let valid_until = a
+                .get("valid_until")
+                .and_then(|v| v.as_str())
+                .and_then(parse_iso);
             // 实体：该条记忆的主角（人/项目/主题/群组）——name+kind 归一后落库挂链
             let entities: Vec<(String, String)> = a
                 .get("entities")
@@ -196,7 +220,10 @@ async fn run_claimed(
                             let kind = e.get("kind").and_then(|v| v.as_str()).unwrap_or("topic");
                             if name.is_empty()
                                 || name.chars().count() > 60
-                                || !matches!(kind, "person" | "project" | "topic" | "group")
+                                || !matches!(
+                                    kind,
+                                    "person" | "project" | "topic" | "group" | "place"
+                                )
                             {
                                 return None;
                             }
@@ -212,6 +239,8 @@ async fn run_claimed(
                 confidence,
                 refs: json!(refs),
                 entities,
+                occurred_at,
+                valid_until,
             });
         }
         if seg_count == 0 {
@@ -250,12 +279,14 @@ async fn run_claimed(
                 confidence,
                 refs,
                 entities,
+                occurred_at,
+                valid_until,
             } = p;
             let id = Uuid::now_v7();
             let needs_review = confidence < 0.55;
             sqlx::query(
-                "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, tsv)
-                 VALUES ($1, $2, $3, $4, 'candidate', $5, $6, $7, to_tsvector('simple', $8))",
+                "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, occurred_at, valid_until, embedding, tsv)
+                 VALUES ($1, $2, $3, $4, 'candidate', $5, $6, $7, $8, $9, to_tsvector('simple', $10))",
             )
             .bind(id)
             .bind(&kind)
@@ -263,6 +294,8 @@ async fn run_claimed(
             .bind(confidence)
             .bind(sqlx::types::Json(&refs))
             .bind(needs_review)
+            .bind(occurred_at)
+            .bind(valid_until)
             // B2：嵌入缺失或全零（上游异常）一律置 NULL——零向量会污染余弦近邻
             .bind(
                 embeddings

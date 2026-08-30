@@ -7,6 +7,7 @@ use agent_memory_core::memory::{
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
@@ -172,9 +173,43 @@ pub struct CreateAtomRequest {
     pub content: String,
     #[serde(default = "default_conf")]
     pub confidence: f32,
+    /// 事件时间（ISO8601；"下周三"这类相对时间解析后的绝对值）
+    pub occurred_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// 有效期（ISO8601；到期事件可过滤/降权）
+    pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 fn default_conf() -> f32 {
     0.9
+}
+
+/// 追加轮次到既有会话（自动节律 b 配套：长对话分片落库，不等收尾）。
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct AppendSessionRequest {
+    #[schema(value_type = Object)]
+    pub turns: serde_json::Value,
+    /// 补记会话归属（pi extension 传 session/model 名；不传保持原值）
+    pub agent: Option<String>,
+    /// auto（默认，防抖）| off
+    #[serde(default = "default_distill")]
+    pub distill: String,
+}
+
+#[utoipa::path(post, path = "/memory/sessions/{id}/append",
+    request_body = AppendSessionRequest,
+    responses((status = 200, body = SessionDto), (status = 400, description = "已蒸馏会话不可追加")))]
+pub async fn append_session(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<AppendSessionRequest>,
+) -> Result<Json<SessionDto>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(
+        svc(&state)
+            .append_session(id, req.turns, req.agent.as_deref(), &req.distill)
+            .await
+            .map_err(me)?,
+    ))
 }
 
 /// 手工新增原子（人审补充，直接 active）。
@@ -188,7 +223,13 @@ pub async fn create_atom(
 ) -> Result<(StatusCode, Json<AtomDto>), ApiError> {
     require_memory(&principal)?;
     let a = svc(&state)
-        .create_atom(&req.kind, &req.content, req.confidence)
+        .create_atom(
+            &req.kind,
+            &req.content,
+            req.confidence,
+            req.occurred_at,
+            req.valid_until,
+        )
         .await
         .map_err(me)?;
     Ok((StatusCode::CREATED, Json(a)))
@@ -202,6 +243,10 @@ pub struct UpdateAtomRequest {
     pub status: Option<String>,
     /// 人审结论：true=转待审，false=通过（清标记）
     pub needs_review: Option<bool>,
+    /// correction 取代链：本原子被哪条新原子取代（arbitrate 自动维护，手动 correction 补链）
+    pub superseded_by: Option<Uuid>,
+    pub occurred_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[utoipa::path(patch, path = "/memory/atoms/{id}",
@@ -222,6 +267,9 @@ pub async fn update_atom(
                 req.confidence,
                 req.status.as_deref(),
                 req.needs_review,
+                req.superseded_by,
+                req.occurred_at,
+                req.valid_until,
             )
             .await
             .map_err(me)?,
@@ -308,10 +356,13 @@ pub async fn persona_rollback(
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct SearchRequest {
     pub query: String,
-    /// 层过滤：["l1","l2","l3"]，空 = 全部
+    /// 层过滤：["l1","l2","l3","entities"]，空 = 全部
     #[serde(default)]
     pub layers: Vec<String>,
     pub max_items: Option<i64>,
+    /// true = 命中不回写热度（harness 注入/测试用，防 B6 污染）
+    #[serde(default)]
+    pub no_feedback: bool,
 }
 
 #[utoipa::path(post, path = "/memory/search", operation_id = "memory_search",
@@ -326,7 +377,12 @@ pub async fn search(
     let layers: Vec<&str> = req.layers.iter().map(|s| s.as_str()).collect();
     Ok(Json(
         svc(&state)
-            .search(&req.query, &layers, req.max_items.unwrap_or(20))
+            .search(
+                &req.query,
+                &layers,
+                req.max_items.unwrap_or(20),
+                req.no_feedback,
+            )
             .await
             .map_err(me)?,
     ))
@@ -338,6 +394,9 @@ pub struct ContextParams {
     pub query: Option<String>,
     pub budget_items: Option<usize>,
     pub budget_chars: Option<usize>,
+    /// true = 命中不回写热度（harness 注入/测试用）
+    #[serde(default)]
+    pub no_feedback: bool,
 }
 
 /// AI 冷启动首选：一站式上下文包（L3+L2+L1 按预算裁剪）。
@@ -355,6 +414,7 @@ pub async fn context(
                 p.query.as_deref(),
                 p.budget_items.unwrap_or(20),
                 p.budget_chars.unwrap_or(8000),
+                p.no_feedback,
             )
             .await
             .map_err(me)?,
@@ -459,17 +519,33 @@ pub async fn update_entity(
     ))
 }
 
-/// 删实体（关联原子保留，仅解除关联）。
+/// 删实体（关联原子保留，仅解除关联）；?forget=true 级联归档挂链原子——「把 XX 忘了」。
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct ForgetParams {
+    /// true = 实体级遗忘：挂链 active 原子全部归档，再删实体
+    pub forget: Option<bool>,
+}
+
 #[utoipa::path(delete, path = "/memory/entities/{id}",
-    responses((status = 204)))]
+    params(ForgetParams),
+    responses((status = 204), (status = 200, description = "forget=true 时返回 {archived: N}")))]
 pub async fn delete_entity(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<StatusCode, ApiError> {
+    axum::extract::Query(fp): axum::extract::Query<ForgetParams>,
+) -> Result<axum::response::Response, ApiError> {
     require_memory(&principal)?;
+    if fp.forget.unwrap_or(false) {
+        let n = svc(&state).forget_entity(id).await.map_err(me)?;
+        return Ok((
+            StatusCode::OK,
+            axum::Json(serde_json::json!({ "archived": n })),
+        )
+            .into_response());
+    }
     svc(&state).delete_entity(id).await.map_err(me)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 /// 挂原子到实体（幂等）。

@@ -830,3 +830,58 @@ async fn reembed_memory_fills_missing_vectors() {
     env.handle.shutdown();
     env.handle.join().await;
 }
+
+/// 议题二：extract 把 LLM 解析出的相对时间（以 prompt 日期锚换算）落入 occurred_at/valid_until。
+#[tokio::test]
+async fn extract_carries_event_time() {
+    let env = setup(vec![
+        json!({"atoms": [
+            {"kind": "event", "content": "用户与张三去环淀山湖骑行", "confidence": 0.9, "turn_refs": [1],
+             "occurred_at": "2026-09-02", "valid_until": "2026-09-02T23:59:59Z",
+             "entities": [{"name": "淀山湖", "kind": "place"}]},
+            {"kind": "fact", "content": "用户偏好早上六点半出发", "confidence": 0.9, "turn_refs": [1]}
+        ]}),
+        json!({"verdicts": []}),
+        json!({"actions": []}),
+    ])
+    .await;
+
+    let sid = Uuid::now_v7();
+    sqlx::query("INSERT INTO raw_sessions (id, agent, content) VALUES ($1, 'pi', $2)")
+        .bind(sid)
+        .bind(session(&[(
+            "user",
+            "下周三和张三去淀山湖骑行，早上六点半出发",
+        )]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "extract_atoms").await;
+
+    let row: (
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as(
+        "SELECT occurred_at, valid_until FROM atoms WHERE content LIKE '%淀山湖%' LIMIT 1",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        row.0.map(|d| d.date_naive().to_string()),
+        Some("2026-09-02".into()),
+        "date-only 应解析为当日零点 UTC"
+    );
+    assert!(row.1.is_some(), "valid_until 应落入");
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "蒸馏应成功：{}",
+        j.error.unwrap_or_default()
+    );
+}

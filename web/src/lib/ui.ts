@@ -12,6 +12,7 @@ export const ENTITY_KIND_COLOR: Record<string, string> = {
   project: '#3b82f6',
   topic: '#10b981',
   group: '#ec4899',
+  place: '#14b8a6',
 }
 /** 相对时间：feed/活动流的紧凑展示（超过 7 天退回绝对时间）。 */
 export function relTime(iso: string): string {

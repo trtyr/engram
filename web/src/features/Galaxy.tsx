@@ -24,6 +24,7 @@ const KIND_LABEL: Record<string, string> = {
   project: '项目',
   topic: '主题',
   group: '群组',
+  place: '地点',
 }
 
 export default function Galaxy({

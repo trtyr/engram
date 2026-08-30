@@ -54,6 +54,10 @@ pub struct AtomDto {
     pub needs_review: bool,
     pub hit_count: i32,
     pub scenario_id: Option<Uuid>,
+    /// 事件时间（extract 以当天为锚把相对时间解析成绝对；created_at 只是记录时间）
+    pub occurred_at: Option<DateTime<Utc>>,
+    /// 有效期（到期事件可过滤/降权）
+    pub valid_until: Option<DateTime<Utc>>,
     #[schema(value_type = Object)]
     pub source_refs: serde_json::Value,
     pub created_at: DateTime<Utc>,
@@ -93,6 +97,8 @@ pub struct ContextPack {
     pub atoms: Vec<AtomDto>,
     /// 实体透镜：用户世界里的人/项目/主题（有 query 按相关，无 query 按密度头部）
     pub entities: Vec<EntityDto>,
+    /// 待人审项（≤5 条）——AI 在对话中顺口确认后 atom-patch 回写
+    pub pending_review: Vec<AtomDto>,
     pub meta: ContextMeta,
 }
 
@@ -116,7 +122,7 @@ pub struct SearchResponse {
 // ---------- 实体（记忆星系） ----------
 
 /// 实体类型（迁移 0015 CHECK 枚举）。
-pub const ENTITY_KINDS: [&str; 4] = ["person", "project", "topic", "group"];
+pub const ENTITY_KINDS: [&str; 5] = ["person", "project", "topic", "group", "place"];
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct EntityDto {
@@ -221,6 +227,52 @@ impl MemoryService {
         Ok(row)
     }
 
+    /// 增量追加轮次到既有会话（长对话分片落库，不等收尾——自动节律 b 配套）。
+    /// 只允许追加未蒸馏（pending）会话：已蒸馏的会话追加会割裂 L1 溯源。
+    /// agent 可选补记（首个 append 补上会话归属，多 agent 视角的数据从现在记对）。
+    pub async fn append_session(
+        &self,
+        id: Uuid,
+        turns: serde_json::Value,
+        agent: Option<&str>,
+        distill: &str,
+    ) -> Result<SessionDto, MemoryError> {
+        let Some(arr) = turns.as_array() else {
+            return Err(MemoryError::BadRequest("content 必须是轮次数组".into()));
+        };
+        if arr.is_empty() {
+            return Err(MemoryError::BadRequest("追加至少一轮".into()));
+        }
+        let cur = sqlx::query_as::<_, SessionDto>("SELECT * FROM raw_sessions WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| MemoryError::NotFound(format!("会话 {id} 不存在")))?;
+        if cur.distill_status != "pending" {
+            return Err(MemoryError::BadRequest(format!(
+                "会话已蒸馏（{}），不可追加——请开新会话",
+                cur.distill_status
+            )));
+        }
+        let mut merged = cur.content.as_array().cloned().unwrap_or_default();
+        merged.extend(arr.iter().cloned());
+        let row = sqlx::query_as::<_, SessionDto>(
+            "UPDATE raw_sessions SET content = $2, agent = COALESCE($3, agent) WHERE id = $1 RETURNING *",
+        )
+        .bind(id)
+        .bind(sqlx::types::Json(&serde_json::Value::Array(merged)))
+        .bind(agent)
+        .fetch_one(&self.pool)
+        .await?;
+        // 追加同样走防抖：同窗口的追加与首写共用一个 extract 任务
+        if distill == "auto" {
+            agent_memory_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
+                .await
+                .ok();
+        }
+        Ok(row)
+    }
+
     pub async fn list_sessions(
         &self,
         agent: Option<&str>,
@@ -312,6 +364,8 @@ impl MemoryService {
         kind: &str,
         content: &str,
         confidence: f32,
+        occurred_at: Option<DateTime<Utc>>,
+        valid_until: Option<DateTime<Utc>>,
     ) -> Result<AtomDto, MemoryError> {
         let text = content.trim();
         // A4 幂等护栏：同 kind + 同内容（trim 后）的 active 原子已存在则直接返回它——
@@ -334,14 +388,16 @@ impl MemoryService {
         let id = Uuid::now_v7();
         let emb = self.try_embed(&[text.to_string()]).await;
         let row = sqlx::query_as::<_, AtomDto>(
-            "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, source_refs, embedding, tsv) \
-             VALUES ($1, $2, $3, $4, 'active', $5, '[]'::jsonb, $6, to_tsvector('simple', $7)) RETURNING *",
+            "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, occurred_at, valid_until, source_refs, embedding, tsv) \
+             VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, '[]'::jsonb, $8, to_tsvector('simple', $9)) RETURNING *",
         )
         .bind(id)
         .bind(kind)
         .bind(text)
         .bind(confidence)
         .bind(needs_review)
+        .bind(occurred_at)
+        .bind(valid_until)
         .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
         .bind(agent_memory_search::tokenize::tsv_text(text))
         .fetch_one(&self.pool)
@@ -356,6 +412,9 @@ impl MemoryService {
         confidence: Option<f32>,
         status: Option<&str>,
         needs_review: Option<bool>,
+        superseded_by: Option<Uuid>,
+        occurred_at: Option<DateTime<Utc>>,
+        valid_until: Option<DateTime<Utc>>,
     ) -> Result<AtomDto, MemoryError> {
         let cur = sqlx::query_as::<_, AtomDto>("SELECT * FROM atoms WHERE id = $1")
             .bind(id)
@@ -384,7 +443,9 @@ impl MemoryService {
 
         let row = sqlx::query_as::<_, AtomDto>(
             "UPDATE atoms SET content = $2, confidence = $3, status = $4, needs_review = COALESCE($5, needs_review), \
-                 embedding = COALESCE($6, embedding), tsv = to_tsvector('simple', $7), updated_at = now() \
+                 superseded_by = COALESCE($6, superseded_by), occurred_at = COALESCE($7, occurred_at), \
+                 valid_until = COALESCE($8, valid_until), \
+                 embedding = COALESCE($9, embedding), tsv = to_tsvector('simple', $10), updated_at = now() \
              WHERE id = $1 RETURNING *",
         )
         .bind(id)
@@ -392,6 +453,9 @@ impl MemoryService {
         .bind(new_conf)
         .bind(new_status)
         .bind(needs_review)
+        .bind(superseded_by)
+        .bind(occurred_at)
+        .bind(valid_until)
         .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
         .bind(agent_memory_search::tokenize::tsv_text(&new_content))
         .fetch_one(&self.pool)
@@ -622,6 +686,35 @@ impl MemoryService {
         Ok(())
     }
 
+    /// 实体级遗忘（「把小王忘了」）：级联归档挂链 active 原子 → 摘链 → 删实体+墓碑。
+    /// archived/superseded 等非 active 原子不动（本来就是历史）；人审候选一并归档。
+    pub async fn forget_entity(&self, id: Uuid) -> Result<usize, MemoryError> {
+        let cur = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM entities WHERE id = $1 AND merged_into IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        if cur.is_none() {
+            return Err(MemoryError::NotFound(format!("实体 {id} 不存在或已合并")));
+        }
+        let n = sqlx::query(
+            "UPDATE atoms SET status = 'archived', updated_at = now() \
+             WHERE status = 'active' AND id IN (SELECT atom_id FROM atom_entities WHERE entity_id = $1)",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected() as usize;
+        // 摘链（atom_entities 随实体删除本会级联，这里显式删保持语义清晰）
+        sqlx::query("DELETE FROM atom_entities WHERE entity_id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        self.delete_entity(id).await?;
+        Ok(n)
+    }
+
     /// 挂原子到实体（幂等）。
     pub async fn attach_atom(&self, entity_id: Uuid, atom_id: Uuid) -> Result<(), MemoryError> {
         self.entity_row(entity_id).await?;
@@ -774,6 +867,7 @@ impl MemoryService {
         query: &str,
         layers: &[&str],
         max_items: i64,
+        no_feedback: bool,
     ) -> Result<SearchResponse, MemoryError> {
         let qv = self
             .try_embed(&[query.to_string()])
@@ -821,9 +915,11 @@ impl MemoryService {
         } else {
             vec![]
         };
-        // B9：命中反馈（异步 best-effort，不阻塞返回）
-        self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
-        self.fire_hit_feedback("scenarios", l2.iter().map(|h| h.id).collect());
+        // B9：命中反馈（异步 best-effort，不阻塞返回）；no_feedback=true 跳过（B6 污染防护）
+        if !no_feedback {
+            self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
+            self.fire_hit_feedback("scenarios", l2.iter().map(|h| h.id).collect());
+        }
         Ok(SearchResponse {
             entities,
             l1,
@@ -839,6 +935,7 @@ impl MemoryService {
         query: Option<&str>,
         budget_items: usize,
         budget_chars: usize,
+        no_feedback: bool,
     ) -> Result<ContextPack, MemoryError> {
         let mut chars_used = 0usize;
         let mut truncated = false;
@@ -989,15 +1086,27 @@ impl MemoryService {
             }
         }
 
-        // B9：context_pack 也是使用（AI 冷启动读路径），同样计热度
-        self.fire_hit_feedback("atoms", out_atoms.iter().map(|a| a.id).collect());
-        self.fire_hit_feedback("scenarios", out_scenarios.iter().map(|s| s.id).collect());
+        // B9：context_pack 也是使用（AI 冷启动读路径），同样计热度；
+        // no_feedback=true 供 harness 注入/测试使用——不刷热度（B6 污染防护）
+        if !no_feedback {
+            self.fire_hit_feedback("atoms", out_atoms.iter().map(|a| a.id).collect());
+            self.fire_hit_feedback("scenarios", out_scenarios.iter().map(|s| s.id).collect());
+        }
+
+        // 人审代问（议题三）：队列里的低置信项带给 AI——下次对话顺口确认一句，
+        // atom-patch 回写，人审从「翻网页」变「一句话」。不计热度。
+        let pending_review: Vec<AtomDto> = sqlx::query_as(
+            "SELECT * FROM atoms WHERE needs_review AND status = 'active' ORDER BY created_at DESC LIMIT 5",
+        )
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(ContextPack {
             persona,
             scenarios: out_scenarios,
             atoms: out_atoms,
             entities: out_entities,
+            pending_review,
             meta: ContextMeta {
                 chars_used,
                 truncated,
