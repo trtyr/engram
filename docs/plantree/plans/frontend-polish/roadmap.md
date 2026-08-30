@@ -88,6 +88,22 @@
      懒加载 157kB 独立 chunk）；实体详情（画像/场景/原子时间线/挂摘计数回写/合并 confirm）；
      中心锚点「我」点击跳画像；seed 6 实体 5 边实测零 pageerror
    - e2e journey 适配新默认 tab（reload 后重进会话列表）
+0k. **目标 mtft7ahs-4gqfst：记忆模型九项问题全修**（模型分析→小目标集）：
+   - 抽取准则放宽 595d5be：「对用户跨会话有用的稳定信息」替代「关于用户本人」——
+     社交记忆解锁（张三生日/同事职责）；extract 实体抽取专项测试补审计缺口
+   - 实体档案自动生成 2523669：consolidate 步骤 2.5（≥3 密度+摘要滞后触发，
+     每轮≤10，LLM 失败仅告警）；首跑逮到并修复 consolidate LATERAL 潜伏 SQL
+     bug（真库必 Dead，从未被测过）
+   - 检索层补全 0b63dda：search_entities（名字加权 token 匹配）进 /memory/search
+     entities 层 + unified entity 域；画像弃 contains 改 jieba 分词打分；
+     palette 实体命中直达星系详情（?tab=galaxy&entity=）
+   - 记忆域 re-embed ae4daad：reembed_memory job（64/批、archived 不动、全零拒入）
+     + status/触发端点 + 原子 tab 修复横幅；修 update_atom 增 needs_review
+   - 人审队列 d7c7fdf：人审 tab（通过/取代/丢弃 + 勾选批量）
+   - 一致性修缮 3dd210a：done→success 绿；蒸馏口径统一为待蒸馏会话数；
+     /jobs 轮询单例化（12s 实测 2 次）；检索 tab 收敛入 palette（深链保留）、
+     星系隐藏条带、palette 记忆→原子
+   - 全门禁：cargo 107 / vitest 30 / build lint 0 / e2e PASS
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
