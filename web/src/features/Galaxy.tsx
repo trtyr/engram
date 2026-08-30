@@ -169,16 +169,19 @@ export default function Galaxy({
           </Card>
         ) : (
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-              <span className="font-mono">图例：</span>
-              {Object.entries(KIND_LABEL).map(([k, label]) => (
-                <span key={k} className="flex items-center gap-1.5">
-                  <span className="inline-block size-2 rounded-full" style={{ backgroundColor: KIND_COLOR[k] }} aria-hidden="true" />
-                  {label}
-                </span>
-              ))}
-              <span className="ml-auto font-mono text-muted-foreground/70">中心=我 · 节点大小=记忆密度 · 边=共现</span>
-            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              每个圆点是你记忆里的一个人 / 项目 / 主题（<span className="text-foreground">颜色 = 类型，大小 = 相关记忆条数</span>），
+              连线 = 它们在你的记忆里<span className="text-foreground">一起出现</span>（越粗越常见，会自动抱团）；
+              中间的「我」是你——点圆点看档案，<span className="text-foreground">按住可拖动</span>，滚轮缩放。
+              <span className="ml-2 inline-flex flex-wrap items-center gap-2 align-middle">
+                {Object.entries(KIND_LABEL).map(([k, label]) => (
+                  <span key={k} className="flex items-center gap-1 font-mono">
+                    <span className="inline-block size-2 rounded-full" style={{ backgroundColor: KIND_COLOR[k] }} aria-hidden="true" />
+                    {label}
+                  </span>
+                ))}
+              </span>
+            </p>
             <Suspense fallback={<div className="h-[60vh] w-full animate-pulse rounded-lg bg-muted/30" />}>
               <EntityGalaxy
                 graph={{ nodes: visible, edges: graph.edges }}
