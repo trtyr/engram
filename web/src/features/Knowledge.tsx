@@ -80,7 +80,7 @@ export default function Knowledge() {
 
       <div
         className={cn(
-          'rounded-lg border-2 border-dashed p-4 transition-colors',
+          'rounded-lg border-2 border-dashed px-4 py-3 transition-colors',
           dragging ? 'border-foreground/60 bg-muted/40' : 'border-border hover:border-foreground/30',
           ingesting && 'border-info/50',
         )}
@@ -145,14 +145,14 @@ export default function Knowledge() {
             </Button>
           </form>
         </div>
-        <p className="mt-2.5 text-xs text-muted-foreground/70">
-          支持 pdf / docx / html / md / txt，或直接把文件拖进这个框
-        </p>
-        <p className="mt-1 min-h-4 text-xs">
-          {notice && (
+        {/* 单行状态：无动作时显示格式提示，有反馈时覆盖（省一行常驻空位） */}
+        <p className="mt-2 min-h-4 text-xs">
+          {notice ? (
             <span className={notice.includes('失败') ? 'text-destructive' : notice.includes('摄取中') ? 'text-info' : 'text-success'}>
               {notice}
             </span>
+          ) : (
+            <span className="text-muted-foreground/70">支持 pdf / docx / html / md / txt，或直接把文件拖进这个框</span>
           )}
         </p>
       </div>
