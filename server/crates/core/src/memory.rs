@@ -982,6 +982,7 @@ impl MemoryService {
                     title: Some(s.topic.clone()),
                     snippet: s.summary.clone(),
                     kind: None,
+                    needs_review: None,
                 })
                 .collect::<Vec<_>>()
         };
