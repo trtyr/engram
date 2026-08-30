@@ -218,7 +218,7 @@ describe('Knowledge re-embed', () => {
     ]
     render(wrap(<Knowledge />))
     await screen.findByText('doc')
-    fireEvent.click(screen.getByRole('button', { name: '分块' }))
+    fireEvent.click(screen.getByRole('button', { name: '阅读' }))
     await screen.findByText('1 个分块嵌入失败（FTS 降级）')
     fireEvent.click(screen.getByRole('button', { name: '重嵌缺失块' }))
     await waitFor(() => {

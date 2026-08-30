@@ -244,7 +244,7 @@ export default function Knowledge() {
                         aria-expanded={openChunks === d.id}
                         onClick={() => setOpenChunks(openChunks === d.id ? null : d.id)}
                       >
-                        {openChunks === d.id ? '收起' : '分块'}
+                        {openChunks === d.id ? '收起' : '阅读'}
                       </Button>
                       <Button
                         variant="ghost"
@@ -288,7 +288,7 @@ function ChunksPanel({ docId }: { docId: string }) {
   if (!rows) return <Spinner />
   const failedCount = rows.filter((c) => c.embed_failed).length
   return (
-    <div className="max-h-96 overflow-auto bg-muted/30 px-4 py-3">
+    <div className="max-h-[70vh] overflow-auto bg-muted/30 px-4 py-3">
       {failedCount > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
           <span className="text-xs text-warning">{failedCount} 个分块嵌入失败（FTS 降级）</span>
@@ -314,12 +314,17 @@ function ChunksPanel({ docId }: { docId: string }) {
           {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
         </div>
       )}
-      {rows.map((c) => (
-        <div key={c.seq} className="border-b border-border/50 py-2.5 text-sm last:border-0">
-          <p className="mb-1 text-xs text-muted-foreground">#{c.seq} {c.embed_failed ? '（FTS 降级）' : ''}</p>
-          <p className="line-clamp-3">{c.content}</p>
-        </div>
-      ))}
+      {/* 阅读视图：分块连成整篇可读；块的 seq/FTS 调试信息退到悬停 title */}
+      <p className="mb-3 font-mono text-xs text-muted-foreground/70">
+        共 {rows.length} 块 · 全文 {rows.reduce((s, c) => s + c.content.length, 0).toLocaleString()} 字
+      </p>
+      <div className="space-y-3 text-sm leading-relaxed">
+        {rows.map((c) => (
+          <p key={c.seq} title={`#${c.seq}${c.embed_failed ? ' · FTS 降级' : ''}`}>
+            {c.content}
+          </p>
+        ))}
+      </div>
     </div>
   )
 }
