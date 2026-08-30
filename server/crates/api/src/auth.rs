@@ -129,6 +129,17 @@ pub async fn bearer_auth(
     mut req: Request,
     next: Next,
 ) -> Response {
+    // SPA 导航分流（D-001）：/jobs 与前端路由同路径——浏览器硬刷新（Accept: text/html*）
+    // 直接回 SPA 页，不要求 Bearer；API 客户端（JSON Accept）照常走认证。
+    let accept_html = req
+        .headers()
+        .get(axum::http::header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|a| a.starts_with("text/html"));
+    if accept_html && req.uri().path() == "/jobs" {
+        return crate::web_assets::static_handler(req.uri().clone()).await;
+    }
+
     let header = req
         .headers()
         .get(axum::http::header::AUTHORIZATION)
