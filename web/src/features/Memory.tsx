@@ -1,6 +1,7 @@
 /** Memory 域：会话 / 原子 / 场景 / 画像 / 检索。 */
 import { Fragment, useEffect, useState } from 'react'
 import { api, type Atom, type Job, type Persona, type Scenario, type Session } from '@/lib/api'
+import Galaxy from '@/features/Galaxy'
 import {
   Card,
   Empty,
@@ -15,9 +16,10 @@ import { useSystemStatus } from '@/lib/status'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-type Tab = 'sessions' | 'atoms' | 'scenarios' | 'persona' | 'search'
+type Tab = 'galaxy' | 'sessions' | 'atoms' | 'scenarios' | 'persona' | 'search'
 
 const TABS: { value: Tab; label: string }[] = [
+  { value: 'galaxy', label: '星系' },
   { value: 'sessions', label: '会话' },
   { value: 'atoms', label: '原子' },
   { value: 'scenarios', label: '场景' },
@@ -116,14 +118,17 @@ export default function Memory() {
   const [tab, setTab] = useState<Tab>(() => {
     // 支持 ?tab= 深链（Dashboard 管线主视觉点击穿透）：仅首次挂载读一次
     const t = new URLSearchParams(window.location.search).get('tab')
-    const valid: readonly string[] = ['sessions', 'atoms', 'scenarios', 'persona', 'search']
-    return valid.includes(t ?? '') ? (t as Tab) : 'sessions'
+    const valid: readonly string[] = ['galaxy', 'sessions', 'atoms', 'scenarios', 'persona', 'search']
+    return valid.includes(t ?? '') ? (t as Tab) : 'galaxy'
   })
   return (
     <div className="space-y-6">
       <PageHeader title="用户记忆" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
       <PipelineStrip onGo={setTab} />
       <Tabs items={TABS} value={tab} onChange={setTab} />
+      {tab === 'galaxy' && (
+        <Galaxy onGoPersona={() => setTab('persona')} onGoAtoms={() => setTab('atoms')} />
+      )}
       {tab === 'sessions' && <Sessions />}
       {tab === 'atoms' && <Atoms />}
       {tab === 'scenarios' && <Scenarios />}

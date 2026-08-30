@@ -186,6 +186,28 @@ export interface ChunkHit {
   score: number
   embed_failed: boolean
 }
+export interface EntityNode {
+  id: string
+  name: string
+  kind: string
+  summary: string
+  atom_count: number
+  updated_at: string
+}
+export interface GraphEdge {
+  a: string
+  b: string
+  weight: number
+}
+export interface EntityGraph {
+  nodes: EntityNode[]
+  edges: GraphEdge[]
+}
+export interface EntityDetail {
+  entity: EntityNode
+  atoms: Atom[]
+  scenarios: Scenario[]
+}
 export interface WikiPage {
   id: string
   slug: string

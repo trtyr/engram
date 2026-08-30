@@ -6,6 +6,13 @@ export function fmtTime(iso: string): string {
 }
 
 /** 统一表格样式：发丝线 + 等宽数字。 */
+/** 实体类型色（数据编码色，亮暗通用中明度——与 WikiGraph 调色板同源）。 */
+export const ENTITY_KIND_COLOR: Record<string, string> = {
+  person: '#e6772e',
+  project: '#3b82f6',
+  topic: '#10b981',
+  group: '#ec4899',
+}
 /** 相对时间：feed/活动流的紧凑展示（超过 7 天退回绝对时间）。 */
 export function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
