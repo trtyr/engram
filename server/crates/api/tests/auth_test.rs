@@ -894,6 +894,7 @@ async fn openapi_snapshot() {
             "/llm/usage",
             "/memory/atoms",
             "/memory/atoms/{id}",
+            "/memory/atoms/{id}/revisions",
             "/memory/context",
             "/memory/distill",
             "/memory/embeddings/status",

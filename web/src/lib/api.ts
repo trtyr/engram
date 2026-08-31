@@ -128,6 +128,7 @@ export interface Atom {
   status: string
   superseded_by: string | null
   needs_review: boolean
+  sensitive?: boolean
   hit_count: number
   scenario_id: string | null
   source_refs: { session_id?: string; erased?: boolean }[]
@@ -148,6 +149,7 @@ export interface Persona {
   evidence_refs: unknown
   version: number
   prompt_version: string | null
+  manually_edited?: boolean
   created_at: string
 }
 export interface Job {
@@ -192,6 +194,7 @@ export interface EntityNode {
   kind: string
   summary: string
   atom_count: number
+  manually_edited?: boolean
   updated_at: string
 }
 export interface GraphEdge {

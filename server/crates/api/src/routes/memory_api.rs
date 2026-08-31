@@ -457,6 +457,18 @@ pub async fn update_atom(
     ))
 }
 
+/// 原子改写历史（新→旧；编辑留痕）。
+#[utoipa::path(get, path = "/memory/atoms/{id}/revisions",
+    responses((status = 200, body = [agent_memory_core::AtomRevision])))]
+pub async fn atom_revisions(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<agent_memory_core::AtomRevision>>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(svc(&state).atom_revisions(id).await.map_err(me)?))
+}
+
 /// 审计/留痕用主体来源："admin" / "key:名"
 fn actor_of(principal: &Principal) -> String {
     match principal {
@@ -587,8 +599,12 @@ pub async fn persona_edit(
             .map_err(me)?;
         return Ok(Json(v));
     }
-    if req.pinned == Some(false) {
-        svc.persona_unpin(&req.aspect, &actor).await.map_err(me)?;
+    match req.pinned {
+        Some(false) => svc.persona_unpin(&req.aspect, &actor).await.map_err(me)?,
+        Some(true) => {
+            svc.persona_repin(&req.aspect, &actor).await.map_err(me)?;
+        }
+        None => {}
     }
     let latest = svc
         .persona_history(&req.aspect)

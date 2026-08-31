@@ -77,6 +77,18 @@ pub struct ScenarioDto {
     pub updated_at: DateTime<Utc>,
 }
 
+/// 原子改写留痕（编辑能力：旧值 + 谁改的）。append-only，随原子级联删除。
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct AtomRevision {
+    pub id: Uuid,
+    pub atom_id: Uuid,
+    pub old_content: String,
+    pub old_kind: String,
+    pub old_confidence: f32,
+    pub edited_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct PersonaVersion {
     pub id: Uuid,
@@ -624,6 +636,53 @@ impl MemoryService {
         )
         .await;
         Ok(())
+    }
+
+    /// 原子改写历史（新→旧）。
+    pub async fn atom_revisions(&self, atom_id: Uuid) -> Result<Vec<AtomRevision>, MemoryError> {
+        Ok(sqlx::query_as::<_, AtomRevision>(
+            "SELECT * FROM atom_revisions WHERE atom_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(atom_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// 重新钉住（用户解锁后想再钉：为当前内容写一条钉住版本）。
+    pub async fn persona_repin(
+        &self,
+        aspect: &str,
+        actor: &str,
+    ) -> Result<PersonaVersion, MemoryError> {
+        let cur: Option<(String, i32)> = sqlx::query_as(
+            "SELECT content, version FROM persona_aspects WHERE aspect = $1 ORDER BY version DESC LIMIT 1",
+        )
+        .bind(aspect)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some((content, v)) = cur else {
+            return Err(MemoryError::NotFound(format!("分面 {aspect} 不存在")));
+        };
+        sqlx::query(
+            "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, manually_edited) \
+             VALUES ($1, $2, $3, '[]'::jsonb, $4, 'human', true)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(aspect)
+        .bind(&content)
+        .bind(v + 1)
+        .execute(&self.pool)
+        .await?;
+        self.audit(
+            "edit_persona",
+            json!({
+                "aspect": aspect, "by": actor, "action": "repin", "version": v + 1,
+            }),
+        )
+        .await;
+        self.persona_history(aspect)
+            .await
+            .map(|mut h| h.swap_remove(0))
     }
 
     pub async fn persona_rollback(

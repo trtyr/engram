@@ -264,6 +264,7 @@ function Atoms() {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [superseding, setSuperseding] = useState<string | null>(null)
+  const [historyAtom, setHistoryAtom] = useState<Atom | null>(null)
   // 重嵌修复：缺失向量可见 + 一键补嵌（换 embedding 供应商后的修复路径）
   const [missing, setMissing] = useState<{ atoms_missing: number; scenarios_missing: number } | null>(null)
   const [reembedMsg, setReembedMsg] = useState('')
@@ -462,6 +463,29 @@ function Atoms() {
                       </td>
                       <td className={tableCls.tdMono}>{a.hit_count}</td>
                       <td className={`${tableCls.td} whitespace-nowrap text-right`}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={cn('mr-1', a.sensitive && 'text-warning')}
+                          title={a.sensitive ? '敏感原子（检索/快照隐身，点击取消）' : '标记敏感（医疗/感情/财务等，检索与快照隐身）'}
+                          onClick={async () => {
+                            await api.patch(`/memory/atoms/${a.id}`, { sensitive: !a.sensitive })
+                            setRows(
+                              rows.map((r) => (r.id === a.id ? { ...r, sensitive: !a.sensitive } : r)),
+                            )
+                          }}
+                        >
+                          {a.sensitive ? '已敏感' : '敏感'}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mr-1"
+                          title="改写留痕历史"
+                          onClick={() => setHistoryAtom(a.id)}
+                        >
+                          历史
+                        </Button>
                         {a.status === 'active' && (
                           <>
                             <Button
@@ -632,6 +656,7 @@ function ReviewQueue({ onGoAtoms }: { onGoAtoms: () => void }) {
   const [rows, setRows] = useState<Atom[] | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [superseding, setSuperseding] = useState<string | null>(null)
+  const [historyAtom, setHistoryAtom] = useState<Atom | null>(null)
   const [draft, setDraft] = useState('')
   const [err, setErr] = useState('')
 

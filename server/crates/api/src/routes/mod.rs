@@ -33,7 +33,7 @@ use utoipa::OpenApi;
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
         memory_api::list_scenarios, memory_api::get_scenario,
         memory_api::get_persona, memory_api::persona_edit, memory_api::persona_history,
-        memory_api::persona_rollback,
+        memory_api::persona_rollback, memory_api::atom_revisions,
         memory_api::search, memory_api::context, memory_api::embedding_status, memory_api::reembed_memory,
         memory_api::list_entities, memory_api::entity_graph, memory_api::create_entity,
         memory_api::get_entity, memory_api::update_entity, memory_api::delete_entity,
@@ -119,6 +119,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/memory/atoms/{id}",
             axum::routing::patch(memory_api::update_atom),
+        )
+        .route(
+            "/memory/atoms/{id}/revisions",
+            axum::routing::get(memory_api::atom_revisions),
         )
         .route("/memory/scenarios", get(memory_api::list_scenarios))
         .route("/memory/scenarios/{id}", get(memory_api::get_scenario))
