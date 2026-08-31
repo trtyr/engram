@@ -62,9 +62,9 @@ export default function Galaxy({
   )
 
   return (
-    <div className="flex flex-col gap-4 lg:flex-row">
-      {/* 左：实体列表——清点与管理 */}
-      <Card className="overflow-hidden lg:w-80 lg:shrink-0 lg:self-start">
+    <div className="flex h-[calc(100vh-13rem)] min-h-[32rem] flex-col gap-4 lg:flex-row">
+      {/* 左：实体列表——清点与管理（独立滚动，与右侧互不牵连） */}
+      <Card className="flex min-h-0 flex-col overflow-hidden lg:w-80 lg:shrink-0">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <span className="font-mono text-xs text-muted-foreground">{graph.nodes.length} 实体</span>
           <div className="relative ml-auto">
@@ -118,7 +118,7 @@ export default function Galaxy({
             <Empty text={graph.nodes.length === 0 ? '暂无实体——蒸馏自动抽取，或手动新建' : '无匹配实体'} />
           </div>
         ) : (
-          <ul className="max-h-64 divide-y divide-border/60 overflow-auto lg:max-h-[calc(100vh-20rem)]">
+          <ul className="min-h-0 flex-1 divide-y divide-border/60 overflow-y-auto">
             {visible.map((n) => (
               <li key={n.id}>
                 <button
@@ -154,8 +154,8 @@ export default function Galaxy({
         )}
       </Card>
 
-      {/* 右：默认关系图谱，选中即详情 */}
-      <div className="min-w-0 flex-1">
+      {/* 右：默认关系图谱，选中即详情（独立滚动区） */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {selected ? (
           <EntityDetailPane
             key={selected}
@@ -169,21 +169,22 @@ export default function Galaxy({
             <Empty text="圈子是你的记忆世界：人物 / 项目 / 主题。蒸馏会自动把对话里的人和事挂进来，也可以先手动新建" />
           </Card>
         ) : (
-          <div className="space-y-3">
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              每个圆点是你记忆里的一个人 / 项目 / 主题（<span className="text-foreground">颜色 = 类型，大小 = 相关记忆条数</span>），
-              连线 = 它们在你的记忆里<span className="text-foreground">一起出现</span>（越粗越常见，会自动抱团）；
-              中间的「我」是你——点圆点看档案，<span className="text-foreground">按住可拖动</span>，滚轮缩放。
-              <span className="ml-2 inline-flex flex-wrap items-center gap-2 align-middle">
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
+            {/* 图示：三行定义式，不再挤一段 */}
+            <div className="grid gap-0.5 text-xs text-muted-foreground sm:grid-cols-2">
+              <p><span className="text-foreground">圆点</span> = 记忆里的人 / 项目 / 主题（大小 = 记忆条数）</p>
+              <p><span className="text-foreground">连线</span> = 一起出现（越粗越常见，自动抱团）</p>
+              <p><span className="text-foreground">「我」</span> = 你 —— 点圆点看档案 · 按住拖动 · 滚轮缩放</p>
+              <p className="flex flex-wrap items-center gap-2.5">
                 {Object.entries(KIND_LABEL).map(([k, label]) => (
                   <span key={k} className="flex items-center gap-1 font-mono">
                     <span className="inline-block size-2 rounded-full" style={{ backgroundColor: KIND_COLOR[k] }} aria-hidden="true" />
                     {label}
                   </span>
                 ))}
-              </span>
-            </p>
-            <Suspense fallback={<div className="h-[60vh] w-full animate-pulse rounded-lg bg-muted/30" />}>
+              </p>
+            </div>
+            <Suspense fallback={<div className="min-h-0 flex-1 animate-pulse rounded-lg bg-muted/30" />}>
               <EntityGalaxy
                 graph={{ nodes: visible, edges: graph.edges }}
                 onSelect={setSelected}
@@ -264,10 +265,10 @@ function EntityDetailPane({
   const { entity, atoms, scenarios } = detail
 
   return (
-    <Card className="overflow-hidden">
-      <div className="border-b border-border px-4 py-3">
+    <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="relative shrink-0 border-b border-border px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
+          <div className="min-w-0 pr-40">
             <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight">
               <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: KIND_COLOR[entity.kind] }} aria-hidden="true" />
               {entity.name}
@@ -280,7 +281,8 @@ function EntityDetailPane({
               {entity.atom_count} 条原子 · 更新于 {relTime(entity.updated_at)}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
+          {/* 固定右上：不随标题/摘要换行漂移（用户实测痛点 #4） */}
+          <div className="absolute right-3 top-3 flex items-center gap-1.5">
             <Button variant="ghost" size="sm" onClick={onBack}>
               ← 返回图谱
             </Button>
@@ -301,7 +303,7 @@ function EntityDetailPane({
         </div>
       </div>
 
-      <div className="space-y-5 px-4 py-4">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
         {/* 相关场景 */}
         {scenarios.length > 0 && (
           <section>

@@ -101,13 +101,17 @@ export default function EntityGalaxy({
     }
     requestAnimationFrame(tick)
 
-    // 节点拖拽：按住圆点即可挪动（sigma v3 无 body 鼠标事件——挂容器原生监听，
-    // clientX/Y 减容器偏移得视口坐标，viewportToGraph 换算图坐标）
+    // 节点拖拽：按住圆点即可挪动。
+    // 病根（v3 实测）：按下节点时 sigma 相机的 stage-pan 同时启动——节点位移与
+    // 相机平移相互抵消，视觉上"拖不动/拖飞"。v3 已删 body 鼠标事件与
+    // preventSigmaDefault，正解是拖拽期间整体关掉鼠标 captor（相机 pan/缩放
+    // 暂停），松手恢复——节点精确跟手。
     let dragNode: string | null = null
+    const captor = sigma.getMouseCaptor()
     sigma.on('downNode', (e) => {
       dragNode = e.node
       g.setNodeAttribute(dragNode, 'highlighted', true)
-      if (typeof e.preventSigmaDefault === 'function') e.preventSigmaDefault()
+      captor.enabled = false
     })
     const onMove = (ev: MouseEvent) => {
       if (!dragNode) return
@@ -120,6 +124,7 @@ export default function EntityGalaxy({
     const onUp = () => {
       if (dragNode) g.removeNodeAttribute(dragNode, 'highlighted')
       dragNode = null
+      captor.enabled = true
     }
     el.addEventListener('mousemove', onMove)
     el.addEventListener('mouseup', onUp)
@@ -137,5 +142,5 @@ export default function EntityGalaxy({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, theme])
 
-  return <div ref={ref} className="h-[60vh] w-full rounded-lg border border-border bg-card wiki-graph-canvas" />
+  return <div ref={ref} className="min-h-0 w-full flex-1 rounded-lg border border-border bg-card wiki-graph-canvas" />
 }
