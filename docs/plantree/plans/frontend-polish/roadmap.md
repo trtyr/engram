@@ -147,6 +147,20 @@
    - 文档：confidence 校准锚（犹豫点①）/30s 防抖（②）/L2 快照定位/arbitrate 规则
    - cargo 117（+6）；pi harness 钩子配方（测试方供）记入 testing.md 路线；testing.md
      重写为全能力版本
+0q. **第四波收官 + 清场深挖**（3e205df→771a8bc，2026-08-31 用户拍板"全做"）：
+   - 用户批准六连：P3 sensitive（0017，检索/pack 默认隐身 + reveal）/ P5 void /
+     P11 purge（erase 分权）/ P4 export / R3 画像退休 / P10 新鲜度混排（30 天半衰）
+   - R4：export 默认排除 sensitive（隐私出口同权，--include-sensitive 显式含）
+   - R3 两档真 bug 修复：stale 名单不进 prompt → 模型静默跳过；措辞升级
+     「只保留素材可支撑的表述」——活体清创 identity v7/routines v8 全净
+   - 清场深挖：e2e-browser 18 条 journey 会话曾蒸进画像（冲焰场景）——purge
+     +场景外科清创+实体 forget；erase/purge 分权活体验证（403/204）
+   - galaxy 图四修（f11a4b0）：拖拽真凶=sigma 相机 pan 与节点位移抵消
+     （captor.enabled 开关）/分栏独立滚动/图例三行/详情按钮 absolute 钉死
+   - 四波互测总账：32 项发现 → 28 落地 + 4 roadmap；cargo 126 / migration 17 /
+     CLI 38 子命令 / 文档四件套
+   - 待用户：galaxy 手感反馈；roadmap：自动节律钩子（缓做）/erase key 签发/
+     定时 full/导入恢复
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
