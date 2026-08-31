@@ -359,7 +359,8 @@ function EntityDetailPane({
             <ul className="divide-y divide-border/60">
               {atoms.map((a: Atom) => (
                 <li key={a.id} className="group flex items-start gap-3 py-2.5">
-                  <span className="mt-1 shrink-0">
+                  {/* 状态列定宽——badge 长短不一会把内容列起点挤歪（用户红笔标注） */}
+                  <span className="mt-1 w-20 shrink-0">
                     <StatusBadge status={a.status} />
                   </span>
                   <div className="min-w-0 flex-1">
