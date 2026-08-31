@@ -191,6 +191,14 @@
      用户此前拍板缓做，启动与否待用户定
    - 卫生项：e2e 每跑一次签一把 key 不回收，key 表已积 20+——journey 收尾
      应自撤（或定期清理）
+0u. **deep purge 事故 + 双修**（2026-08-31，测试方冒烟失误清空真数据，
+   会话历史重建 32 原子——坑里两个口子当天焊死）：
+   - P-A 语义陷阱：deep 与 agent 组合传入 → 400 互斥守卫（agent 在 deep
+     下无过滤语义，组合即误导"只清这个 agent"）；CLI 同款本地守卫
+   - P-B 直写重建死路：atom-add 原子永不进聚类（organize 只被 candidate
+     触发）——extract 空认领也链 organize，批量导入/重建后一次 full 即成形
+   - 流程教训（测试方自拟）：破坏性端点测试①非法参数测路径②合法参数只
+     对假数据③执行前 echo 请求体人眼过一遍
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
