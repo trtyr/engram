@@ -199,6 +199,15 @@
      触发）——extract 空认领也链 organize，批量导入/重建后一次 full 即成形
    - 流程教训（测试方自拟）：破坏性端点测试①非法参数测路径②合法参数只
      对假数据③执行前 echo 请求体人眼过一遍
+0v. **P-C 两阶段清空落地**（1472832+ae2d4a9，2026-08-31 收官）：
+   - arm（5 分钟冷却）→ token 立即执行 / cancel 后悔药（无需确认短语，
+     安全方向免验证）；到期自动执行；job 行即审计链（confirm/by/计数）
+   - 0019 迁移 jobs cancelled 态；arm 秒级防抖（取消后可重 arm）
+   - 三次清空事故复盘归档：①测试方真参测权限 ②信"已修复"未先探针
+     ③开发功能测试打真库——四条规则进 testing.md（含第四条：破坏性
+     功能验证必须打一次性栈）
+   - 编辑能力整章归档：批一分权/留痕/钉住 + 批二 Web（用户验收"差不多
+     了"）+ 测试方四波复核全绿；pi-xiamu 正式 key 在役（v3/v4 已撤）
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
