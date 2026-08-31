@@ -193,13 +193,16 @@ describe('Persona 版本历史与回滚', () => {
     const dlg = await screen.findByRole('dialog', { name: /历史/ })
     // v1 内容会出现多处（diff 删除段 + 版本列表预览）——findAllByText 断言至少一处
     expect((await within(dlg).findAllByText(/用户居住在上海。/)).length).toBeGreaterThan(0)
-    // diff 视图存在：v1→v2 增删高亮段（success/destructive 底色）
-    expect(dlg.querySelector('.bg-success\\/10, .bg-destructive\\/10') || dlg.textContent).toBeTruthy()
-    // 回滚在版本行内（confirm 守卫保留）
+    // diff 方向语义断言：基线=v1(上海) → 对比=v2(北京)，北京必须在绿(增)、上海必须在红(删)
+    const addSeg = [...dlg.querySelectorAll('span.bg-success\\/10')].map((s) => s.textContent).join('')
+    const delSeg = [...dlg.querySelectorAll('span.bg-destructive\\/10')].map((s) => s.textContent).join('')
+    expect(addSeg).toContain('北京')
+    expect(delSeg).toContain('上海')
+    // 回滚走 body 形式（后端 Json<RollbackRequest>——query 形式会被 axum 拒）
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     fireEvent.click(within(dlg).getByRole('button', { name: '回滚' }))
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalled()
+      expect(api.post).toHaveBeenCalledWith('/memory/persona/rollback', { aspect: 'identity', to_version: 1 })
     })
   })
 })

@@ -114,14 +114,15 @@ export function PersonaHistoryDrawer({ aspect, label, onClose, onGoScenario, onM
 
   const verA = history?.[pickA]
   const verB = history?.[pickB]
+  // 方向：a=基线(旧)=pickB，b=对比(新)=pickA——b-only=新增(绿)、a-only=删除(红)
   const diff = useMemo(
-    () => (verA && verB && verA.version !== verB.version ? diffSentences(verA.content, verB.content) : null),
+    () => (verA && verB && verA.version !== verB.version ? diffSentences(verB.content, verA.content) : null),
     [verA, verB],
   )
 
   const rollback = async (toVersion: number) => {
     if (!confirm(`回滚到 v${toVersion}？将以新版本号落地当前内容（历史不可变）。`)) return
-    await api.post(`/memory/persona/rollback?aspect=${aspect}&to_version=${toVersion}`)
+    await api.post('/memory/persona/rollback', { aspect, to_version: toVersion })
     const h = await api.get<Persona[]>(`/memory/persona/history?aspect=${aspect}`)
     setHistory(h)
     setPickA(0)
