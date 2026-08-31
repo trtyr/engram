@@ -90,8 +90,10 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                 continue;
             }
             // 并入：victim 的 source_refs 并入 keep，victim 置 archived
+            // R1：victim 同时补 superseded_by → keep——近重复合并也是取代关系，
+            // 取代链不断（此前归档孤儿无指向，"谁取代谁"不可溯）。
             let res = sqlx::query(
-                "UPDATE atoms a SET status = 'archived', updated_at = now() \
+                "UPDATE atoms a SET status = 'archived', superseded_by = $2, updated_at = now() \
                  FROM ( \
                     SELECT id, source_refs FROM atoms WHERE id = ANY($1) AND status = 'active' \
                  ) v \
@@ -99,6 +101,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                  RETURNING v.source_refs",
             )
             .bind(&victims)
+            .bind(keep)
             .fetch_all(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
