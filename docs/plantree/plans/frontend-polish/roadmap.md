@@ -177,6 +177,12 @@
      P3/R4 三层防护对 L2/L3 无效（比 R4 严重）→ ④ 敏感归档连带快照重算或
      快照生成跳过 sensitive 溯源
    - 真数据灌入前 ③④ 建议先做（化石+敏感驻留会在真数据重演）
+0s. **真数据时代流程约束**（2026-08-31，测试方 seq24/25）：
+   - 活体报告必须带实例标识（端口/库指纹/迁移版本号三选一）——"某栈验证过"
+     ≠ "当前栈验证过"，消费者会误读（dev 栈 vs 生产栈双实例并存后尤其致命）
+   - skill 安装副本（~/.pi/skills，非 git）与 server 版本可能错位——副本
+     随 server 版本打版本号 / 一键同步命令（待做）；消费者撞旧副本会误报
+     "功能缺失"（--sensitive 实际存在但副本旧）
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
