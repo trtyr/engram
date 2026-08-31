@@ -52,6 +52,8 @@ pub struct AtomDto {
     pub status: String,
     pub superseded_by: Option<Uuid>,
     pub needs_review: bool,
+    /// P3 隐私标记：医疗/感情/财务类——默认不进检索与 context_pack，reveal 才可见
+    pub sensitive: bool,
     pub hit_count: i32,
     pub scenario_id: Option<Uuid>,
     /// 事件时间（extract 以当天为锚把相对时间解析成绝对；created_at 只是记录时间）
@@ -366,6 +368,7 @@ impl MemoryService {
         confidence: f32,
         occurred_at: Option<DateTime<Utc>>,
         valid_until: Option<DateTime<Utc>>,
+        sensitive: bool,
     ) -> Result<AtomDto, MemoryError> {
         let text = content.trim();
         // A4 幂等护栏：同 kind + 同内容（trim 后）的 active 原子已存在则直接返回它——
@@ -388,14 +391,15 @@ impl MemoryService {
         let id = Uuid::now_v7();
         let emb = self.try_embed(&[text.to_string()]).await;
         let row = sqlx::query_as::<_, AtomDto>(
-            "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, occurred_at, valid_until, source_refs, embedding, tsv) \
-             VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, '[]'::jsonb, $8, to_tsvector('simple', $9)) RETURNING *",
+            "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive, occurred_at, valid_until, source_refs, embedding, tsv) \
+             VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, '[]'::jsonb, $9, to_tsvector('simple', $10)) RETURNING *",
         )
         .bind(id)
         .bind(kind)
         .bind(text)
         .bind(confidence)
         .bind(needs_review)
+        .bind(sensitive)
         .bind(occurred_at)
         .bind(valid_until)
         .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
@@ -417,6 +421,7 @@ impl MemoryService {
         superseded_by: Option<Uuid>,
         occurred_at: Option<DateTime<Utc>>,
         valid_until: Option<DateTime<Utc>>,
+        sensitive: Option<bool>,
     ) -> Result<AtomDto, MemoryError> {
         let cur = sqlx::query_as::<_, AtomDto>("SELECT * FROM atoms WHERE id = $1")
             .bind(id)
@@ -446,8 +451,8 @@ impl MemoryService {
         let row = sqlx::query_as::<_, AtomDto>(
             "UPDATE atoms SET content = $2, confidence = $3, status = $4, needs_review = COALESCE($5, needs_review), \
                  superseded_by = COALESCE($6, superseded_by), occurred_at = COALESCE($7, occurred_at), \
-                 valid_until = COALESCE($8, valid_until), \
-                 embedding = COALESCE($9, embedding), tsv = to_tsvector('simple', $10), updated_at = now() \
+                 valid_until = COALESCE($8, valid_until), sensitive = COALESCE($9, sensitive), \
+                 embedding = COALESCE($10, embedding), tsv = to_tsvector('simple', $11), updated_at = now() \
              WHERE id = $1 RETURNING *",
         )
         .bind(id)
@@ -458,6 +463,7 @@ impl MemoryService {
         .bind(superseded_by)
         .bind(occurred_at)
         .bind(valid_until)
+        .bind(sensitive)
         .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
         .bind(agent_memory_search::tokenize::tsv_text(&new_content))
         .fetch_one(&self.pool)
@@ -717,6 +723,87 @@ impl MemoryService {
         Ok(n)
     }
 
+    /// P5 会话作废：「这段白记了」——标记 void，蒸馏跳过（claim 只取 pending）、
+    /// 记录保留。只允许 pending 会话作废（已蒸馏的产出用 purge/归档处理）。
+    pub async fn void_session(&self, id: Uuid) -> Result<SessionDto, MemoryError> {
+        let row = sqlx::query_as::<_, SessionDto>(
+            "UPDATE raw_sessions SET distill_status = 'void' WHERE id = $1 AND distill_status = 'pending' RETURNING *",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.ok_or_else(|| {
+            MemoryError::BadRequest(format!(
+                "会话 {id} 不存在或已蒸馏（作废只对未蒸馏会话；已蒸馏的用 purge/归档）"
+            ))
+        })
+    }
+
+    /// P11 按 agent 清场（测试隔离）：该 agent 全部会话置 void + 其产出的 active
+    /// 原子归档。返回 (voided_sessions, archived_atoms)。可恢复（archived 可逆）。
+    pub async fn purge_agent(&self, agent: &str) -> Result<(i64, i64), MemoryError> {
+        let mut tx = self.pool.begin().await.map_err(MemoryError::from)?;
+        let voided = sqlx::query(
+            "UPDATE raw_sessions SET distill_status = 'void' \
+             WHERE agent = $1 AND distill_status IN ('pending', 'processing')",
+        )
+        .bind(agent)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        let archived = sqlx::query(
+            "UPDATE atoms SET status = 'archived', updated_at = now() \
+             WHERE status = 'active' AND EXISTS ( \
+                SELECT 1 FROM jsonb_array_elements(atoms.source_refs) e \
+                JOIN raw_sessions s ON s.id::text = e->>'session_id' \
+                WHERE s.agent = $1)",
+        )
+        .bind(agent)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        tx.commit().await.map_err(MemoryError::from)?;
+        Ok((voided as i64, archived as i64))
+    }
+
+    /// P4 全量导出（数据主权）：记忆域五表完整快照，JSON 随身带走。
+    pub async fn export(&self) -> Result<serde_json::Value, MemoryError> {
+        let sessions: Vec<SessionDto> =
+            sqlx::query_as("SELECT * FROM raw_sessions ORDER BY created_at")
+                .fetch_all(&self.pool)
+                .await?;
+        let atoms: Vec<AtomDto> = sqlx::query_as("SELECT * FROM atoms ORDER BY created_at")
+            .fetch_all(&self.pool)
+            .await?;
+        let scenarios: Vec<ScenarioDto> =
+            sqlx::query_as("SELECT * FROM scenarios ORDER BY created_at")
+                .fetch_all(&self.pool)
+                .await?;
+        let persona: Vec<PersonaVersion> =
+            sqlx::query_as("SELECT * FROM persona_aspects ORDER BY aspect, version")
+                .fetch_all(&self.pool)
+                .await?;
+        let entities: Vec<EntityDto> =
+            sqlx::query_as(
+                "SELECT id, name, kind, summary, \
+                 (SELECT count(*) FROM atom_entities ae WHERE ae.entity_id = entities.id) AS atom_count, \
+                 updated_at FROM entities WHERE merged_into IS NULL ORDER BY updated_at DESC",
+            )
+            .fetch_all(&self.pool).await?;
+        Ok(serde_json::json!({
+            "format": "engram-memory-export",
+            "version": 1,
+            "exported_at": chrono::Utc::now(),
+            "counts": {
+                "sessions": sessions.len(), "atoms": atoms.len(),
+                "scenarios": scenarios.len(), "persona": persona.len(),
+                "entities": entities.len(),
+            },
+            "sessions": sessions, "atoms": atoms, "scenarios": scenarios,
+            "persona": persona, "entities": entities,
+        }))
+    }
+
     /// 挂原子到实体（幂等）。
     pub async fn attach_atom(&self, entity_id: Uuid, atom_id: Uuid) -> Result<(), MemoryError> {
         self.entity_row(entity_id).await?;
@@ -870,6 +957,7 @@ impl MemoryService {
         layers: &[&str],
         max_items: i64,
         no_feedback: bool,
+        reveal: bool,
     ) -> Result<SearchResponse, MemoryError> {
         let qv = self
             .try_embed(&[query.to_string()])
@@ -888,7 +976,7 @@ impl MemoryService {
             vec![]
         };
         let l1 = if want_l1 {
-            search_atoms(&self.pool, query, qv.as_deref(), max_items).await?
+            search_atoms(&self.pool, query, qv.as_deref(), max_items, reveal).await?
         } else {
             vec![]
         };
@@ -1056,24 +1144,34 @@ impl MemoryService {
         let atoms: Vec<AtomDto> = match query {
             Some(q) => {
                 let hits =
-                    search_atoms(&self.pool, q, qv.as_deref(), remaining as i64).await?;
+                    search_atoms(&self.pool, q, qv.as_deref(), remaining as i64, false).await?;
                 let ids: Vec<Uuid> = hits.iter().map(|h| h.id).collect();
                 if ids.is_empty() {
                     vec![]
                 } else {
-                    let mut by_id: std::collections::HashMap<Uuid, AtomDto> =
+                    let score_of: std::collections::HashMap<Uuid, f64> =
+                        hits.iter().map(|h| (h.id, h.score)).collect();
+                    let mut fetched: Vec<AtomDto> =
                         sqlx::query_as::<_, AtomDto>("SELECT * FROM atoms WHERE id = ANY($1)")
                             .bind(&ids)
                             .fetch_all(&self.pool)
-                            .await?
-                            .into_iter()
-                            .map(|a| (a.id, a))
-                            .collect();
-                    ids.into_iter().filter_map(|id| by_id.remove(&id)).collect()
+                            .await?;
+                    // P10 新鲜度混排：final = 相关分 × 时间衰减（30 天半衰）——
+                    // 老记忆不再凭旧高分挤掉新记忆；无 query 路径本就按新→旧。
+                    let now = chrono::Utc::now();
+                    fetched.sort_by(|a, b| {
+                        let f = |x: &AtomDto| {
+                            let age = (now - x.created_at).num_days().max(0) as f64;
+                            score_of.get(&x.id).copied().unwrap_or(0.0)
+                                * (-age / 30.0).exp()
+                        };
+                        f(b).partial_cmp(&f(a)).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    fetched
                 }
             }
             None => sqlx::query_as(
-                "SELECT * FROM atoms WHERE status = 'active' ORDER BY hit_count DESC, confidence DESC, created_at DESC LIMIT $1",
+                "SELECT * FROM atoms WHERE status = 'active' AND NOT sensitive ORDER BY hit_count DESC, confidence DESC, created_at DESC LIMIT $1",
             )
             .bind(remaining as i64)
             .fetch_all(&self.pool)
@@ -1099,7 +1197,7 @@ impl MemoryService {
         // 人审代问（议题三）：队列里的低置信项带给 AI——下次对话顺口确认一句，
         // atom-patch 回写，人审从「翻网页」变「一句话」。不计热度。
         let pending_review: Vec<AtomDto> = sqlx::query_as(
-            "SELECT * FROM atoms WHERE needs_review AND status = 'active' ORDER BY created_at DESC LIMIT 5",
+            "SELECT * FROM atoms WHERE needs_review AND status = 'active' AND NOT sensitive ORDER BY created_at DESC LIMIT 5",
         )
         .fetch_all(&self.pool)
         .await?;

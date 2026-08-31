@@ -119,6 +119,7 @@ const STATUS_STYLE: Record<string, { dot: string; text: string; pulse?: boolean 
   error: { dot: 'bg-destructive', text: 'text-destructive' },
   superseded: { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' },
   archived: { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' },
+void: { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' },
   candidate: { dot: 'bg-info', text: 'text-info' },
   version_mismatch: { dot: 'bg-warning', text: 'text-warning' },
 }

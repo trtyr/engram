@@ -22,7 +22,7 @@ const ASPECTS: [&str; 7] = [
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {
     let pool = ctx.pool();
 
-    let scenario_ids: Vec<Uuid> = ctx
+    let mut scenario_ids: Vec<Uuid> = ctx
         .job
         .payload
         .0
@@ -35,7 +35,29 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         })
         .unwrap_or_default();
     if scenario_ids.is_empty() {
-        return Ok(json!({"updated": []}));
+        // R3 画像退休：无新素材时检查分面年龄——超 7 天未更新的分面用近期场景
+        // 强制重写一次（剔除过期内容：过期的相对时间/失效计划/不再成立的习惯）。
+        // 说过的时话比不说话更伤信任。
+        let stale: Vec<String> = sqlx::query_scalar(
+            "WITH latest AS (SELECT DISTINCT ON (aspect) aspect, created_at \
+             FROM persona_aspects ORDER BY aspect, version DESC) \
+             SELECT aspect FROM latest WHERE created_at < now() - interval '7 days'",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        if stale.is_empty() {
+            return Ok(json!({"updated": []}));
+        }
+        tracing::info!(?stale, "画像退休：陈旧分面以近期场景重写");
+        scenario_ids =
+            sqlx::query_scalar("SELECT id FROM scenarios ORDER BY updated_at DESC LIMIT 30")
+                .fetch_all(pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+        if scenario_ids.is_empty() {
+            return Ok(json!({"updated": []}));
+        }
     }
 
     // 1. 变动场景（S1..Sn 编号，LLM 证据标注用）+ 当前画像（每个 aspect 的最新版本）

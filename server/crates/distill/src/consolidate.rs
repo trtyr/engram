@@ -20,10 +20,11 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             FROM atoms a JOIN LATERAL ( \
                 SELECT b.id, b.embedding FROM atoms b \
                 WHERE b.status = 'active' AND b.id != a.id AND b.embedding IS NOT NULL \
+                  AND NOT b.sensitive \
                   AND a.embedding IS NOT NULL AND a.embedding <=> b.embedding < 0.25 \
                 ORDER BY a.embedding <=> b.embedding LIMIT 3 \
             ) b ON true \
-            WHERE a.status = 'active' AND a.embedding IS NOT NULL \
+            WHERE a.status = 'active' AND a.embedding IS NOT NULL AND NOT a.sensitive \
             GROUP BY a.id, a.content \
          ) SELECT id, content, nbrs FROM near",
     )
@@ -220,6 +221,9 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             .with_due(next),
     )
     .await?;
+    // R3：full 整理完顺带画像退休检查（persona 内部自查分面年龄，无陈旧则 no-op）
+    ctx.enqueue_next(JobTemplate::new("distill_persona").with_payload(json!({"scenario_ids": []})))
+        .await?;
 
     Ok(json!({"merged": merged, "stale_downweighted": stale}))
 }

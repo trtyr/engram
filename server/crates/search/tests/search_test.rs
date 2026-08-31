@@ -47,7 +47,7 @@ async fn chinese_hybrid_search_hits() {
     }
 
     // 纯 FTS：中文关键词命中
-    let hits = agent_memory_search::search_atoms(&pool, "用户偏好", None, 5)
+    let hits = agent_memory_search::search_atoms(&pool, "用户偏好", None, 5, false)
         .await
         .unwrap();
     assert!(!hits.is_empty(), "中文 FTS 应有命中");
@@ -55,13 +55,13 @@ async fn chinese_hybrid_search_hits() {
 
     // 纯向量：用一个确定性的向量（与第一条同构）命中
     let probe: Vec<f32> = (0..1024).map(|j| ((j * 13) % 97) as f32 / 97.0).collect();
-    let hits = agent_memory_search::search_atoms(&pool, "偏好", Some(&probe), 3)
+    let hits = agent_memory_search::search_atoms(&pool, "偏好", Some(&probe), 3, false)
         .await
         .unwrap();
     assert!(!hits.is_empty(), "向量通道应有命中");
 
     // 无关查询不应误伤（空命中合法，但这里「Rust 后端」应命中决策条）
-    let hits = agent_memory_search::search_atoms(&pool, "后端 选型", None, 5)
+    let hits = agent_memory_search::search_atoms(&pool, "后端 选型", None, 5, false)
         .await
         .unwrap();
     assert!(

@@ -189,6 +189,9 @@ pub struct CreateAtomRequest {
     pub occurred_at: Option<chrono::DateTime<chrono::Utc>>,
     /// 有效期（ISO8601；到期事件可过滤/降权）
     pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// P3 隐私标记：默认不进检索与 context_pack（reveal 才可见）
+    #[serde(default)]
+    pub sensitive: bool,
 }
 fn default_conf() -> f32 {
     0.9
@@ -221,6 +224,60 @@ where
             ))),
         },
     }
+}
+
+/// P5 会话作废：「这段白记了」——蒸馏跳过、记录保留（只对未蒸馏会话）。
+#[utoipa::path(post, path = "/memory/sessions/{id}/void",
+    responses((status = 200, body = SessionDto), (status = 400, description = "不存在或已蒸馏")))]
+pub async fn void_session(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<SessionDto>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(svc(&state).void_session(id).await.map_err(me)?))
+}
+
+/// P11 按 agent 清场（测试隔离）：会话置 void + 产出 active 原子归档（可恢复）。
+/// 破坏半径大——与 erase 同级，需 erase scope。
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct PurgeRequest {
+    pub agent: String,
+}
+
+#[utoipa::path(post, path = "/memory/purge",
+    request_body = PurgeRequest,
+    responses((status = 200, description = "{voided_sessions, archived_atoms}")))]
+pub async fn purge_agent(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<PurgeRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_memory(&principal)?;
+    match &*principal {
+        Principal::Admin => {}
+        Principal::ApiKey { scopes, .. } if scopes.iter().any(|s| s == "erase") => {}
+        _ => {
+            return Err(ApiError::Forbidden(
+                "清场需要 erase scope（批量作废+归档，破坏半径与擦除同级）".into(),
+            ));
+        }
+    }
+    let (voided, archived) = svc(&state).purge_agent(&req.agent).await.map_err(me)?;
+    Ok(Json(serde_json::json!({
+        "voided_sessions": voided, "archived_atoms": archived
+    })))
+}
+
+/// P4 全量导出（数据主权）：记忆域五表 JSON 快照。
+#[utoipa::path(get, path = "/memory/export",
+    responses((status = 200, description = "完整导出 JSON（format=engram-memory-export）")))]
+pub async fn export_memory(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(svc(&state).export().await.map_err(me)?))
 }
 
 /// 追加轮次到既有会话（自动节律 b 配套：长对话分片落库，不等收尾）。
@@ -270,6 +327,7 @@ pub async fn create_atom(
             req.confidence,
             req.occurred_at,
             req.valid_until,
+            req.sensitive,
         )
         .await
         .map_err(me)?;
@@ -290,6 +348,8 @@ pub struct UpdateAtomRequest {
     pub occurred_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default, deserialize_with = "opt_flex_dt")]
     pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// P3 隐私标记切换
+    pub sensitive: Option<bool>,
 }
 
 #[utoipa::path(patch, path = "/memory/atoms/{id}",
@@ -313,6 +373,7 @@ pub async fn update_atom(
                 req.superseded_by,
                 req.occurred_at,
                 req.valid_until,
+                req.sensitive,
             )
             .await
             .map_err(me)?,
@@ -406,6 +467,9 @@ pub struct SearchRequest {
     /// true = 命中不回写热度（harness 注入/测试用，防 B6 污染）
     #[serde(default)]
     pub no_feedback: bool,
+    /// true = 结果包含 sensitive 原子（隐私项默认排除；P3）
+    #[serde(default)]
+    pub reveal: bool,
 }
 
 #[utoipa::path(post, path = "/memory/search", operation_id = "memory_search",
@@ -425,6 +489,7 @@ pub async fn search(
                 &layers,
                 req.max_items.unwrap_or(20),
                 req.no_feedback,
+                req.reveal,
             )
             .await
             .map_err(me)?,

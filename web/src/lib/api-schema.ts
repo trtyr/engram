@@ -477,6 +477,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** P4 全量导出（数据主权）：记忆域五表 JSON 快照。 */
+        get: operations["export_memory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/persona": {
         parameters: {
             query?: never;
@@ -520,6 +537,22 @@ export interface paths {
         put?: never;
         /** 回滚分面到历史版本（以新版本落地，历史不可变）。 */
         post: operations["persona_rollback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["purge_agent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -635,6 +668,23 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["append_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/sessions/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** P5 会话作废：「这段白记了」——蒸馏跳过、记录保留（只对未蒸馏会话）。 */
+        post: operations["void_session"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1131,6 +1181,8 @@ export interface components {
             occurred_at?: string | null;
             /** Format: uuid */
             scenario_id?: string | null;
+            /** @description P3 隐私标记：医疗/感情/财务类——默认不进检索与 context_pack，reveal 才可见 */
+            sensitive: boolean;
             source_refs: Record<string, never>;
             status: string;
             /** Format: uuid */
@@ -1232,6 +1284,8 @@ export interface components {
              * @description 事件时间（ISO8601 或 date-only；"下周三"这类相对时间解析后的绝对值）
              */
             occurred_at?: string | null;
+            /** @description P3 隐私标记：默认不进检索与 context_pack（reveal 才可见） */
+            sensitive?: boolean;
             /**
              * Format: date-time
              * @description 有效期（ISO8601；到期事件可过滤/降权）
@@ -1464,6 +1518,13 @@ export interface components {
             /** @description L10：占位主密钥生效时的告示（不阻断；换真实密钥后需 re-encrypt 迁移） */
             warning?: string | null;
         };
+        /**
+         * @description P11 按 agent 清场（测试隔离）：会话置 void + 产出 active 原子归档（可恢复）。
+         *     破坏半径大——与 erase 同级，需 erase scope。
+         */
+        PurgeRequest: {
+            agent: string;
+        };
         Purpose: {
             /** @description wiki 存在的目标（为什么建这个知识库） */
             goals: string[];
@@ -1602,6 +1663,8 @@ export interface components {
             needs_review?: boolean | null;
             /** Format: date-time */
             occurred_at?: string | null;
+            /** @description P3 隐私标记切换 */
+            sensitive?: boolean | null;
             /** @description 只允许 "archived" / "active" */
             status?: string | null;
             /**
@@ -2514,6 +2577,24 @@ export interface operations {
             };
         };
     };
+    export_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 完整导出 JSON（format=engram-memory-export） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_persona: {
         parameters: {
             query?: never;
@@ -2574,6 +2655,28 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PersonaVersion"];
                 };
+            };
+        };
+    };
+    purge_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurgeRequest"];
+            };
+        };
+        responses: {
+            /** @description {voided_sessions, archived_atoms} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2776,6 +2879,34 @@ export interface operations {
                 };
             };
             /** @description 已蒸馏会话不可追加 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    void_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDto"];
+                };
+            };
+            /** @description 不存在或已蒸馏 */
             400: {
                 headers: {
                     [name: string]: unknown;

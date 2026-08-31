@@ -939,3 +939,54 @@ async fn arbitrate_similar_pool_reaches_embeddingless_seed() {
         "仲裁相似列表应包含无嵌入种子（FTS 补位），实得 prompt：\n{arb_prompt}"
     );
 }
+
+/// R3 画像退休：分面超 7 天未更新 → 即使 payload 无新场景也以近期场景强制重写。
+#[tokio::test]
+async fn persona_stale_facet_forces_refresh() {
+    let env = setup(vec![
+        json!({"aspects": [
+            {"aspect": "routines", "content": "周末骑行；9 月 9 日带小王去淀山湖（已重写，绝对日期）", "evidence_scenarios": ["S1"]}
+        ]}),
+    ])
+    .await;
+
+    // 陈旧分面（10 天前的 v1）+ 一条近期场景作素材
+    sqlx::query(
+        "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, created_at, updated_at) \
+         VALUES ($1, 'routines', 'v1 旧内容：下周三计划带小王骑行（相对词）', '[]'::jsonb, 1, 'v1', now() - interval '10 days', now() - interval '10 days')",
+    )
+    .bind(Uuid::now_v7())
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO scenarios (id, topic, summary, body, atom_refs) \
+         VALUES ($1, '骑行圈', '周末骑行习惯', '正文', '[]'::jsonb)",
+    )
+    .bind(Uuid::now_v7())
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    // 空 scenario_ids——退休检查应触发并以场景素材重写
+    env.queue
+        .enqueue(JobTemplate::new("distill_persona").with_payload(json!({"scenario_ids": []})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "distill_persona").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "退休重写应成功：{}",
+        j.error.unwrap_or_default()
+    );
+
+    let (content, version): (String, i32) = sqlx::query_as(
+        "SELECT content, version FROM persona_aspects WHERE aspect='routines' ORDER BY version DESC LIMIT 1",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(version, 2, "应写出 v2");
+    assert!(content.contains("绝对日期"), "重写内容生效：{content}");
+}

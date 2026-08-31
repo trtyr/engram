@@ -28,18 +28,28 @@ pub async fn search_atoms(
     query: &str,
     query_vec: Option<&[f32]>,
     limit: i64,
+    include_sensitive: bool,
 ) -> Result<Vec<SearchHit>, sqlx::Error> {
     // K7：无 token 且无查询向量 → 短路空结果（单字/纯标点不再空跑 to_tsquery）
     if query_vec.is_none() && !has_query_tokens(query) {
         return Ok(vec![]);
     }
+    // P3：sensitive 原子默认排除（医疗/感情/财务），reveal 才进结果。
+    // 布尔编译为 SQL 常量——非用户输入，无注入面。
+    let sens_filter = if include_sensitive {
+        "true"
+    } else {
+        "NOT sensitive"
+    };
     let has_vec = query_vec.is_some();
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
         "WITH fts AS (SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
          FROM atoms, to_tsquery('simple', ",
     );
     qb.push_bind(tsv_query_smart(query, 3));
-    qb.push(") q WHERE status = 'active' AND tsv @@ q LIMIT 100) ");
+    qb.push(") q WHERE status = 'active' AND (");
+    qb.push(sens_filter);
+    qb.push(") AND tsv @@ q LIMIT 100) ");
 
     if has_vec {
         qb.push(", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> ");
@@ -61,7 +71,9 @@ pub async fn search_atoms(
     if has_vec {
         qb.push("LEFT JOIN vec ON vec.id = a.id ");
     }
-    qb.push("WHERE a.status = 'active' AND (fts.id IS NOT NULL");
+    qb.push("WHERE a.status = 'active' AND (");
+    qb.push(sens_filter);
+    qb.push(") AND (fts.id IS NOT NULL");
     if has_vec {
         qb.push(" OR vec.id IS NOT NULL");
     }

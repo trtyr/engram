@@ -94,7 +94,10 @@ async fn search_hits_bump_hit_count() {
     .await
     .unwrap();
 
-    let _ = svc.search("Rust", &[], 10, false).await.expect("search");
+    let _ = svc
+        .search("Rust", &[], 10, false, false)
+        .await
+        .expect("search");
 
     // 回写是异步的：轮询等它落地
     let mut atom_hits = 0i32;
@@ -161,7 +164,7 @@ async fn update_atom_can_clear_needs_review() {
 
     // 通过：清人审标记，其余不动
     let a = svc
-        .update_atom(id, None, None, None, Some(false), None, None, None)
+        .update_atom(id, None, None, None, Some(false), None, None, None, None)
         .await
         .unwrap();
     assert!(!a.needs_review, "人审通过应清 needs_review");
@@ -301,7 +304,7 @@ async fn forget_entity_archives_linked_atoms() {
 async fn atom_time_and_supersede_chain() {
     let (_pool, svc, _container) = setup().await;
     let old = svc
-        .create_atom("fact", "张三的生日是 3 月 5 日", 0.9, None, None)
+        .create_atom("fact", "张三的生日是 3 月 5 日", 0.9, None, None, false)
         .await
         .unwrap();
     assert!(old.occurred_at.is_none());
@@ -316,6 +319,7 @@ async fn atom_time_and_supersede_chain() {
             0.95,
             Some(occ),
             None,
+            false,
         )
         .await
         .unwrap();
@@ -330,6 +334,7 @@ async fn atom_time_and_supersede_chain() {
             Some("archived"),
             None,
             Some(new.id),
+            None,
             None,
             None,
         )
@@ -347,7 +352,14 @@ async fn context_pack_pending_review_and_no_feedback() {
 
     // 造一条待人审原子
     let pr = svc
-        .create_atom("fact", "待确认：张三生日 3 月 15 日", 0.3, None, None)
+        .create_atom(
+            "fact",
+            "待确认：张三生日 3 月 15 日",
+            0.3,
+            None,
+            None,
+            false,
+        )
         .await
         .unwrap();
     assert!(pr.needs_review);
@@ -418,5 +430,192 @@ async fn concurrent_append_keeps_all_turns() {
         Some(3),
         "两路并发 append 都应落库（原子拼接），实得 {}",
         after.content
+    );
+}
+
+/// P3 sensitive：默认不进检索与 pack，reveal 才可见；consolidate 素材不动它。
+#[tokio::test]
+async fn sensitive_atoms_hidden_until_reveal() {
+    let (pool, svc, _container) = setup().await;
+    insert_atom(&pool, "用户喜欢骑行", 0).await;
+    let s = svc
+        .create_atom("fact", "用户在服用降压药", 0.9, None, None, true)
+        .await
+        .unwrap();
+    assert!(s.sensitive);
+
+    // 默认检索：不可见
+    let r = svc.search("降压药", &[], 10, true, false).await.unwrap();
+    assert!(r.l1.is_empty(), "sensitive 默认不可见");
+    // reveal：可见
+    let r = svc.search("降压药", &[], 10, true, true).await.unwrap();
+    assert!(r.l1.iter().any(|h| h.id == s.id), "reveal 后可见");
+    // context_pack：恒排除（注入路径不给 reveal）
+    let pack = svc
+        .context_pack(Some("降压药"), 10, 10_000, true)
+        .await
+        .unwrap();
+    assert!(
+        !pack.atoms.iter().any(|a| a.id == s.id),
+        "pack 注入不携带 sensitive"
+    );
+    // patch 可切换
+    let off = svc
+        .update_atom(s.id, None, None, None, None, None, None, None, Some(false))
+        .await
+        .unwrap();
+    assert!(!off.sensitive);
+}
+
+/// P5 void：pending 可作废（蒸馏跳过），已蒸馏 400。
+#[tokio::test]
+async fn void_session_semantics() {
+    let (pool, svc, _container) = setup().await;
+    let s = svc
+        .write_session(
+            "t",
+            serde_json::json!([{"speaker":"user","text":"x"}]),
+            "off",
+        )
+        .await
+        .unwrap();
+    let v = svc.void_session(s.id).await.unwrap();
+    assert_eq!(v.distill_status, "void");
+    // claim 只取 pending → void 会话不会被蒸馏（extract 测试已覆盖 claim 谓词，此处验证状态语义）
+    let again = svc.void_session(s.id).await;
+    assert!(again.is_err(), "void 不可重复（非 pending）");
+
+    let s2 = svc
+        .write_session(
+            "t",
+            serde_json::json!([{"speaker":"user","text":"y"}]),
+            "off",
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE raw_sessions SET distill_status='done' WHERE id=$1")
+        .bind(s2.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(svc.void_session(s2.id).await.is_err(), "已蒸馏不可 void");
+}
+
+/// P11 purge_agent：该 agent 会话置 void + 产出 active 原子归档（可恢复）。
+#[tokio::test]
+async fn purge_agent_clears_test_data() {
+    let (pool, svc, _container) = setup().await;
+    let s1 = svc
+        .write_session(
+            "test-agent",
+            serde_json::json!([{"speaker":"user","text":"a"}]),
+            "off",
+        )
+        .await
+        .unwrap();
+    let keep = svc
+        .write_session(
+            "real-agent",
+            serde_json::json!([{"speaker":"user","text":"b"}]),
+            "off",
+        )
+        .await
+        .unwrap();
+    // 手工挂产出原子（source_refs 指向各自会话）
+    for (sid, content) in [(s1.id, "测试产物A"), (keep.id, "真数据B")] {
+        let id = uuid::Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
+             VALUES ($1, 'fact', $2, 0.9, 'active', $3::jsonb, to_tsvector('simple', $4))",
+        )
+        .bind(id)
+        .bind(content)
+        .bind(serde_json::json!([{"session_id": sid}]).to_string())
+        .bind(agent_memory_search::tokenize::tsv_text(content))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let (voided, archived) = svc.purge_agent("test-agent").await.unwrap();
+    assert_eq!(voided, 1, "test-agent 会话置 void");
+    assert_eq!(archived, 1, "其产出原子归档");
+    // 真数据不动
+    let st: (String,) = sqlx::query_as("SELECT distill_status FROM raw_sessions WHERE id=$1")
+        .bind(keep.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(st.0, "pending");
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM atoms WHERE content LIKE '真数据%' AND status='active'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 1);
+}
+
+/// P4 导出：五表齐全 + 计数一致。
+#[tokio::test]
+async fn export_contains_all_domains() {
+    let (_pool, svc, _container) = setup().await;
+    svc.write_session(
+        "e",
+        serde_json::json!([{"speaker":"user","text":"x"}]),
+        "off",
+    )
+    .await
+    .unwrap();
+    svc.create_atom("fact", "导出验证原子", 0.9, None, None, false)
+        .await
+        .unwrap();
+    svc.create_entity("张三", "person", "").await.unwrap();
+
+    let dump = svc.export().await.unwrap();
+    assert_eq!(dump["format"], "engram-memory-export");
+    assert_eq!(dump["counts"]["sessions"], 1);
+    assert_eq!(dump["counts"]["atoms"], 1);
+    assert_eq!(dump["counts"]["entities"], 1);
+    assert!(dump["atoms"][0]["content"].is_string(), "原子内容在");
+}
+
+/// P10 新鲜度混排：同分近似的命中，新的排前。
+#[tokio::test]
+async fn context_pack_prefers_recent() {
+    let (pool, svc, _container) = setup().await;
+    // 两条同题材原子：老的 hit_count 高、新的刚入库
+    insert_atom(&pool, "用户喜欢深色主题偏好", 100).await;
+    let new_id = {
+        let id = uuid::Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv, created_at) \
+             VALUES ($1, 'preference', '用户喜欢深色主题的新说法', 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $2), now() - interval '1 hour')",
+        )
+        .bind(id)
+        .bind(agent_memory_search::tokenize::tsv_text("用户喜欢深色主题的新说法"))
+        .execute(&pool)
+        .await
+        .unwrap();
+        // 老的压到 90 天前
+        sqlx::query("UPDATE atoms SET created_at = now() - interval '90 days' WHERE content = '用户喜欢深色主题偏好'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        id
+    };
+    let pack = svc
+        .context_pack(Some("深色主题"), 10, 10_000, true)
+        .await
+        .unwrap();
+    assert!(!pack.atoms.is_empty());
+    assert_eq!(
+        pack.atoms[0].id,
+        new_id,
+        "新记忆应排前（recency × score 混排），实得首位 {:?}",
+        pack.atoms
+            .iter()
+            .map(|a| a.content.clone())
+            .collect::<Vec<_>>()
     );
 }
