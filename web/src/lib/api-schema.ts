@@ -1566,10 +1566,20 @@ export interface components {
         PurgeRequest: {
             /** @description agent 清场（deep=false 时必填） */
             agent?: string | null;
+            /**
+             * Format: uuid
+             * @description P-C 两阶段：取消已 armed 的 job（后悔药）
+             */
+            cancel?: string | null;
             /** @description 确认短语，deep=true 时必须精确等于「清空记忆库」 */
             confirm?: string | null;
             /** @description F1：全库清空（四层+实体，单事务）——需 confirm 短语双因子 */
             deep?: boolean | null;
+            /**
+             * Format: uuid
+             * @description P-C 两阶段：携带 armed job id → 立即执行（跳过剩余冷却期）
+             */
+            token?: string | null;
         };
         Purpose: {
             /** @description wiki 存在的目标（为什么建这个知识库） */

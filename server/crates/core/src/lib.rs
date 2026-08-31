@@ -11,6 +11,6 @@ pub mod wiki;
 
 pub use codegraph::{CgBridge, CgError, CgProjectDto, QueryKind};
 pub use knowledge::{ChunkHit, DocumentDto, KnowledgeService};
-pub use memory::{AtomRevision, MemoryService, SearchResponse};
+pub use memory::{AtomRevision, MemoryService, SearchResponse, purge_deep_pool};
 pub use unified::{UnifiedError, UnifiedHit, UnifiedSearch};
 pub use wiki::{LintReport, WikiError, WikiPageDto, WikiService};

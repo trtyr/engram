@@ -9,6 +9,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::util::ServiceExt;
+use uuid::Uuid;
 
 async fn app() -> (Router, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
@@ -576,17 +577,38 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
     let r = post(&erase_key, r#"{"deep":true,"confirm":"随便"}"#).await;
     assert_eq!(r.0, StatusCode::BAD_REQUEST, "错短语应 400：{}", r.1);
 
-    // 正确双因子 → 200 五计数 + 审计 job 行
+    // 正确双因子 → 200 armed（P-C 两阶段：5 分钟冷却，非即时执行）
     let r = post(&erase_key, r#"{"deep":true,"confirm":"清空记忆库"}"#).await;
-    assert_eq!(r.0, StatusCode::OK, "双因子应 200：{}", r.1);
-    assert!(r.1.contains("\"sessions\""), "计数响应：{}", r.1);
-    let audit: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM jobs WHERE kind = 'purge_memory' AND status = 'succeeded' AND payload->>'confirm' = '清空记忆库'",
+    assert_eq!(r.0, StatusCode::OK, "双因子应 200 armed：{}", r.1);
+    assert!(r.1.contains("armed"), "阶段一响应：{}", r.1);
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM raw_sessions")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 1, "armed 不执行（冷却窗口 = 后悔药）");
+
+    // 阶段二：token 立即执行 → 五计数 + job succeeded（payload 带 confirm/executed_by = 审计链）
+    let job_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM jobs WHERE kind = 'deep_purge' AND status = 'pending' LIMIT 1",
     )
     .fetch_one(&state.pool)
     .await
     .unwrap();
-    assert_eq!(audit, 1, "审计 job 行应存在（短语+来源+计数）");
+    let body = format!(
+        r#"{{"deep":true,"confirm":"清空记忆库","token":"{}"}}"#,
+        job_id
+    );
+    let r = post(&erase_key, &body).await;
+    assert_eq!(r.0, StatusCode::OK, "token 执行应 200：{}", r.1);
+    assert!(r.1.contains("sessions"), "计数响应：{}", r.1);
+    let audit: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE id = $1 AND status = 'succeeded' AND payload->>'confirm' = '清空记忆库' AND payload->>'executed_by' = 'key:t'",
+    )
+    .bind(job_id)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(audit, 1, "审计链应完整（短语+执行者+计数）");
 
     // 清空后四层全零
     let n: i64 = sqlx::query_scalar(

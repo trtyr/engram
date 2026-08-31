@@ -248,10 +248,14 @@ pub struct PurgeRequest {
     pub deep: Option<bool>,
     /// 确认短语，deep=true 时必须精确等于「清空记忆库」
     pub confirm: Option<String>,
+    /// P-C 两阶段：携带 armed job id → 立即执行（跳过剩余冷却期）
+    pub token: Option<Uuid>,
+    /// P-C 两阶段：取消已 armed 的 job（后悔药）
+    pub cancel: Option<Uuid>,
 }
 
 /// deep purge 的确认短语（用户亲口授权的载体——AI 复述破坏半径后由用户给出）
-pub const PURGE_CONFIRM_PHRASE: &str = "清空记忆库";
+pub use agent_memory_core::memory::PURGE_CONFIRM_PHRASE;
 
 #[utoipa::path(post, path = "/memory/purge",
     request_body = PurgeRequest,
@@ -287,33 +291,80 @@ pub async fn purge_agent(
                     .into(),
             ));
         }
-        // F2 一等清空：确认短语（用户亲口授权）+ 审计入 job 记录
-        if req.confirm.as_deref() != Some(PURGE_CONFIRM_PHRASE) {
-            return Err(ApiError::BadRequest(format!(
-                "deep 清空需要确认短语（AI 应先复述破坏半径，用户确认后传 confirm=\\\"{}\\\"）",
-                PURGE_CONFIRM_PHRASE
-            )));
-        }
-        let counts = svc(&state).purge_deep().await.map_err(me)?;
-        // 审计：授权短语 + 来源 + 计数落 job 行（不可抵赖的清空凭证）
         let source = match &*principal {
             Principal::Admin => "admin".to_string(),
             Principal::ApiKey { name, .. } => format!("key:{name}"),
         };
-        sqlx::query(
-            "INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, \
-             progress, started_at, finished_at) \
-             VALUES ($1, 'purge_memory', $2, 'succeeded', 1, 1, $3, now(), now())",
-        )
-        .bind(uuid::Uuid::now_v7())
-        .bind(serde_json::json!({
-            "deep": true, "confirm": PURGE_CONFIRM_PHRASE, "authorized_by": source,
-        }))
-        .bind(&counts)
-        .execute(&state.pool.clone())
-        .await
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!("审计写入失败: {e}")))?;
-        return Ok(Json(counts));
+        // P-C 后悔药先于确认短语：取消是安全方向，不该要危险确认
+        if let Some(job_id) = req.cancel {
+            // 后悔药：取消 armed job
+            let n = sqlx::query(
+                "UPDATE jobs SET status = 'cancelled', finished_at = now() \
+                 WHERE id = $1 AND kind = 'deep_purge' AND status = 'pending'",
+            )
+            .bind(job_id)
+            .execute(&state.pool.clone())
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?
+            .rows_affected();
+            if n == 0 {
+                return Err(ApiError::BadRequest(
+                    "取消失败：job 不存在或已执行/已取消".into(),
+                ));
+            }
+            return Ok(Json(
+                serde_json::json!({"phase": "cancelled", "job_id": job_id}),
+            ));
+        }
+        // F2 一等清空：确认短语（用户亲口授权）+ P-C 两阶段（arm → 5min 冷却 → 到期执行）
+        if req.confirm.as_deref() != Some(PURGE_CONFIRM_PHRASE) {
+            return Err(ApiError::BadRequest(format!(
+                "deep 清空需要确认短语（AI 应先复述破坏半径，用户确认后传 confirm=\"{}\"）",
+                PURGE_CONFIRM_PHRASE
+            )));
+        }
+
+        // P-C 两阶段（两次真数据事故教训）：arm → 5 分钟冷却 → 到期执行。
+        // token = 立即执行；cancel = 后悔药。job 本身就是审计链。
+        if let Some(token) = req.token {
+            // 阶段二：确认执行——校验 armed job 存在且未执行，跳过剩余冷却
+            let armed: Option<(Uuid, serde_json::Value)> = sqlx::query_as(
+                "SELECT id, payload FROM jobs \
+                 WHERE id = $1 AND kind = 'deep_purge' AND status = 'pending' AND payload->>'phase' = 'armed'",
+            )
+            .bind(token)
+            .fetch_optional(&state.pool.clone())
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+            let Some((job_id, mut payload)) = armed else {
+                return Err(ApiError::BadRequest(
+                    "token 无效或已过期（armed 状态 5 分钟，到期自动执行或已被取消/执行）".into(),
+                ));
+            };
+            let counts = svc(&state).purge_deep().await.map_err(me)?;
+            payload["executed_by"] = serde_json::json!(source);
+            sqlx::query(
+                "UPDATE jobs SET status = 'succeeded', payload = $2, progress = $3, \
+                 started_at = now(), finished_at = now() WHERE id = $1",
+            )
+            .bind(job_id)
+            .bind(&payload)
+            .bind(&counts)
+            .execute(&state.pool.clone())
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+            return Ok(Json(counts));
+        }
+
+        // 阶段一：arm——5 分钟冷却窗口（手滑后悔药），到期由 deep_purge handler 执行
+        let job = svc(&state).arm_deep_purge(&source).await.map_err(me)?;
+        return Ok(Json(serde_json::json!({
+            "phase": "armed",
+            "job_id": job.id,
+            "executes_at": job.due_at,
+            "confirm_now": format!("再次调用并带 token=\"{}\" 立即执行", job.id),
+            "cancel": format!("再次调用并带 cancel=\"{}\" 取消", job.id),
+        })));
     }
 
     let agent = req.agent.clone().unwrap_or_default();

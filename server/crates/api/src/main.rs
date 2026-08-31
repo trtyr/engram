@@ -48,6 +48,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 4. 任务 runner：注册蒸馏链 + 知识摄取 handler
+    // P-C：deep purge 定时执行器——armed 的 job 到期（5 分钟冷却后）真清库。
+    let pool_for_purge = pool.clone();
     let runner = agent_memory_distill::register_handlers(
         agent_memory_jobs::Runner::new(pool.clone(), agent_memory_jobs::RunnerConfig::default()),
         agent_memory_distill::gateway_llm(
@@ -57,7 +59,16 @@ async fn main() -> anyhow::Result<()> {
             )
             .expect("主密钥格式恒合法"),
         ),
-    );
+    )
+    .register("deep_purge", move |_ctx| {
+        let pool = pool_for_purge.clone();
+        async move {
+            let counts = agent_memory_core::purge_deep_pool(&pool)
+                .await
+                .map_err(|e| agent_memory_jobs::types::JobError::Retryable(e.to_string()))?;
+            Ok(counts)
+        }
+    });
     let runner = agent_memory_core::knowledge::register_handlers(
         runner,
         agent_memory_llm::ProviderRegistry::new(

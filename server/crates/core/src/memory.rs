@@ -189,6 +189,34 @@ pub struct MemoryService {
     pub debounce_secs: i64,
 }
 
+/// deep purge 确认短语（canonical 常量，API 层引用）。
+pub const PURGE_CONFIRM_PHRASE: &str = "清空记忆库";
+
+/// deep purge 核心（供 MemoryService 与 API 的 deep_purge 定时 job 复用）。
+pub async fn purge_deep_pool(pool: &sqlx::PgPool) -> Result<serde_json::Value, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let counts: (i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+            (SELECT count(*) FROM raw_sessions), \
+            (SELECT count(*) FROM atoms), \
+            (SELECT count(*) FROM entities WHERE merged_into IS NULL), \
+            (SELECT count(*) FROM scenarios), \
+            (SELECT count(*) FROM persona_aspects)",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query(
+        "TRUNCATE atom_entities, entities, persona_aspects, scenarios, atoms, raw_sessions CASCADE",
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(serde_json::json!({
+        "sessions": counts.0, "atoms": counts.1, "entities": counts.2,
+        "scenarios": counts.3, "persona": counts.4,
+    }))
+}
+
 impl MemoryService {
     pub fn new(pool: PgPool, registry: ProviderRegistry) -> Self {
         Self {
@@ -978,25 +1006,25 @@ impl MemoryService {
     /// F1/F2 deep purge（终极清空测试）：记忆域四层 + 实体链一键清空，单事务，
     /// 返回五计数。TRUNCATE CASCADE 一发解 FK——API 层负责 erase scope + confirm 双因子。
     pub async fn purge_deep(&self) -> Result<serde_json::Value, MemoryError> {
-        let mut tx = self.pool.begin().await.map_err(MemoryError::from)?;
-        let counts: (i64, i64, i64, i64, i64) = sqlx::query_as(
-            "SELECT \
-                (SELECT count(*) FROM raw_sessions), \
-                (SELECT count(*) FROM atoms), \
-                (SELECT count(*) FROM entities WHERE merged_into IS NULL), \
-                (SELECT count(*) FROM scenarios), \
-                (SELECT count(*) FROM persona_aspects)",
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        sqlx::query("TRUNCATE atom_entities, entities, persona_aspects, scenarios, atoms, raw_sessions CASCADE")
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await.map_err(MemoryError::from)?;
-        Ok(serde_json::json!({
-            "sessions": counts.0, "atoms": counts.1, "entities": counts.2,
-            "scenarios": counts.3, "persona": counts.4,
-        }))
+        purge_deep_pool(&self.pool).await.map_err(MemoryError::from)
+    }
+
+    /// P-C 阶段一：arm——入队 5 分钟冷却的 deep_purge job（后悔药窗口）。
+    pub async fn arm_deep_purge(&self, source: &str) -> Result<Job, MemoryError> {
+        let bucket = chrono::Utc::now().timestamp() / 60;
+        self.queue
+            .enqueue(
+                JobTemplate::new("deep_purge")
+                    .with_idempotency_key(format!("deep-purge-arm-{bucket}"))
+                    .with_payload(json!({
+                        "phase": "armed",
+                        "confirm": PURGE_CONFIRM_PHRASE,
+                        "authorized_by": source,
+                    }))
+                    .with_due(chrono::Utc::now() + chrono::Duration::minutes(5)),
+            )
+            .await
+            .map_err(|e| MemoryError::Storage(e.to_string()))
     }
 
     /// 编辑/清空类审计：写一条已完成的 job 行（谁、何时、干了什么）——不可抵赖凭证。
