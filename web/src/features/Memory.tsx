@@ -12,6 +12,7 @@ import {
   StatusBadge,
   Tabs,
 } from '@/components/ui-bits'
+import { PersonaHistoryDrawer } from '@/components/PersonaHistory'
 import { fmtTime, relTime, inputCls, selectCls, tableCls } from '@/lib/ui'
 import { useSystemStatus } from '@/lib/status'
 import { Button } from '@/components/ui/button'
@@ -105,7 +106,7 @@ function MemoryPage() {
       {tab === 'atoms' && <Atoms />}
       {tab === 'review' && <ReviewQueue onGoAtoms={() => setTab('atoms')} />}
       {tab === 'scenarios' && <Scenarios />}
-      {tab === 'persona' && <PersonaView />}
+      {tab === 'persona' && <PersonaView onGoScenario={() => setTab('scenarios')} />}
       {tab === 'search' && (
         <SearchPane
           onGoAtoms={() => setTab('atoms')}
@@ -551,90 +552,67 @@ function Scenarios() {
   )
 }
 
-function PersonaView() {
+function PersonaView({ onGoScenario }: { onGoScenario: () => void }) {
   const [rows, setRows] = useState<Persona[] | null>(null)
-  // 历史随卡片内展开（per-aspect 按需拉取），不再全局面板
-  const [openAspect, setOpenAspect] = useState<string | null>(null)
-  const [history, setHistory] = useState<Persona[] | null>(null)
+  // 历史走右侧抽屉（2026-08-31 P1.1）：内联展开会把同行等高卡一起拉爆
+  const [drawerAspect, setDrawerAspect] = useState<string | null>(null)
+  const refresh = () => api.get<Persona[]>('/memory/persona').then(setRows).catch(() => {})
   useEffect(() => {
-    api.get<Persona[]>('/memory/persona').then(setRows).catch(() => {})
+    refresh()
   }, [])
   if (!rows) return <Spinner />
   if (rows.length === 0) return <Empty text="画像为空——蒸馏 persona 阶段从原子与场景提炼长期画像" />
 
-  const loadHistory = async (aspect: string) => {
-    if (openAspect === aspect) {
-      setOpenAspect(null)
-      setHistory(null)
-      return
-    }
-    setHistory(null)
-    setOpenAspect(aspect)
-    setHistory(await api.get<Persona[]>(`/memory/persona/history?aspect=${aspect}`))
-  }
-
   return (
-    // 同行等高（去掉 items-start——那让每张卡各自为高，参差）；Card 需 flex 撑满
+    <>
+    {/* 同行等高（去掉 items-start——那让每张卡各自为高，参差）；Card 需 flex 撑满 */}
     <div className="grid gap-4 md:grid-cols-2">
       {rows.map((p) => (
         <Card key={p.id} className="flex flex-col p-4">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h3 className="font-medium">{ASPECT_LABEL[p.aspect] ?? p.aspect}</h3>
-              <p className="font-mono text-xs text-muted-foreground">{p.aspect}</p>
+              <p className="font-mono text-xs text-muted-foreground">
+                {p.aspect} · v{p.version} · {relTime(p.created_at)}
+              </p>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <span className="font-mono text-xs text-muted-foreground">v{p.version}</span>
               <Button
                 variant="ghost"
                 size="sm"
-                aria-expanded={openAspect === p.aspect}
-                onClick={() => loadHistory(p.aspect)}
+                onClick={() => setDrawerAspect(p.aspect)}
               >
                 历史
               </Button>
-              {p.version > 1 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    if (!confirm(`回滚 ${ASPECT_LABEL[p.aspect] ?? p.aspect} 到 v${p.version - 1}？当前版本会存入历史。`)) return
-                    await api.post('/memory/persona/rollback', { aspect: p.aspect, to_version: p.version - 1 })
-                    const np = await api.get<Persona[]>('/memory/persona')
-                    setRows(np)
-                    // 历史面板保持展开并刷新——回滚效果在版本列表里立刻可见
-                    if (openAspect === p.aspect) {
-                      setHistory(await api.get<Persona[]>(`/memory/persona/history?aspect=${p.aspect}`))
-                    }
-                  }}
-                >
-                  回滚 v{p.version - 1}
-                </Button>
-              )}
             </div>
           </div>
           <p className="mt-2 flex-1 whitespace-pre-wrap text-sm text-muted-foreground">{p.content}</p>
-          <p className="mt-3 font-mono text-xs text-muted-foreground/70">{relTime(p.created_at)}</p>
-          {openAspect === p.aspect && (
-            <div className="mt-3 border-t border-border pt-2.5">
-              {history === null ? (
-                <p className="font-mono text-xs text-muted-foreground">加载历史…</p>
-              ) : (
-                history.map((v) => (
-                  <div key={v.id} className="mb-2.5 border-b border-border/50 pb-2.5 text-sm last:mb-0 last:border-0 last:pb-0">
-                    <span className="mr-2 rounded border border-border px-1.5 py-px font-mono text-xs text-muted-foreground">
-                      v{v.version}
-                    </span>
-                    <span className="text-xs text-muted-foreground">{fmtTime(v.created_at)}</span>
-                    <p className="mt-1">{v.content}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
+          <p className="mt-3 font-mono text-xs text-muted-foreground/70">
+            {(() => {
+              const ev = (p.evidence_refs && typeof p.evidence_refs === 'object' ? p.evidence_refs : {}) as {
+                atoms?: string[]
+                sessions?: string[]
+                scenarios?: string[]
+              }
+              return `证据 ${ev.atoms?.length ?? 0} 原子 · ${ev.sessions?.length ?? 0} 会话 · ${ev.scenarios?.length ?? 0} 场景`
+            })()}
+          </p>
         </Card>
       ))}
     </div>
+    {/* 抽屉在网格容器外——fixed 元素不该做 grid 子项 */}
+    {drawerAspect && (
+      <PersonaHistoryDrawer
+        key={drawerAspect}
+        aspect={drawerAspect}
+        label={ASPECT_LABEL[drawerAspect] ?? drawerAspect}
+        onClose={() => setDrawerAspect(null)}
+        onGoScenario={onGoScenario}
+        onMutated={refresh}
+      />
+    )}
+    </>
   )
 }
 
