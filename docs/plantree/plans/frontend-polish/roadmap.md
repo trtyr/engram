@@ -161,6 +161,22 @@
      CLI 38 子命令 / 文档四件套
    - 待用户：galaxy 手感反馈；roadmap：自动节律钩子（缓做）/erase key 签发/
      定时 full/导入恢复
+0r. **终极清空测试四发现**（测试方 seq18，2026-08-31，用户指令「AI 自己把
+   系统全部清空」压力测试产物；当日已硬清真空 0/0/0/0/0，原型 SQL：
+   TRUNCATE 六表 CASCADE 单事务）：
+   - F1 权限倒置：用户侧 AI（memory key）无法清空自己的记忆——erase 分权
+     本身对（多 AI 防误毁），缺的是用户侧正当路径 → ② Web 设置页
+     「清空记忆库」按钮（管理员二次确认/确认短语）
+   - F2 清空非一等操作：四层四种操作无事务无单命令 → ① purge ?deep=true
+     （原子归档+实体删+场景解散+persona 清空，需 erase scope，与 F2 授权
+     路径绑定）
+   - F3 快照层化石（最重要）：源清空后场景/persona 原封不动（stale 按分面
+     年龄、素材支撑不排除 archived 成员）→ ③ organize 加「成员全 archived
+     场景自动解散」+ consolidate 支撑判定排除 archived
+   - F4 敏感不覆盖快照层：青霉素在场景摘要+persona constraints 明文驻留，
+     P3/R4 三层防护对 L2/L3 无效（比 R4 严重）→ ④ 敏感归档连带快照重算或
+     快照生成跳过 sensitive 溯源
+   - 真数据灌入前 ③④ 建议先做（化石+敏感驻留会在真数据重演）
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
