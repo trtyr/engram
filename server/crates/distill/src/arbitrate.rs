@@ -58,8 +58,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         return Ok(json!({"promoted": [], "duplicates": [], "superseded": []}));
     }
 
-    // 2. 每条候选取 top-5 相似 active atoms（向量余弦；B2：候选无嵌入时 FTS 兜底，
-    //    不再因 NULL <=> NULL 整行过滤而直通转正跳过仲裁）
+    // 2. 每条候选取相似 active atoms：ANN ∪ FTS 并集（P1）
     let mut user = String::new();
     let mut no_similar: Vec<Uuid> = Vec::new();
     for (i, c) in candidates.iter().enumerate() {
@@ -70,8 +69,9 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-        let similar: Vec<(Uuid, String)> = if has_emb {
-            sqlx::query_as(
+        let mut similar: Vec<(Uuid, String)> = Vec::new();
+        if has_emb {
+            let ann: Vec<(Uuid, String)> = sqlx::query_as(
                 "SELECT id, content FROM atoms \
                  WHERE status = 'active' AND embedding IS NOT NULL \
                  ORDER BY embedding <=> (SELECT embedding FROM atoms WHERE id = $1) \
@@ -80,11 +80,12 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             .bind(c.id)
             .fetch_all(pool)
             .await
-            .map_err(|e| JobError::Retryable(e.to_string()))?
-        } else if agent_memory_search::tokenize::has_query_tokens(&c.content) {
-            // FTS 兜底：写入与查询同源 jieba 分词，语义相近的既有原子可命中
-            // （K7：内容无有效 token 时不空跑 to_tsquery——直接走无相似分支）
-            sqlx::query_as(
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+            similar.extend(ann);
+        }
+        if agent_memory_search::tokenize::has_query_tokens(&c.content) {
+            // FTS 补位：写入与查询同源 jieba 分词——无嵌入原子（种子/历史直插）由此可达
+            let fts: Vec<(Uuid, String)> = sqlx::query_as(
                 "SELECT id, content FROM atoms, to_tsquery('simple', $1) q \
                  WHERE status = 'active' AND tsv @@ q \
                  ORDER BY ts_rank(tsv, q) DESC LIMIT 5",
@@ -94,10 +95,13 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             ))
             .fetch_all(pool)
             .await
-            .map_err(|e| JobError::Retryable(e.to_string()))?
-        } else {
-            vec![]
-        };
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+            similar.extend(fts);
+        }
+        // 去重保序（ANN 在前），cap 8 防提示过长
+        let mut seen = std::collections::HashSet::new();
+        similar.retain(|(sid, _)| seen.insert(*sid));
+        similar.truncate(8);
 
         writeln!(user, "候选[{}]: id={} 内容={}", i, c.id, c.content).ok();
         if similar.is_empty() {

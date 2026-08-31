@@ -108,7 +108,18 @@ pub async fn erase_session(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
+    // erase 不可逆且污染溯源——比读写高一级：memory + erase 双 scope（admin 全权）。
+    // 2026-08-31 用户批准：多 AI 共享 key 时任何一个不能单独毁库。
     require_memory(&principal)?;
+    match &*principal {
+        Principal::Admin => {}
+        Principal::ApiKey { scopes, .. } if scopes.iter().any(|s| s == "erase") => {}
+        _ => {
+            return Err(ApiError::Forbidden(
+                "擦除需要 erase scope（不可逆操作，与读写分权）".into(),
+            ));
+        }
+    }
     svc(&state).erase_session(id).await.map_err(me)?;
     Ok(StatusCode::NO_CONTENT)
 }

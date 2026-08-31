@@ -32,6 +32,21 @@ async fn main() -> anyhow::Result<()> {
     let version = agent_memory_storage::current_version(&pool).await?;
     tracing::info!(migration_version = ?version, "迁移就绪");
 
+    // P2：进程崩溃自愈——上次运行中被认领（processing）的会话此刻不可能有
+    // extract 在跑，一律退回 pending，否则永远卡死（claim 只取 pending）。
+    if let Ok(n) = sqlx::query(
+        "UPDATE raw_sessions SET distill_status = 'pending' WHERE distill_status = 'processing'",
+    )
+    .execute(&pool)
+    .await
+        && n.rows_affected() > 0
+    {
+        tracing::info!(
+            n = n.rows_affected(),
+            "启动自愈：processing 会话退回 pending"
+        );
+    }
+
     // 4. 任务 runner：注册蒸馏链 + 知识摄取 handler
     let runner = agent_memory_distill::register_handlers(
         agent_memory_jobs::Runner::new(pool.clone(), agent_memory_jobs::RunnerConfig::default()),

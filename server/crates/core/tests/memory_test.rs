@@ -378,3 +378,45 @@ async fn context_pack_pending_review_and_no_feedback() {
         .unwrap();
     assert_eq!(before, after, "no_feedback 不应刷热度");
 }
+
+/// P12：并发 append 不丢更新——原子 jsonb 拼接在行级串行。
+#[tokio::test]
+async fn concurrent_append_keeps_all_turns() {
+    let (_pool, svc, _container) = setup().await;
+    let s = svc
+        .write_session(
+            "pi",
+            serde_json::json!([{"speaker":"user","text":"第1轮"}]),
+            "off",
+        )
+        .await
+        .unwrap();
+
+    let a = svc.clone();
+    let b = svc.clone();
+    let sid = s.id;
+    let (r1, r2) = tokio::join!(
+        a.append_session(
+            sid,
+            serde_json::json!([{"speaker":"user","text":"并发A"}]),
+            None,
+            "off"
+        ),
+        b.append_session(
+            sid,
+            serde_json::json!([{"speaker":"user","text":"并发B"}]),
+            None,
+            "off"
+        ),
+    );
+    r1.unwrap();
+    r2.unwrap();
+
+    let after = svc.get_session(sid).await.unwrap();
+    assert_eq!(
+        after.content.as_array().map(|x| x.len()),
+        Some(3),
+        "两路并发 append 都应落库（原子拼接），实得 {}",
+        after.content
+    );
+}

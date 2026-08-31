@@ -250,6 +250,9 @@ pub struct MockLlm {
     pub embed_fail: bool,
     /// 测试注入（W3/K4）：embed 短响应（比输入少一条）
     pub embed_short: bool,
+    /// 测试录制：chat_json 收到的 user prompt 逐条入列——断言「LLM 到底看见了什么」
+    /// （P1：验证仲裁相似列表是否把无嵌入种子原子喂给了模型）
+    pub sent_user: std::sync::Mutex<Vec<String>>,
 }
 
 impl MockLlm {
@@ -264,6 +267,7 @@ impl MockLlm {
             embed_dim: 1024, // 与存储层 vector(1024) 一致（D0010）
             embed_fail: false,
             embed_short: false,
+            sent_user: std::sync::Mutex::new(Vec::new()),
         }
     }
 }
@@ -279,6 +283,7 @@ impl DistillLlm for MockLlm {
         Box<dyn std::future::Future<Output = Result<serde_json::Value, JobError>> + Send + 'a>,
     > {
         Box::pin(async move {
+            self.sent_user.lock().unwrap().push(_user.to_string());
             let mut q = self.chats.lock().unwrap();
             match q.pop_front() {
                 Some(s) => parse_json_lenient(&s).map_err(JobError::Permanent),

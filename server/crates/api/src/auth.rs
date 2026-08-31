@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 
 /// 资产域 scope。
-pub const SCOPES: [&str; 5] = ["memory", "knowledge", "wiki", "codegraph", "llm"];
+pub const SCOPES: [&str; 6] = ["memory", "knowledge", "wiki", "codegraph", "llm", "erase"];
 
 /// 已认证主体。
 #[derive(Debug, Clone)]

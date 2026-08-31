@@ -484,6 +484,74 @@ async fn llm_scope_key_manages_providers() {
     );
 }
 
+/// erase 分权（2026-08-31 用户批准）：擦除不可逆，memory-only key 不得单独行使——
+/// 需 memory + erase 双 scope（admin 全权）。
+#[tokio::test]
+async fn erase_requires_dedicated_scope() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+    let erase_key = create_key(&app, &admin, &["memory", "erase"]).await;
+
+    let send = |app: &Router, method: &str, uri: &str, auth: String, body: Option<&str>| {
+        let mut b = Request::builder().method(method).uri(uri);
+        if body.is_some() {
+            b = b.header("content-type", "application/json");
+        }
+        app.clone().oneshot(
+            b.header("authorization", format!("Bearer {auth}"))
+                .body(Body::from(body.unwrap_or_default().to_string()))
+                .unwrap(),
+        )
+    };
+
+    // 造一条会话
+    let resp = send(
+        &app,
+        "POST",
+        "/memory/sessions",
+        admin.clone(),
+        Some(r#"{"agent":"t","turns":[{"speaker":"user","text":"x"}],"distill":"off"}"#),
+    )
+    .await
+    .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let sid = body["id"].as_str().unwrap();
+
+    // memory-only → 403（可读可写但不可毁）
+    let resp = send(
+        &app,
+        "DELETE",
+        &format!("/memory/sessions/{sid}"),
+        mem_key,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "memory-only 擦除应 403"
+    );
+
+    // memory+erase → 204
+    let resp = send(
+        &app,
+        "DELETE",
+        &format!("/memory/sessions/{sid}"),
+        erase_key,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "双 scope 擦除应 204");
+}
+
 #[tokio::test]
 async fn openapi_snapshot() {
     let (app, _pg) = app().await;

@@ -17,6 +17,7 @@ struct Env {
     pool: sqlx::PgPool,
     queue: JobQueue,
     handle: agent_memory_jobs::RunnerHandle,
+    llm: std::sync::Arc<MockLlm>,
     _pg: support::TestPg,
 }
 
@@ -48,13 +49,14 @@ async fn setup(chats: Vec<serde_json::Value>) -> Env {
                 reap_interval: Duration::from_secs(3600),
             },
         ),
-        llm,
+        llm.clone(),
     );
     let handle = runner.start();
     Env {
         pool: pool.clone(),
         queue: JobQueue::new(pool),
         handle,
+        llm,
         _pg: container,
     }
 }
@@ -883,5 +885,57 @@ async fn extract_carries_event_time() {
         JobStatus::Succeeded,
         "蒸馏应成功：{}",
         j.error.unwrap_or_default()
+    );
+}
+
+/// P1：仲裁相似查找必须覆盖无嵌入的种子原子（ANN∪FTS 并集）。
+/// 双胞胎案：种子「周日晚上不安排长任务」SQL 直插无嵌入；蒸馏产出近义候选
+/// 「周日晚上不排长任务」——修复前 ANN 分支看不见种子 → 候选直通转正成双胞胎。
+/// 断言：LLM 收到的仲裁 prompt 里出现种子内容（FTS 补位把它喂了进去）。
+#[tokio::test]
+async fn arbitrate_similar_pool_reaches_embeddingless_seed() {
+    let env = setup(vec![
+        json!({"atoms": [
+            {"kind": "convention", "content": "周日晚上不排长任务", "confidence": 0.9, "turn_refs": [1]}
+        ]}),
+        json!({"verdicts": []}), // 裁决结果不重要——断言在 prompt 里
+        json!({"actions": []}),
+    ])
+    .await;
+
+    // 种子：无嵌入（SQL 直插漏嵌的真实形态），tsv 齐全
+    let seed = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, tsv) \
+         VALUES ($1, 'preference', '周日晚上不安排长任务', 0.75, 'active', '[]'::jsonb, false, NULL, to_tsvector('simple', $2))",
+    )
+    .bind(seed)
+    .bind(agent_memory_search::tokenize::tsv_text("周日晚上不安排长任务"))
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    let sid = Uuid::now_v7();
+    sqlx::query("INSERT INTO raw_sessions (id, agent, content) VALUES ($1, 'pi', $2)")
+        .bind(sid)
+        .bind(session(&[("user", "说好了周日晚上不排长任务，留白")]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let _ = wait_done(&env.queue, "arbitrate_atoms").await;
+
+    let prompts = env.llm.sent_user.lock().unwrap();
+    let arb_prompt = prompts
+        .iter()
+        .find(|p| p.contains("候选[0]"))
+        .expect("应发出仲裁 prompt");
+    assert!(
+        arb_prompt.contains("周日晚上不安排长任务"),
+        "仲裁相似列表应包含无嵌入种子（FTS 补位），实得 prompt：\n{arb_prompt}"
     );
 }

@@ -254,13 +254,13 @@ impl MemoryService {
                 cur.distill_status
             )));
         }
-        let mut merged = cur.content.as_array().cloned().unwrap_or_default();
-        merged.extend(arr.iter().cloned());
+        // P12：原子 jsonb 数组拼接——单语句在行级天然串行，并发 append 不丢更新
+        // （分立的读-改-写在池连接上无法持锁，后写会覆盖前写的合并结果）。
         let row = sqlx::query_as::<_, SessionDto>(
-            "UPDATE raw_sessions SET content = $2, agent = COALESCE($3, agent) WHERE id = $1 RETURNING *",
+            "UPDATE raw_sessions SET content = content || $2, agent = COALESCE($3, agent) WHERE id = $1 RETURNING *",
         )
         .bind(id)
-        .bind(sqlx::types::Json(&serde_json::Value::Array(merged)))
+        .bind(sqlx::types::Json(&serde_json::Value::Array(arr.to_vec())))
         .bind(agent)
         .fetch_one(&self.pool)
         .await?;
