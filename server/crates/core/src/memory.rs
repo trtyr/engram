@@ -1011,7 +1011,8 @@ impl MemoryService {
 
     /// P-C 阶段一：arm——入队 5 分钟冷却的 deep_purge job（后悔药窗口）。
     pub async fn arm_deep_purge(&self, source: &str) -> Result<Job, MemoryError> {
-        let bucket = chrono::Utc::now().timestamp() / 60;
+        // 秒级防抖：同秒连点只 arm 一次；跨秒可重新 arm（取消后立刻重 arm 是正当操作）
+        let bucket = chrono::Utc::now().timestamp();
         self.queue
             .enqueue(
                 JobTemplate::new("deep_purge")
