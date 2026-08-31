@@ -574,9 +574,10 @@ function PersonaView() {
   }
 
   return (
-    <div className="grid items-start gap-4 md:grid-cols-2">
+    // 同行等高（去掉 items-start——那让每张卡各自为高，参差）；Card 需 flex 撑满
+    <div className="grid gap-4 md:grid-cols-2">
       {rows.map((p) => (
-        <Card key={p.id} className="p-4">
+        <Card key={p.id} className="flex flex-col p-4">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h3 className="font-medium">{ASPECT_LABEL[p.aspect] ?? p.aspect}</h3>
@@ -612,7 +613,7 @@ function PersonaView() {
               )}
             </div>
           </div>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{p.content}</p>
+          <p className="mt-2 flex-1 whitespace-pre-wrap text-sm text-muted-foreground">{p.content}</p>
           <p className="mt-3 font-mono text-xs text-muted-foreground/70">{relTime(p.created_at)}</p>
           {openAspect === p.aspect && (
             <div className="mt-3 border-t border-border pt-2.5">
