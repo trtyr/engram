@@ -163,9 +163,7 @@ async fn update_atom_can_clear_needs_review() {
     .unwrap();
 
     // 通过：清人审标记，其余不动
-    let a = svc
-        .update_atom(id, None, None, None, Some(false), None, None, None, None)
-        .await
+    let a = svc.update_atom(id, None, None, None, None, Some(false), None, None, None, None, "test").await
         .unwrap();
     assert!(!a.needs_review, "人审通过应清 needs_review");
     assert_eq!(a.status, "candidate");
@@ -326,19 +324,7 @@ async fn atom_time_and_supersede_chain() {
     assert_eq!(new.occurred_at, Some(occ), "直写应携带事件时间");
 
     // 手动 correction：归档旧原子并补取代链
-    let archived = svc
-        .update_atom(
-            old.id,
-            None,
-            None,
-            Some("archived"),
-            None,
-            Some(new.id),
-            None,
-            None,
-            None,
-        )
-        .await
+    let archived = svc.update_atom(old.id, None, None, None, Some("archived"), None, Some(new.id), None, None, None, "test").await
         .unwrap();
     assert_eq!(archived.status, "archived");
     assert_eq!(archived.superseded_by, Some(new.id), "取代链应指向新原子");
@@ -460,9 +446,7 @@ async fn sensitive_atoms_hidden_until_reveal() {
         "pack 注入不携带 sensitive"
     );
     // patch 可切换
-    let off = svc
-        .update_atom(s.id, None, None, None, None, None, None, None, Some(false))
-        .await
+    let off = svc.update_atom(s.id, None, None, None, None, None, None, None, None, Some(false), "test").await
         .unwrap();
     assert!(!off.sensitive);
 }
@@ -612,18 +596,7 @@ async fn archive_debounces_into_single_snapshot_refresh() {
 
     // 批量归档（同一防抖窗口内 3 次 update_atom）
     for a in &atoms {
-        svc.update_atom(
-            a.id,
-            None,
-            None,
-            Some("archived"),
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
+        svc.update_atom(a.id, None, None, None, Some("archived"), None, None, None, None, None, "test").await
         .unwrap();
     }
 

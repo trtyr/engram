@@ -579,6 +579,188 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
     assert_eq!(n, 0, "deep 清空后应真空");
 }
 
+// ============ 编辑分权（2026-08-31 编辑能力批一） ============
+
+// AI 禁改改写语义（content/kind/confidence）→ 403 教正确姿势；
+// admin 改 content → 200 + atom_revisions 留痕 + edit_atom 审计行；sensitive 对 AI 开放。
+#[tokio::test]
+async fn edit_split_atom_rewrite_user_only() {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
+    let state = agent_memory_api::state::AppState::new(pool.clone())
+        .with_admin_password(Some("test-admin-pw".into()))
+        .with_master_key(Some("ab".repeat(32)));
+    let app = agent_memory_api::routes::router(state.clone());
+    let admin = login_token(&app).await;
+
+    let svc = agent_memory_core::MemoryService::new(
+        pool.clone(),
+        agent_memory_llm::ProviderRegistry::new(
+            pool.clone(),
+            agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+        ),
+    );
+    let atom = svc
+        .create_atom("fact", "用户不能吃辣", 0.9, None, None, false)
+        .await
+        .unwrap();
+
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+    let patch = |key: &str, body: String| {
+        let app = app.clone();
+        let key = key.to_string();
+        async move {
+            let resp = app
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method("PATCH")
+                        .uri(format!("/memory/atoms/{}", atom.id))
+                        .header("content-type", "application/json")
+                        .header("authorization", format!("Bearer {key}"))
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let code = resp.status();
+            let b = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (code, String::from_utf8_lossy(&b).to_string())
+        }
+    };
+
+    // AI 改 content → 403 + 教 correction
+    let (code, body) = patch(&mem_key, r#"{"content":"用户对辣过敏"}"#.into()).await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains("correction"), "文案应教正确姿势：{body}");
+
+    // AI 改 confidence → 同样 403
+    let (code, _) = patch(&mem_key, r#"{"confidence":0.5}"#.into()).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+
+    // AI 标 sensitive → 开放（保护语义）
+    let (code, _) = patch(&mem_key, r#"{"sensitive":true}"#.into()).await;
+    assert_eq!(code, StatusCode::OK);
+
+    // 用户改 content → 200 + revision + 审计
+    let (code, body) = patch(&admin, r#"{"content":"用户不能吃辣（体质原因）"}"#.into()).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let rev: i64 = sqlx::query_scalar("SELECT count(*) FROM atom_revisions WHERE atom_id = $1")
+        .bind(atom.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rev, 1, "改写应留痕一条 revision");
+    let by: String =
+        sqlx::query_scalar("SELECT edited_by FROM atom_revisions WHERE atom_id = $1 LIMIT 1")
+            .bind(atom.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(by, "admin");
+    let audit: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'edit_atom' AND payload->>'by' = 'admin'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit, 1, "审计行应存在");
+}
+
+// persona 编辑/回滚、实体名/摘要：全部仅用户（amk_ 403）。
+#[tokio::test]
+async fn edit_split_persona_and_entity_user_only() {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
+    let state = agent_memory_api::state::AppState::new(pool.clone())
+        .with_admin_password(Some("test-admin-pw".into()))
+        .with_master_key(Some("ab".repeat(32)));
+    let app = agent_memory_api::routes::router(state);
+    let admin = login_token(&app).await;
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+
+    // amk_ PATCH persona → 403
+    let resp = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("PATCH")
+                .uri("/memory/persona")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {mem_key}"))
+                .body(axum::body::Body::from(
+                    r#"{"aspect":"constraints","content":"手编内容"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // amk_ rollback → 403；amk_ entity PATCH → 403
+    for (method, uri, body) in [
+        (
+            "POST",
+            "/memory/persona/rollback",
+            r#"{"aspect":"constraints","to_version":1}"#.to_string(),
+        ),
+        (
+            "PATCH",
+            "/memory/entities/00000000-0000-0000-0000-000000000000",
+            r#"{"summary":"x"}"#.to_string(),
+        ),
+    ] {
+        let resp = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {mem_key}"))
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{method} {uri}");
+    }
+
+    // admin 编辑 persona → v1 手编钉住
+    let resp = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method("PATCH")
+                .uri("/memory/persona")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(axum::body::Body::from(
+                    r#"{"aspect":"constraints","content":"用户手编的约束"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let (me, version): (bool, i32) = sqlx::query_as(
+        "SELECT manually_edited, version FROM persona_aspects WHERE aspect = 'constraints' ORDER BY version DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(version, 1);
+    assert!(me, "手编应置 manually_edited");
+}
+
 /// erase_session 分权：memory-only key 403 / memory+erase key 204（admin 全权）。
 /// 需 memory + erase 双 scope（admin 全权）。
 #[tokio::test]

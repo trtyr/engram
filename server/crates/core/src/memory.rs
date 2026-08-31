@@ -411,10 +411,12 @@ impl MemoryService {
 
     // 选项袋式更新：8 个可选字段一一对应列；struct 化留给下一轮接口收敛
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_atom(
         &self,
         id: Uuid,
         content: Option<&str>,
+        kind: Option<&str>,
         confidence: Option<f32>,
         status: Option<&str>,
         needs_review: Option<bool>,
@@ -422,6 +424,8 @@ impl MemoryService {
         occurred_at: Option<DateTime<Utc>>,
         valid_until: Option<DateTime<Utc>>,
         sensitive: Option<bool>,
+        // 编辑来源（"admin" / "key:名"）——改写语义时落 atom_revisions + 审计
+        actor: &str,
     ) -> Result<AtomDto, MemoryError> {
         let cur = sqlx::query_as::<_, AtomDto>("SELECT * FROM atoms WHERE id = $1")
             .bind(id)
@@ -442,6 +446,40 @@ impl MemoryService {
             _ => cur.status.as_str(),
         };
         let content_changed = new_content != cur.content;
+        let new_kind = kind.unwrap_or(&cur.kind);
+        // 编辑能力：改写语义（content/kind/confidence）变化 → 旧值进 atom_revisions + 审计行。
+        // AI 走 correction（新原子+superseded_by）不产生 revision；这条是用户轻量修正路。
+        let rewrite = content_changed
+            || new_kind != cur.kind
+            || confidence.is_some_and(|c| (c - cur.confidence).abs() > f32::EPSILON);
+        if rewrite {
+            sqlx::query(
+                "INSERT INTO atom_revisions (id, atom_id, old_content, old_kind, old_confidence, edited_by) \
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(Uuid::now_v7())
+            .bind(id)
+            .bind(&cur.content)
+            .bind(&cur.kind)
+            .bind(cur.confidence)
+            .bind(actor)
+            .execute(&self.pool)
+            .await?;
+            self.audit(
+                "edit_atom",
+                json!({
+                    "atom_id": id.to_string(),
+                    "by": actor,
+                    "old": {"content": cur.content, "kind": cur.kind, "confidence": cur.confidence},
+                    "new": {
+                        "content": if content_changed { new_content.clone() } else { cur.content.clone() },
+                        "kind": new_kind,
+                        "confidence": confidence.unwrap_or(cur.confidence),
+                    },
+                }),
+            )
+            .await;
+        }
         let emb = if content_changed {
             self.try_embed(std::slice::from_ref(&new_content)).await
         } else {
@@ -449,7 +487,7 @@ impl MemoryService {
         };
 
         let row = sqlx::query_as::<_, AtomDto>(
-            "UPDATE atoms SET content = $2, confidence = $3, status = $4, needs_review = COALESCE($5, needs_review), \
+            "UPDATE atoms SET content = $2, confidence = $3, status = $4, kind = $12, needs_review = COALESCE($5, needs_review), \
                  superseded_by = COALESCE($6, superseded_by), occurred_at = COALESCE($7, occurred_at), \
                  valid_until = COALESCE($8, valid_until), sensitive = COALESCE($9, sensitive), \
                  embedding = COALESCE($10, embedding), tsv = to_tsvector('simple', $11), updated_at = now() \
@@ -466,6 +504,7 @@ impl MemoryService {
         .bind(sensitive)
         .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
         .bind(agent_memory_search::tokenize::tsv_text(&new_content))
+        .bind(new_kind)
         .fetch_one(&self.pool)
         .await?;
 
@@ -529,10 +568,69 @@ impl MemoryService {
     }
 
     /// 回滚分面到历史版本（以新版本号落地当前内容——历史不可变）。
+    /// 编辑能力：用户直接改画像分面（仅用户会话；AI 禁入）。钉住 = 蒸馏绕开。
+    pub async fn persona_edit(
+        &self,
+        aspect: &str,
+        content: &str,
+        actor: &str,
+    ) -> Result<PersonaVersion, MemoryError> {
+        let content = content.trim();
+        if content.is_empty() || content.chars().count() > 4000 {
+            return Err(MemoryError::BadRequest("分面内容需 1~4000 字".into()));
+        }
+        let cur: Option<Option<i32>> =
+            sqlx::query_scalar("SELECT MAX(version) FROM persona_aspects WHERE aspect = $1")
+                .bind(aspect)
+                .fetch_optional(&self.pool)
+                .await?;
+        let next_v = cur.flatten().map(|v| v + 1).unwrap_or(1);
+        sqlx::query(
+            "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, manually_edited) \
+             VALUES ($1, $2, $3, '[]'::jsonb, $4, 'human', true)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(aspect)
+        .bind(content)
+        .bind(next_v)
+        .execute(&self.pool)
+        .await?;
+        self.audit(
+            "edit_persona",
+            json!({
+                "aspect": aspect, "by": actor, "action": "edit", "version": next_v,
+            }),
+        )
+        .await;
+        self.persona_history(aspect)
+            .await
+            .map(|mut v| v.swap_remove(0))
+    }
+
+    /// 解除钉住：分面回归蒸馏管辖（下次 consolidate/退休可重写）。
+    pub async fn persona_unpin(&self, aspect: &str, actor: &str) -> Result<(), MemoryError> {
+        sqlx::query(
+            "UPDATE persona_aspects SET manually_edited = false \
+             WHERE id IN (SELECT id FROM persona_aspects WHERE aspect = $1 ORDER BY version DESC LIMIT 1)",
+        )
+        .bind(aspect)
+        .execute(&self.pool)
+        .await?;
+        self.audit(
+            "edit_persona",
+            json!({
+                "aspect": aspect, "by": actor, "action": "unpin",
+            }),
+        )
+        .await;
+        Ok(())
+    }
+
     pub async fn persona_rollback(
         &self,
         aspect: &str,
         to_version: i32,
+        actor: &str,
     ) -> Result<PersonaVersion, MemoryError> {
         let target = sqlx::query_as::<_, PersonaVersion>(
             "SELECT * FROM persona_aspects WHERE aspect = $1 AND version = $2",
@@ -551,8 +649,8 @@ impl MemoryService {
         let next_v = cur.flatten().map(|v| v + 1).unwrap_or(1);
 
         sqlx::query(
-            "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version) \
-             VALUES ($1, $2, $3, $4::jsonb, $5, 'rollback')",
+            "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, manually_edited) \
+             VALUES ($1, $2, $3, $4::jsonb, $5, 'rollback', true)",
         )
         .bind(Uuid::now_v7())
         .bind(aspect)
@@ -561,6 +659,14 @@ impl MemoryService {
         .bind(next_v)
         .execute(&self.pool)
         .await?;
+        // 回滚 = 人工钉住（蒸馏绕开，直到解锁）
+        self.audit(
+            "edit_persona",
+            json!({
+                "aspect": aspect, "by": actor, "action": "rollback", "to_version": to_version,
+            }),
+        )
+        .await;
         self.persona_history(aspect)
             .await
             .map(|mut v| v.swap_remove(0))
@@ -674,7 +780,9 @@ impl MemoryService {
         id: Uuid,
         name: Option<&str>,
         summary: Option<&str>,
+        actor: &str,
     ) -> Result<EntityDto, MemoryError> {
+        let mut changed = false;
         if let Some(n) = name {
             let n = n.trim();
             if n.is_empty() || n.chars().count() > 60 {
@@ -685,13 +793,34 @@ impl MemoryService {
                 .bind(n)
                 .execute(&self.pool)
                 .await?;
+            changed = true;
         }
         if let Some(s) = summary {
-            sqlx::query("UPDATE entities SET summary = $2, updated_at = now() WHERE id = $1 AND merged_into IS NULL")
-                .bind(id)
-                .bind(s)
-                .execute(&self.pool)
-                .await?;
+            sqlx::query(
+                "UPDATE entities SET summary = $2, manually_edited = true, updated_at = now() \
+                         WHERE id = $1 AND merged_into IS NULL",
+            )
+            .bind(id)
+            .bind(s)
+            .execute(&self.pool)
+            .await?;
+            changed = true;
+        }
+        if changed {
+            // 用户手编实体档案 → 钉住（consolidate 档案重生成绕开）；审计
+            sqlx::query(
+                "UPDATE entities SET manually_edited = true WHERE id = $1 AND merged_into IS NULL",
+            )
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+            self.audit(
+                "edit_entity",
+                json!({
+                    "entity_id": id.to_string(), "by": actor,
+                }),
+            )
+            .await;
         }
         self.entity_row(id).await
     }
@@ -807,6 +936,21 @@ impl MemoryService {
             "sessions": counts.0, "atoms": counts.1, "entities": counts.2,
             "scenarios": counts.3, "persona": counts.4,
         }))
+    }
+
+    /// 编辑/清空类审计：写一条已完成的 job 行（谁、何时、干了什么）——不可抵赖凭证。
+    pub async fn audit(&self, kind: &str, payload: serde_json::Value) {
+        sqlx::query(
+            "INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, \
+             progress, started_at, finished_at) \
+             VALUES ($1, $2, $3, 'succeeded', 1, 1, $3, now(), now())",
+        )
+        .bind(Uuid::now_v7())
+        .bind(kind)
+        .bind(payload)
+        .execute(&self.pool)
+        .await
+        .ok();
     }
 
     /// P4 全量导出（数据主权）：记忆域五表完整快照，JSON 随身带走。

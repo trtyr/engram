@@ -129,7 +129,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             "SELECT e.id, e.name, e.kind FROM entities e \
          JOIN atom_entities ae ON ae.entity_id = e.id \
          JOIN atoms a ON a.id = ae.atom_id \
-         WHERE e.merged_into IS NULL \
+         WHERE e.merged_into IS NULL AND NOT e.manually_edited \
          GROUP BY e.id, e.name, e.kind, e.summary, e.updated_at \
          HAVING count(ae.atom_id) >= 3 AND (e.summary = '' OR max(a.created_at) > e.updated_at) \
          ORDER BY count(ae.atom_id) DESC LIMIT 10",

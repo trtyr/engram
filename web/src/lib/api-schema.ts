@@ -506,7 +506,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** 用户编辑画像分面（留痕：新版本 manually_edited=true + 审计行）。 */
+        patch: operations["persona_edit"];
         trace?: never;
     };
     "/memory/persona/history": {
@@ -1495,6 +1496,14 @@ export interface components {
             capabilities: string[];
             id: string;
         };
+        PersonaEditRequest: {
+            /** @description 分面（identity/preferences/skills/constraints/communication_style/goals/routines） */
+            aspect: string;
+            /** @description 新内容；缺省时不改内容 */
+            content?: string | null;
+            /** @description false = 解除钉住，回归蒸馏管辖（手编保护关闭） */
+            pinned?: boolean | null;
+        };
         PersonaVersion: {
             aspect: string;
             content: string;
@@ -1663,6 +1672,8 @@ export interface components {
             /** Format: float */
             confidence?: number | null;
             content?: string | null;
+            /** @description 分面类型修正（仅用户会话；AI 禁改改写语义） */
+            kind?: string | null;
             /** @description 人审结论：true=转待审，false=通过（清标记） */
             needs_review?: boolean | null;
             /** Format: date-time */
@@ -2617,6 +2628,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PersonaVersion"][];
+                };
+            };
+        };
+    };
+    persona_edit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonaEditRequest"];
+            };
+        };
+        responses: {
+            /** @description 编辑/解钉后的分面最新版 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonaVersion"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };

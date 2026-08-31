@@ -170,6 +170,21 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
 
+    // 编辑能力：用户钉住（manually_edited）的分面，蒸馏输出落库前丢弃——确定性保护。
+    // 钉住分面仍作上下文喂给模型（保持整体一致性），但产出不落库。
+    let pinned: std::collections::HashSet<String> = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT aspect FROM ( \
+            SELECT aspect, manually_edited, \
+                   row_number() OVER (PARTITION BY aspect ORDER BY version DESC) AS rn \
+            FROM persona_aspects) t \
+         WHERE rn = 1 AND manually_edited",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?
+    .into_iter()
+    .collect();
+
     let mut user = String::new();
     writeln!(user, "== 有变动的场景 ==").ok();
     for (i, (topic, summary)) in scenarios.iter().enumerate() {
@@ -313,6 +328,9 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             .to_string();
         if !ASPECTS.contains(&aspect.as_str()) || content.is_empty() {
             continue;
+        }
+        if pinned.contains(&aspect) {
+            continue; // 用户钉住的分面：蒸馏不覆盖（编辑能力，2026-08-31）
         }
 
         // B3：分面级证据——LLM 标注的 S 编号映射回场景 id；

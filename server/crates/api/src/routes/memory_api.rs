@@ -400,6 +400,8 @@ pub async fn create_atom(
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateAtomRequest {
     pub content: Option<String>,
+    /// 分面类型修正（仅用户会话；AI 禁改改写语义）
+    pub kind: Option<String>,
     pub confidence: Option<f32>,
     /// 只允许 "archived" / "active"
     pub status: Option<String>,
@@ -425,11 +427,22 @@ pub async fn update_atom(
     Json(req): Json<UpdateAtomRequest>,
 ) -> Result<Json<AtomDto>, ApiError> {
     require_memory(&principal)?;
+    // 编辑分权：改写语义（content/kind/confidence）仅限用户（Web 登录态）；
+    // AI 走 correction：atom-add 新原子 + PATCH 旧原子 superseded_by/status。
+    // sensitive/needs_review/status/superseded_by/时间字段对 AI 开放（保护与追加语义）。
+    let actor = actor_of(&principal);
+    let rewriting = req.content.is_some() || req.kind.is_some() || req.confidence.is_some();
+    if rewriting && !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+            "content/kind/confidence 编辑仅限用户（Web 登录态）；AI 纠错走 correction：atom-add 新原子 + PATCH 旧原子 superseded_by".into(),
+        ));
+    }
     Ok(Json(
         svc(&state)
             .update_atom(
                 id,
                 req.content.as_deref(),
+                req.kind.as_deref(),
                 req.confidence,
                 req.status.as_deref(),
                 req.needs_review,
@@ -437,10 +450,19 @@ pub async fn update_atom(
                 req.occurred_at,
                 req.valid_until,
                 req.sensitive,
+                &actor,
             )
             .await
             .map_err(me)?,
     ))
+}
+
+/// 审计/留痕用主体来源："admin" / "key:名"
+fn actor_of(principal: &Principal) -> String {
+    match principal {
+        Principal::Admin => "admin".to_string(),
+        Principal::ApiKey { name, .. } => format!("key:{name}"),
+    }
 }
 
 // ---------- L2 场景 ----------
@@ -510,12 +532,72 @@ pub async fn persona_rollback(
     Json(req): Json<RollbackRequest>,
 ) -> Result<Json<PersonaVersion>, ApiError> {
     require_memory(&principal)?;
+    // 回滚 = 改写语义（重写当前版本 + 钉住），仅限用户
+    if !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+            "画像回滚仅限用户（Web 登录态）；AI 纠错走 correction 流程".into(),
+        ));
+    }
+    let actor = actor_of(&principal);
     Ok(Json(
         svc(&state)
-            .persona_rollback(&req.aspect, req.to_version)
+            .persona_rollback(&req.aspect, req.to_version, &actor)
             .await
             .map_err(me)?,
     ))
+}
+
+// ---------- 画像编辑（编辑能力：用户直改分面，钉住=蒸馏绕开） ----------
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct PersonaEditRequest {
+    /// 分面（identity/preferences/skills/constraints/communication_style/goals/routines）
+    pub aspect: String,
+    /// 新内容；缺省时不改内容
+    pub content: Option<String>,
+    /// false = 解除钉住，回归蒸馏管辖（手编保护关闭）
+    pub pinned: Option<bool>,
+}
+
+/// 用户编辑画像分面（留痕：新版本 manually_edited=true + 审计行）。
+#[utoipa::path(patch, path = "/memory/persona",
+    request_body = PersonaEditRequest,
+    responses(
+        (status = 200, body = PersonaVersion, description = "编辑/解钉后的分面最新版"),
+        (status = 403, body = crate::error::ErrorEnvelope),
+    ))]
+pub async fn persona_edit(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<PersonaEditRequest>,
+) -> Result<Json<PersonaVersion>, ApiError> {
+    require_memory(&principal)?;
+    // 编辑画像是"用户直改"语义——AI 禁入（它有自己的蒸馏/correction 通道）
+    if !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+            "画像编辑仅限用户（Web 登录态）——AI 的画像认知由蒸馏与 correction 维护".into(),
+        ));
+    }
+    let actor = actor_of(&principal);
+    let svc = svc(&state);
+    if let Some(content) = req.content.as_deref() {
+        let v = svc
+            .persona_edit(&req.aspect, content, &actor)
+            .await
+            .map_err(me)?;
+        return Ok(Json(v));
+    }
+    if req.pinned == Some(false) {
+        svc.persona_unpin(&req.aspect, &actor).await.map_err(me)?;
+    }
+    let latest = svc
+        .persona_history(&req.aspect)
+        .await
+        .map_err(me)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| ApiError::NotFound(format!("分面 {} 不存在", req.aspect)))?;
+    Ok(Json(latest))
 }
 
 // ---------- 检索 ----------
@@ -682,9 +764,17 @@ pub async fn update_entity(
     Json(req): Json<UpdateEntityRequest>,
 ) -> Result<Json<EntityDto>, ApiError> {
     require_memory(&principal)?;
+    // 实体名/摘要是改写语义（档案手编 = 钉住，consolidate 绕开）——仅限用户
+    if !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+            "实体名/摘要编辑仅限用户（Web 登录态）；AI 的实体档案由蒸馏维护，关联走 attach/detach"
+                .into(),
+        ));
+    }
+    let actor = actor_of(&principal);
     Ok(Json(
         svc(&state)
-            .update_entity(id, req.name.as_deref(), req.summary.as_deref())
+            .update_entity(id, req.name.as_deref(), req.summary.as_deref(), &actor)
             .await
             .map_err(me)?,
     ))

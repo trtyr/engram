@@ -32,7 +32,8 @@ use utoipa::OpenApi;
         memory_api::erase_session, memory_api::append_session, memory_api::void_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
         memory_api::list_scenarios, memory_api::get_scenario,
-        memory_api::get_persona, memory_api::persona_history, memory_api::persona_rollback,
+        memory_api::get_persona, memory_api::persona_edit, memory_api::persona_history,
+        memory_api::persona_rollback,
         memory_api::search, memory_api::context, memory_api::embedding_status, memory_api::reembed_memory,
         memory_api::list_entities, memory_api::entity_graph, memory_api::create_entity,
         memory_api::get_entity, memory_api::update_entity, memory_api::delete_entity,
@@ -121,7 +122,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/memory/scenarios", get(memory_api::list_scenarios))
         .route("/memory/scenarios/{id}", get(memory_api::get_scenario))
-        .route("/memory/persona", get(memory_api::get_persona))
+        .route(
+            "/memory/persona",
+            get(memory_api::get_persona).patch(memory_api::persona_edit),
+        )
         .route("/memory/persona/history", get(memory_api::persona_history))
         .route(
             "/memory/persona/rollback",

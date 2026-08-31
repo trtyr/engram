@@ -1089,6 +1089,114 @@ async fn scenario_converge_recompute_and_dissolve() {
 
 // F3 persona 素材全空：stale 分面写空版本（content=''），不静默跳过。
 // F4 治：organize 收敛传 removed_texts → persona prompt 明确剔除块。
+// 编辑能力：用户钉住（manually_edited）的分面——蒸馏输出落库前丢弃。
+#[tokio::test]
+async fn persona_skips_pinned_facet_on_write() {
+    let env = setup(vec![json!({"aspects": [
+        {"aspect": "constraints", "content": "蒸馏想覆盖的手编约束", "evidence_scenarios": ["S1"]},
+        {"aspect": "preferences", "content": "蒸馏写的偏好", "evidence_scenarios": ["S1"]}
+    ]})])
+    .await;
+
+    // constraints 钉住 + preferences 未钉
+    sqlx::query("INSERT INTO persona_aspects (id, aspect, content, version, manually_edited, created_at, updated_at) \
+                 VALUES ($1, 'constraints', '用户手编的约束', 1, true, now() - interval '8 days', now() - interval '8 days')")
+        .bind(Uuid::now_v7())
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO scenarios (id, topic, summary, body, atom_refs) \
+                 VALUES ($1, '骑行', '周末骑行', '正文', '[]'::jsonb)",
+    )
+    .bind(Uuid::now_v7())
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("distill_persona").with_payload(json!({
+            "scenario_ids": [],
+        })))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "distill_persona").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "{}",
+        j.error.unwrap_or_default()
+    );
+
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM persona_aspects WHERE aspect = 'constraints' AND prompt_version != 'v1' AND manually_edited = false",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 0, "钉住分面不得产生非手编新版本");
+    let pref: Option<String> = sqlx::query_scalar(
+        "SELECT content FROM persona_aspects WHERE aspect = 'preferences' AND content = '蒸馏写的偏好' LIMIT 1",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap_or(None);
+    assert!(pref.is_some(), "未钉分面正常落库");
+}
+
+// 编辑能力：手编实体档案（manually_edited）——consolidate 档案重生成绕开。
+#[tokio::test]
+async fn consolidate_skips_manual_entity_portrait() {
+    let env = setup(vec![]).await;
+    // 手编实体 + 3 原子（够档案候选门槛）
+    let eid = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO entities (id, name, kind, summary, manually_edited) \
+                 VALUES ($1, '张三', 'person', '用户手编的档案', true)",
+    )
+    .bind(eid)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    for i in 0..3 {
+        let aid = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, needs_review) \
+                     VALUES ($1, 'fact', $2, 0.9, 'active', false)",
+        )
+        .bind(aid)
+        .bind(format!("张三素材{i}"))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
+            .bind(aid)
+            .bind(eid)
+            .execute(&env.pool)
+            .await
+            .unwrap();
+    }
+
+    env.queue
+        .enqueue(JobTemplate::new("consolidate").with_payload(json!({})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "consolidate").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "{}",
+        j.error.unwrap_or_default()
+    );
+
+    let summary: String = sqlx::query_scalar("SELECT summary FROM entities WHERE id = $1")
+        .bind(eid)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(summary, "用户手编的档案", "手编档案不得被档案重生成覆盖");
+}
+
 // F4 治边界（测试方头孢案）：素材全空 + removed_texts 非空 → 重叠分面确定性写空版本。
 #[tokio::test]
 async fn persona_retires_facet_when_all_material_removed() {
