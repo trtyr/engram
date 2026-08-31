@@ -124,13 +124,42 @@ void: { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' },
   version_mismatch: { dot: 'bg-warning', text: 'text-warning' },
 }
 
-/** 状态徽章：无底色，色点 + mono 状态字——状态是数据。 */
+/** 状态中文标签（2026-08-31 用户：状态全是英文不好）——title 保留英文原文。 */
+const STATUS_LABEL: Record<string, string> = {
+  ready: '就绪',
+  succeeded: '成功',
+  done: '完成',
+  active: '生效',
+  human: '人审',
+  processing: '处理中',
+  parsing: '解析中',
+  chunking: '分块中',
+  embedding: '嵌入中',
+  running: '运行中',
+  indexing: '索引中',
+  pending: '待处理',
+  registered: '已注册',
+  failed: '失败',
+  dead: '已死亡',
+  error: '错误',
+  superseded: '已取代',
+  archived: '已归档',
+  candidate: '待审',
+  version_mismatch: '版本不符',
+  void: '已作废',
+}
+
+/** 状态徽章：无底色，色点 + 状态字——状态是数据。 */
 export function StatusBadge({ status }: { status: string }) {
   const s = STATUS_STYLE[status] ?? { dot: 'bg-muted-foreground/60', text: 'text-muted-foreground' }
+  const label = STATUS_LABEL[status] ?? status
   return (
-    <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap font-mono text-xs', s.text)}>
+    <span
+      className={cn('inline-flex items-center gap-1.5 whitespace-nowrap text-xs', s.text)}
+      title={status}
+    >
       <span className={cn('size-1.5 rounded-full', s.dot, s.pulse && 'engram-pulse')} />
-      {status}
+      {label}
     </span>
   )
 }

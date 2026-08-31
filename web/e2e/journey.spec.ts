@@ -62,7 +62,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   const docBtn = page.getByRole('button', { name: /playwright-guide/ })
   await expect(docBtn, '文档应出现在目录').toBeVisible({ timeout: 240_000 })
   await docBtn.click()
-  await expect(page.getByText('ready', { exact: true }), '文档应推进到 ready').toBeVisible({ timeout: 240_000 })
+  await expect(page.getByText('就绪', { exact: true }), '文档应推进到 ready').toBeVisible({ timeout: 240_000 })
   await expect(page.getByText(/共 \d+ 块/), '阅读区应显示分块成文').toBeVisible({ timeout: 30_000 })
 
   // ---------- 3. Memory：写会话 ->（有 LLM 时）触发蒸馏 -> 原子出现 ----------
@@ -120,7 +120,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
     await page.reload()
     const card = page.locator('div.rounded-lg.border', { hasText: projName }).first()
     await card.getByRole('button', { name: /\u5efa\u7d22\u5f15/ }).click()
-    await expect(card.getByText('ready', { exact: true }), 'codegraph \u7d22\u5f15\u5e94\u5b8c\u6210').toBeVisible({ timeout: 420_000 })
+    await expect(card.getByText('就绪', { exact: true }), 'codegraph \u7d22\u5f15\u5e94\u5b8c\u6210').toBeVisible({ timeout: 420_000 })
     await card.getByPlaceholder('\u7b26\u53f7\u6216\u95ee\u9898').fill('ni')
     await card.getByRole('button', { name: '\u67e5\u8be2' }).click()
     await expect(card.locator('pre'), 'codegraph \u67e5\u8be2\u5e94\u8fd4\u56de\u7ed3\u679c').toBeVisible({ timeout: 240_000 })

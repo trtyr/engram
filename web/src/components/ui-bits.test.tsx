@@ -8,7 +8,7 @@ import { ApiError } from '@/lib/api'
 describe('StatusBadge', () => {
   it('renders known status with tone class', () => {
     render(<StatusBadge status="ready" />)
-    expect(screen.getByText('ready')).toHaveClass('text-success')
+    expect(screen.getByText('就绪')).toHaveClass('text-success')
   })
   it('unknown status falls back to gray', () => {
     render(<StatusBadge status="weird" />)
