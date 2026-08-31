@@ -92,7 +92,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     if !stale_refresh.is_empty() {
         writeln!(
             user,
-            "\n**注意：以下分面已超 7 天未更新，可能含过期内容（过期的相对时间/已失效的计划/不再成立的习惯）。必须依据上方场景素材重写这些分面，剔除不再成立的内容：{}**",
+            "\n**注意：以下分面已超 7 天未更新，其旧版本可能含过期内容（过期的相对时间/已失效的计划/不再成立的习惯/已清除的测试数据）。必须重写这些分面：只保留能被上方场景素材直接支撑的表述，旧版本中未被素材支撑的一律删除，宁缺毋滥：{}**",
             stale_refresh.join(", ")
         )
         .ok();

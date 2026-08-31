@@ -484,7 +484,6 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** P4 全量导出（数据主权）：记忆域五表 JSON 快照。 */
         get: operations["export_memory"];
         put?: never;
         post?: never;
@@ -2579,7 +2578,10 @@ export interface operations {
     };
     export_memory: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description true = 包含 sensitive 原子（R4：隐私面不默认随导出扩大） */
+                include_sensitive?: boolean | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;

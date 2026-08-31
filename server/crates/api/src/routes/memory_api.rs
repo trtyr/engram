@@ -269,15 +269,28 @@ pub async fn purge_agent(
     })))
 }
 
-/// P4 全量导出（数据主权）：记忆域五表 JSON 快照。
+/// P4 全量导出（数据主权）：记忆域五表 JSON 快照。sensitive 原子默认排除。
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct ExportParams {
+    /// true = 包含 sensitive 原子（R4：隐私面不默认随导出扩大）
+    pub include_sensitive: Option<bool>,
+}
+
 #[utoipa::path(get, path = "/memory/export",
+    params(ExportParams),
     responses((status = 200, description = "完整导出 JSON（format=engram-memory-export）")))]
 pub async fn export_memory(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
+    axum::extract::Query(p): axum::extract::Query<ExportParams>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_memory(&principal)?;
-    Ok(Json(svc(&state).export().await.map_err(me)?))
+    Ok(Json(
+        svc(&state)
+            .export(p.include_sensitive.unwrap_or(false))
+            .await
+            .map_err(me)?,
+    ))
 }
 
 /// 追加轮次到既有会话（自动节律 b 配套：长对话分片落库，不等收尾）。

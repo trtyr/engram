@@ -572,10 +572,16 @@ async fn export_contains_all_domains() {
         .unwrap();
     svc.create_entity("张三", "person", "").await.unwrap();
 
-    let dump = svc.export().await.unwrap();
+    svc.create_atom("fact", "导出隐私项", 0.9, None, None, true)
+        .await
+        .unwrap();
+    let dump = svc.export(false).await.unwrap();
     assert_eq!(dump["format"], "engram-memory-export");
     assert_eq!(dump["counts"]["sessions"], 1);
-    assert_eq!(dump["counts"]["atoms"], 1);
+    assert_eq!(dump["counts"]["atoms"], 1, "sensitive 默认排除");
+    assert_eq!(dump["sensitive_excluded"], true);
+    let full = svc.export(true).await.unwrap();
+    assert_eq!(full["counts"]["atoms"], 2, "include 后全量");
     assert_eq!(dump["counts"]["entities"], 1);
     assert!(dump["atoms"][0]["content"].is_string(), "原子内容在");
 }

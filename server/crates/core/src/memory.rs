@@ -767,14 +767,20 @@ impl MemoryService {
     }
 
     /// P4 全量导出（数据主权）：记忆域五表完整快照，JSON 随身带走。
-    pub async fn export(&self) -> Result<serde_json::Value, MemoryError> {
+    /// R4：sensitive 原子默认排除（隐私面不随导出扩大到文件系统），
+    /// include_sensitive=true 显式包含——与检索 reveal 同权。
+    pub async fn export(&self, include_sensitive: bool) -> Result<serde_json::Value, MemoryError> {
         let sessions: Vec<SessionDto> =
             sqlx::query_as("SELECT * FROM raw_sessions ORDER BY created_at")
                 .fetch_all(&self.pool)
                 .await?;
-        let atoms: Vec<AtomDto> = sqlx::query_as("SELECT * FROM atoms ORDER BY created_at")
-            .fetch_all(&self.pool)
-            .await?;
+        let atoms: Vec<AtomDto> = sqlx::query_as(if include_sensitive {
+            "SELECT * FROM atoms ORDER BY created_at"
+        } else {
+            "SELECT * FROM atoms WHERE NOT sensitive ORDER BY created_at"
+        })
+        .fetch_all(&self.pool)
+        .await?;
         let scenarios: Vec<ScenarioDto> =
             sqlx::query_as("SELECT * FROM scenarios ORDER BY created_at")
                 .fetch_all(&self.pool)
@@ -799,6 +805,7 @@ impl MemoryService {
                 "scenarios": scenarios.len(), "persona": persona.len(),
                 "entities": entities.len(),
             },
+            "sensitive_excluded": !include_sensitive,
             "sessions": sessions, "atoms": atoms, "scenarios": scenarios,
             "persona": persona, "entities": entities,
         }))
