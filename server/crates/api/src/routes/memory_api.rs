@@ -242,28 +242,78 @@ pub async fn void_session(
 /// 破坏半径大——与 erase 同级，需 erase scope。
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct PurgeRequest {
-    pub agent: String,
+    /// agent 清场（deep=false 时必填）
+    pub agent: Option<String>,
+    /// F1：全库清空（四层+实体，单事务）——需 confirm 短语双因子
+    pub deep: Option<bool>,
+    /// 确认短语，deep=true 时必须精确等于「清空记忆库」
+    pub confirm: Option<String>,
 }
+
+/// deep purge 的确认短语（用户亲口授权的载体——AI 复述破坏半径后由用户给出）
+pub const PURGE_CONFIRM_PHRASE: &str = "清空记忆库";
 
 #[utoipa::path(post, path = "/memory/purge",
     request_body = PurgeRequest,
-    responses((status = 200, description = "{voided_sessions, archived_atoms}")))]
+    responses(
+        (status = 200, description = "agent 清场 {voided_sessions, archived_atoms} 或 deep 清空五计数"),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+    ))]
 pub async fn purge_agent(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Json(req): Json<PurgeRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_memory(&principal)?;
+    // F1 双因子：erase scope（持有）× 逐操作二校验
     match &*principal {
         Principal::Admin => {}
         Principal::ApiKey { scopes, .. } if scopes.iter().any(|s| s == "erase") => {}
         _ => {
             return Err(ApiError::Forbidden(
-                "清场需要 erase scope（批量作废+归档，破坏半径与擦除同级）".into(),
+                "清场需要 erase scope（不可逆操作，与读写分权）".into(),
             ));
         }
     }
-    let (voided, archived) = svc(&state).purge_agent(&req.agent).await.map_err(me)?;
+
+    if req.deep.unwrap_or(false) {
+        // F2 一等清空：确认短语（用户亲口授权）+ 审计入 job 记录
+        if req.confirm.as_deref() != Some(PURGE_CONFIRM_PHRASE) {
+            return Err(ApiError::BadRequest(format!(
+                "deep 清空需要确认短语（AI 应先复述破坏半径，用户确认后传 confirm=\\\"{}\\\"）",
+                PURGE_CONFIRM_PHRASE
+            )));
+        }
+        let counts = svc(&state).purge_deep().await.map_err(me)?;
+        // 审计：授权短语 + 来源 + 计数落 job 行（不可抵赖的清空凭证）
+        let source = match &*principal {
+            Principal::Admin => "admin".to_string(),
+            Principal::ApiKey { name, .. } => format!("key:{name}"),
+        };
+        sqlx::query(
+            "INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, \
+             progress, started_at, finished_at) \
+             VALUES ($1, 'purge_memory', $2, 'succeeded', 1, 1, $3, now(), now())",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(serde_json::json!({
+            "deep": true, "confirm": PURGE_CONFIRM_PHRASE, "authorized_by": source,
+        }))
+        .bind(&counts)
+        .execute(&state.pool.clone())
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("审计写入失败: {e}")))?;
+        return Ok(Json(counts));
+    }
+
+    let agent = req.agent.clone().unwrap_or_default();
+    if agent.is_empty() {
+        return Err(ApiError::BadRequest(
+            "agent 清场需要 agent 参数；全库清空用 deep=true + confirm".into(),
+        ));
+    }
+    let (voided, archived) = svc(&state).purge_agent(&agent).await.map_err(me)?;
     Ok(Json(serde_json::json!({
         "voided_sessions": voided, "archived_atoms": archived
     })))

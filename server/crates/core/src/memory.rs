@@ -468,6 +468,25 @@ impl MemoryService {
         .bind(agent_memory_search::tokenize::tsv_text(&new_content))
         .fetch_one(&self.pool)
         .await?;
+
+        // F4 治：归档或标敏感 → 受影响场景快照需要收敛重算（best-effort 异步，
+        // 30s 防抖合并批量归档；重算仅活跃非敏感成员、0 活跃则解散——organize 收敛段）
+        if new_status == "archived" || sensitive == Some(true) {
+            let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
+            self.queue
+                .enqueue(
+                    JobTemplate::new("organize_scenarios")
+                        .with_idempotency_key(format!("snapshot-refresh-{bucket}"))
+                        .with_payload(
+                            serde_json::json!({"converge_only": true, "atom_id": id.to_string()}),
+                        )
+                        .with_due(
+                            chrono::Utc::now() + chrono::Duration::seconds(self.debounce_secs),
+                        ),
+                )
+                .await
+                .ok();
+        }
         Ok(row)
     }
 
@@ -764,6 +783,30 @@ impl MemoryService {
         .rows_affected();
         tx.commit().await.map_err(MemoryError::from)?;
         Ok((voided as i64, archived as i64))
+    }
+
+    /// F1/F2 deep purge（终极清空测试）：记忆域四层 + 实体链一键清空，单事务，
+    /// 返回五计数。TRUNCATE CASCADE 一发解 FK——API 层负责 erase scope + confirm 双因子。
+    pub async fn purge_deep(&self) -> Result<serde_json::Value, MemoryError> {
+        let mut tx = self.pool.begin().await.map_err(MemoryError::from)?;
+        let counts: (i64, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT \
+                (SELECT count(*) FROM raw_sessions), \
+                (SELECT count(*) FROM atoms), \
+                (SELECT count(*) FROM entities WHERE merged_into IS NULL), \
+                (SELECT count(*) FROM scenarios), \
+                (SELECT count(*) FROM persona_aspects)",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        sqlx::query("TRUNCATE atom_entities, entities, persona_aspects, scenarios, atoms, raw_sessions CASCADE")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await.map_err(MemoryError::from)?;
+        Ok(serde_json::json!({
+            "sessions": counts.0, "atoms": counts.1, "entities": counts.2,
+            "scenarios": counts.3, "persona": counts.4,
+        }))
     }
 
     /// P4 全量导出（数据主权）：记忆域五表完整快照，JSON 随身带走。

@@ -561,13 +561,16 @@ function PersonaView({ onGoScenario }: { onGoScenario: () => void }) {
     refresh()
   }, [])
   if (!rows) return <Spinner />
-  if (rows.length === 0) return <Empty text="画像为空——蒸馏 persona 阶段从原子与场景提炼长期画像" />
+  // F3：空内容分面不展示（素材清空后分面退休为空版本——快照与源同生共死）
+  const visible = rows.filter((p) => p.content.trim() !== '')
+  if (visible.length === 0)
+    return <Empty text="画像为空——蒸馏 persona 阶段从原子与场景提炼长期画像" />
 
   return (
     <>
     {/* 同行等高（去掉 items-start——那让每张卡各自为高，参差）；Card 需 flex 撑满 */}
     <div className="grid gap-4 md:grid-cols-2">
-      {rows.map((p) => (
+      {visible.map((p) => (
         <Card key={p.id} className="flex flex-col p-4">
           <div className="flex items-center justify-between gap-2">
             <div>

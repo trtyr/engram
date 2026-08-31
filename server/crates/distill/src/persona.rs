@@ -60,7 +60,32 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;
         if scenario_ids.is_empty() {
-            return Ok(json!({"updated": []}));
+            // F3 素材全空：分面写空版本（历史不可变；UI 过滤空分面不展示）——
+            // 源数据没了，画像不该继续说旧话（终极清空测试 F3 化石问题）。
+            let mut retired: Vec<String> = Vec::new();
+            for aspect in &stale_refresh {
+                let next_v: Option<Option<i32>> = sqlx::query_scalar(
+                    "SELECT MAX(version) FROM persona_aspects WHERE aspect = $1",
+                )
+                .bind(aspect)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+                let v = next_v.flatten().map(|x| x + 1).unwrap_or(1);
+                sqlx::query(
+                    "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version) \
+                     VALUES ($1, $2, '', '[]'::jsonb, $3, 'f3-empty')",
+                )
+                .bind(Uuid::now_v7())
+                .bind(aspect)
+                .bind(v)
+                .execute(pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+                retired.push(aspect.clone());
+            }
+            tracing::info!(?retired, "画像退休：素材全空，分面写空版本");
+            return Ok(json!({"retired_empty": retired}));
         }
     }
 
@@ -94,6 +119,32 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             user,
             "\n**注意：以下分面已超 7 天未更新，其旧版本可能含过期内容（过期的相对时间/已失效的计划/不再成立的习惯/已清除的测试数据）。必须重写这些分面：只保留能被上方场景素材直接支撑的表述，旧版本中未被素材支撑的一律删除，宁缺毋滥：{}**",
             stale_refresh.join(", ")
+        )
+        .ok();
+    }
+
+    // F4 治：上游 organize 收敛传来的已移除表述——任何分面不得保留（重写时删除）。
+    // 活体洞：场景解散后 constraints v1 仍抱着青霉素（2026-08-31 复测）。
+    let removed_texts: Vec<String> = ctx
+        .job
+        .payload
+        .0
+        .get("removed_texts")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !removed_texts.is_empty() {
+        writeln!(user, "\n== 已从记忆移除的表述（成员原子已归档/标敏感）==").ok();
+        for t in removed_texts.iter().take(40) {
+            writeln!(user, "- {t}").ok();
+        }
+        writeln!(
+            user,
+            "**以上表述已从记忆中移除：任何分面不得再包含其内容或同义转述，重写时直接删除。**"
         )
         .ok();
     }

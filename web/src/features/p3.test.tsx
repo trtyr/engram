@@ -1,3 +1,22 @@
+describe('Settings 危险区：清空记忆库确认短语门禁', () => {
+  it('错短语禁用执行按钮，正确短语放行', async () => {
+    const { default: Settings } = await import('./Settings')
+    render(
+      <MemoryRouter>
+        <Settings />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '清空记忆库…' }))
+    const input = await screen.findByLabelText('清空确认短语')
+    const btn = screen.getByRole('button', { name: '执行清空' })
+    expect(btn).toBeDisabled()
+    fireEvent.change(input, { target: { value: '清空记忆' } })
+    expect(btn).toBeDisabled()
+    fireEvent.change(input, { target: { value: '清空记忆库' } })
+    expect(btn).toBeEnabled()
+  })
+})
+
 /**
  * P3 功能测试：跨域 /search、provider 编辑/删除、re-embed。
  * 以 Dashboard GlobalSearch、Settings Providers、Knowledge ChunksPanel 的行为面为对象。

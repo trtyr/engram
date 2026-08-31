@@ -486,6 +486,101 @@ async fn llm_scope_key_manages_providers() {
 
 /// erase 分权（2026-08-31 用户批准）：擦除不可逆，memory-only key 不得单独行使——
 /// 需 memory + erase 双 scope（admin 全权）。
+/// F1 deep purge：erase scope × confirm 短语双因子 + 计数 + 审计 job 行。
+#[tokio::test]
+async fn deep_purge_requires_scope_and_confirm_phrase() {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
+    let state = AppState::new(pool.clone())
+        .with_admin_password(Some("test-admin-pw".into()))
+        .with_master_key(Some("ab".repeat(32)));
+    let app = routes::router(state.clone());
+    let admin = login_token(&app).await;
+
+    // 造数据：会话（经服务层）
+    let svc = agent_memory_core::MemoryService::new(
+        state.pool.clone(),
+        agent_memory_llm::ProviderRegistry::new(
+            state.pool.clone(),
+            agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+        ),
+    );
+    svc.write_session(
+        "t",
+        serde_json::json!([{"speaker":"user","text":"x"}]),
+        "off",
+    )
+    .await
+    .unwrap();
+
+    let post = |key: &str, body: &str| {
+        let app = app.clone();
+        let key = key.to_string();
+        let body = body.to_string();
+        async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/memory/purge")
+                        .header("content-type", "application/json")
+                        .header("authorization", format!("Bearer {key}"))
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let code = resp.status();
+            let b = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (code, String::from_utf8_lossy(&b).to_string())
+        }
+    };
+
+    // 无 erase scope 的 memory key → 403
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+    let r = post(&mem_key, r#"{"deep":true,"confirm":"清空记忆库"}"#).await;
+    assert_eq!(r.0, StatusCode::FORBIDDEN, "无 erase scope 应 403：{}", r.1);
+
+    // 有 erase scope 但无 confirm → 400
+    let erase_key = create_key(&app, &admin, &["memory", "erase"]).await;
+    let r = post(&erase_key, r#"{"deep":true}"#).await;
+    assert_eq!(r.0, StatusCode::BAD_REQUEST, "缺确认短语应 400：{}", r.1);
+    assert!(r.1.contains("确认短语"));
+
+    // 错短语 → 400
+    let r = post(&erase_key, r#"{"deep":true,"confirm":"随便"}"#).await;
+    assert_eq!(r.0, StatusCode::BAD_REQUEST, "错短语应 400：{}", r.1);
+
+    // 正确双因子 → 200 五计数 + 审计 job 行
+    let r = post(&erase_key, r#"{"deep":true,"confirm":"清空记忆库"}"#).await;
+    assert_eq!(r.0, StatusCode::OK, "双因子应 200：{}", r.1);
+    assert!(r.1.contains("\"sessions\""), "计数响应：{}", r.1);
+    let audit: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'purge_memory' AND status = 'succeeded' AND payload->>'confirm' = '清空记忆库'",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(audit, 1, "审计 job 行应存在（短语+来源+计数）");
+
+    // 清空后四层全零
+    let n: i64 = sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM raw_sessions) + (SELECT count(*) FROM atoms) + (SELECT count(*) FROM scenarios)",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 0, "deep 清空后应真空");
+}
+
+/// erase_session 分权：memory-only key 403 / memory+erase key 204（admin 全权）。
+/// 需 memory + erase 双 scope（admin 全权）。
 #[tokio::test]
 async fn erase_requires_dedicated_scope() {
     let (app, _pg) = app().await;

@@ -1522,7 +1522,12 @@ export interface components {
          *     破坏半径大——与 erase 同级，需 erase scope。
          */
         PurgeRequest: {
-            agent: string;
+            /** @description agent 清场（deep=false 时必填） */
+            agent?: string | null;
+            /** @description 确认短语，deep=true 时必须精确等于「清空记忆库」 */
+            confirm?: string | null;
+            /** @description F1：全库清空（四层+实体，单事务）——需 confirm 短语双因子 */
+            deep?: boolean | null;
         };
         Purpose: {
             /** @description wiki 存在的目标（为什么建这个知识库） */
@@ -2673,12 +2678,28 @@ export interface operations {
             };
         };
         responses: {
-            /** @description {voided_sessions, archived_atoms} */
+            /** @description agent 清场 {voided_sessions, archived_atoms} 或 deep 清空五计数 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
             };
         };
     };

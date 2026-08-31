@@ -26,6 +26,7 @@ export default function Settings() {
       <div className="mt-10 space-y-3">
         <h2 className="text-sm font-semibold text-destructive">危险区域</h2>
         <ReencryptPane />
+        <DeepPurgePane />
       </div>
     </div>
   )
@@ -384,6 +385,96 @@ function ReencryptPane() {
         </Button>
         {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
       </div>
+    </Card>
+  )
+}
+
+/** F1 Web：清空记忆库——破坏半径清单 + 确认短语输入（AI 侧同短语走 deep purge API）。 */
+function DeepPurgePane() {
+  const [open, setOpen] = useState(false)
+  const [phrase, setPhrase] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState('')
+  const [err, setErr] = useState('')
+  const [stats, setStats] = useState<Record<string, number> | null>(null)
+
+  useEffect(() => {
+    // 破坏半径清单：四层计数
+    if (!open || stats) return
+    Promise.all([
+      api.get<unknown[]>('/memory/sessions?limit=500'),
+      api.get<unknown[]>('/memory/atoms?limit=500'),
+      api.get<unknown[]>('/memory/scenarios?limit=500'),
+      api.get<unknown[]>('/memory/persona'),
+      api.get<unknown[]>('/memory/entities'),
+    ])
+      .then(([s, a, sc, p, e]) => setStats({ 会话: s.length, 原子: a.length, 场景: sc.length, 画像: p.length, 实体: e.length }))
+      .catch(() => setStats({}))
+  }, [open, stats])
+
+  const go = async () => {
+    if (phrase !== '清空记忆库') return
+    setBusy(true)
+    setErr('')
+    try {
+      const res = await api.post<Record<string, number>>('/memory/purge', {
+        deep: true,
+        confirm: phrase,
+      })
+      setResult(`已清空：${Object.entries(res).map(([k, v]) => `${k} ${v}`).join('，')}`)
+      setPhrase('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="border-destructive/30 p-4">
+      <h3 className="font-medium">清空记忆库</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        四层 + 实体链一键清空（不可逆）：会话 / 原子 / 场景 / 画像 / 实体全部删除。操作会记入审计。
+      </p>
+      {!open ? (
+        <Button variant="destructive" size="sm" className="mt-3" onClick={() => setOpen(true)}>
+          清空记忆库…
+        </Button>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <div className="rounded-md border border-border p-3 text-sm">
+            <p className="mb-1 font-medium">破坏半径（当前数据）</p>
+            {stats === null ? (
+              <p className="text-muted-foreground">统计中…</p>
+            ) : (
+              <ul className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground md:grid-cols-3">
+                {Object.entries(stats).map(([k, v]) => (
+                  <li key={k}>
+                    {k}：{v}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className={`${inputCls} w-64`}
+              placeholder='输入"清空记忆库"确认'
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value)}
+              aria-label="清空确认短语"
+            />
+            <Button variant="destructive" size="sm" disabled={busy || phrase !== '清空记忆库'} onClick={go}>
+              {busy ? '执行中…' : '执行清空'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => { setOpen(false); setPhrase(''); setErr(''); setResult('') }}>
+              取消
+            </Button>
+          </div>
+          {err && <p className="text-sm text-destructive">{err}</p>}
+          {result && <p className="text-sm text-success">{result}</p>}
+        </div>
+      )}
     </Card>
   )
 }

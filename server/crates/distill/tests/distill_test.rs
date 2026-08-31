@@ -941,6 +941,230 @@ async fn arbitrate_similar_pool_reaches_embeddingless_seed() {
 }
 
 /// R3 画像退休：分面超 7 天未更新 → 即使 payload 无新场景也以近期场景强制重写。
+// F3 快照收敛：含 archived 成员的场景——活跃≥1 重算（atom_refs 重写为活跃成员）、
+// 全非活跃解散删除。
+// F4 防：敏感原子不进 organize 素材（prompt 里看不到 sensitive 内容）。
+#[tokio::test]
+async fn organize_excludes_sensitive_atoms_from_prompt() {
+    let env = setup(vec![json!({ "actions": [] })]).await;
+
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive) \
+                 VALUES ($1, 'fact', '普通原子内容公开可见', 0.9, 'active', false, false)",
+    )
+    .bind(Uuid::now_v7())
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive) \
+                 VALUES ($1, 'fact', '青霉素过敏绝对机密', 0.9, 'active', false, true)",
+    )
+    .bind(Uuid::now_v7())
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("organize_scenarios").with_payload(json!({})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "organize_scenarios").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "organize 应成功：{}",
+        j.error.unwrap_or_default()
+    );
+
+    let sent = env.llm.sent_user.lock().unwrap();
+    let prompt = sent.first().cloned().unwrap_or_default();
+    assert!(prompt.contains("普通原子内容公开可见"), "普通原子应进素材");
+    assert!(
+        !prompt.contains("青霉素"),
+        "敏感原子不得进素材 prompt：{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn scenario_converge_recompute_and_dissolve() {
+    let env = setup(vec![
+        // 第 1 发：场景 A 的收敛重算
+        json!({ "topic": "骑行", "summary": "仅活跃成员的新摘要", "body": "新正文" }),
+        // 第 2 发：主流程把未归组的 a3 再组织一次——空动作即可
+        json!({ "actions": [] }),
+    ])
+    .await;
+
+    // 场景 A：3 成员 2 archived 1 active → 重算
+    let a1 = Uuid::now_v7();
+    let a2 = Uuid::now_v7();
+    let a3 = Uuid::now_v7();
+    for (id, st) in [(a1, "archived"), (a2, "archived"), (a3, "active")] {
+        sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, needs_review) VALUES ($1, 'fact', $2, 0.9, $3, false)")
+            .bind(id)
+            .bind(format!("原子{id}"))
+            .bind(st)
+            .execute(&env.pool)
+            .await
+            .unwrap();
+    }
+    let sa = Uuid::now_v7();
+    sqlx::query("INSERT INTO scenarios (id, topic, summary, body, atom_refs, version) VALUES ($1, '骑行', '旧摘要含已归档内容', '旧正文', $2, 1)")
+        .bind(sa)
+        .bind(sqlx::types::Json(vec![a1, a2, a3]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    // 场景 B：成员全 archived → 解散
+    let b1 = Uuid::now_v7();
+    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, needs_review) VALUES ($1, 'fact', 'B成员', 0.9, 'archived', false)")
+        .bind(b1)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    let sb = Uuid::now_v7();
+    sqlx::query("INSERT INTO scenarios (id, topic, summary, body, atom_refs, version) VALUES ($1, '旧项目', '旧摘要', '旧正文', $2, 1)")
+        .bind(sb)
+        .bind(sqlx::types::Json(vec![b1]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE atoms SET scenario_id = $2 WHERE id = $1")
+        .bind(b1)
+        .bind(sb)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    // mock：重算场景 A 的一次 chat（返回新快照）
+
+    env.queue
+        .enqueue(JobTemplate::new("organize_scenarios").with_payload(json!({})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "organize_scenarios").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "收敛 organize 应成功：{}",
+        j.error.unwrap_or_default()
+    );
+
+    // A：重算——atom_refs 只剩 a3，version+1，摘要重写
+    let (refs, ver, summary): (serde_json::Value, i32, String) =
+        sqlx::query_as("SELECT atom_refs, version, summary FROM scenarios WHERE id = $1")
+            .bind(sa)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(ver, 2, "重算应递增版本");
+    assert_eq!(
+        refs.as_array().unwrap().len(),
+        1,
+        "atom_refs 应只剩活跃成员"
+    );
+    assert_eq!(
+        refs.as_array().unwrap()[0].as_str().unwrap(),
+        a3.to_string()
+    );
+    assert!(summary.contains("活跃成员"), "摘要应重写：{summary}");
+
+    // B：解散——场景删除，成员 scenario_id 清空
+    let gone: Option<Uuid> = sqlx::query_scalar("SELECT id FROM scenarios WHERE id = $1")
+        .bind(sb)
+        .fetch_optional(&env.pool)
+        .await
+        .unwrap();
+    assert!(gone.is_none(), "全非活跃场景应被解散");
+    let sid: Option<Uuid> = sqlx::query_scalar("SELECT scenario_id FROM atoms WHERE id = $1")
+        .bind(b1)
+        .fetch_optional(&env.pool)
+        .await
+        .unwrap()
+        .flatten();
+    assert!(sid.is_none(), "解散场景成员指向应清空");
+}
+
+// F3 persona 素材全空：stale 分面写空版本（content=''），不静默跳过。
+// F4 治：organize 收敛传 removed_texts → persona prompt 明确剔除块。
+#[tokio::test]
+async fn persona_prompt_carries_removed_texts() {
+    let env = setup(vec![json!({"aspects": [
+        {"aspect": "constraints", "content": "健康：无已知过敏。", "evidence_scenarios": ["S1"]}
+    ]})])
+    .await;
+
+    // 素材场景 + 带 removed_texts 的 payload（scenario_ids 非空才走正常重写路径）
+    let sid = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO scenarios (id, topic, summary, body, atom_refs) \
+                 VALUES ($1, '骑行', '周末骑行', '正文', '[]'::jsonb)",
+    )
+    .bind(sid)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("distill_persona").with_payload(json!({
+            "scenario_ids": [sid.to_string()],
+            "removed_texts": ["用户对青霉素严重过敏，用药必须避开"]
+        })))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "distill_persona").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "{}",
+        j.error.unwrap_or_default()
+    );
+
+    let sent = env.llm.sent_user.lock().unwrap();
+    let prompt = sent.first().cloned().unwrap_or_default();
+    assert!(
+        prompt.contains("已从记忆移除的表述"),
+        "prompt 应含剔除块：{prompt}"
+    );
+    assert!(prompt.contains("青霉素"), "被移除表述应点名：{prompt}");
+    assert!(prompt.contains("不得再包含"), "应明令禁止保留：{prompt}");
+}
+
+#[tokio::test]
+async fn persona_writes_empty_version_when_no_material() {
+    let env = setup(vec![]).await;
+
+    // 无任何场景 + 一个 8 天前的分面
+    sqlx::query("INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, created_at, updated_at) \
+                 VALUES ($1, 'routines', '旧的例行内容', '[]'::jsonb, 5, '1', now() - interval '8 days', now() - interval '8 days')")
+        .bind(Uuid::now_v7())
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("distill_persona").with_payload(json!({"scenario_ids": []})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "distill_persona").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "空素材 persona 应成功：{}",
+        j.error.unwrap_or_default()
+    );
+
+    let (content, version): (String, i32) =
+        sqlx::query_as("SELECT content, version FROM persona_aspects WHERE aspect = 'routines' ORDER BY version DESC LIMIT 1")
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(version, 6, "素材全空应写新版本");
+    assert_eq!(content, "", "素材全空应写空内容（UI 过滤不展示）");
+}
+
 #[tokio::test]
 async fn persona_stale_facet_forces_refresh() {
     let env = setup(vec![

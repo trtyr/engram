@@ -587,6 +587,55 @@ async fn export_contains_all_domains() {
 }
 
 /// P10 新鲜度混排：同分近似的命中，新的排前。
+// F4 治：批量归档 → 30s 防抖只入队一个快照收敛 job（converge_only）。
+#[tokio::test]
+async fn archive_debounces_into_single_snapshot_refresh() {
+    let (pool, svc, _c) = setup().await;
+
+    // 1 场景 + 3 活跃成员
+    let mut atoms = vec![];
+    for i in 0..3 {
+        atoms.push(
+            svc.create_atom("fact", &format!("成员{i}"), 0.9, None, None, false)
+                .await
+                .unwrap(),
+        );
+    }
+    let sid = Uuid::now_v7();
+    let refs: Vec<Uuid> = atoms.iter().map(|a| a.id).collect();
+    sqlx::query("INSERT INTO scenarios (id, topic, summary, body, atom_refs, version) VALUES ($1, 'T', 'S', 'B', $2, 1)")
+        .bind(sid)
+        .bind(sqlx::types::Json(&refs))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // 批量归档（同一防抖窗口内 3 次 update_atom）
+    for a in &atoms {
+        svc.update_atom(
+            a.id,
+            None,
+            None,
+            Some("archived"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    }
+
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'organize_scenarios' AND payload->>'converge_only' = 'true'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 1, "3 连归档应合并为 1 个快照刷新 job（30s 防抖）");
+}
+
 #[tokio::test]
 async fn context_pack_prefers_recent() {
     let (pool, svc, _container) = setup().await;

@@ -142,7 +142,8 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     for (eid, name, kind) in &portrait_candidates {
         let atoms: Vec<String> = sqlx::query_scalar(
             "SELECT a.content FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
-             WHERE ae.entity_id = $1 ORDER BY a.created_at DESC LIMIT 20",
+             WHERE ae.entity_id = $1 AND a.status = 'active' AND NOT a.sensitive \
+         ORDER BY a.created_at DESC LIMIT 20",
         )
         .bind(eid)
         .fetch_all(pool)
