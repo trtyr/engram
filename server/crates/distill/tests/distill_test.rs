@@ -1198,6 +1198,47 @@ async fn consolidate_skips_manual_entity_portrait() {
 }
 
 // F4 治边界（测试方头孢案）：素材全空 + removed_texts 非空 → 重叠分面确定性写空版本。
+// P-B 直写重建：无待蒸馏会话时 extract 也要链 organize——直写原子进聚类。
+#[tokio::test]
+async fn extract_chains_organize_for_unassigned_atoms() {
+    // 固定原子 id——mock 的 create 动作要求非空 atom_ids（organize 的防幻觉守卫）
+    let aid = Uuid::parse_str("00000000-0000-0000-0000-00000000abcd").unwrap();
+    let env = setup(vec![json!({"actions": [
+        {"action": "create", "topic": "直写聚类", "summary": "直写原子聚成的场景", "body": "正文",
+         "atom_ids": [aid.to_string()]}
+    ]})])
+    .await;
+
+    // 直写原子：无会话、无 scenario_id（批量导入/重建的典型形态）
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, scenario_id) \
+                 VALUES ($1, 'fact', '直写导入的原子内容', 0.9, 'active', false, NULL)",
+    )
+    .bind(aid)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    // full 蒸馏：extract 空认领 → 链 organize → 场景成形
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms").with_payload(json!({"reason": "manual"})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "organize_scenarios").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "{}",
+        j.error.unwrap_or_default()
+    );
+
+    let topic: String = sqlx::query_scalar("SELECT topic FROM scenarios LIMIT 1")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(topic, "直写聚类", "直写原子应被 organize 聚类");
+}
+
 #[tokio::test]
 async fn persona_retires_facet_when_all_material_removed() {
     // 无 chat 响应——该分支不应触碰 LLM

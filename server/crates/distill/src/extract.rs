@@ -44,7 +44,11 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     .collect();
 
     if sessions.is_empty() {
-        return Ok(json!({"session_ids": [], "candidate_ids": []}));
+        // P-B（直写重建死路）：无待蒸馏会话 ≠ 无事可做——直写原子（scenario_id NULL）
+        // 也要进场景聚类。organize 自带空输入幂等（收敛扫描 + 未归组原子），空转成本可忽略。
+        ctx.enqueue_next(JobTemplate::new("organize_scenarios"))
+            .await?;
+        return Ok(json!({"session_ids": [], "candidate_ids": [], "chained_organize": true}));
     }
     let session_ids: Vec<Uuid> = sessions.iter().map(|s| s.id).collect();
 

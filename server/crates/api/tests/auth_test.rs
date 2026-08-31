@@ -553,6 +553,25 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
     assert_eq!(r.0, StatusCode::BAD_REQUEST, "缺确认短语应 400：{}", r.1);
     assert!(r.1.contains("确认短语"));
 
+    // P-A：deep + agent 组合 → 400（deep 无 agent 过滤语义，组合即误导）
+    let r = post(
+        &erase_key,
+        r#"{"agent":"nonexistent-xyz","deep":true,"confirm":"清空记忆库"}"#,
+    )
+    .await;
+    assert_eq!(r.0, StatusCode::BAD_REQUEST, "deep+agent 应 400：{}", r.1);
+    assert!(
+        r.1.contains("不接受 agent 参数"),
+        "文案应点破语义陷阱：{}",
+        r.1
+    );
+    // 400 后库必须原封不动（防线意义所在）
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM raw_sessions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(n >= 1, "被拒的 deep 不得有任何删除副作用");
+
     // 错短语 → 400
     let r = post(&erase_key, r#"{"deep":true,"confirm":"随便"}"#).await;
     assert_eq!(r.0, StatusCode::BAD_REQUEST, "错短语应 400：{}", r.1);

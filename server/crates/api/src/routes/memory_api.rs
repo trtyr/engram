@@ -278,6 +278,15 @@ pub async fn purge_agent(
     }
 
     if req.deep.unwrap_or(false) {
+        // 事故防线（2026-08-31 测试方案）：deep 是全库清空，agent 在此无过滤语义——
+        // 组合传入会让人误以为"只清这个 agent"。强制分开调用，语义零歧义。
+        if req.agent.is_some() {
+            return Err(ApiError::BadRequest(
+                "deep=true 是全库清空，不接受 agent 参数（agent 会在 deep 下被忽略，语义误导）。\
+                 按 agent 清场请去掉 deep；全库清空请去掉 agent 并带 confirm=\"清空记忆库\""
+                    .into(),
+            ));
+        }
         // F2 一等清空：确认短语（用户亲口授权）+ 审计入 job 记录
         if req.confirm.as_deref() != Some(PURGE_CONFIRM_PHRASE) {
             return Err(ApiError::BadRequest(format!(
