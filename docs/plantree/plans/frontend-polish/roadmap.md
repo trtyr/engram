@@ -183,6 +183,14 @@
    - skill 安装副本（~/.pi/skills，非 git）与 server 版本可能错位——副本
      随 server 版本打版本号 / 一键同步命令（待做）；消费者撞旧副本会误报
      "功能缺失"（--sensitive 实际存在但副本旧）
+0t. **AI 主消费者形态确认 + 排期重排建议**（2026-08-31，用户批二验收
+   "UI 差不多了"+ 真数据采访后确立）：主消费者是 AI，Web 是辅助观察面。
+   - 编辑分权不变，文档写明：AI 编辑=correction 双条留痕，纠错不需要 Web
+   - **测试方建议：自动节律钩子（pi extension）提前**——"开场注入+收尾写回"
+     的自动化是 AI 消费者使用率与数据质量的倍增器，比任何 Web 打磨都值；
+     用户此前拍板缓做，启动与否待用户定
+   - 卫生项：e2e 每跑一次签一把 key 不回收，key 表已积 20+——journey 收尾
+     应自撤（或定期清理）
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
