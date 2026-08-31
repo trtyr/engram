@@ -104,6 +104,7 @@ function MemoryPage() {
       )}
       {tab === 'sessions' && <Sessions />}
       {tab === 'atoms' && <Atoms />}
+
       {tab === 'review' && <ReviewQueue onGoAtoms={() => setTab('atoms')} />}
       {tab === 'scenarios' && <Scenarios />}
       {tab === 'persona' && <PersonaView onGoScenario={() => setTab('scenarios')} />}
@@ -482,7 +483,7 @@ function Atoms() {
                           size="sm"
                           className="mr-1"
                           title="改写留痕历史"
-                          onClick={() => setHistoryAtom(a.id)}
+                          onClick={() => setHistoryAtom(a)}
                         >
                           历史
                         </Button>
@@ -522,6 +523,9 @@ function Atoms() {
             <p className="text-xs text-muted-foreground">已显示前 200 条——收窄 kind / 人审筛选，或提高 limit 查看更多</p>
           )}
         </>
+      )}
+      {historyAtom && (
+        <AtomHistoryDrawer atom={historyAtom} onClose={() => setHistoryAtom(null)} />
       )}
     </div>
   )
@@ -580,6 +584,8 @@ function PersonaView({ onGoScenario }: { onGoScenario: () => void }) {
   const [rows, setRows] = useState<Persona[] | null>(null)
   // 历史走右侧抽屉（2026-08-31 P1.1）：内联展开会把同行等高卡一起拉爆
   const [drawerAspect, setDrawerAspect] = useState<string | null>(null)
+  const [editingAspect, setEditingAspect] = useState<string | null>(null)
+  const [aspectDraft, setAspectDraft] = useState('')
   const refresh = () => api.get<Persona[]>('/memory/persona').then(setRows).catch(() => {})
   useEffect(() => {
     refresh()
@@ -604,17 +610,67 @@ function PersonaView({ onGoScenario }: { onGoScenario: () => void }) {
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              <span className="font-mono text-xs text-muted-foreground">v{p.version}</span>
+              {p.manually_edited && (
+                <span
+                  className="rounded bg-success/15 px-1.5 py-0.5 font-mono text-xs text-success"
+                  title="用户钉住：蒸馏绕开此分面（清退仍优先）"
+                >
+                  已钉住
+                </span>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setDrawerAspect(p.aspect)}
+                onClick={() => {
+                  setEditingAspect(p.aspect)
+                  setAspectDraft(p.content)
+                }}
               >
+                编辑
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                title={p.manually_edited ? '解除钉住：回归蒸馏管辖' : '钉住：蒸馏不覆盖此分面'}
+                onClick={async () => {
+                  await api.patch('/memory/persona', { aspect: p.aspect, pinned: !p.manually_edited })
+                  await refresh()
+                }}
+              >
+                {p.manually_edited ? '解锁' : '钉住'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setDrawerAspect(p.aspect)}>
                 历史
               </Button>
             </div>
           </div>
-          <p className="mt-2 flex-1 whitespace-pre-wrap text-sm text-muted-foreground">{p.content}</p>
+          {editingAspect === p.aspect ? (
+            <div className="mt-2 space-y-2">
+              <textarea
+                aria-label="分面内容"
+                className={`${inputCls} min-h-32 w-full`}
+                value={aspectDraft}
+                onChange={(e) => setAspectDraft(e.target.value)}
+              />
+              <div className="flex gap-1.5">
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    await api.patch('/memory/persona', { aspect: p.aspect, content: aspectDraft })
+                    setEditingAspect(null)
+                    await refresh()
+                  }}
+                >
+                  保存（钉住）
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setEditingAspect(null)}>
+                  取消
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-2 flex-1 whitespace-pre-wrap text-sm text-muted-foreground">{p.content}</p>
+          )}
           <p className="mt-3 font-mono text-xs text-muted-foreground/70">
             {(() => {
               const ev = (p.evidence_refs && typeof p.evidence_refs === 'object' ? p.evidence_refs : {}) as {
@@ -656,7 +712,6 @@ function ReviewQueue({ onGoAtoms }: { onGoAtoms: () => void }) {
   const [rows, setRows] = useState<Atom[] | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [superseding, setSuperseding] = useState<string | null>(null)
-  const [historyAtom, setHistoryAtom] = useState<Atom | null>(null)
   const [draft, setDraft] = useState('')
   const [err, setErr] = useState('')
 
@@ -939,5 +994,77 @@ function ResultSection({
       </h3>
       {children}
     </section>
+  )
+}
+
+/** AtomRevision（GET /memory/atoms/{id}/revisions） */
+interface AtomRevision {
+  id: string
+  atom_id: string
+  old_content: string
+  old_kind: string
+  old_confidence: number
+  edited_by: string
+  created_at: string
+}
+
+/** 原子改写历史抽屉（编辑能力：留痕可溯——复用 persona 抽屉模式）。 */
+function AtomHistoryDrawer({ atom, onClose }: { atom: Atom; onClose: () => void }) {
+  const [rows, setRows] = useState<AtomRevision[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    api.get<AtomRevision[]>(`/memory/atoms/${atom.id}/revisions`).then((r) => {
+      if (alive) setRows(r)
+    })
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      alive = false
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [atom.id, onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-label="原子改写历史">
+      <div className="absolute inset-0 bg-foreground/20" onClick={onClose} aria-hidden />
+      <aside className="relative flex h-full w-[440px] max-w-[92vw] flex-col border-l border-border bg-background shadow-lg">
+        <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+          <div className="min-w-0">
+            <h3 className="truncate font-medium">改写历史</h3>
+            <p className="font-mono text-xs text-muted-foreground">
+              {atom.id.slice(0, 8)} · 现值「{atom.content.slice(0, 24)}…」
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            关闭
+          </Button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {!rows ? (
+            <p className="font-mono text-xs text-muted-foreground">加载留痕…</p>
+          ) : rows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">还没有改写留痕——内容编辑（用户）会在这里留一条旧值。</p>
+          ) : (
+            <ul className="space-y-3">
+              {rows.map((r) => (
+                <li key={r.id} className="rounded-lg border border-border p-3">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="rounded border border-border px-1.5 py-px font-mono text-xs text-muted-foreground">
+                      {r.old_kind}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{relTime(r.created_at)}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground/60">by {r.edited_by}</span>
+                    <span className="ml-auto font-mono text-xs text-muted-foreground">置信 {r.old_confidence.toFixed(2)}</span>
+                  </div>
+                  <p className="mt-1.5 line-clamp-3 text-sm text-muted-foreground">{r.old_content}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </aside>
+    </div>
   )
 }

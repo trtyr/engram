@@ -98,6 +98,7 @@ pub struct PersonaVersion {
     pub evidence_refs: serde_json::Value,
     pub version: i32,
     pub prompt_version: Option<String>,
+    pub manually_edited: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -145,6 +146,7 @@ pub struct EntityDto {
     pub kind: String,
     pub summary: String,
     pub atom_count: i64,
+    pub manually_edited: Option<bool>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -736,10 +738,10 @@ impl MemoryService {
     /// 活体实体列表（按记忆密度降序）。
     pub async fn list_entities(&self, kind: Option<&str>) -> Result<Vec<EntityDto>, MemoryError> {
         Ok(sqlx::query_as::<_, EntityDto>(
-            "SELECT e.id, e.name, e.kind, e.summary, count(ae.atom_id)::bigint AS atom_count, e.updated_at \
+            "SELECT e.id, e.name, e.kind, e.summary, count(ae.atom_id)::bigint AS atom_count, e.manually_edited, e.updated_at \
              FROM entities e LEFT JOIN atom_entities ae ON ae.entity_id = e.id \
              WHERE e.merged_into IS NULL AND ($1::text IS NULL OR e.kind = $1) \
-             GROUP BY e.id, e.name, e.kind, e.summary, e.updated_at \
+             GROUP BY e.id, e.name, e.kind, e.summary, e.manually_edited, e.updated_at \
              ORDER BY atom_count DESC, e.updated_at DESC",
         )
         .bind(kind)
@@ -749,10 +751,10 @@ impl MemoryService {
 
     async fn entity_row(&self, id: Uuid) -> Result<EntityDto, MemoryError> {
         sqlx::query_as::<_, EntityDto>(
-            "SELECT e.id, e.name, e.kind, e.summary, count(ae.atom_id)::bigint AS atom_count, e.updated_at \
+            "SELECT e.id, e.name, e.kind, e.summary, count(ae.atom_id)::bigint AS atom_count, bool_or(e.manually_edited) AS manually_edited, e.updated_at \
              FROM entities e LEFT JOIN atom_entities ae ON ae.entity_id = e.id \
              WHERE e.id = $1 AND e.merged_into IS NULL \
-             GROUP BY e.id, e.name, e.kind, e.summary, e.updated_at",
+             GROUP BY e.id, e.name, e.kind, e.summary, e.manually_edited, e.updated_at",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -1039,7 +1041,7 @@ impl MemoryService {
             sqlx::query_as(
                 "SELECT id, name, kind, summary, \
                  (SELECT count(*) FROM atom_entities ae WHERE ae.entity_id = entities.id) AS atom_count, \
-                 updated_at FROM entities WHERE merged_into IS NULL ORDER BY updated_at DESC",
+                 manually_edited, updated_at FROM entities WHERE merged_into IS NULL ORDER BY updated_at DESC",
             )
             .fetch_all(&self.pool).await?;
         Ok(serde_json::json!({
@@ -1367,7 +1369,7 @@ impl MemoryService {
             let rows: Vec<EntityDto> = sqlx::query_as(
                 "SELECT id, name, kind, summary, \
                  (SELECT count(*) FROM atom_entities ae WHERE ae.entity_id = entities.id) AS atom_count, \
-                 updated_at FROM entities WHERE id = ANY($1) AND merged_into IS NULL",
+                 manually_edited, updated_at FROM entities WHERE id = ANY($1) AND merged_into IS NULL",
             )
                     .bind(&entity_ids)
                     .fetch_all(&self.pool)

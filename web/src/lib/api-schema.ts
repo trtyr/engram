@@ -338,6 +338,23 @@ export interface paths {
         patch: operations["update_atom"];
         trace?: never;
     };
+    "/memory/atoms/{id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 原子改写历史（新→旧；编辑留痕）。 */
+        get: operations["atom_revisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/context": {
         parameters: {
             query?: never;
@@ -1195,6 +1212,20 @@ export interface components {
              */
             valid_until?: string | null;
         };
+        /** @description 原子改写留痕（编辑能力：旧值 + 谁改的）。append-only，随原子级联删除。 */
+        AtomRevision: {
+            /** Format: uuid */
+            atom_id: string;
+            /** Format: date-time */
+            created_at: string;
+            edited_by: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: float */
+            old_confidence: number;
+            old_content: string;
+            old_kind: string;
+        };
         CascadeReport: {
             cleaned_links: number;
             deleted_pages: string[];
@@ -1345,6 +1376,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             kind: string;
+            manually_edited?: boolean | null;
             name: string;
             summary: string;
             /** Format: date-time */
@@ -1512,6 +1544,7 @@ export interface components {
             evidence_refs: Record<string, never>;
             /** Format: uuid */
             id: string;
+            manually_edited: boolean;
             prompt_version?: string | null;
             /** Format: int32 */
             version: number;
@@ -2316,6 +2349,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AtomDto"];
+                };
+            };
+        };
+    };
+    atom_revisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AtomRevision"][];
                 };
             };
         };

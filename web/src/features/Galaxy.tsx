@@ -251,6 +251,8 @@ function EntityDetailPane({
   const [detail, setDetail] = useState<EntityDetail | null>(null)
   const [err, setErr] = useState('')
   const [attachOpen, setAttachOpen] = useState(false)
+  const [editingSummary, setEditingSummary] = useState(false)
+  const [summaryDraft, setSummaryDraft] = useState('')
   const [mergeOpen, setMergeOpen] = useState(false)
 
   useEffect(() => {
@@ -276,7 +278,45 @@ function EntityDetailPane({
                 {KIND_LABEL[entity.kind] ?? entity.kind}
               </span>
             </h2>
-            <p className="mt-1 text-sm text-muted-foreground">{entity.summary || '尚无画像摘要——蒸馏积累后自动丰富'}</p>
+            {editingSummary ? (
+              <div className="mt-2 space-y-2">
+                <textarea
+                  aria-label="实体摘要"
+                  className={`${inputCls} min-h-24 w-full`}
+                  value={summaryDraft}
+                  onChange={(e) => setSummaryDraft(e.target.value)}
+                />
+                <div className="flex gap-1.5">
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      await api.patch(`/memory/entities/${entity.id}`, { summary: summaryDraft })
+                      setEditingSummary(false)
+                      onMutated()
+                    }}
+                  >
+                    保存（钉住）
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setEditingSummary(false)}>
+                    取消
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p
+                className="mt-1 -mx-1 cursor-text rounded-sm px-1 text-sm text-muted-foreground transition-colors hover:bg-muted/40"
+                title="点击编辑摘要（手编档案，蒸馏绕开）"
+                onClick={() => {
+                  setSummaryDraft(entity.summary)
+                  setEditingSummary(true)
+                }}
+              >
+                {entity.summary || '尚无画像摘要——蒸馏积累后自动丰富'}
+                {entity.manually_edited && (
+                  <span className="ml-1.5 rounded bg-success/15 px-1.5 py-0.5 font-mono text-xs text-success">已钉住</span>
+                )}
+              </p>
+            )}
             <p className="mt-1 font-mono text-xs text-muted-foreground/70">
               {entity.atom_count} 条原子 · 更新于 {relTime(entity.updated_at)}
             </p>
