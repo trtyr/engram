@@ -22,6 +22,9 @@ const ASPECTS: [&str; 7] = [
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {
     let pool = ctx.pool();
 
+    // R3 退休名单（stale 路径填充，供 prompt 明示——否则模型见素材无新意会跳过，
+    // 旧内容原样滞留，2026-08-31 活体复测教训）
+    let mut stale_refresh: Vec<String> = Vec::new();
     let mut scenario_ids: Vec<Uuid> = ctx
         .job
         .payload
@@ -50,6 +53,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             return Ok(json!({"updated": []}));
         }
         tracing::info!(?stale, "画像退休：陈旧分面以近期场景重写");
+        stale_refresh = stale;
         scenario_ids =
             sqlx::query_scalar("SELECT id FROM scenarios ORDER BY updated_at DESC LIMIT 30")
                 .fetch_all(pool)
@@ -84,6 +88,14 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     writeln!(user, "\n== 当前画像（各分面最新版）==").ok();
     for (aspect, content, _) in &current {
         writeln!(user, "[{aspect}] {content}").ok();
+    }
+    if !stale_refresh.is_empty() {
+        writeln!(
+            user,
+            "\n**注意：以下分面已超 7 天未更新，可能含过期内容（过期的相对时间/已失效的计划/不再成立的习惯）。必须依据上方场景素材重写这些分面，剔除不再成立的内容：{}**",
+            stale_refresh.join(", ")
+        )
+        .ok();
     }
 
     // 2. LLM 更新画像
