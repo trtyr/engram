@@ -97,6 +97,71 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
 
+    // F4 治：上游 organize 收敛传来的已移除表述——任何分面不得保留（重写时删除）。
+    // 活体洞：场景解散后 constraints v1 仍抱着青霉素（2026-08-31 复测）。
+    let removed_texts: Vec<String> = ctx
+        .job
+        .payload
+        .0
+        .get("removed_texts")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    // F4 治边界（测试方 seq20 头孢案）：素材全空（场景解散）+ removed_texts 非空——
+    // 模型见零素材会静默跳过（R3 同族），清退必须确定性执行：分面内容与被移除
+    // 表述 token 重叠 ≥2 → 直接写空 content 版本（宁缺毋滥的尽头是空）。
+    let removed_all = removed_texts.join(" ");
+    if scenarios.is_empty() && !removed_texts.is_empty() {
+        let cur_facets: Vec<(String, String)> = sqlx::query_as(
+            "SELECT DISTINCT ON (aspect) aspect, content \
+             FROM persona_aspects ORDER BY aspect, version DESC",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        let removed_tokens: std::collections::HashSet<String> =
+            agent_memory_search::tokenize::tokenize(&removed_all)
+                .into_iter()
+                .collect();
+        let mut retired: Vec<String> = Vec::new();
+        for (aspect, content) in &cur_facets {
+            if content.trim().is_empty() {
+                continue;
+            }
+            let overlap = agent_memory_search::tokenize::tokenize(content)
+                .into_iter()
+                .filter(|t| removed_tokens.contains(t))
+                .count();
+            if overlap < 2 {
+                continue;
+            }
+            let next_v: Option<Option<i32>> =
+                sqlx::query_scalar("SELECT MAX(version) FROM persona_aspects WHERE aspect = $1")
+                    .bind(aspect)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|e| JobError::Retryable(e.to_string()))?;
+            let v = next_v.flatten().map(|x| x + 1).unwrap_or(1);
+            sqlx::query(
+                "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version) \
+                 VALUES ($1, $2, '', '[]'::jsonb, $3, 'f4-removed-empty')",
+            )
+            .bind(Uuid::now_v7())
+            .bind(aspect)
+            .bind(v)
+            .execute(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+            retired.push(aspect.clone());
+        }
+        tracing::info!(?retired, "画像清退：素材全空，重叠分面写空版本");
+        return Ok(serde_json::json!({"retired_by_removal": retired}));
+    }
+
     let current: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT DISTINCT ON (aspect) aspect, content, id::text \
          FROM persona_aspects ORDER BY aspect, version DESC",
@@ -123,20 +188,6 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         .ok();
     }
 
-    // F4 治：上游 organize 收敛传来的已移除表述——任何分面不得保留（重写时删除）。
-    // 活体洞：场景解散后 constraints v1 仍抱着青霉素（2026-08-31 复测）。
-    let removed_texts: Vec<String> = ctx
-        .job
-        .payload
-        .0
-        .get("removed_texts")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
     if !removed_texts.is_empty() {
         writeln!(user, "\n== 已从记忆移除的表述（成员原子已归档/标敏感）==").ok();
         for t in removed_texts.iter().take(40) {

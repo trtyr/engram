@@ -1089,6 +1089,46 @@ async fn scenario_converge_recompute_and_dissolve() {
 
 // F3 persona 素材全空：stale 分面写空版本（content=''），不静默跳过。
 // F4 治：organize 收敛传 removed_texts → persona prompt 明确剔除块。
+// F4 治边界（测试方头孢案）：素材全空 + removed_texts 非空 → 重叠分面确定性写空版本。
+#[tokio::test]
+async fn persona_retires_facet_when_all_material_removed() {
+    // 无 chat 响应——该分支不应触碰 LLM
+    let env = setup(vec![]).await;
+
+    sqlx::query("INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, created_at, updated_at) \
+                 VALUES ($1, 'constraints', '用户对头孢类药物过敏，服用后会起疹子，用药必须避开', '[]'::jsonb, 1, 'v1', now(), now())")
+        .bind(Uuid::now_v7())
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("distill_persona").with_payload(json!({
+            "scenario_ids": [Uuid::now_v7().to_string()],
+            "removed_texts": ["用户对头孢类药物过敏，服用后会起疹子"]
+        })))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "distill_persona").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "{}",
+        j.error.unwrap_or_default()
+    );
+
+    let (content, version): (String, i32) =
+        sqlx::query_as("SELECT content, version FROM persona_aspects WHERE aspect = 'constraints' ORDER BY version DESC LIMIT 1")
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(version, 2, "清退应写新版本");
+    assert_eq!(
+        content, "",
+        "素材全空+removed 命中应写空版本（化石不得滞留）"
+    );
+}
+
 #[tokio::test]
 async fn persona_prompt_carries_removed_texts() {
     let env = setup(vec![json!({"aspects": [
