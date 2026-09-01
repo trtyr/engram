@@ -159,6 +159,7 @@ export interface Job {
   attempts: number
   error: string | null
   progress: unknown
+  payload?: Record<string, unknown>
   created_at: string
 }
 export interface JobEvent {

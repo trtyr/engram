@@ -1,27 +1,29 @@
-/** Settings 域：LLM providers / 路由 / API keys。 */
+/** Settings 域：LLM providers / 路由 / API keys / 节律。 */
 import { useEffect, useState } from 'react'
-import { api, type ApiKey, type Provider } from '@/lib/api'
-import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
-import { fmtTime, inputCls, tableCls } from '@/lib/ui'
+import { api, type ApiKey, type Job, type Provider } from '@/lib/api'
+import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
+import { fmtTime, inputCls, relTime, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'providers' | 'routing' | 'keys'
+type Tab = 'providers' | 'routing' | 'keys' | 'rhythm'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'providers', label: 'Providers' },
   { value: 'routing', label: '路由' },
   { value: 'keys', label: 'API Keys' },
+  { value: 'rhythm', label: '节律' },
 ]
 
 export default function Settings() {
   const [tab, setTab] = useState<Tab>('providers')
   return (
     <div className="space-y-6">
-      <PageHeader title="设置" desc="LLM 供应商、模型路由与 API 密钥" />
+      <PageHeader title="设置" desc="LLM 供应商、模型路由、API 密钥与记忆节律" />
       <Tabs items={TABS} value={tab} onChange={setTab} />
       {tab === 'providers' && <Providers />}
       {tab === 'routing' && <Routing />}
       {tab === 'keys' && <Keys />}
+      {tab === 'rhythm' && <RhythmPane />}
 
       <div className="mt-10 space-y-3">
         <h2 className="text-sm font-semibold text-destructive">危险区域</h2>
@@ -476,5 +478,188 @@ function DeepPurgePane() {
         </div>
       )}
     </Card>
+  )
+}
+
+// ---------- 节律（memory-rhythm：外部 cron 的观察面） ----------
+// cron 住在外部（crontab），server 只观察不控制：心跳逾期、积压年龄、
+// 安装向导与节律事件全部从既有数据面（jobs 表 + rhythm/status）读出。
+
+type RhythmStatus = {
+  last_heartbeat?: string | null
+  last_heartbeat_by?: string | null
+  pending_sessions: number
+  oldest_pending_age_secs?: number | null
+}
+
+const EXPECTED_KEY = 'engram-rhythm-expected'
+const EXPECTED_OPTIONS = [
+  { value: '3600', label: '每小时' },
+  { value: '21600', label: '每 6 小时' },
+  { value: '86400', label: '每天' },
+]
+
+function humanAge(secs: number): string {
+  if (secs < 3600) return `${Math.round(secs / 60)} 分钟`
+  if (secs < 86400) return `${(secs / 3600).toFixed(1)} 小时`
+  return `${(secs / 86400).toFixed(1)} 天`
+}
+
+function RhythmPane() {
+  const [status, setStatus] = useState<RhythmStatus | null>(null)
+  const [events, setEvents] = useState<Job[] | null>(null)
+  const [err, setErr] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [expected, setExpected] = useState('86400')
+
+  useEffect(() => {
+    const saved = localStorage.getItem(EXPECTED_KEY)
+    if (saved) setExpected(saved)
+    api
+      .get<RhythmStatus>('/memory/rhythm/status')
+      .then(setStatus)
+      .catch((e) => setErr(e.message))
+    api
+      .get<Job[]>('/jobs?limit=100')
+      .then((rows) =>
+        setEvents(
+          rows
+            .filter((j) => j.kind === 'rhythm_heartbeat' || (j.payload as Record<string, unknown>)?.reason === 'cron')
+            .slice(0, 12),
+        ),
+      )
+      .catch(() => setEvents([]))
+  }, [])
+
+  const onExpected = (v: string) => {
+    setExpected(v)
+    localStorage.setItem(EXPECTED_KEY, v)
+  }
+
+  // 逾期判定：超过期望周期 1.5 倍没有心跳 = cron 没来报到
+  const expectedSecs = Number(expected)
+  const overdue =
+    !status?.last_heartbeat
+      ? status === null
+        ? null
+        : 'never'
+      : Date.now() - new Date(status.last_heartbeat).getTime() > expectedSecs * 1500
+        ? 'overdue'
+        : 'ok'
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:19180'
+  const crontab = [
+    '# agent-memory 记忆节律（外部 cron）——AM 换成本站地址，KEY 换成专用 amk_（设置→API 密钥，memory scope）',
+    `AM=${origin}`,
+    'KEY="amk_专用密钥"',
+    '# 心跳：每次运行报到（设置页据此判定逾期）',
+    '25 3 * * * curl -s -X POST "$AM/memory/rhythm/heartbeat" -H "authorization: Bearer $KEY"',
+    '# 每日 full：全量蒸馏 + 整理（consolidate 日桶幂等，重跑安全）',
+    `30 3 * * * curl -s -X POST "$AM/memory/distill" -H "authorization: Bearer $KEY" -H 'content-type: application/json' -d '{"full":true,"via":"cron"}'`,
+    '# 每 6 小时兜底：扫 pending 会话（AI 写了没蒸馏的由这里接走）',
+    `0 */6 * * * curl -s -X POST "$AM/memory/distill" -H "authorization: Bearer $KEY" -H 'content-type: application/json' -d '{"via":"cron"}'`,
+  ].join('\n')
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(crontab)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* 剪贴板不可用时静默 */
+    }
+  }
+
+  if (err) return <ErrorBox msg={err} />
+  if (!status) return <Spinner />
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">cron 心跳</h2>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            期望周期
+            <select
+              className={inputCls + ' h-8 w-28'}
+              value={expected}
+              onChange={(e) => onExpected(e.target.value)}
+              aria-label="期望心跳周期"
+            >
+              {EXPECTED_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {overdue === 'ok' && (
+          <p className="text-sm text-success">
+            ● 在役——最近心跳 {relTime(status.last_heartbeat!)}
+            {status.last_heartbeat_by ? `（${status.last_heartbeat_by}）` : ''}
+          </p>
+        )}
+        {overdue === 'overdue' && (
+          <p className="text-sm text-destructive">
+            ● 逾期——最近心跳 {relTime(status.last_heartbeat!)}
+            {status.last_heartbeat_by ? `（${status.last_heartbeat_by}）` : ''}，超过期望周期 1.5 倍。检查
+            crontab 是否在跑（crontab -l）与本站可达性。
+          </p>
+        )}
+        {overdue === 'never' && (
+          <p className="text-sm text-warning">● 未装——还没有任何心跳记录。按下方安装向导配置外部 cron。</p>
+        )}
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h2 className="text-sm font-semibold">会话积压（cron 兜底对象）</h2>
+        <p className="text-sm">
+          pending 会话 <span className="font-mono tabular-nums">{status.pending_sessions}</span> 条
+          {status.oldest_pending_age_secs != null && status.pending_sessions > 0 && (
+            <>
+              ，最老的已等 <span className="font-mono">{humanAge(status.oldest_pending_age_secs)}</span>
+            </>
+          )}
+          {status.pending_sessions > 0 && (
+            <span className="text-muted-foreground">（AI 写入但未蒸馏——cron 会接走；也可手动触发蒸馏）</span>
+          )}
+        </p>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">安装向导（crontab 片段）</h2>
+          <Button variant="outline" className="h-8" onClick={copy}>
+            {copied ? '已复制' : '复制'}
+          </Button>
+        </div>
+        <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-relaxed">{crontab}</pre>
+        <p className="text-xs text-muted-foreground">
+          建议签发专用 key（名称如 cron，memory scope）——心跳与触发源都会标记 by，事件流可区分谁在跑。
+        </p>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h2 className="text-sm font-semibold">节律事件（近 12 条）</h2>
+        {events === null ? (
+          <Spinner />
+        ) : events.length === 0 ? (
+          <Empty text="还没有节律事件——装好 cron 后这里会出现心跳与触发记录" />
+        ) : (
+          <ul className="divide-y divide-border/60 text-sm">
+            {events.map((j) => (
+              <li key={j.id} className="flex items-center gap-3 py-2">
+                <StatusBadge status={j.status} />
+                <span className="font-mono text-xs">{j.kind}</span>
+                <span className="ml-auto text-xs text-muted-foreground" title={fmtTime(j.created_at)}>
+                  {relTime(j.created_at)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
   )
 }
