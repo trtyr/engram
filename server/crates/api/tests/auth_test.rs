@@ -950,6 +950,8 @@ async fn openapi_snapshot() {
             "/memory/persona/rollback",
             "/memory/purge",
             "/memory/reembed",
+            "/memory/rhythm/heartbeat",
+            "/memory/rhythm/status",
             "/memory/scenarios",
             "/memory/scenarios/{id}",
             "/memory/search",

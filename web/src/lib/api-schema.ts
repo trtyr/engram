@@ -593,6 +593,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/rhythm/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 节律心跳（memory-rhythm）：外部 cron 每次运行时报到——设置页据此判定逾期。
+         *     落 jobs 审计行（kind=rhythm_heartbeat），不新建表。
+         */
+        post: operations["rhythm_heartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/rhythm/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 节律状态：最近心跳 + pending 会话积压年龄（cron 兜底的对象面）。 */
+        get: operations["rhythm_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/scenarios": {
         parameters: {
             query?: never;
@@ -1344,6 +1381,11 @@ export interface components {
         DistillRequest: {
             /** @description true 时附带 consolidate */
             full?: boolean;
+            /**
+             * @description 触发通道："cron"（外部定时器）或缺省（人工/AI 主动）。
+             *     cron 通道的 consolidate 走日桶幂等——同日重复调用只跑一次全量整理。
+             */
+            via?: string | null;
         };
         DocumentDto: {
             /** Format: date-time */
@@ -2825,6 +2867,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    rhythm_heartbeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    rhythm_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
         };
     };

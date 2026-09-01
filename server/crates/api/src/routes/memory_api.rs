@@ -129,6 +129,10 @@ pub struct DistillRequest {
     /// true 时附带 consolidate
     #[serde(default)]
     pub full: bool,
+    /// 触发通道："cron"（外部定时器）或缺省（人工/AI 主动）。
+    /// cron 通道的 consolidate 走日桶幂等——同日重复调用只跑一次全量整理。
+    #[serde(default)]
+    pub via: Option<String>,
 }
 
 /// 手动触发蒸馏链。
@@ -141,8 +145,45 @@ pub async fn trigger_distill(
     Json(req): Json<DistillRequest>,
 ) -> Result<(StatusCode, Json<Vec<agent_memory_jobs::Job>>), ApiError> {
     require_memory(&principal)?;
-    let jobs = svc(&state).trigger_distill(req.full).await.map_err(me)?;
+    let by = actor_of(&principal);
+    let via = if req.via.as_deref() == Some("cron") {
+        "cron"
+    } else {
+        "manual"
+    };
+    let jobs = svc(&state)
+        .trigger_distill(req.full, via, by.as_str())
+        .await
+        .map_err(me)?;
     Ok((StatusCode::ACCEPTED, Json(jobs)))
+}
+
+/// 节律心跳（memory-rhythm）：外部 cron 每次运行时报到——设置页据此判定逾期。
+/// 落 jobs 审计行（kind=rhythm_heartbeat），不新建表。
+#[utoipa::path(post, path = "/memory/rhythm/heartbeat",
+    responses((status = 200, body = serde_json::Value)))]
+pub async fn rhythm_heartbeat(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_memory(&principal)?;
+    let by = actor_of(&principal);
+    svc(&state)
+        .audit("rhythm_heartbeat", serde_json::json!({ "by": by }))
+        .await;
+    Ok(Json(serde_json::json!({ "ok": true, "by": by })))
+}
+
+/// 节律状态：最近心跳 + pending 会话积压年龄（cron 兜底的对象面）。
+#[utoipa::path(get, path = "/memory/rhythm/status",
+    responses((status = 200, body = serde_json::Value)))]
+pub async fn rhythm_status(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_memory(&principal)?;
+    let st = svc(&state).rhythm_status().await.map_err(me)?;
+    Ok(Json(st))
 }
 
 // ---------- L1 原子 ----------

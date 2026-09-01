@@ -702,3 +702,45 @@ async fn context_pack_prefers_recent() {
             .collect::<Vec<_>>()
     );
 }
+
+/// memory-rhythm：rhythm_status——最近心跳（audit 行）+ pending 积压年龄（cron 兜底对象面）。
+#[tokio::test]
+async fn rhythm_status_reports_heartbeat_and_backlog() {
+    let (pool, svc, _c) = setup().await;
+    // 无心跳、无积压的冷态
+    let cold = svc.rhythm_status().await.unwrap();
+    assert_eq!(cold["last_heartbeat"], serde_json::Value::Null);
+    assert_eq!(cold["pending_sessions"], serde_json::json!(0));
+
+    // 两条 pending 会话，一条回拨 3 小时（积压年龄的锚）
+    for i in 0..2 {
+        let _ = svc
+            .write_session(
+                "cron-test",
+                serde_json::json!([{"speaker":"user","text":format!("第{i}条")}]),
+                "off",
+            )
+            .await
+            .unwrap();
+    }
+    sqlx::query(
+        "UPDATE raw_sessions SET created_at = now() - interval '3 hours' WHERE agent = 'cron-test'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // cron 心跳落审计行
+    svc.audit("rhythm_heartbeat", serde_json::json!({"by": "key:cron"}))
+        .await;
+
+    let st = svc.rhythm_status().await.unwrap();
+    assert!(st["last_heartbeat"].is_string(), "心跳时间应返回：{st}");
+    assert_eq!(st["last_heartbeat_by"], serde_json::json!("key:cron"));
+    assert_eq!(st["pending_sessions"], serde_json::json!(2));
+    let age = st["oldest_pending_age_secs"].as_i64().unwrap();
+    assert!(
+        (10_000..=11_000).contains(&age),
+        "最老积压应约 3 小时（10800s）：{age}"
+    );
+}

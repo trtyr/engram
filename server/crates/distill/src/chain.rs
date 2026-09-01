@@ -71,16 +71,34 @@ pub async fn trigger_manual(
     queue: &JobQueue,
     with_consolidate: bool,
 ) -> Result<Vec<agent_memory_jobs::Job>, JobError> {
+    trigger(queue, with_consolidate, "manual", "").await
+}
+
+/// 统一触发口（memory-rhythm 双节律）：
+/// - via="manual"：旧行为原样——extract + consolidate 都不带幂等键（人工随时可重复触发）
+/// - via="cron"：extract 仍不去重（claim pending 天然幂等，扫积压正是 cron 兜底的本意）；
+///   consolidate 走日桶幂等 cron-consolidate-{YYYYMMDD}——同日二次 cron 只跑一次全量整理，
+///   网络 retry 风暴 / crontab 双行都不会重复烧 LLM。by 记录触发者（admin / key:name）。
+pub async fn trigger(
+    queue: &JobQueue,
+    with_consolidate: bool,
+    via: &str,
+    by: &str,
+) -> Result<Vec<agent_memory_jobs::Job>, JobError> {
+    let is_cron = via == "cron";
+    let payload = serde_json::json!({"reason": via, "triggered_by": by});
     let mut out = vec![
         queue
-            .enqueue(
-                JobTemplate::new("extract_atoms")
-                    .with_payload(serde_json::json!({"reason": "manual"})),
-            )
+            .enqueue(JobTemplate::new("extract_atoms").with_payload(payload.clone()))
             .await?,
     ];
     if with_consolidate {
-        out.push(queue.enqueue(JobTemplate::new("consolidate")).await?);
+        let mut tpl = JobTemplate::new("consolidate").with_payload(payload);
+        if is_cron {
+            let day = chrono::Utc::now().format("%Y%m%d");
+            tpl = tpl.with_idempotency_key(format!("cron-consolidate-{day}"));
+        }
+        out.push(queue.enqueue(tpl).await?);
     }
     Ok(out)
 }

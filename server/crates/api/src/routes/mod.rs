@@ -35,6 +35,7 @@ use utoipa::OpenApi;
         memory_api::get_persona, memory_api::persona_edit, memory_api::persona_history,
         memory_api::persona_rollback, memory_api::atom_revisions,
         memory_api::search, memory_api::context, memory_api::embedding_status, memory_api::reembed_memory,
+        memory_api::rhythm_heartbeat, memory_api::rhythm_status,
         memory_api::list_entities, memory_api::entity_graph, memory_api::create_entity,
         memory_api::get_entity, memory_api::update_entity, memory_api::delete_entity,
         memory_api::attach_atom, memory_api::detach_atom, memory_api::merge_entity,
@@ -142,6 +143,12 @@ pub fn router(state: AppState) -> Router {
             get(memory_api::embedding_status),
         )
         .route("/memory/reembed", post(memory_api::reembed_memory))
+        // 节律（memory-rhythm）：外部 cron 的心跳与状态
+        .route(
+            "/memory/rhythm/heartbeat",
+            post(memory_api::rhythm_heartbeat),
+        )
+        .route("/memory/rhythm/status", get(memory_api::rhythm_status))
         // 实体（记忆星系）：graph 路由先于 {id}，避免 "graph" 被当作 id
         .route("/memory/entities/graph", get(memory_api::entity_graph))
         .route(

@@ -370,10 +370,40 @@ impl MemoryService {
         Ok(())
     }
 
-    pub async fn trigger_distill(&self, full: bool) -> Result<Vec<Job>, MemoryError> {
-        agent_memory_distill::chain::trigger_manual(&self.queue, full)
+    pub async fn trigger_distill(
+        &self,
+        full: bool,
+        via: &str,
+        by: &str,
+    ) -> Result<Vec<Job>, MemoryError> {
+        agent_memory_distill::chain::trigger(&self.queue, full, via, by)
             .await
             .map_err(|e| MemoryError::Storage(e.to_string()))
+    }
+
+    /// 节律状态（memory-rhythm）：外部 cron 的心跳与积压年龄，供设置页判定逾期。
+    /// last_heartbeat 复用 jobs 审计行（kind=rhythm_heartbeat）；pending 统计扫
+    /// raw_sessions 积压（cron 兜底蒸馏的对象）。
+    pub async fn rhythm_status(&self) -> Result<serde_json::Value, MemoryError> {
+        let heartbeat: Option<(chrono::DateTime<chrono::Utc>, String)> = sqlx::query_as(
+            "SELECT created_at, payload->>'by' AS by FROM jobs \
+             WHERE kind = 'rhythm_heartbeat' ORDER BY created_at DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        let pending: (i64, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+            "SELECT count(*), min(created_at) FROM raw_sessions WHERE distill_status = 'pending'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        let (count, oldest) = pending;
+        let age_secs = oldest.map(|t| (chrono::Utc::now() - t).num_seconds());
+        Ok(serde_json::json!({
+            "last_heartbeat": heartbeat.as_ref().map(|h| h.0),
+            "last_heartbeat_by": heartbeat.as_ref().map(|h| h.1.clone()),
+            "pending_sessions": count,
+            "oldest_pending_age_secs": age_secs,
+        }))
     }
 
     // ---------- L1 ----------

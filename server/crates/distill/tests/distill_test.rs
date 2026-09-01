@@ -1403,3 +1403,47 @@ async fn persona_stale_facet_forces_refresh() {
     assert_eq!(version, 2, "应写出 v2");
     assert!(content.contains("绝对日期"), "重写内容生效：{content}");
 }
+
+/// memory-rhythm：cron 通道的日桶幂等——同日重复触发 consolidate 返回既有 job，
+/// extract 永不去重（扫 pending 是兜底本意）；manual 通道行为不变（无键随时可重触发）。
+#[tokio::test]
+async fn cron_full_consolidate_daily_idempotent() {
+    let env = setup(vec![]).await;
+    let c1 = agent_memory_distill::chain::trigger(&env.queue, true, "cron", "key:cron")
+        .await
+        .unwrap();
+    let c2 = agent_memory_distill::chain::trigger(&env.queue, true, "cron", "key:cron")
+        .await
+        .unwrap();
+
+    // 两次各有 extract + consolidate
+    assert_eq!(c1.len(), 2);
+    assert_eq!(c2.len(), 2);
+    let cons1 = c1.iter().find(|j| j.kind == "consolidate").unwrap();
+    let cons2 = c2.iter().find(|j| j.kind == "consolidate").unwrap();
+    assert_eq!(
+        cons1.id, cons2.id,
+        "cron 同日 consolidate 应幂等返回既有 job"
+    );
+    let ext1 = c1.iter().find(|j| j.kind == "extract_atoms").unwrap();
+    let ext2 = c2.iter().find(|j| j.kind == "extract_atoms").unwrap();
+    assert_ne!(
+        ext1.id, ext2.id,
+        "extract 永不去重（扫 pending 是兜底本意）"
+    );
+    // 触发源标记进 payload（可观测性）
+    assert_eq!(ext1.payload.get("triggered_by"), Some(&json!("key:cron")));
+    assert_eq!(ext1.payload.get("reason"), Some(&json!("cron")));
+
+    // manual 通道：无键，随时重触发都是新 job
+    let m1 = agent_memory_distill::chain::trigger(&env.queue, true, "manual", "admin")
+        .await
+        .unwrap();
+    let m2 = agent_memory_distill::chain::trigger(&env.queue, true, "manual", "admin")
+        .await
+        .unwrap();
+    let mc1 = m1.iter().find(|j| j.kind == "consolidate").unwrap();
+    let mc2 = m2.iter().find(|j| j.kind == "consolidate").unwrap();
+    assert_ne!(mc1.id, mc2.id, "manual consolidate 不幂等（旧行为保留）");
+    assert_eq!(mc1.payload.get("reason"), Some(&json!("manual")));
+}
