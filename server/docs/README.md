@@ -33,6 +33,6 @@ HTTP API（axum）+ PostgreSQL(pgvector)，SPA 静态资源经 rust-embed 同源
 ```bash
 cd server
 cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings   # 均 exit 0
-cargo test --workspace        # 100 passed / 0 failed（35 个套件）
+cargo test --workspace        # 141 passed / 0 failed（36 个套件）
 cargo run -q -p agent-memory-api --bin openapi-dump   # OpenAPI 导出
 ```

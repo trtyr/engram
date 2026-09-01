@@ -28,7 +28,7 @@
 ## 测试策略
 
 - vitest（jsdom + testing-library）：组件行为面（交互、渲染断言）；新组件逻辑同步补测
-  （如 CommandPalette 5 用例：聚焦/检索/键盘选择/Esc/错误态）。
+  （如 CommandPalette 的聚焦/检索/键盘选择/Esc/错误态）。
 - Playwright journey：全链路语义回归，无 provider 自动降级部分旅程。
 - 视觉验证脚本（e2e-design-shots/metrics）：大改后双主题截图 + 几何/像素断言。
 

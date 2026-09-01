@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-工作树干净，origin/main 双 workflow 绿。cargo **140** 测试 / vitest **35** / 19 迁移 / 69 路径 / 22 业务表。
+工作树干净，origin/main 双 workflow 绿。cargo **141** 测试 / vitest **35** / 19 迁移 / 69 路径 / 22 业务表。
 生产栈 :19180 跑真数据（用户真实记忆 + pi-xiamu 消费者 key 在役）。
 
 ## 2026-08-30 基线以来的落地（按主题）
@@ -21,6 +21,8 @@
 | 登录态根修 | JobStatus cancelled + 探活 401-only | b5ac042 |
 | 圈子拆页 | /circle 独立页 + Memory 回归纯梯子 | 36342e8 |
 | e2e 自清 | journey 收尾清 agent/实体/key | a7ae4f4 |
+| 测试隔离 | E2E_BASE 必填 + 一次性栈 + 差分自清 | 399deab |
+| 双节律 | cron 兜底 + 心跳/status + cron scope 分权 | 775aea2/c1f877f/d7a8345 |
 
 ## 运行中的真数据
 
@@ -30,6 +32,6 @@
 
 ## 已知未了项
 
-- 自动节律钩子（pi extension）缓做——roadmap 0t
+- 自动节律钩子（pi extension 开场注入/收尾写回）缓做——roadmap 0t（cron 兜底已落地，钩子管「会话内实时」层）
 - skill 安装副本（~/.pi）非 git 跟踪，版本同步是已知风险——roadmap 0t
 - 无 provider 的 CI e2e 走部分旅程（蒸馏断言跳过，单测覆盖）

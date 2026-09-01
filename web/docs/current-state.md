@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-vitest 32 / oxlint 0 警告 / tsc 0 / build 0 / journey PASS（含收尾自清）。
+vitest 35 / oxlint 0 警告 / tsc 0 / build 0 / journey PASS（含收尾自清）。
 IA 定稿为八页：圈子拆独立页，用户记忆回归纯梯子。
 
 ## 2026-08-30 基线以来的前端大事记
@@ -18,8 +18,10 @@ IA 定稿为八页：圈子拆独立页，用户记忆回归纯梯子。
 6. **deep 清空 UI**（bfa2e3f 部分）：危险区确认短语门禁
 7. **登录态根修**（b5ac042）：探活 401-only（5xx 不再误杀）
 8. **e2e 自清**（a7ae4f4）：journey 收尾清 agent/实体/key
+9. **测试隔离**（399deab）：E2E_BASE 必填拒跑 + 一次性栈脚本 + 快照差分自清
+10. **设置节律 tab**（c1f877f）：cron 心跳三态 / 积压年龄 / crontab 安装向导 / 节律事件流
 
 ## 已知前端未了项
 
-- 自动节律钩子（pi extension 侧，roadmap）
+- 自动节律钩子（pi extension 侧，roadmap）——cron 兜底已落地，钩子管「会话内实时」层
 - 初始 bundle 预算 350kB 内（当前 282kB，sigma/mermaid/cytoscape 均在 lazy chunk）

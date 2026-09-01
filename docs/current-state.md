@@ -12,8 +12,8 @@ origin/main 双 workflow 绿（编辑能力 + P-C 两阶段清空 + 登录态根
 | 栈 | 命令 | 结果 |
 |---|---|---|
 | server | cargo fmt --check / clippy -D warnings | exit 0 / 0 errors |
-| server | cargo test --workspace | 138 passed（36 套件） |
-| web | pnpm test / lint / build | 32/32 / 0 警告 / exit 0 |
+| server | cargo test --workspace | 141 passed（36 套件） |
+| web | pnpm test / lint / build | 35/35 / 0 警告 / exit 0 |
 | e2e | playwright journey（一次性栈 scripts/e2e-local.sh） | PASS 1 / FAIL 0（含快照差分自清） |
 | 事实 | OpenAPI 活体 / 迁移 / 表 | **69 路径 / 86 方法注册**（GET 35/POST 38/PUT 4/PATCH 3/DELETE 6）/ **19 迁移** / **22 业务表** |
 
@@ -26,9 +26,12 @@ origin/main 双 workflow 绿（编辑能力 + P-C 两阶段清空 + 登录态根
 5. **P-C 两阶段清空**（0019）：arm 5 分钟冷却 → token 执行 / cancel 后悔药；三次清空事故的架构级防线
 6. **圈子拆独立页**：/circle 与代码图谱对称；用户记忆页回归纯梯子（五 tab 默认会话）
 7. **登录态根修**：JobStatus 补 cancelled 变体（503 连环误判），探活改 401-only
+8. **双节律**（memory-rhythm）：AI 主动 + cron 兜底（外部 crontab 打 API，consolidate 日桶幂等）；心跳/status 端点 + 设置页节律 tab；cron scope 分权（status 可读 / heartbeat+via:cron 专属，杜绝 AI 伪造）
+9. **测试隔离提级**（P11）：E2E_BASE 必填拒跑 + 一次性栈脚本 + journey 快照差分自清
 
 ## 已知未了项
 
-- 自动节律钩子（pi extension）——roadmap 缓做项，方向已定（用户 wishlist #1）
+- 自动节律钩子（pi extension 开场注入/收尾写回）——roadmap 缓做项（用户 wishlist #1）；
+  cron 兜底（双节律）已落地，钩子管的是「会话内实时」那一层
 - e2e key 表历史积压（journey 现已自撤新 key；历史 revoked 行留存无害）
 - skill 安装副本版本同步（~/.pi 侧非 git 跟踪，roadmap 0t）
