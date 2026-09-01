@@ -15,7 +15,7 @@ import {
   type TimelineEvent,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Card, Empty, ErrorBox, Spinner, StatusBadge } from '@/components/ui-bits'
+import { Card, Checkbox, Empty, ErrorBox, Spinner, StatusBadge } from '@/components/ui-bits'
 import { ENTITY_KIND_COLOR as KIND_COLOR, REL_TYPE_COLOR, REL_TYPE_LABEL } from '@/lib/ui'
 import { relTime, inputCls, selectCls } from '@/lib/ui'
 import { cn } from '@/lib/utils'
@@ -218,12 +218,11 @@ export default function Galaxy({
             {visible.map((n) => (
               <li key={n.id}>
                 <div className="flex items-center">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selectedIds.has(n.id)}
                     onChange={() => toggleSelect(n.id)}
-                    aria-label={`选择 ${n.name}`}
-                    className="ml-2.5 size-3 shrink-0 accent-foreground"
+                    label={`选择 ${n.name}`}
+                    className="ml-2.5"
                   />
                   <button
                     type="button"

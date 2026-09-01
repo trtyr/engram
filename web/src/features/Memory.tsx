@@ -4,6 +4,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { api, type Atom, type Job, type Persona, type Scenario, type Session } from '@/lib/api'
 import {
   Card,
+  Checkbox,
   Empty,
   ErrorBox,
   PageHeader,
@@ -322,15 +323,9 @@ function Atoms() {
             </option>
           ))}
         </select>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
-            className="size-3.5 accent-foreground"
-            checked={review}
-            onChange={(e) => setReview(e.target.checked)}
-          />
+        <Checkbox checked={review} onChange={setReview}>
           仅人审
-        </label>
+        </Checkbox>
       </div>
 
       {superseding && (
@@ -789,15 +784,14 @@ function ReviewQueue({ onGoAtoms }: { onGoAtoms: () => void }) {
           <Card className="divide-y divide-border/60">
             {rows.map((a) => (
               <div key={a.id} className="flex items-start gap-3 px-4 py-3">
-                <input
-                  type="checkbox"
-                  className="mt-1 size-3.5 accent-foreground"
-                  aria-label={`选中 ${a.content.slice(0, 12)}`}
+                <Checkbox
+                  className="mt-1"
+                  label={`选中 ${a.content.slice(0, 12)}`}
                   checked={picked.has(a.id)}
-                  onChange={(e) =>
+                  onChange={(v) =>
                     setPicked((s) => {
                       const n = new Set(s)
-                      if (e.target.checked) n.add(a.id)
+                      if (v) n.add(a.id)
                       else n.delete(a.id)
                       return n
                     })

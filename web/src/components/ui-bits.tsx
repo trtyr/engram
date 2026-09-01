@@ -26,6 +26,50 @@ export function Card({ className, children, ...props }: ComponentProps<'div'>) {
   )
 }
 
+/** 复选框：发丝线方框，选中墨色实心 + 反色对勾（自动适配双主题）。有 children 时渲染为带文字项。 */
+export function Checkbox({
+  checked,
+  onChange,
+  label,
+  children,
+  className,
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  label?: string
+  children?: ReactNode
+  className?: string
+}) {
+  return (
+    <label className={cn('relative inline-flex cursor-pointer items-center gap-2', className)}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        aria-label={label}
+        className="peer sr-only"
+      />
+      <span
+        aria-hidden
+        className="size-4 shrink-0 rounded border border-border bg-card transition-colors peer-checked:border-foreground peer-checked:bg-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring/60 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background"
+      />
+      <svg
+        aria-hidden
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="pointer-events-none absolute left-0.5 top-1/2 size-3 -translate-y-1/2 text-background opacity-0 transition-opacity peer-checked:opacity-100"
+      >
+        <path d="M3 8.5l3 3 7-7" />
+      </svg>
+      {children != null && <span className="text-sm text-muted-foreground">{children}</span>}
+    </label>
+  )
+}
+
 /** 区块标题行（卡片内的节标题）：字重层级，不靠字号。 */
 export function SectionTitle({ className, children, ...props }: ComponentProps<'h2'>) {
   return (
