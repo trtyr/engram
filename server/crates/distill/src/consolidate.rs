@@ -122,8 +122,9 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         }
     }
 
-    // 2.5 实体档案：高密度实体（≥3 原子）且摘要滞后（空摘要或有更新原子）→ LLM 聚合切片。
-    //     best-effort：单实体失败（含无 provider）仅告警跳过，绝不拖垮 consolidate 主链。
+    // 2.5 实体档案：有原子且摘要滞后（空摘要或有更新原子）→ LLM 聚合切片。
+    //     门槛从 ≥3 降到 ≥1：稀疏实体（当前数据每个实体常只有 1 条原子）也应获得画像；
+    //     LIMIT 10 + 密度降序保证高密度优先，best-effort 失败不拖垮主链。
     let portrait_candidates: Vec<(Uuid, String, String)> =
         sqlx::query_as::<_, (Uuid, String, String)>(
             "SELECT e.id, e.name, e.kind FROM entities e \
@@ -131,7 +132,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
          JOIN atoms a ON a.id = ae.atom_id \
          WHERE e.merged_into IS NULL AND NOT e.manually_edited \
          GROUP BY e.id, e.name, e.kind, e.summary, e.updated_at \
-         HAVING count(ae.atom_id) >= 3 AND (e.summary = '' OR max(a.created_at) > e.updated_at) \
+         HAVING count(ae.atom_id) >= 1 AND (e.summary = '' OR max(a.created_at) > e.updated_at) \
          ORDER BY count(ae.atom_id) DESC LIMIT 10",
         )
         .fetch_all(pool)

@@ -89,6 +89,16 @@ pub struct AtomRevision {
     pub created_at: DateTime<Utc>,
 }
 
+/// 实体摘要改写留痕（圈子强化：手编档案的轻量历史，复用原子 revisions 模式）。
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct EntityRevision {
+    pub id: Uuid,
+    pub entity_id: Uuid,
+    pub old_summary: String,
+    pub edited_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct PersonaVersion {
     pub id: Uuid,
@@ -155,6 +165,8 @@ pub struct EntityDetail {
     pub entity: EntityDto,
     pub atoms: Vec<AtomDto>,
     pub scenarios: Vec<ScenarioDto>,
+    /// 共现邻居：与当前实体共享原子的其他实体（按共现次数降序，最多 20）
+    pub neighbors: Vec<EntityDto>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
@@ -708,6 +720,16 @@ impl MemoryService {
         .await?)
     }
 
+    /// 实体摘要版本链（圈子强化）：手编档案的历史，最近在前。
+    pub async fn entity_revisions(&self, entity_id: Uuid) -> Result<Vec<EntityRevision>, MemoryError> {
+        Ok(sqlx::query_as::<_, EntityRevision>(
+            "SELECT * FROM entity_revisions WHERE entity_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(entity_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// 重新钉住（用户解锁后想再钉：为当前内容写一条钉住版本）。
     pub async fn persona_repin(
         &self,
@@ -839,10 +861,26 @@ impl MemoryService {
         .bind(id)
         .fetch_all(&self.pool)
         .await?;
+        // 共现邻居：与当前实体共享原子的其他实体，按共现次数降序
+        let neighbors = sqlx::query_as::<_, EntityDto>(
+            "SELECT e.id, e.name, e.kind, e.summary, \
+                    (SELECT count(*) FROM atom_entities x WHERE x.entity_id = e.id)::bigint AS atom_count, \
+                    bool_or(e.manually_edited) AS manually_edited, e.updated_at \
+             FROM atom_entities ae \
+             JOIN entities e ON e.id = ae.entity_id \
+             WHERE ae.atom_id IN (SELECT atom_id FROM atom_entities WHERE entity_id = $1) \
+               AND ae.entity_id != $1 AND e.merged_into IS NULL \
+             GROUP BY e.id, e.name, e.kind, e.summary, e.manually_edited, e.updated_at \
+             ORDER BY count(*) DESC, e.updated_at DESC LIMIT 20",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(EntityDetail {
             entity,
             atoms,
             scenarios,
+            neighbors,
         })
     }
 
@@ -915,6 +953,27 @@ impl MemoryService {
             changed = true;
         }
         if let Some(s) = summary {
+            // 版本链：旧摘要进 entity_revisions（轻量历史，复用原子 revisions 模式）
+            let old: Option<String> = sqlx::query_scalar(
+                "SELECT summary FROM entities WHERE id = $1 AND merged_into IS NULL",
+            )
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+            if let Some(old_summary) = old {
+                if old_summary != s {
+                    sqlx::query(
+                        "INSERT INTO entity_revisions (id, entity_id, old_summary, edited_by) \
+                         VALUES ($1, $2, $3, $4)",
+                    )
+                    .bind(Uuid::now_v7())
+                    .bind(id)
+                    .bind(&old_summary)
+                    .bind(actor)
+                    .execute(&self.pool)
+                    .await?;
+                }
+            }
             sqlx::query(
                 "UPDATE entities SET summary = $2, manually_edited = true, updated_at = now() \
                          WHERE id = $1 AND merged_into IS NULL",

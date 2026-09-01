@@ -1,5 +1,6 @@
 //! 记忆域端点（memory scope）。
 
+use agent_memory_search::{search_entities, SearchHit};
 use agent_memory_core::memory::{
     AtomDto, ContextPack, EmbeddingStatus, EntityDetail, EntityDto, EntityGraph, MemoryError,
     MemoryService, PersonaVersion, ScenarioDto, SearchResponse, SessionDto,
@@ -583,6 +584,18 @@ pub async fn atom_revisions(
     Ok(Json(svc(&state).atom_revisions(id).await.map_err(me)?))
 }
 
+/// 实体摘要版本链（手编档案历史，最近在前）。
+#[utoipa::path(get, path = "/memory/entities/{id}/revisions",
+    responses((status = 200, body = [agent_memory_core::EntityRevision])))]
+pub async fn entity_revisions(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<agent_memory_core::EntityRevision>>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(svc(&state).entity_revisions(id).await.map_err(me)?))
+}
+
 /// 审计/留痕用主体来源："admin" / "key:名"
 fn actor_of(principal: &Principal) -> String {
     match principal {
@@ -810,6 +823,28 @@ pub async fn context(
 pub struct ListEntitiesParams {
     /// person / project / topic / group
     pub kind: Option<String>,
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct SearchEntitiesParams {
+    /// 检索词（jieba 分词；name 命中权重 1.0，summary 0.3）
+    pub q: String,
+    /// 返回条数（默认 20）
+    pub limit: Option<i64>,
+}
+
+/// 圈子语义检索：按 token 命中打分（实体量小，无向量/FTS，名字命中优先）。
+#[utoipa::path(get, path = "/memory/entities/search", params(SearchEntitiesParams),
+    responses((status = 200, body = [SearchHit])))]
+pub async fn search_entities_handler(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<SearchEntitiesParams>,
+) -> Result<Json<Vec<SearchHit>>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(
+        search_entities(&state.pool, &p.q, p.limit.unwrap_or(20)).await?,
+    ))
 }
 
 /// 实体列表（按记忆密度降序）。

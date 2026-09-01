@@ -60,6 +60,7 @@ dependencies = [
  "agent-memory-distill",
  "agent-memory-jobs",
  "agent-memory-llm",
+ "agent-memory-search",
  "agent-memory-storage",
  "anyhow",
  "axum",
