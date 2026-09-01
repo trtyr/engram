@@ -1494,7 +1494,7 @@ export interface components {
          *                  ↘ dead（可重试错误重试耗尽；人工可复活）
          * @enum {string}
          */
-        JobStatus: "pending" | "running" | "succeeded" | "failed" | "dead";
+        JobStatus: "pending" | "running" | "succeeded" | "failed" | "dead" | "cancelled";
         KnowledgeSearchRequest: {
             /** Format: int64 */
             max_items?: number | null;
