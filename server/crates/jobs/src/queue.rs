@@ -324,6 +324,7 @@ impl std::fmt::Display for JobStatus {
             JobStatus::Succeeded => "succeeded",
             JobStatus::Failed => "failed",
             JobStatus::Dead => "dead",
+            JobStatus::Cancelled => "cancelled",
         };
         f.write_str(s)
     }

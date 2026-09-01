@@ -18,6 +18,9 @@ pub enum JobStatus {
     Succeeded,
     Failed,
     Dead,
+    /// P-C 两阶段清空的取消态（0019 迁移同日加入 DB CHECK；缺这个变体会让
+    /// list_jobs 反序列化整表炸 503——2026-08-31 登录态误判事故的病根）
+    Cancelled,
 }
 
 /// 任务行。

@@ -318,7 +318,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null)
 
-  // 探活（挂载时一次）：401/网络失败 → 登录页
+  // 探活（挂载时一次）：仅 401（凭证失效）→ 登录页；
+  // 5xx（服务抖动/部署窗口）不踢人——否则一次 503 让全员"被登出"（2026-08-31 事故）
   useEffect(() => {
     if (!getToken()) {
       setAuthed(false)
@@ -326,8 +327,13 @@ export default function App() {
     }
     let cancelled = false
     fetch('/jobs?limit=1', { headers: { authorization: `Bearer ${getToken()}` } })
-      .then((r) => !cancelled && setAuthed(r.ok))
-      .catch(() => !cancelled && setAuthed(false))
+      .then((r) => {
+        if (cancelled) return
+        if (r.status === 401) setAuthed(false)
+        else if (r.ok) setAuthed(true)
+        // 5xx：保持 null → 显示加载态但用户可等；不再误杀会话
+      })
+      .catch(() => !cancelled && undefined)
     return () => {
       cancelled = true
     }
