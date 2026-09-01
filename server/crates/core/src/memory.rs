@@ -112,6 +112,16 @@ pub struct EntityRelationDto {
     pub updated_at: DateTime<Utc>,
 }
 
+/// 全局记忆时间轴事件（原子/场景/实体按时间倒序合并）。
+#[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct TimelineEvent {
+    pub id: Uuid,
+    pub at: DateTime<Utc>,
+    /// atom | scenario | entity
+    pub kind: String,
+    pub content: String,
+}
+
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct PersonaVersion {
     pub id: Uuid,
@@ -199,6 +209,8 @@ pub struct EntityGraph {
     pub nodes: Vec<EntityDto>,
     /// 共现边：同一原子同时关联的两个实体（weight = 共同原子数）
     pub edges: Vec<GraphEdge>,
+    /// 类型化关系（有向）：图升级成知识图谱的关系边
+    pub relations: Vec<EntityRelationDto>,
 }
 
 /// 记忆域缺失向量统计（重嵌修复入口）。
@@ -1358,7 +1370,26 @@ impl MemoryService {
         )
         .fetch_all(&self.pool)
         .await?;
-        Ok(EntityGraph { nodes, edges })
+        let relations = self.list_relations(None).await?;
+        Ok(EntityGraph { nodes, edges, relations })
+    }
+
+    /// 全局记忆时间轴：原子（occurred_at 优先）/场景/实体按时间倒序合并。
+    pub async fn timeline(&self, limit: i64) -> Result<Vec<TimelineEvent>, MemoryError> {
+        Ok(sqlx::query_as::<_, TimelineEvent>(
+            "SELECT a.id, COALESCE(a.occurred_at, a.created_at) AS at, 'atom' AS kind, a.content \
+             FROM atoms a WHERE a.status = 'active' AND NOT a.sensitive \
+             UNION ALL \
+             SELECT s.id, s.created_at AS at, 'scenario' AS kind, s.topic \
+             FROM scenarios s \
+             UNION ALL \
+             SELECT e.id, e.created_at AS at, 'entity' AS kind, e.name \
+             FROM entities e WHERE e.merged_into IS NULL \
+             ORDER BY at DESC LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     /// 记忆域缺失向量统计（重嵌修复入口的状态面）。

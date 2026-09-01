@@ -642,6 +642,90 @@ pub async fn delete_entity_relation(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize, IntoParams)]
+pub struct TimelineParams {
+    /// 返回条数（默认 100）
+    pub limit: Option<i64>,
+}
+
+/// 全局记忆时间轴：原子（occurred_at 优先）/场景/实体按时间倒序合并。
+#[utoipa::path(get, path = "/memory/timeline", params(TimelineParams),
+    responses((status = 200, body = [agent_memory_core::TimelineEvent])))]
+pub async fn timeline(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<TimelineParams>,
+) -> Result<Json<Vec<agent_memory_core::TimelineEvent>>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(svc(&state).timeline(p.limit.unwrap_or(100)).await.map_err(me)?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct BatchEntitiesRequest {
+    pub ids: Vec<Uuid>,
+    /// true = 级联归档原子后再删实体（forget 语义）
+    #[serde(default)]
+    pub forget: bool,
+    /// 破坏性批量操作确认短语："批量删除"
+    pub confirm: String,
+}
+
+/// 批量删除实体（破坏性：erase scope + 确认短语）。
+#[utoipa::path(post, path = "/memory/entities/batch", request_body = BatchEntitiesRequest,
+    responses((status = 200, body = serde_json::Value)))]
+pub async fn batch_entities(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<BatchEntitiesRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_memory(&principal)?;
+    // 破坏性批量：与 erase 同级（admin 全权 / erase scope）
+    match &*principal {
+        Principal::Admin => {}
+        Principal::ApiKey { scopes, .. } if scopes.iter().any(|s| s == "erase") => {}
+        _ => {
+            return Err(ApiError::Forbidden(
+                "批量删除需要 erase scope（不可逆操作，与读写分权）".into(),
+            ));
+        }
+    }
+    if req.confirm != "批量删除" {
+        return Err(ApiError::BadRequest(
+            "批量删除需要确认短语（confirm=批量删除）——破坏半径大，AI 应先复述破坏半径，用户确认后再执行".into(),
+        ));
+    }
+    let mut deleted = 0i64;
+    let mut archived = 0i64;
+    for id in &req.ids {
+        if req.forget {
+            archived += svc(&state).forget_entity(*id).await.map_err(me)? as i64;
+        } else {
+            svc(&state).delete_entity(*id).await.map_err(me)?;
+        }
+        deleted += 1;
+    }
+    Ok(Json(serde_json::json!({"deleted": deleted, "archived": archived})))
+}
+
+/// 圈子独立实体导出（数据主权，memory scope，无破坏性）。
+#[utoipa::path(get, path = "/memory/entities/export",
+    responses((status = 200, body = serde_json::Value)))]
+pub async fn export_entities(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_memory(&principal)?;
+    let entities = svc(&state).list_entities(None).await.map_err(me)?;
+    let relations = svc(&state).list_relations(None).await.map_err(me)?;
+    Ok(Json(serde_json::json!({
+        "format": "engram-entities-export",
+        "version": 1,
+        "exported_at": chrono::Utc::now(),
+        "entities": entities,
+        "relations": relations,
+    })))
+}
+
 /// 审计/留痕用主体来源："admin" / "key:名"
 fn actor_of(principal: &Principal) -> String {
     match principal {

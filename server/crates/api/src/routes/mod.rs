@@ -36,7 +36,9 @@ use utoipa::OpenApi;
         memory_api::persona_rollback, memory_api::atom_revisions,
         memory_api::search, memory_api::context, memory_api::embedding_status, memory_api::reembed_memory,
         memory_api::rhythm_heartbeat, memory_api::rhythm_status,
+        memory_api::timeline,
         memory_api::list_entities, memory_api::entity_graph, memory_api::search_entities_handler, memory_api::create_entity,
+        memory_api::batch_entities, memory_api::export_entities,
         memory_api::get_entity, memory_api::update_entity, memory_api::delete_entity,
         memory_api::attach_atom, memory_api::detach_atom, memory_api::merge_entity, memory_api::entity_revisions,
         memory_api::list_entity_relations, memory_api::create_entity_relation, memory_api::delete_entity_relation,
@@ -150,9 +152,12 @@ pub fn router(state: AppState) -> Router {
             post(memory_api::rhythm_heartbeat),
         )
         .route("/memory/rhythm/status", get(memory_api::rhythm_status))
+        .route("/memory/timeline", get(memory_api::timeline))
         // 实体（记忆星系）：graph/search 路由先于 {id}，避免 "graph"/"search" 被当作 id
         .route("/memory/entities/graph", get(memory_api::entity_graph))
         .route("/memory/entities/search", get(memory_api::search_entities_handler))
+        .route("/memory/entities/batch", post(memory_api::batch_entities))
+        .route("/memory/entities/export", get(memory_api::export_entities))
         .route(
             "/memory/entities",
             get(memory_api::list_entities).post(memory_api::create_entity),
