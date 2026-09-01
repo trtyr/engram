@@ -171,3 +171,40 @@ async fn place_is_a_valid_entity_kind() {
     let p = svc.create_entity("张三", "person", "").await.unwrap();
     assert_eq!(p.kind, "person");
 }
+
+/// 圈子强化 P3：类型化关系建/查/删 + 同向同类型 upsert + 详情含关系。
+#[tokio::test]
+async fn relation_crud_upsert_and_detail() {
+    let (_pool, svc, _container) = setup().await;
+    let zhang = svc.create_entity("张三", "person", "").await.unwrap();
+    let team = svc.create_entity("后端组", "group", "").await.unwrap();
+    let shanghai = svc.create_entity("上海", "place", "").await.unwrap();
+
+    // 建关系：张三 member_of 后端组
+    let r1 = svc.create_relation(zhang.id, team.id, "member_of", "manual").await.unwrap();
+    assert_eq!(r1.rel_type, "member_of");
+    assert_eq!(r1.weight, 1);
+
+    // 同向同类型 upsert：weight 累加到 2
+    let r2 = svc.create_relation(zhang.id, team.id, "member_of", "distill").await.unwrap();
+    assert_eq!(r2.id, r1.id, "同向同类型应 upsert 同一条");
+    assert_eq!(r2.weight, 2);
+
+    // 反向是不同关系
+    let r3 = svc.create_relation(team.id, zhang.id, "member_of", "manual").await.unwrap();
+    assert_ne!(r3.id, r1.id);
+
+    // 非法类型 / 自环
+    assert!(svc.create_relation(zhang.id, shanghai.id, "bad_type", "manual").await.is_err());
+    assert!(svc.create_relation(zhang.id, zhang.id, "related_to", "manual").await.is_err());
+
+    // 详情含关系
+    let detail = svc.get_entity(zhang.id).await.unwrap();
+    assert!(detail.relations.iter().any(|r| r.rel_type == "member_of"));
+
+    // list 过滤 + 删关系
+    let rels = svc.list_relations(Some(zhang.id)).await.unwrap();
+    assert!(rels.iter().any(|r| r.rel_type == "member_of"));
+    svc.delete_relation(r1.id).await.unwrap();
+    assert!(svc.delete_relation(r1.id).await.is_err(), "重复删应 NotFound");
+}

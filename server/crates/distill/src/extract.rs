@@ -150,6 +150,7 @@ async fn run_claimed(
     }
     let mut texts: Vec<String> = Vec::new();
     let mut pending: Vec<PendingAtom> = Vec::new();
+    let mut all_relations: Vec<(String, String, String)> = Vec::new();
     for (i, seg) in segments.iter().enumerate() {
         let user = seg
             .iter()
@@ -171,6 +172,23 @@ async fn run_claimed(
             .and_then(|a| a.as_array())
             .cloned()
             .unwrap_or_default();
+        // 关系抽取：顶层 relations（from/to 用规范称呼，rel_type 限定五类）
+        if let Some(rels) = out.get("relations").and_then(|r| r.as_array()) {
+            for r in rels {
+                let from = r.get("from").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
+                let to = r.get("to").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
+                let rel_type = r.get("rel_type").and_then(|v| v.as_str()).unwrap_or("related_to");
+                if let (Some(f), Some(t)) = (from, to) {
+                    if !f.is_empty()
+                        && !t.is_empty()
+                        && f != t
+                        && matches!(rel_type, "member_of" | "located_in" | "works_on" | "part_of" | "related_to")
+                    {
+                        all_relations.push((f, t, rel_type.to_string()));
+                    }
+                }
+            }
+        }
         let seg_count = atoms.len();
         for a in &atoms {
             let kind = a
@@ -348,6 +366,42 @@ async fn run_claimed(
                 }
             }
             candidate_ids.push(id);
+        }
+    }
+
+    // 关系落库：实体已在挂链里 upsert，name→id 解析后建关系（best-effort，不阻断主链）
+    for (from, to, rel_type) in &all_relations {
+        let fid: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM entities WHERE name = $1 AND merged_into IS NULL ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(from)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+        let tid: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM entities WHERE name = $1 AND merged_into IS NULL ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(to)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+        if let (Some(fid), Some(tid)) = (fid, tid) {
+            if let Err(e) = sqlx::query(
+                "INSERT INTO entity_relations (id, from_id, to_id, rel_type, weight, source) \
+                 VALUES ($1, $2, $3, $4, 1, 'distill') \
+                 ON CONFLICT (from_id, to_id, rel_type) DO UPDATE SET weight = entity_relations.weight + 1, updated_at = now()",
+            )
+            .bind(Uuid::now_v7())
+            .bind(fid)
+            .bind(tid)
+            .bind(rel_type)
+            .execute(pool)
+            .await
+            {
+                tracing::warn!(error = %e, "关系落库失败（不影响主链）");
+            }
         }
     }
 

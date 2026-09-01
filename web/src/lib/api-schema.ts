@@ -511,6 +511,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/entities/{id}/relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 实体关系列表（有向：本实体作为 from 或 to）。 */
+        get: operations["list_entity_relations"];
+        put?: never;
+        /** 建关系（有向：本实体 --rel_type--> to；同向同类型 upsert）。 */
+        post: operations["create_entity_relation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/entities/{id}/relations/{rid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删关系。 */
+        delete: operations["delete_entity_relation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/entities/{id}/revisions": {
         parameters: {
             query?: never;
@@ -1409,6 +1444,12 @@ export interface components {
             models?: components["schemas"]["ModelInfo"][];
             name: string;
         };
+        CreateRelationRequest: {
+            /** @description member_of / located_in / works_on / part_of / related_to */
+            rel_type: string;
+            /** Format: uuid */
+            to_id: string;
+        };
         DismissInsightRequest: {
             key: string;
         };
@@ -1446,6 +1487,8 @@ export interface components {
             entity: components["schemas"]["EntityDto"];
             /** @description 共现邻居：与当前实体共享原子的其他实体（按共现次数降序，最多 20） */
             neighbors: components["schemas"]["EntityDto"][];
+            /** @description 类型化关系（有向）：本实体作为 from 或 to 的关系 */
+            relations: components["schemas"]["EntityRelationDto"][];
             scenarios: components["schemas"]["ScenarioDto"][];
         };
         EntityDto: {
@@ -1464,6 +1507,23 @@ export interface components {
             /** @description 共现边：同一原子同时关联的两个实体（weight = 共同原子数） */
             edges: components["schemas"]["GraphEdge"][];
             nodes: components["schemas"]["EntityDto"][];
+        };
+        /** @description 实体关系（迁移 0021）：有向类型化关系，图升级成知识图谱。 */
+        EntityRelationDto: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            from_id: string;
+            /** Format: uuid */
+            id: string;
+            rel_type: string;
+            source: string;
+            /** Format: uuid */
+            to_id: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: int32 */
+            weight: number;
         };
         /** @description 实体摘要改写留痕（圈子强化：手编档案的轻量历史，复用原子 revisions 模式）。 */
         EntityRevision: {
@@ -2766,6 +2826,73 @@ export interface operations {
                 content: {
                     "application/json": Record<string, never>;
                 };
+            };
+        };
+    };
+    list_entity_relations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityRelationDto"][];
+                };
+            };
+        };
+    };
+    create_entity_relation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRelationRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityRelationDto"];
+                };
+            };
+        };
+    };
+    delete_entity_relation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                rid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -945,6 +945,8 @@ async fn openapi_snapshot() {
             "/memory/entities/{id}",
             "/memory/entities/{id}/atoms/{atom_id}",
             "/memory/entities/{id}/merge",
+            "/memory/entities/{id}/relations",
+            "/memory/entities/{id}/relations/{rid}",
             "/memory/entities/{id}/revisions",
             "/memory/export",
             "/memory/persona",

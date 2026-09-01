@@ -12,7 +12,7 @@ pub mod wiki_api;
 
 use crate::state::AppState;
 use axum::middleware::from_fn_with_state;
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use utoipa::OpenApi;
 
@@ -39,6 +39,7 @@ use utoipa::OpenApi;
         memory_api::list_entities, memory_api::entity_graph, memory_api::search_entities_handler, memory_api::create_entity,
         memory_api::get_entity, memory_api::update_entity, memory_api::delete_entity,
         memory_api::attach_atom, memory_api::detach_atom, memory_api::merge_entity, memory_api::entity_revisions,
+        memory_api::list_entity_relations, memory_api::create_entity_relation, memory_api::delete_entity_relation,
         search_api::search,
         knowledge_api::submit_url, knowledge_api::upload, knowledge_api::list_documents,
         knowledge_api::get_document, knowledge_api::document_chunks,
@@ -173,6 +174,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/memory/entities/{id}/revisions",
             get(memory_api::entity_revisions),
+        )
+        .route(
+            "/memory/entities/{id}/relations",
+            get(memory_api::list_entity_relations).post(memory_api::create_entity_relation),
+        )
+        .route(
+            "/memory/entities/{id}/relations/{rid}",
+            delete(memory_api::delete_entity_relation),
         )
         .route("/search", post(search_api::search))
         .route(

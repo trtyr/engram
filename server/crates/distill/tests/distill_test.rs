@@ -774,6 +774,49 @@ async fn extract_creates_and_links_entities() {
     env.handle.join().await;
 }
 
+/// 圈子强化 P3：extract 抽取类型化关系（顶层 relations → entity_relations）。
+#[tokio::test]
+async fn extract_creates_relations() {
+    let env = setup(vec![
+        json!({"atoms": [
+            {"kind": "fact", "content": "张三在后端组负责 API 层", "confidence": 0.9, "turn_refs": [1],
+             "entities": [{"name": "张三", "kind": "person"}, {"name": "后端组", "kind": "group"}]}
+        ],
+        "relations": [{"from": "张三", "to": "后端组", "rel_type": "member_of"}]}),
+        json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
+        json!({"actions": []}),
+    ])
+    .await;
+
+    let sid = Uuid::now_v7();
+    sqlx::query("INSERT INTO raw_sessions (id, agent, content) VALUES ($1, 'pi', $2)")
+        .bind(sid)
+        .bind(session(&[("user", "张三在后端组负责 API 层")]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "extract_atoms").await;
+    assert_eq!(j.status, JobStatus::Succeeded, "extract 应成功: {:?}", j.error);
+    wait_done(&env.queue, "arbitrate_atoms").await;
+
+    // 关系落库：张三 member_of 后端组，source=distill
+    let rel_n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM entity_relations WHERE rel_type = 'member_of' AND source = 'distill'",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(rel_n, 1, "extract 应抽出并落库 1 条 member_of 关系");
+
+    env.handle.shutdown();
+    env.handle.join().await;
+}
+
 /// 记忆域重嵌：NULL 向量的原子（active）与场景批量补嵌；archived 原子不动。
 #[tokio::test]
 async fn reembed_memory_fills_missing_vectors() {

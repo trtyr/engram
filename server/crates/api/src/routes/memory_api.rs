@@ -596,6 +596,52 @@ pub async fn entity_revisions(
     Ok(Json(svc(&state).entity_revisions(id).await.map_err(me)?))
 }
 
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct CreateRelationRequest {
+    pub to_id: Uuid,
+    /// member_of / located_in / works_on / part_of / related_to
+    pub rel_type: String,
+}
+
+/// 实体关系列表（有向：本实体作为 from 或 to）。
+#[utoipa::path(get, path = "/memory/entities/{id}/relations",
+    responses((status = 200, body = [agent_memory_core::EntityRelationDto])))]
+pub async fn list_entity_relations(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<agent_memory_core::EntityRelationDto>>, ApiError> {
+    require_memory(&principal)?;
+    Ok(Json(svc(&state).list_relations(Some(id)).await.map_err(me)?))
+}
+
+/// 建关系（有向：本实体 --rel_type--> to；同向同类型 upsert）。
+#[utoipa::path(post, path = "/memory/entities/{id}/relations", request_body = CreateRelationRequest,
+    responses((status = 201, body = agent_memory_core::EntityRelationDto)))]
+pub async fn create_entity_relation(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<CreateRelationRequest>,
+) -> Result<(StatusCode, Json<agent_memory_core::EntityRelationDto>), ApiError> {
+    require_memory(&principal)?;
+    let r = svc(&state).create_relation(id, req.to_id, &req.rel_type, "manual").await.map_err(me)?;
+    Ok((StatusCode::CREATED, Json(r)))
+}
+
+/// 删关系。
+#[utoipa::path(delete, path = "/memory/entities/{id}/relations/{rid}",
+    responses((status = 204, description = "已删除")))]
+pub async fn delete_entity_relation(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((_id, rid)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    require_memory(&principal)?;
+    svc(&state).delete_relation(rid).await.map_err(me)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// 审计/留痕用主体来源："admin" / "key:名"
 fn actor_of(principal: &Principal) -> String {
     match principal {

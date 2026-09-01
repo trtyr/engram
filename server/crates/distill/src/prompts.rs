@@ -30,8 +30,9 @@ pub fn extract_system() -> String {
 5. entities 是这条记忆涉及的主角（他人姓名 / 项目名 / 主题名 / 群体名 / 地点名），kind ∈ person|project|topic|group|place；用对话中的规范称呼，只收稳定可复现的实体，没有则为空数组。用户本人不是实体。kind 判例：具体的人→person；公司/团队/组织/乐队→group；个人或团队在做的项目/产品→project；学校/城市/地点/地址→place；抽象话题/领域→topic。
 6. **event 类或含明确时间的信息**给 occurred_at（ISO8601，如 \"2026-09-02T00:00:00Z\"）；有过期语义的（活动/安排）再给 valid_until。无法定位时间的省略这两个字段。
 7. 不值得记的对话输出空数组。宁缺毋滥。
+8. relations 是这些实体之间的关系（可选）：from 与 to 用 entities 里的规范称呼，rel_type ∈ member_of|located_in|works_on|part_of|related_to。方向：from --rel_type--> to（如 张三 member_of 后端组，长亭科技 located_in 上海）。只输出对话中明确表达的关系，没有则为空数组。
 
-输出严格 JSON： {{\"atoms\":[{{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"turn_refs\":[1],\"occurred_at\":\"2026-09-02T00:00:00Z\",\"valid_until\":null,\"entities\":[{{\"name\":\"张三\",\"kind\":\"person\"}}]}}]}}",
+输出严格 JSON： {{\"atoms\":[{{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"turn_refs\":[1],\"occurred_at\":\"2026-09-02T00:00:00Z\",\"valid_until\":null,\"entities\":[{{\"name\":\"张三\",\"kind\":\"person\"}}]}}],\"relations\":[{{\"from\":\"张三\",\"to\":\"后端组\",\"rel_type\":\"member_of\"}}]}}",
         today = chrono::Utc::now().date_naive(),
     )
 }

@@ -99,6 +99,19 @@ pub struct EntityRevision {
     pub created_at: DateTime<Utc>,
 }
 
+/// 实体关系（迁移 0021）：有向类型化关系，图升级成知识图谱。
+#[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct EntityRelationDto {
+    pub id: Uuid,
+    pub from_id: Uuid,
+    pub to_id: Uuid,
+    pub rel_type: String,
+    pub weight: i32,
+    pub source: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct PersonaVersion {
     pub id: Uuid,
@@ -149,6 +162,9 @@ pub struct SearchResponse {
 /// 实体类型（迁移 0015 CHECK 枚举）。
 pub const ENTITY_KINDS: [&str; 5] = ["person", "project", "topic", "group", "place"];
 
+/// 实体关系类型（迁移 0021 CHECK 枚举）。方向：from --rel_type--> to。
+pub const REL_TYPES: [&str; 5] = ["member_of", "located_in", "works_on", "part_of", "related_to"];
+
 #[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct EntityDto {
     pub id: Uuid,
@@ -167,6 +183,8 @@ pub struct EntityDetail {
     pub scenarios: Vec<ScenarioDto>,
     /// 共现邻居：与当前实体共享原子的其他实体（按共现次数降序，最多 20）
     pub neighbors: Vec<EntityDto>,
+    /// 类型化关系（有向）：本实体作为 from 或 to 的关系
+    pub relations: Vec<EntityRelationDto>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
@@ -730,6 +748,71 @@ impl MemoryService {
         .await?)
     }
 
+    /// 实体关系列表（有向类型化；可选按实体过滤 from/to 两端）。
+    pub async fn list_relations(&self, entity_id: Option<Uuid>) -> Result<Vec<EntityRelationDto>, MemoryError> {
+        let rows = match entity_id {
+            Some(eid) => {
+                sqlx::query_as::<_, EntityRelationDto>(
+                    "SELECT * FROM entity_relations WHERE from_id = $1 OR to_id = $1 ORDER BY created_at DESC",
+                )
+                .bind(eid)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query_as::<_, EntityRelationDto>("SELECT * FROM entity_relations ORDER BY created_at DESC")
+                    .fetch_all(&self.pool)
+                    .await?
+            }
+        };
+        Ok(rows)
+    }
+
+    /// 建关系（有向）：from --rel_type--> to；同向同类型 upsert（weight 累加）。
+    pub async fn create_relation(
+        &self,
+        from: Uuid,
+        to: Uuid,
+        rel_type: &str,
+        source: &str,
+    ) -> Result<EntityRelationDto, MemoryError> {
+        if from == to {
+            return Err(MemoryError::BadRequest("关系两端不能是同一实体".into()));
+        }
+        if !REL_TYPES.contains(&rel_type) {
+            return Err(MemoryError::BadRequest(format!("rel_type 只允许 {}", REL_TYPES.join("/"))));
+        }
+        self.entity_row(from).await?;
+        self.entity_row(to).await?;
+        let row = sqlx::query_as::<_, EntityRelationDto>(
+            "INSERT INTO entity_relations (id, from_id, to_id, rel_type, weight, source) \
+             VALUES ($1, $2, $3, $4, 1, $5) \
+             ON CONFLICT (from_id, to_id, rel_type) DO UPDATE SET weight = entity_relations.weight + 1, updated_at = now() \
+             RETURNING *",
+        )
+        .bind(Uuid::now_v7())
+        .bind(from)
+        .bind(to)
+        .bind(rel_type)
+        .bind(source)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// 删关系。
+    pub async fn delete_relation(&self, id: Uuid) -> Result<(), MemoryError> {
+        let n = sqlx::query("DELETE FROM entity_relations WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if n == 0 {
+            return Err(MemoryError::NotFound(format!("关系 {id} 不存在")));
+        }
+        Ok(())
+    }
+
     /// 重新钉住（用户解锁后想再钉：为当前内容写一条钉住版本）。
     pub async fn persona_repin(
         &self,
@@ -876,11 +959,19 @@ impl MemoryService {
         .bind(id)
         .fetch_all(&self.pool)
         .await?;
+        // 类型化关系：本实体作为 from 或 to 的有向关系
+        let relations = sqlx::query_as::<_, EntityRelationDto>(
+            "SELECT * FROM entity_relations WHERE from_id = $1 OR to_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(EntityDetail {
             entity,
             atoms,
             scenarios,
             neighbors,
+            relations,
         })
     }
 
