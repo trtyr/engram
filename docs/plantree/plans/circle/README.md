@@ -24,4 +24,4 @@
 
 - 活体：生产栈 :19180，16 实体（全 atom_count=1）/ 13 共现边（全 weight=1）/ 19 迁移 / 69 路径。
 - 前端：Circle.tsx(32) + Galaxy.tsx(520) + EntityGalaxy.tsx(147，lazy sigma 157kB)。
-- API：entities 面 7 路由（list/create/graph/get/patch/delete/atoms/merge/forget），全部 require_memory。
+- API：entities 面 5 路径 / 9 方法注册（list/create/graph/get/patch/delete/atoms/merge/forget），全部 require_memory。
