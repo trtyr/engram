@@ -50,7 +50,7 @@
 
 ## 三、开放 API（活体实测）
 
-entities 面 **7 路由**（openapi-dump + curl 实测，全部 `require_memory` scope）：
+entities 面 **5 路径 / 9 方法注册**（openapi-dump + curl 实测，全部 `require_memory` scope）：
 
 | 方法 | 路径 | 返回 | 说明 |
 |---|---|---|---|
@@ -91,6 +91,7 @@ api-schema.ts（3786 行）与后端 OpenAPI 零漂移（EntityDto/EntityGraph/E
 | 详情补「相关实体」 | get_entity 无邻居 | 详情看不到关系，退回图谱看边 | 后端 get_entity 加共现邻居查询 + 前端详情「相关实体」chips | 小（后端 1 查询 + 前端 1 区块） |
 | 实体级去重/合并建议 | 无 | 同名同义实体靠人工发现 | 后端 list 时按 name 归一化聚类提示候选 merge | 中（需定归一化规则） |
 | 图可读性：zoom/pan reset | 无控件 | 拖/缩丢失后回不来 | 前端加 reset 按钮 + 适配缩放 | 小 |
+| 图可访问性 | canvas 无 aria/键盘 | 图对键盘/读屏不可达，WCAG 基础缺口 | canvas 加 aria-label + 键盘焦点替代（节点遍历） | 中 |
 
 ### P2（能力补齐）
 
@@ -100,6 +101,7 @@ api-schema.ts（3786 行）与后端 OpenAPI 零漂移（EntityDto/EntityGraph/E
 | 图可读性：社区聚类 | 无 | 实体多时一团 | 后端 graph 返回社区标签（louvain）或前端按 kind 分区 | 中 |
 | 低密度信息呈现 | 均匀星形 | 数据成熟前图无信息量 | 空态/低密度态提示 + 列表为主、图为辅的降级 | 小 |
 | 实体摘要补生成 | 门槛 atom_count>=3 | 稀疏实体长期无画像 | consolidate 门槛降或按需触发单实体画像 | 中 |
+| 实体历史/版本 | 无 | summary 编辑无版本链、无实体版本端点（对比 atom 有 /revisions） | 实体摘要版本链 + 历史抽屉，复用 atom revisions 模式 | 中 |
 
 ### P3（大项，需拍板）
 
