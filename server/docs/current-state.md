@@ -1,43 +1,35 @@
-# 当前状态（2026-08-30 验证基线）
+# 当前状态（2026-09-01 验证基线）
 
-> 全新初始化当日实况。此前文档描述的 CI 修复、Engram 重设计等历史见 git log 与根 docs/plantree/。
+> 2026-08-30 初始化后的首次全面更新。历史（CI 修复、Engram 重设计）见 git log 与根 docs/plantree/。
 
-## 未提交变更（重要）
+## 一句话状态
 
-本地 HEAD = origin/main = `d0abdf4`，但其上有 **38 个未提交文件**（26 改 + 15 新增 + docs）：
+工作树干净，origin/main 双 workflow 绿。cargo **138** 测试 / vitest **32** / 19 迁移 / 67 路径 / 22 业务表。
+生产栈 :19180 跑真数据（用户真实记忆 + pi-xiamu 消费者 key 在役）。
 
-- `server/crates/api/src/auth.rs`——**唯一后端改动**：/jobs Accept 分流（text/html→SPA，见 api.md）
-- `web/` 全套 Engram 重设计 + 侧栏四件套（收缩/徽章/命令面板/分区）+ 六轮视觉修复
-- 新增：PRODUCT.md、DESIGN.md、web/src/{lib/theme.ts,lib/status.ts,components/CommandPalette*,components/ThemeToggle.tsx}
-- docs/plantree/（frontend-polish 计划树）、docs/design/（审计证据）
+## 2026-08-30 基线以来的落地（按主题）
 
-origin CI 对 `d0abdf4` 双 workflow 绿（CI + e2e，2026-08-29）；**上述未提交内容尚未过远端 CI**。
-
-## 当日验证记录（命令 + 结果）
-
-| 命令 | 结果 | 时间 |
+| 主题 | 内容 | 代表提交 |
 |---|---|---|
-| `cargo fmt --check`（server） | exit 0 | 08-30 16:0x |
-| `cargo clippy --workspace --all-targets -- -D warnings` | exit 0（auth.rs 改后复验） | 08-30 16:03 |
-| `cargo test --workspace` | **100 passed / 0 failed**（35 套件；此后 server 零改动） | 08-30 16:07 |
-| `pnpm exec tsc --noEmit`（web） | 0 errors | 08-30 17:0x |
-| `pnpm run lint`（web, oxlint） | exit 0，**0 warnings** | 08-30 17:0x |
-| `pnpm test`（web, vitest） | **26/26**（5 文件，含 CommandPalette 5 新用例） | 08-30 17:0x |
-| `pnpm run build`（web） | exit 0；初始 JS gzip ~93kB + CSS 8.5kB | 08-30 17:0x |
-| `pnpm exec playwright test`（e2e journey，本地栈） | **PASS 1 / FAIL 0**（终树复跑，25s） | 08-30 17:1x |
-| OpenAPI 活体（:19180） | 55 路径（GET26/POST24/PATCH1/DELETE4） | 08-30 17:0x |
-| 运行库表清点 | 19 业务表 + _sqlx_migrations | 08-30 |
+| 实体层 | 0015 迁移 + 9 API + 蒸馏抽取 + 圈子页 | 1067a21/8bfd330 |
+| 记忆模型九修 | 抽取放宽/实体档案/检索四层/re-embed/人审队列/一致性 | 595d5be..3dd210a |
+| 消费者契约面 | context_pack 实体透镜 + amk_ 全旅程测试 | 47c2caf/9b0e176 |
+| 时间表达力 | occurred_at/valid_until/place kind/今天锚 | c75f668 |
+| 敏感与清空 | sensitive 全链 + void/purge/export + F3 快照收敛 + F4 清退 | 3e205df/bfa2e3f/b7203e6 |
+| 编辑能力 | 分权/留痕/钉住 + Web 编辑面 | 0189b1b/534d701 |
+| 清空防线 | P-A 互斥/P-B 直写聚类/P-C 两阶段 | b044bf5/1472832 |
+| 登录态根修 | JobStatus cancelled + 探活 401-only | b5ac042 |
+| 圈子拆页 | /circle 独立页 + Memory 回归纯梯子 | 36342e8 |
+| e2e 自清 | journey 收尾清 agent/实体/key | a7ae4f4 |
 
-本地设计验证栈：:19180（am_design_audit 库，种子数据齐全）当日全程可用。
+## 运行中的真数据
 
-## 已知开放项
+- 记忆域：用户真实记忆运行中（原子/场景/画像/实体），2 条敏感带标
+- 消费者：pi-xiamu key（memory+llm+erase）在役；v2 只读 key 留用
+- LLM：newapi 网关（MiniMax-M3 chat + bge-m3 embed）
 
-1. 未提交批次待分块 commit + push + 盯 CI（沿用既定工作流）。
-2. `cargo audit`：rsa 孤儿 + 4 transitive 提示——已接受（见 tech-stack.md）。
-3. 前端 R3/R4 打磨项（skip-link、移动端 scrollIntoView、路由骨架屏）——见根 docs/plantree/frontend-polish roadmap。
-4. codegraph CLI 版本钉在 Dockerfile（1.5.0），本地 homebrew 版本可能领先——行为差异未审计。
+## 已知未了项
 
-## 健康快照
-
-- 测试：后端 100 + 前端 26 + e2e 1，全绿。
-- 无已知运行时缺陷；当日新增功能均经 Playwright 几何/像素验证。
+- 自动节律钩子（pi extension）缓做——roadmap 0t
+- skill 安装副本（~/.pi）非 git 跟踪，版本同步是已知风险——roadmap 0t
+- 无 provider 的 CI e2e 走部分旅程（蒸馏断言跳过，单测覆盖）

@@ -6,11 +6,14 @@
 
 | 类型 | 关键字段 | 消费页面 |
 |---|---|---|
-| Session | content: {speaker,text,ts?}[]、distill_status、agent | Memory |
-| Atom | kind、confidence、needs_review、superseded_by、source_refs（溯源，含 erased） | Memory |
+| Session | content: {speaker,text,ts?}[]、distill_status（含 void）、agent | Memory |
+| Atom | kind、confidence、needs_review、superseded_by、**sensitive**、**occurred_at/valid_until**、source_refs（溯源，含 erased） | Memory、圈子 |
+| AtomRevision | old_content/old_kind/old_confidence、edited_by、created_at | 原子历史抽屉 |
 | Scenario | topic、atom_refs、version、hit_count | Memory |
-| Persona | aspect、evidence_refs、prompt_version | Memory |
-| Job / JobEvent | kind、status、attempts、error / level、message | Jobs、壳徽章 |
+| Persona | aspect、evidence_refs、prompt_version、**manually_edited** | Memory 画像 |
+| **Entity** | name、kind（5 种：person/project/topic/group/place）、summary、atom_count、**manually_edited** | 圈子 |
+| EntityGraph | nodes + edges（共现权重） | 圈子图谱 |
+| Job / JobEvent | kind、status（含 **cancelled**）、attempts、error / level、message | Jobs、壳徽章 |
 | Document / ChunkHit | status（pending→parsing→chunking→embedding→ready/failed）/ score | Knowledge |
 | WikiPage | slug、page_type、frontmatter、origin、version | Wiki |
 | GraphDto | nodes/edges/communities（社区发现） | Wiki 图谱 |
@@ -36,7 +39,7 @@
 
 ```text
 文档: pending → parsing → chunking → embedding → ready | failed（error 列展示）
-任务: pending → running → succeeded | failed（attempts≥3 → dead，可 revive）
-蒸馏: 会话 distill_status: pending → processing → done|failed；管线条据此脉冲
+任务: pending → running → succeeded | failed（attempts≥3 → dead，可 revive）| deep_purge: armed → succeeded/cancelled
+蒸馏: 会话 distill_status: pending → processing → done|failed|void；tab 脉冲只认 processing
 会话: active → archived；擦除后关联原子 source_refs[].erased=true（不可逆）
 ```

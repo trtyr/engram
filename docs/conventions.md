@@ -12,8 +12,8 @@
 
 | 门 | 内容 |
 |---|---|
-| backend | fmt → clippy(-D warnings) → test(100)；pgvector service；`mkdir -p ../web/dist` 占位 |
-| web | oxlint（0 警告）→ tsc → vitest(26) → build |
+| backend | fmt → clippy(-D warnings) → test(138)；pgvector service；`mkdir -p ../web/dist` 占位 |
+| web | oxlint（0 警告）→ tsc → vitest(32) → build |
 | api-types | OpenAPI 导出 → 生成 → 与 api-schema.ts 零漂移 |
 | docker | 多阶段镜像构建 |
 | e2e | compose 全栈 + Playwright journey（无 provider 部分旅程） |
@@ -23,10 +23,15 @@
 | 改动 | 必须同步 |
 |---|---|
 | 后端端点/DTO | `pnpm run gen:api` 重生成 + web/src/lib/api.ts 手写类型核对 + e2e |
+| utoipa 注解 struct | 同 commit 重生成 api-schema.ts（下一个 push 必红，先例 b63a90c/8903566） |
+| 新端点 | `.route()` + `mod.rs` 的 `paths()` 双注册，漏一半快照测试红 |
+| DB CHECK/枚举值 | Rust enum 同步加变体（先例：JobStatus 漏 cancelled → /jobs 整端点 503） |
+| 新迁移 | storage/tests/migrations_test.rs 计数断言 +1；touch storage 触发 rlib 重建 |
 | Cargo.toml version | 无需动前端（vite define 自动读） |
 | 前端路由 | 检查是否与后端 API 路径碰撞（先例：/jobs） |
 | 表单控件/按钮文案 | e2e 选择器（getByLabel / getByRole 中文 name，exact 防撞） |
 | web/dist 相关 | 后端 rust-embed 编译期要求目录存在（CI 已占位） |
+| 破坏性功能验证 | 打一次性栈，不打真库（三次清空事故的教训）；改完生产栈要重启+指纹回报 |
 
 ## 工具链纪律
 

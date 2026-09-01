@@ -1,38 +1,25 @@
-# 当前状态（2026-08-30 验证基线）
+# 当前状态（2026-09-01 验证基线）
 
-## 未提交变更
+> 2026-08-30 初始化后的首次全面更新。
 
-`web/` 侧 24 改 + 6 新增（含 docs/），全部属于 Engram 重设计 + 侧栏四件套批次，
-与 `server/crates/api/src/auth.rs` 同批待提交（见 server/docs/current-state.md 的完整清单）。
+## 一句话状态
 
-## 当日验证（终树复跑）
+vitest 32 / oxlint 0 警告 / tsc 0 / build 0 / journey PASS（含收尾自清）。
+IA 定稿为八页：圈子拆独立页，用户记忆回归纯梯子。
 
-| 命令 | 结果 |
-|---|---|
-| pnpm exec tsc --noEmit | 0 errors |
-| pnpm run lint | exit 0，**0 警告**（set-state-in-effect 已全部清除） |
-| pnpm test | **26/26**（5 文件；CommandPalette 新增 5 用例） |
-| pnpm run build | exit 0；初始 JS gzip ~93kB + CSS 8.5kB |
-| E2E_ADMIN_PW=… pnpm exec playwright test | **PASS 1 / FAIL 0**（25s，无 provider 栈部分旅程） |
-| 移动端 390px 几何检查 | 页面溢出 0px；顶部条/表格滚动正常 |
+## 2026-08-30 基线以来的前端大事记
 
-## 当日功能快照（相对 origin/main=d0abdf4 的增量）
+1. **记忆星系 → 圈子 → 独立页**：先以 tab 落地（8bfd330），改名圈子（3e9f95b），
+   最终拆独立页 /circle（36342e8）——一坐标系脱离一架梯子
+2. **人审队列 tab**（d7c7fdf）：通过/取代/丢弃 + 批量
+3. **re-embed 横幅**（ae4daad）：向量缺失诊断与修复入口
+4. **编辑能力 UI**（534d701）：原子双击编辑/敏感开关/历史抽屉 + 画像编辑钉住 + 实体摘要手编
+5. **画像三件套**（1d9ee28）：右滑历史抽屉 + 句子级 LCS diff + 证据链跳场景
+6. **deep 清空 UI**（bfa2e3f 部分）：危险区确认短语门禁
+7. **登录态根修**（b5ac042）：探活 401-only（5xx 不再误杀）
+8. **e2e 自清**（a7ae4f4）：journey 收尾清 agent/实体/key
 
-1. Engram 设计系统全量替换（token/组件/七域页/双主题/品牌更名）
-2. 侧栏四件套：收缩（60px 窄轨+持久化+呼吸图标）、三分区、状态徽章（10s 轮询）、命令面板
-3. 401 会话恢复、主题引擎（跨标签/系统跟随/sigma+mermaid 实时重渲染）
-4. 移动端适配（顶部导航条 + 表格横滚）
-5. 六轮视觉反馈修复记录在根 docs/plantree/frontend-polish/roadmap（0~0e）
+## 已知前端未了项
 
-## 开放项
-
-1. R3：skip-to-content、移动端激活项 scrollIntoView、横滚渐隐提示
-2. R4：路由 Suspense fallback 骨架化
-3. toast 体系（倾向不做，保持内联反馈——根 plantree open-questions#2）
-4. api-schema 生成类型与手写域类型双轨未合一
-5. `e2e-design-*.mjs` 两个审计脚本属一次性工具，可择机移出 web/ 或 gitignore
-
-## 已知风险
-
-- 初始 chunk 若继续增长需守住 350kB 预算（当前 ~102kB 总 gzip，余量大）。
-- Playwright 依赖本地栈（19180）与 E2E_ADMIN_PW；新环境跑前先起栈。
+- 自动节律钩子（pi extension 侧，roadmap）
+- 初始 bundle 预算 350kB 内（当前 282kB，sigma/mermaid/cytoscape 均在 lazy chunk）

@@ -1,6 +1,6 @@
 # 约定
 
-> 2026-08-30 依据源码与 CI 配置归纳。
+> 2026-08-30 依据源码与 CI 配置归纳；2026-09-01 补充治理类约定。
 
 ## 代码风格
 
@@ -8,8 +8,20 @@
 - 注释与文档以中文为主；doc comment 讲"为什么"，代码讲"做什么"。
 - 错误统一 `ApiError`（stable code + retryable 标志），handler 返回 `Result<Json<T>, ApiError>`；
   错误体形状 `{"error":{"code","message","retryable"}}`。
+- **4xx 三问规范**：错误文案必须回答"发生了什么/为什么/下一步"，缺一即 bug（六处先例见 api.md）。
 - 长操作一律任务化：入 jobs 队列，不阻塞 HTTP 响应。
-- 迁移只增不改：新变更新开 `NNNN_*.sql`，已发布迁移不回头编辑。
+- 迁移只增不改：新变更新开 `NNNN_*.sql`，已发布迁移不回头编辑；
+  新迁移三连——storage 测试计数 +1 / touch storage 促 rlib 重建 / openapi_snapshot 字节序。
+
+## 完备性铁律（事故换来）
+
+- **DB CHECK ↔ Rust enum 同步**：加数据库枚举值必须同 commit 加 Rust 变体
+  （先例：JobStatus 漏 cancelled → list_jobs 整端点 503 → 前端全员"被登出"）。
+- **utoipa 双注册**：`.route()` + `mod.rs` paths() 同 commit，漏 paths() 则 OpenAPI 缺路径（CI 不报）。
+- **schema regen 同 commit**：改 utoipa 注解 struct 后立即 openapi-dump + openapi-typescript，
+  漂移留给下一个 push 必红（先例 b63a90c/8903566 两次翻车）。
+- **append 类更新用单语句 UPDATE...RETURNING**：sqlx 池连接间无事务，SELECT-then-UPDATE 假装原子。
+- **破坏性功能验证打一次性栈**，不打真库；生产栈换二进制必须重启 + /ready 指纹 + 契约探针。
 
 ## 命名
 
@@ -20,7 +32,8 @@
 ## 测试
 
 - 集成测试为主（每 crate 一个 tests/ 目录），共享 `tests/support/mod.rs` 建一次性库。
-- 100 用例全绿是合并前提；测试用 PG 由 CI 的 pgvector service 提供。
+- 138 用例全绿是合并前提；测试用 PG 由 CI 的 pgvector service 提供。
+- MockLlm.sent_user 可断言"LLM 实际看到什么"（提示词行为测试）。
 
 ## Git 与提交
 

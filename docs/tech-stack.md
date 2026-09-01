@@ -1,6 +1,6 @@
 # 技术栈（全栈汇总）
 
-> 版本数字以两端 lockfile 实查为准（2026-08-30）。明细：
+> 版本数字以两端 lockfile 实查为准（2026-08-30 实查，2026-09-01 复核无依赖升级）。明细：
 > [server/docs/tech-stack.md](../server/docs/tech-stack.md)、[web/docs/tech-stack.md](../web/docs/tech-stack.md)。
 
 | 层 | 技术 | 版本 |

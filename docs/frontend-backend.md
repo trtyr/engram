@@ -1,6 +1,6 @@
 # 前后端接合
 
-> 全栈项目专有文档：前端怎么够到后端。2026-08-30 实查（vite.config.ts / web_assets.rs / auth.rs / api.ts）。
+> 全栈项目专有文档：前端怎么够到后端。2026-09-01 实查（vite.config.ts / web_assets.rs / auth.rs / api.ts）。
 
 ## 三种形态，一条链路
 
@@ -16,8 +16,9 @@
 Login 页 ──POST /auth/login（管理员密码）──▶ ams_ token
        └─▶ localStorage am_token ──▶ api.ts 每次请求附 Bearer
 挂载探活：GET /jobs?limit=1（复用碰撞路径做探针）
+  仅 401（凭证失效）→ 回登录页；5xx（服务抖动/部署窗口）保持会话不误杀
 中途失效：任何 401 ─▶ clearToken + engram-auth-expired 事件 ─▶ App 回 /login
-Agent 侧：settings 页签发 amk_ API Key（scope 受限）
+Agent 侧：settings 页签发 amk_ API Key（六 scope：memory/knowledge/wiki/codegraph/llm/erase）
 ```
 
 ## /jobs 路由冲突（2026-08-30 定稿）
@@ -29,6 +30,9 @@ Agent 侧：settings 页签发 amk_ API Key（scope 受限）
 
 ## 契约与版本
 
-- OpenAPI：server 导出 → web 生成类型（`pnpm run gen:api`）→ CI 零漂移门禁
-- 版本：server/Cargo.toml → vite define `__APP_VERSION__` → 侧栏底部展示，单一来源
-- 前端 bundle 预算 350kB gzip（当前 ~102kB，重库全在懒加载边界后）
+- 版本单源：`web/vite.config.ts` 构建时读 `server/Cargo.toml` workspace version 注入 `__APP_VERSION__`
+  （读不到时回退 "dev"——Docker 构建上下文防御，见 deploy/Dockerfile 的对应 COPY）。
+- 类型双轨：手写 `lib/api.ts`（页面消费形状）+ 生成 `lib/api-schema.ts`（openapi-typescript，
+  CI 零漂移门禁）。**改 utoipa 注解的 struct 必须同 commit 重生成**，否则下一个 push 必红。
+- 202 响应带体：api.ts 对 202 做 JSON 解析（204 才是 undefined）——`POST /memory/distill` 返回
+  Job[] 依赖此行为。
