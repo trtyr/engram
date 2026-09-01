@@ -16,7 +16,7 @@ HTTP API（axum）+ PostgreSQL(pgvector)，SPA 静态资源经 rust-embed 同源
 | [overview.md](overview.md) | 产品定位、核心能力、整体形状 | 30 秒了解这是什么 |
 | [architecture.md](architecture.md) | 10 crate 地图、模块职责、依赖方向 | 找代码从这开始 |
 | [tech-stack.md](tech-stack.md) | 语言/框架/关键依赖版本（lockfile 实查） | 排查版本问题 |
-| [api.md](api.md) | 全部 67 路径 / 84 方法注册（当日 OpenAPI 活体导出）+ 分权矩阵 | 对接前端/写客户端 |
+| [api.md](api.md) | 全部 69 路径 / 86 方法注册（当日 OpenAPI 活体导出）+ 分权矩阵 | 对接前端/写客户端 |
 | [data-model.md](data-model.md) | 22 张业务表、19 个迁移、数据流 | 改 schema 前必读 |
 | [run-and-deploy.md](run-and-deploy.md) | 本地起栈、测试、环境变量、部署 | 跑起来 |
 | [conventions.md](conventions.md) | 代码风格、错误处理、测试、git/CI 约定 | 写代码前 |

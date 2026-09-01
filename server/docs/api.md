@@ -1,6 +1,6 @@
 # API
 
-> 2026-09-01 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **67 路径 / 84 方法注册**（GET 34 · POST 37 · PUT 4 · PATCH 3 · DELETE 6）。
+> 2026-09-01 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **69 路径 / 86 方法注册**（GET 35 · POST 38 · PUT 4 · PATCH 3 · DELETE 6）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 六 scope：memory/knowledge/wiki/codegraph/llm/erase）。
@@ -38,6 +38,9 @@
 | POST | /memory/purge | **一等清空**：按 agent（可逆归档）或 deep（两阶段：arm 5min 冷却→token 执行/cancel 后悔药；**需 erase scope + 确认短语"清空记忆库"**；deep+agent 互斥 400） |
 | GET | /memory/export | 全量导出（数据主权；敏感默认排除，?include_sensitive=true 可选，响应带 sensitive_excluded 口径） |
 | GET/POST | /memory/embeddings/status、/memory/reembed | 向量缺失诊断 / 重嵌修复（202 任务，fail loudly） |
+| POST | /memory/rhythm/heartbeat | **节律心跳**（外部 cron 报到，落 jobs 审计行；设置页据此判逾期） |
+| GET | /memory/rhythm/status | 节律状态：最近心跳 + pending 会话数 + 最老积压年龄 |
+| POST | /memory/distill `{via:"cron"}` | cron 通道：consolidate 走 cron-consolidate-{日桶} 幂等（同日只跑一次全量整理），extract 永不去重（扫 pending 兜底） |
 
 ## knowledge（知识库域）
 

@@ -15,7 +15,7 @@ origin/main 双 workflow 绿（编辑能力 + P-C 两阶段清空 + 登录态根
 | server | cargo test --workspace | 138 passed（36 套件） |
 | web | pnpm test / lint / build | 32/32 / 0 警告 / exit 0 |
 | e2e | playwright journey（一次性栈 scripts/e2e-local.sh） | PASS 1 / FAIL 0（含快照差分自清） |
-| 事实 | OpenAPI 活体 / 迁移 / 表 | **67 路径 / 84 方法注册**（GET 34/POST 37/PUT 4/PATCH 3/DELETE 6）/ **19 迁移** / **22 业务表** |
+| 事实 | OpenAPI 活体 / 迁移 / 表 | **69 路径 / 86 方法注册**（GET 35/POST 38/PUT 4/PATCH 3/DELETE 6）/ **19 迁移** / **22 业务表** |
 
 ## 2026-08-30 基线以来的大事记
 
