@@ -822,6 +822,79 @@ async fn extract_creates_relations() {
     env.handle.join().await;
 }
 
+/// 关系回溯：存量实体（无 session 可重放）由 consolidate 直接抽关系。
+#[tokio::test]
+async fn consolidate_backfills_relations_for_stale_entities() {
+    // mock：2 份实体档案（summary 空 → 触发 portrait）+ 1 份关系回溯
+    let env = setup(vec![
+        json!({"summary": "权志龙是 BIGBANG 队长"}),
+        json!({"summary": "BIGBANG 是韩国男团"}),
+        json!({"relations": [{"from": "权志龙", "to": "BIGBANG", "rel_type": "member_of"}]}),
+    ])
+    .await;
+
+    let gd: Uuid = sqlx::query_scalar(
+        "INSERT INTO entities (id, name, kind, summary) VALUES ($1, '权志龙', 'person', '') RETURNING id",
+    )
+    .bind(Uuid::now_v7())
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    let bb: Uuid = sqlx::query_scalar(
+        "INSERT INTO entities (id, name, kind, summary) VALUES ($1, 'BIGBANG', 'group', '') RETURNING id",
+    )
+    .bind(Uuid::now_v7())
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+
+    for (eid, content, tsv) in [
+        (gd, "权志龙是 BIGBANG 的队长", "gd bigbang"),
+        (bb, "BIGBANG 是韩国男团", "bigbang group"),
+    ] {
+        let aid = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
+             VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $3))",
+        )
+        .bind(aid)
+        .bind(content)
+        .bind(tsv)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
+            .bind(aid)
+            .bind(eid)
+            .execute(&env.pool)
+            .await
+            .unwrap();
+    }
+
+    env.queue
+        .enqueue(JobTemplate::new("consolidate"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "consolidate").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "consolidate 应成功: {:?}",
+        j.error
+    );
+
+    let rel_n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM entity_relations WHERE rel_type = 'member_of' AND source = 'distill'",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(rel_n, 1, "关系回溯应抽出并落库 1 条 member_of 关系");
+
+    env.handle.shutdown();
+    env.handle.join().await;
+}
+
 /// 记忆域重嵌：NULL 向量的原子（active）与场景批量补嵌；archived 原子不动。
 #[tokio::test]
 async fn reembed_memory_fills_missing_vectors() {

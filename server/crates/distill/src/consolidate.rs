@@ -194,6 +194,91 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         }
     }
 
+    // 2.6 关系回溯：存量实体（有原子）间抽关系，不依赖 session 重放。
+    //     实体 + 各自原子拼成上下文，LLM 一次抽所有关系，映射名字→id 落库（best-effort）。
+    let rel_entities: Vec<(Uuid, String, String)> = sqlx::query_as::<_, (Uuid, String, String)>(
+        "SELECT e.id, e.name, e.kind FROM entities e \
+         JOIN atom_entities ae ON ae.entity_id = e.id \
+         WHERE e.merged_into IS NULL \
+         GROUP BY e.id, e.name, e.kind \
+         ORDER BY count(ae.atom_id) DESC LIMIT 40",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    let mut backfilled = 0usize;
+    if rel_entities.len() >= 2 {
+        let mut lines: Vec<String> = Vec::new();
+        for (eid, name, kind) in &rel_entities {
+            let atoms: Vec<String> = sqlx::query_scalar(
+                "SELECT a.content FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
+                 WHERE ae.entity_id = $1 AND NOT a.sensitive \
+                 ORDER BY a.created_at DESC LIMIT 10",
+            )
+            .bind(eid)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+            lines.push(format!("{name}[{kind}]：{}", atoms.join("；")));
+        }
+        let user = lines.join("\n");
+        match crate::llm_port::chat_json_retrying(
+            &ctx,
+            llm.as_ref(),
+            agent_memory_llm::types::Purpose::Consolidate,
+            &prompts::relation_backfill_system(),
+            &user,
+            ctx.job.id,
+        )
+        .await
+        {
+            Ok(out) => {
+                if let Some(rels) = out.get("relations").and_then(|r| r.as_array()) {
+                    let name_id: std::collections::HashMap<&str, Uuid> = rel_entities
+                        .iter()
+                        .map(|(id, name, _)| (name.as_str(), *id))
+                        .collect();
+                    for r in rels {
+                        let from = r.get("from").and_then(|v| v.as_str()).map(|s| s.trim());
+                        let to = r.get("to").and_then(|v| v.as_str()).map(|s| s.trim());
+                        let rel_type = r
+                            .get("rel_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("related_to");
+                        if let (Some(f), Some(t)) = (from, to)
+                            && !f.is_empty()
+                            && !t.is_empty()
+                            && matches!(
+                                rel_type,
+                                "member_of" | "located_in" | "works_on" | "part_of" | "related_to"
+                            )
+                            && let (Some(&fid), Some(&tid)) = (name_id.get(f), name_id.get(t))
+                            && fid != tid
+                        {
+                            match sqlx::query(
+                                "INSERT INTO entity_relations (id, from_id, to_id, rel_type, weight, source) \
+                                 VALUES ($1, $2, $3, $4, 1, 'distill') \
+                                 ON CONFLICT (from_id, to_id, rel_type) DO UPDATE SET weight = entity_relations.weight + 1, updated_at = now()",
+                            )
+                            .bind(Uuid::now_v7())
+                            .bind(fid)
+                            .bind(tid)
+                            .bind(rel_type)
+                            .execute(pool)
+                            .await
+                            {
+                                Ok(_) => backfilled += 1,
+                                Err(e) => tracing::warn!(error = %e, "关系回溯落库失败（不影响主链）"),
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "关系回溯抽取失败（跳过，不影响主链）"),
+        }
+    }
+
     // 3. stale 降权：90 天零命中 + 低置信 → confidence * 0.7
     // B10：不再刷新 updated_at（旧写法降权动作自身刷新时间戳，条件自锁只能降一次）；
     // 判龄改 created_at（原子出生日，不受任何后续写动作影响）
@@ -208,7 +293,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     .rows_affected();
 
     ctx.emit(
-        &format!("整理：合并 {merged} 条近重复，降权 {stale} 条 stale，实体档案 {portraits} 份"),
+        &format!("整理：合并 {merged} 条近重复，降权 {stale} 条 stale，实体档案 {portraits} 份，关系回溯 {backfilled} 条"),
         None,
     )
     .await

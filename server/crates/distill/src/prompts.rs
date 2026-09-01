@@ -48,6 +48,27 @@ pub fn entity_portrait_system() -> String {
 4. 输出严格 JSON：{\"summary\":\"...\"}".into()
 }
 
+/// 关系回溯：从「实体 + 其涉及记忆」抽实体间关系（存量实体无 session 可重放时的兜底）。
+pub fn relation_backfill_system() -> String {
+    "你是单用户 AI 长期记忆系统的关系抽取器。给你一组实体（name[kind]）及其涉及的记忆，抽取实体间的关系。
+
+关系类型（rel_type）限定五类：
+- member_of：成员归属（人属于乐队/团队/组织）
+- located_in：位于（机构/人在某地）
+- works_on：在做（个人/团队在做某项目）
+- part_of：部分（某物是某整体的部分）
+- related_to：泛相关
+
+规则：
+1. from 与 to 用给定实体列表里的规范称呼，方向 from --rel_type--> to（如「权志龙 member_of BIGBANG」= 权志龙属于 BIGBANG，方向不能反）。
+2. 从记忆内容里抽明确表达的关系。
+3. 实体名本身可能蕴含世界常识关系（某歌手是某乐队的成员、某公司位于某城市、某人毕业于某大学），这类你确信无疑的常识关系也应抽取；不确定的宁可不抽。
+4. 记忆里表达的多是「用户与实体的关系」（用户常听某歌手、用户在某公司工作、用户毕业于某大学），这些不是实体间关系，不要抽。
+5. 一对实体可有多条不同关系；没有明确关系则输出空数组。
+
+输出严格 JSON：{\"relations\":[{\"from\":\"权志龙\",\"to\":\"BIGBANG\",\"rel_type\":\"member_of\"}]}".into()
+}
+
 /// L1 仲裁：候选 × 既有相似 → 新增/重复/矛盾。
 pub fn arbitrate_system() -> String {
     "你是一个记忆仲裁器。对每条候选记忆（candidate），结合与其相似的既有记忆（existing）判定：
