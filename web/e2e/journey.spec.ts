@@ -133,4 +133,19 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   await expect(page.getByRole('combobox').first()).toBeVisible()
   await page.locator('tbody tr').first().click()
   await expect(page.getByText(/\u4efb\u52a1|\u5165\u961f/).first(), '\u4e8b\u4ef6\u65f6\u95f4\u7ebf\u5e94\u5c55\u793a').toBeVisible({ timeout: 15_000 })
+
+  // ---------- 7. 自清（P11 精神：不留测试污染在真库；本地跑打的是生产栈） ----------
+  // 按 agent 清场（void 会话 + 归档原子）+ 删 journey 蒸出的测试实体 + 自撤 key
+  try {
+    await api('POST', '/memory/purge', { agent: 'e2e-browser' }, adminToken)
+    const ents = (await api('GET', '/memory/entities?limit=200', undefined, adminToken)) as { id: string; name: string }[]
+    const junk = (ents ?? []).filter((e) => /e2e|冲焰|playwright/i.test(e.name))
+    for (const e of junk) await api('DELETE', `/memory/entities/${e.id}`, undefined, adminToken)
+    const keys = (await api('GET', '/settings/api-keys', undefined, adminToken)) as { id: string; name: string }[]
+    const mine = (keys ?? []).filter((k) => k.name.startsWith('e2e-'))
+    for (const k of mine) await api('POST', `/settings/api-keys/${k.id}/revoke`, {}, adminToken)
+    test.info().annotations.push({ type: 'note', description: `自清完成：实体 ${junk.length} 个，key ${mine.length} 把` })
+  } catch (e) {
+    test.info().annotations.push({ type: 'warning', description: `自清失败（需人工检查残留）：${e}` })
+  }
 })
