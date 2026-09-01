@@ -20,6 +20,17 @@ fn require_memory(p: &Principal) -> Result<(), ApiError> {
     require_scope(p, "memory")
 }
 
+/// cron 专属 scope（memory-rhythm 分权）：cron 通道与心跳只能由 cron key 走——
+/// 否则 AI 可伪造 `via:"cron"` 审计行、可伪造心跳掩盖 cron 失联。AI 别碰这条线。
+fn require_cron(p: &Principal) -> Result<(), ApiError> {
+    if p.has_scope("cron") {
+        return Ok(());
+    }
+    Err(ApiError::Forbidden(
+        "cron 通道需要 cron scope 的独立 key（AI 主动蒸馏走 manual 不带 via；心跳是 cron 专属，AI 别碰——设置页会读 status 判 cron 死活）".into(),
+    ))
+}
+
 fn me(e: MemoryError) -> ApiError {
     match e {
         MemoryError::NotFound(m) => ApiError::NotFound(m),
@@ -147,6 +158,8 @@ pub async fn trigger_distill(
     require_memory(&principal)?;
     let by = actor_of(&principal);
     let via = if req.via.as_deref() == Some("cron") {
+        // cron 通道只能由 cron scope 的 key 走——防 AI 伪造 cron 审计行
+        require_cron(&principal)?;
         "cron"
     } else {
         "manual"
@@ -166,7 +179,7 @@ pub async fn rhythm_heartbeat(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_memory(&principal)?;
+    require_cron(&principal)?;
     let by = actor_of(&principal);
     svc(&state)
         .audit("rhythm_heartbeat", serde_json::json!({ "by": by }))
