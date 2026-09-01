@@ -189,6 +189,21 @@ export interface ChunkHit {
   score: number
   embed_failed: boolean
 }
+export interface EntityRevision {
+  id: string
+  entity_id: string
+  old_summary: string
+  edited_by: string
+  created_at: string
+}
+export interface SearchHit {
+  id: string
+  score: number
+  title?: string | null
+  snippet: string
+  kind?: string | null
+  needs_review?: boolean | null
+}
 export interface EntityNode {
   id: string
   name: string
@@ -211,6 +226,7 @@ export interface EntityDetail {
   entity: EntityNode
   atoms: Atom[]
   scenarios: Scenario[]
+  neighbors: EntityNode[]
 }
 export interface WikiPage {
   id: string

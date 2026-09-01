@@ -441,6 +441,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/entities/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 圈子语义检索：按 token 命中打分（实体量小，无向量/FTS，名字命中优先）。 */
+        get: operations["search_entities_handler"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/entities/{id}": {
         parameters: {
             query?: never;
@@ -488,6 +505,23 @@ export interface paths {
         put?: never;
         /** 合并实体：原子关联全部改挂目标，from 置 merged_into 让出唯一名。 */
         post: operations["merge_entity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/entities/{id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 实体摘要版本链（手编档案历史，最近在前）。 */
+        get: operations["entity_revisions"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1410,6 +1444,8 @@ export interface components {
         EntityDetail: {
             atoms: components["schemas"]["AtomDto"][];
             entity: components["schemas"]["EntityDto"];
+            /** @description 共现邻居：与当前实体共享原子的其他实体（按共现次数降序，最多 20） */
+            neighbors: components["schemas"]["EntityDto"][];
             scenarios: components["schemas"]["ScenarioDto"][];
         };
         EntityDto: {
@@ -1428,6 +1464,17 @@ export interface components {
             /** @description 共现边：同一原子同时关联的两个实体（weight = 共同原子数） */
             edges: components["schemas"]["GraphEdge"][];
             nodes: components["schemas"]["EntityDto"][];
+        };
+        /** @description 实体摘要改写留痕（圈子强化：手编档案的轻量历史，复用原子 revisions 模式）。 */
+        EntityRevision: {
+            /** Format: date-time */
+            created_at: string;
+            edited_by: string;
+            /** Format: uuid */
+            entity_id: string;
+            /** Format: uuid */
+            id: string;
+            old_summary: string;
         };
         ErrorBody: {
             code: string;
@@ -2558,6 +2605,30 @@ export interface operations {
             };
         };
     };
+    search_entities_handler: {
+        parameters: {
+            query: {
+                /** @description 检索词（jieba 分词；name 命中权重 1.0，summary 0.3） */
+                q: string;
+                /** @description 返回条数（默认 20） */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchHit"][];
+                };
+            };
+        };
+    };
     get_entity: {
         parameters: {
             query?: never;
@@ -2694,6 +2765,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    entity_revisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityRevision"][];
                 };
             };
         };

@@ -2,7 +2,7 @@
  * 圈子 tab：左实体列表（搜索/类型过滤/密度排序/新建）+ 右侧默认关系图谱，
  * 点击节点或列表项进入实体详情（画像摘要/原子时间线/相关场景/挂摘/合并）。
  */
-import { Suspense, lazy, useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import {
   api,
@@ -10,6 +10,8 @@ import {
   type EntityDetail,
   type EntityGraph,
   type EntityNode,
+  type EntityRevision,
+  type SearchHit,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, Empty, ErrorBox, Spinner, StatusBadge } from '@/components/ui-bits'
@@ -42,6 +44,7 @@ export default function Galaxy({
   const [q, setQ] = useState('')
   const [kind, setKind] = useState('')
   const [creating, setCreating] = useState(false)
+  const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null)
 
   const load = () =>
     api
@@ -51,15 +54,53 @@ export default function Galaxy({
   useEffect(() => {
     load()
   }, [])
+  // 语义搜索：停顿 350ms 后打后端 token 检索（名字命中优先，summary 次之）
+  useEffect(() => {
+    if (!q.trim()) {
+      setSearchHits(null)
+      return
+    }
+    const t = setTimeout(() => {
+      api
+        .get<SearchHit[]>(`/memory/entities/search?q=${encodeURIComponent(q)}`)
+        .then(setSearchHits)
+        .catch(() => setSearchHits(null))
+    }, 350)
+    return () => clearTimeout(t)
+  }, [q])
 
   if (err) return <ErrorBox msg={err} />
   if (!graph) return <Spinner />
 
-  const visible = graph.nodes.filter(
-    (n) =>
-      (!kind || n.kind === kind) &&
-      (!q || n.name.toLowerCase().includes(q.toLowerCase()) || n.summary.includes(q)),
-  )
+  // 列表数据：语义搜索命中时按 score 映射回实体；否则 substring 过滤
+  const visible = useMemo(() => {
+    if (searchHits) {
+      const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+      const hits = searchHits
+        .map((h) => byId.get(h.id))
+        .filter((n): n is EntityNode => n !== undefined)
+      if (hits.length > 0) return hits.filter((n) => !kind || n.kind === kind)
+    }
+    return graph.nodes.filter(
+      (n) =>
+        (!kind || n.kind === kind) &&
+        (!q || n.name.toLowerCase().includes(q.toLowerCase()) || n.summary.includes(q)),
+    )
+  }, [graph, searchHits, kind, q])
+  // 疑似重复：name 归一化（忽略大小写/空白/中英标点）后同名 → 提示候选 merge
+  const dupGroups = useMemo(() => {
+    const normalize = (s: string) => s.toLowerCase().replace(/[\s·.\-_()（）【】《》,，。、]/g, '')
+    const m = new Map<string, EntityNode[]>()
+    for (const n of graph.nodes) {
+      const k = normalize(n.name)
+      const arr = m.get(k) ?? []
+      arr.push(n)
+      m.set(k, arr)
+    }
+    return [...m.values()].filter((g) => g.length > 1)
+  }, [graph])
+  // 低密度态：所有实体关联数 ≤1 → 图退化成均匀星形，诚实提示看列表
+  const sparse = graph.nodes.length > 0 && graph.nodes.every((n) => n.atom_count <= 1)
 
   return (
     <div className="flex h-[calc(100vh-13rem)] min-h-[32rem] flex-col gap-4 lg:flex-row">
@@ -77,6 +118,15 @@ export default function Galaxy({
             />
           </div>
         </div>
+        {dupGroups.length > 0 && (
+          <div className="border-b border-warning/30 bg-warning/10 px-3 py-1.5">
+            {dupGroups.map((g) => (
+              <p key={g[0].id} className="truncate text-xs text-warning">
+                疑似重复：{g.map((n) => n.name).join(' ≈ ')}——可选中后「合并」
+              </p>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-1.5 border-b border-border px-3 py-1.5">
           <button
             type="button"
@@ -163,6 +213,7 @@ export default function Galaxy({
             onBack={() => setSelected(null)}
             onMutated={load}
             onGoAtoms={onGoAtoms}
+            onSelectEntity={setSelected}
           />
         ) : visible.length === 0 && graph.nodes.length === 0 ? (
           <Card className="p-4">
@@ -184,6 +235,11 @@ export default function Galaxy({
                 ))}
               </p>
             </div>
+            {sparse && (
+              <p className="rounded border border-border bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                记忆还在积累——每个实体目前的关联都不多，图谱关系会随蒸馏逐渐成形。现在先看左侧列表更清楚。
+              </p>
+            )}
             <Suspense fallback={<div className="min-h-0 flex-1 animate-pulse rounded-lg bg-muted/30" />}>
               <EntityGalaxy
                 graph={{ nodes: visible, edges: graph.edges }}
@@ -242,11 +298,13 @@ function EntityDetailPane({
   onBack,
   onMutated,
   onGoAtoms,
+  onSelectEntity,
 }: {
   entityId: string
   onBack: () => void
   onMutated: () => void
   onGoAtoms: () => void
+  onSelectEntity: (id: string) => void
 }) {
   const [detail, setDetail] = useState<EntityDetail | null>(null)
   const [err, setErr] = useState('')
@@ -254,6 +312,8 @@ function EntityDetailPane({
   const [editingSummary, setEditingSummary] = useState(false)
   const [summaryDraft, setSummaryDraft] = useState('')
   const [mergeOpen, setMergeOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [entityRevisions, setEntityRevisions] = useState<EntityRevision[]>([])
 
   useEffect(() => {
     api
@@ -264,7 +324,7 @@ function EntityDetailPane({
 
   if (err) return <ErrorBox msg={err} />
   if (!detail) return <Spinner />
-  const { entity, atoms, scenarios } = detail
+  const { entity, atoms, scenarios, neighbors } = detail
 
   return (
     <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -317,9 +377,43 @@ function EntityDetailPane({
                 )}
               </p>
             )}
-            <p className="mt-1 font-mono text-xs text-muted-foreground/70">
-              {entity.atom_count} 条原子 · 更新于 {relTime(entity.updated_at)}
-            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-3 font-mono text-xs text-muted-foreground/70">
+              <span>{entity.atom_count} 条原子 · 更新于 {relTime(entity.updated_at)}</span>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (historyOpen) {
+                    setHistoryOpen(false)
+                    return
+                  }
+                  try {
+                    const revs = await api.get<EntityRevision[]>(`/memory/entities/${entity.id}/revisions`)
+                    setEntityRevisions(revs)
+                    setHistoryOpen(true)
+                  } catch {
+                    setEntityRevisions([])
+                    setHistoryOpen(true)
+                  }
+                }}
+                className="underline underline-offset-4 hover:text-foreground"
+              >
+                历史{entityRevisions.length > 0 ? `（${entityRevisions.length}）` : ''}
+              </button>
+            </div>
+            {historyOpen && (
+              <div className="mt-2 space-y-1.5">
+                {entityRevisions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">暂无历史版本</p>
+                ) : (
+                  entityRevisions.map((r) => (
+                    <div key={r.id} className="rounded border border-border bg-muted/30 px-2.5 py-1.5">
+                      <p className="line-clamp-2 text-xs text-muted-foreground">{r.old_summary || '（空摘要）'}</p>
+                      <p className="mt-0.5 font-mono text-[10px] text-muted-foreground/60">{r.edited_by} · {relTime(r.created_at)}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
           {/* 固定右上：不随标题/摘要换行漂移（用户实测痛点 #4） */}
           <div className="absolute right-3 top-3 flex items-center gap-1.5">
@@ -344,6 +438,27 @@ function EntityDetailPane({
       </div>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+        {/* 相关实体（共现邻居） */}
+        {neighbors.length > 0 && (
+          <section>
+            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">相关实体（{neighbors.length}）</h3>
+            <div className="flex flex-wrap gap-1.5">
+              {neighbors.map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => onSelectEntity(n.id)}
+                  className="flex items-center gap-1.5 rounded border border-border px-1.5 py-px text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+                >
+                  <span className="inline-block size-2 rounded-full" style={{ backgroundColor: KIND_COLOR[n.kind] ?? 'var(--muted-foreground)' }} aria-hidden="true" />
+                  {n.name}
+                  <span className="font-mono text-muted-foreground/60">{n.atom_count}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* 相关场景 */}
         {scenarios.length > 0 && (
           <section>

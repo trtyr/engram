@@ -36,6 +36,7 @@ export default function EntityGalaxy({
   onGoPersona: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const sigmaRef = useRef<Sigma | null>(null)
   const themeTick = useThemeTick()
   const theme = useMemo(() => themeColors(), [themeTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -52,14 +53,22 @@ export default function EntityGalaxy({
       y: 0,
       fixed: true,
     })
-    // 实体：密度定大小（cap 防爆炸），类型着色；初始随机落点由 FA2 自组织
+    // 实体：密度定大小（cap 防爆炸），类型着色。社区聚类的轻量实现——
+    // 同 kind 节点初始落在同一扇区（人物/项目/主题/群组/地点各占一角），
+    // 力导向后同类型自然聚拢，实体多时不再是一团乱麻。
+    const kindOrder = ['person', 'project', 'topic', 'group', 'place']
+    const sectorAngle = (2 * Math.PI) / kindOrder.length
     for (const n of graph.nodes) {
+      const sector = kindOrder.indexOf(n.kind)
+      const base = sector >= 0 ? sector * sectorAngle : 0
+      const r = 6 + Math.random() * 4
+      const a = base + Math.random() * sectorAngle
       g.addNode(n.id, {
         label: n.name,
         size: 5 + Math.min(n.atom_count * 1.1, 9),
         color: KIND_COLOR[n.kind] ?? theme.muted,
-        x: Math.random() * 10 - 5,
-        y: Math.random() * 10 - 5,
+        x: Math.cos(a) * r,
+        y: Math.sin(a) * r,
       })
       // 用户锚边：细而淡（都连着「我」，信息量低——只做结构提示）
       g.addEdge(ME, n.id, { size: 0.6, color: theme.border, weight: 0.2 })
@@ -79,6 +88,7 @@ export default function EntityGalaxy({
       minCameraRatio: 0.3,
       maxCameraRatio: 3,
     })
+    sigmaRef.current = sigma
 
     // 力导向自组织：约 2.5 秒的活布局（重力收拢 + 共现抱团），然后定格。
     // 「我」fixed 居中，实体围绕成簇——图不再是一张死画。
@@ -138,9 +148,27 @@ export default function EntityGalaxy({
       el.removeEventListener('mousemove', onMove)
       el.removeEventListener('mouseup', onUp)
       sigma.kill()
+      sigmaRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, theme])
 
-  return <div ref={ref} className="min-h-0 w-full flex-1 rounded-lg border border-border bg-card wiki-graph-canvas" />
+  return (
+    <div className="relative min-h-0 w-full flex-1">
+      <div
+        ref={ref}
+        role="img"
+        aria-label="实体关系图谱：节点为记忆里的实体，连线表示共现关系。按住节点可拖动，滚轮缩放，点击节点看档案。"
+        tabIndex={0}
+        className="min-h-0 h-full w-full rounded-lg border border-border bg-card wiki-graph-canvas"
+      />
+      <button
+        type="button"
+        onClick={() => sigmaRef.current?.getCamera().animatedReset({ duration: 300 })}
+        className="absolute bottom-3 right-3 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground shadow-sm transition-colors hover:border-foreground/30 hover:text-foreground"
+      >
+        重置视图
+      </button>
+    </div>
+  )
 }
