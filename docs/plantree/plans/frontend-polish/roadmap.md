@@ -191,7 +191,7 @@
      用户此前拍板缓做，启动与否待用户定。
      2026-09-01 更新：用户拍板**双节律方向**（AI 主动 + cron 定时 + 冲突防御 +
      设置页），已升格为独立规划树 [memory-rhythm](../memory-rhythm/README.md)；
-     harness 钩子仍缓做（与 cron 是互补关系，见其 open-questions #3）
+     harness 钩子判定为**非本系统能力**（pi 宿主侧扩展），从 agent-memory roadmap 移除
    - 卫生项：e2e 每跑一次签一把 key 不回收，key 表已积 20+——journey 收尾
      应自撤（或定期清理）
 0u. **deep purge 事故 + 双修**（2026-08-31，测试方冒烟失误清空真数据，

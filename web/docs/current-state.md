@@ -23,5 +23,4 @@ IA 定稿为八页：圈子拆独立页，用户记忆回归纯梯子。
 
 ## 已知前端未了项
 
-- 自动节律钩子（pi extension 侧，roadmap）——cron 兜底已落地，钩子管「会话内实时」层
 - 初始 bundle 预算 350kB 内（当前 282kB，sigma/mermaid/cytoscape 均在 lazy chunk）

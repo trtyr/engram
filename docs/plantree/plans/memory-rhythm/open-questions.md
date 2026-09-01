@@ -8,12 +8,6 @@
 
 **选外部 crontab 打 API**（非内置 scheduler）。灵活，多一个活动部件但 server 侧更轻。
 
-## 3. 与 pi extension 钩子的关系（不阻塞，仍开）
-
-harness 钩子（session_start 注入 / turn_end append / shutdown flush）在 Deferred。
-钩子管「会话内实时」，cron 管「跨会话周期兜底」，互补不冲突；cron 已上线，
-钩子做不做取决于用户要不要「开场自动注入」那一层实时性。
-
 ## 4. 静默时段的语义 ✅ 已关（随外部宿主消解）
 
 cron 住外部 → 静默时段就是 crontab 的时间表达式本身，server 不控制也不判定。

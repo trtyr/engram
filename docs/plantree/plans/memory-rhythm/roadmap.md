@@ -11,5 +11,4 @@
 
 ## Deferred
 
-- [ ] harness 侧 pi extension 钩子（open-questions #3）
 - [ ] conflict-matrix B 项（防抖 starvation 上限）、D 项（并发上限）——上线后观察，暂不写场景

@@ -31,7 +31,5 @@ origin/main 双 workflow 绿（编辑能力 + P-C 两阶段清空 + 登录态根
 
 ## 已知未了项
 
-- 自动节律钩子（pi extension 开场注入/收尾写回）——roadmap 缓做项（用户 wishlist #1）；
-  cron 兜底（双节律）已落地，钩子管的是「会话内实时」那一层
 - e2e key 表历史积压（journey 现已自撤新 key；历史 revoked 行留存无害）
 - skill 安装副本版本同步（~/.pi 侧非 git 跟踪，roadmap 0t）

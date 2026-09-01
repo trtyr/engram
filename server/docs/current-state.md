@@ -32,6 +32,5 @@
 
 ## 已知未了项
 
-- 自动节律钩子（pi extension 开场注入/收尾写回）缓做——roadmap 0t（cron 兜底已落地，钩子管「会话内实时」层）
 - skill 安装副本（~/.pi）非 git 跟踪，版本同步是已知风险——roadmap 0t
 - 无 provider 的 CI e2e 走部分旅程（蒸馏断言跳过，单测覆盖）

@@ -5,7 +5,7 @@
 ## Scope
 
 - **In**：双节律模型（AI 主动 / cron 定时）、AI×cron 冲突矩阵、cron 宿主选型、Settings 配置页（开关/周期/静默时段）、节律可观测性（设置页看到"谁在记、记了什么"）
-- **Out**：蒸馏算法本身（已有）、编辑分权（已有）、harness 侧 pi extension 钩子（相邻但独立，见 open-questions #3）
+- **Out**：蒸馏算法本身（已有）、编辑分权（已有）、harness 侧 pi extension 钩子（**非本系统能力**：挂 pi 宿主侧监听会话事件，agent-memory 是被动 API 服务感知不到对话起止）
 
 ## Authority
 
