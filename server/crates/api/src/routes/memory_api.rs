@@ -1,10 +1,10 @@
 //! 记忆域端点（memory scope）。
 
-use agent_memory_search::{search_entities, SearchHit};
 use agent_memory_core::memory::{
     AtomDto, ContextPack, EmbeddingStatus, EntityDetail, EntityDto, EntityGraph, MemoryError,
     MemoryService, PersonaVersion, ScenarioDto, SearchResponse, SessionDto,
 };
+use agent_memory_search::{SearchHit, search_entities};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -612,7 +612,9 @@ pub async fn list_entity_relations(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<agent_memory_core::EntityRelationDto>>, ApiError> {
     require_memory(&principal)?;
-    Ok(Json(svc(&state).list_relations(Some(id)).await.map_err(me)?))
+    Ok(Json(
+        svc(&state).list_relations(Some(id)).await.map_err(me)?,
+    ))
 }
 
 /// 建关系（有向：本实体 --rel_type--> to；同向同类型 upsert）。
@@ -625,7 +627,10 @@ pub async fn create_entity_relation(
     Json(req): Json<CreateRelationRequest>,
 ) -> Result<(StatusCode, Json<agent_memory_core::EntityRelationDto>), ApiError> {
     require_memory(&principal)?;
-    let r = svc(&state).create_relation(id, req.to_id, &req.rel_type, "manual").await.map_err(me)?;
+    let r = svc(&state)
+        .create_relation(id, req.to_id, &req.rel_type, "manual")
+        .await
+        .map_err(me)?;
     Ok((StatusCode::CREATED, Json(r)))
 }
 
@@ -657,7 +662,12 @@ pub async fn timeline(
     Query(p): Query<TimelineParams>,
 ) -> Result<Json<Vec<agent_memory_core::TimelineEvent>>, ApiError> {
     require_memory(&principal)?;
-    Ok(Json(svc(&state).timeline(p.limit.unwrap_or(100)).await.map_err(me)?))
+    Ok(Json(
+        svc(&state)
+            .timeline(p.limit.unwrap_or(100))
+            .await
+            .map_err(me)?,
+    ))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -704,7 +714,9 @@ pub async fn batch_entities(
         }
         deleted += 1;
     }
-    Ok(Json(serde_json::json!({"deleted": deleted, "archived": archived})))
+    Ok(Json(
+        serde_json::json!({"deleted": deleted, "archived": archived}),
+    ))
 }
 
 /// 圈子独立实体导出（数据主权，memory scope，无破坏性）。

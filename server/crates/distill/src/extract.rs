@@ -175,17 +175,28 @@ async fn run_claimed(
         // 关系抽取：顶层 relations（from/to 用规范称呼，rel_type 限定五类）
         if let Some(rels) = out.get("relations").and_then(|r| r.as_array()) {
             for r in rels {
-                let from = r.get("from").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
-                let to = r.get("to").and_then(|v| v.as_str()).map(|s| s.trim().to_string());
-                let rel_type = r.get("rel_type").and_then(|v| v.as_str()).unwrap_or("related_to");
-                if let (Some(f), Some(t)) = (from, to) {
-                    if !f.is_empty()
-                        && !t.is_empty()
-                        && f != t
-                        && matches!(rel_type, "member_of" | "located_in" | "works_on" | "part_of" | "related_to")
-                    {
-                        all_relations.push((f, t, rel_type.to_string()));
-                    }
+                let from = r
+                    .get("from")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string());
+                let to = r
+                    .get("to")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string());
+                let rel_type = r
+                    .get("rel_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("related_to");
+                if let (Some(f), Some(t)) = (from, to)
+                    && !f.is_empty()
+                    && !t.is_empty()
+                    && f != t
+                    && matches!(
+                        rel_type,
+                        "member_of" | "located_in" | "works_on" | "part_of" | "related_to"
+                    )
+                {
+                    all_relations.push((f, t, rel_type.to_string()));
                 }
             }
         }
@@ -387,8 +398,8 @@ async fn run_claimed(
         .await
         .ok()
         .flatten();
-        if let (Some(fid), Some(tid)) = (fid, tid) {
-            if let Err(e) = sqlx::query(
+        if let (Some(fid), Some(tid)) = (fid, tid)
+            && let Err(e) = sqlx::query(
                 "INSERT INTO entity_relations (id, from_id, to_id, rel_type, weight, source) \
                  VALUES ($1, $2, $3, $4, 1, 'distill') \
                  ON CONFLICT (from_id, to_id, rel_type) DO UPDATE SET weight = entity_relations.weight + 1, updated_at = now()",
@@ -399,9 +410,8 @@ async fn run_claimed(
             .bind(rel_type)
             .execute(pool)
             .await
-            {
-                tracing::warn!(error = %e, "关系落库失败（不影响主链）");
-            }
+        {
+            tracing::warn!(error = %e, "关系落库失败（不影响主链）");
         }
     }
 

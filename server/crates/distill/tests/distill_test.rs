@@ -801,7 +801,12 @@ async fn extract_creates_relations() {
         .await
         .unwrap();
     let j = wait_done(&env.queue, "extract_atoms").await;
-    assert_eq!(j.status, JobStatus::Succeeded, "extract 应成功: {:?}", j.error);
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "extract 应成功: {:?}",
+        j.error
+    );
     wait_done(&env.queue, "arbitrate_atoms").await;
 
     // 关系落库：张三 member_of 后端组，source=distill

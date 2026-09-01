@@ -155,7 +155,10 @@ pub fn router(state: AppState) -> Router {
         .route("/memory/timeline", get(memory_api::timeline))
         // 实体（记忆星系）：graph/search 路由先于 {id}，避免 "graph"/"search" 被当作 id
         .route("/memory/entities/graph", get(memory_api::entity_graph))
-        .route("/memory/entities/search", get(memory_api::search_entities_handler))
+        .route(
+            "/memory/entities/search",
+            get(memory_api::search_entities_handler),
+        )
         .route("/memory/entities/batch", post(memory_api::batch_entities))
         .route("/memory/entities/export", get(memory_api::export_entities))
         .route(

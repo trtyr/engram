@@ -47,6 +47,7 @@ export default function Galaxy({
   const [creating, setCreating] = useState(false)
   const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [viewMode, setViewMode] = useState<'graph' | 'timeline'>('graph')
 
   const load = () =>
     api
@@ -71,11 +72,9 @@ export default function Galaxy({
     return () => clearTimeout(t)
   }, [q])
 
-  if (err) return <ErrorBox msg={err} />
-  if (!graph) return <Spinner />
-
   // 列表数据：语义搜索命中时按 score 映射回实体；否则 substring 过滤
   const visible = useMemo(() => {
+    if (!graph) return [] as EntityNode[]
     if (searchHits) {
       const byId = new Map(graph.nodes.map((n) => [n.id, n]))
       const hits = searchHits
@@ -91,6 +90,7 @@ export default function Galaxy({
   }, [graph, searchHits, kind, q])
   // 疑似重复：name 归一化（忽略大小写/空白/中英标点）后同名 → 提示候选 merge
   const dupGroups = useMemo(() => {
+    if (!graph) return [] as EntityNode[][]
     const normalize = (s: string) => s.toLowerCase().replace(/[\s·.\-_()（）【】《》,，。、]/g, '')
     const m = new Map<string, EntityNode[]>()
     for (const n of graph.nodes) {
@@ -101,6 +101,9 @@ export default function Galaxy({
     }
     return [...m.values()].filter((g) => g.length > 1)
   }, [graph])
+
+  if (err) return <ErrorBox msg={err} />
+  if (!graph) return <Spinner />
   // 低密度态：所有实体关联数 ≤1 → 图退化成均匀星形，诚实提示看列表
   const sparse = graph.nodes.length > 0 && graph.nodes.every((n) => n.atom_count <= 1)
   const toggleSelect = (id: string) => {
@@ -393,7 +396,6 @@ function EntityDetailPane({
   const [historyOpen, setHistoryOpen] = useState(false)
   const [entityRevisions, setEntityRevisions] = useState<EntityRevision[]>([])
   const [relOpen, setRelOpen] = useState(false)
-  const [viewMode, setViewMode] = useState<'graph' | 'timeline'>('graph')
 
   useEffect(() => {
     api
@@ -402,10 +404,11 @@ function EntityDetailPane({
       .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
   }, [entityId])
 
+  const nameById = useMemo(() => new Map(allNodes.map((n) => [n.id, n.name])), [allNodes])
+
   if (err) return <ErrorBox msg={err} />
   if (!detail) return <Spinner />
   const { entity, atoms, scenarios, neighbors, relations } = detail
-  const nameById = useMemo(() => new Map(allNodes.map((n) => [n.id, n.name])), [allNodes])
 
   return (
     <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">

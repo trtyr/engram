@@ -173,7 +173,13 @@ pub struct SearchResponse {
 pub const ENTITY_KINDS: [&str; 5] = ["person", "project", "topic", "group", "place"];
 
 /// 实体关系类型（迁移 0021 CHECK 枚举）。方向：from --rel_type--> to。
-pub const REL_TYPES: [&str; 5] = ["member_of", "located_in", "works_on", "part_of", "related_to"];
+pub const REL_TYPES: [&str; 5] = [
+    "member_of",
+    "located_in",
+    "works_on",
+    "part_of",
+    "related_to",
+];
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct EntityDto {
@@ -751,7 +757,10 @@ impl MemoryService {
     }
 
     /// 实体摘要版本链（圈子强化）：手编档案的历史，最近在前。
-    pub async fn entity_revisions(&self, entity_id: Uuid) -> Result<Vec<EntityRevision>, MemoryError> {
+    pub async fn entity_revisions(
+        &self,
+        entity_id: Uuid,
+    ) -> Result<Vec<EntityRevision>, MemoryError> {
         Ok(sqlx::query_as::<_, EntityRevision>(
             "SELECT * FROM entity_revisions WHERE entity_id = $1 ORDER BY created_at DESC",
         )
@@ -761,7 +770,10 @@ impl MemoryService {
     }
 
     /// 实体关系列表（有向类型化；可选按实体过滤 from/to 两端）。
-    pub async fn list_relations(&self, entity_id: Option<Uuid>) -> Result<Vec<EntityRelationDto>, MemoryError> {
+    pub async fn list_relations(
+        &self,
+        entity_id: Option<Uuid>,
+    ) -> Result<Vec<EntityRelationDto>, MemoryError> {
         let rows = match entity_id {
             Some(eid) => {
                 sqlx::query_as::<_, EntityRelationDto>(
@@ -792,7 +804,10 @@ impl MemoryService {
             return Err(MemoryError::BadRequest("关系两端不能是同一实体".into()));
         }
         if !REL_TYPES.contains(&rel_type) {
-            return Err(MemoryError::BadRequest(format!("rel_type 只允许 {}", REL_TYPES.join("/"))));
+            return Err(MemoryError::BadRequest(format!(
+                "rel_type 只允许 {}",
+                REL_TYPES.join("/")
+            )));
         }
         self.entity_row(from).await?;
         self.entity_row(to).await?;
@@ -1063,19 +1078,19 @@ impl MemoryService {
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
-            if let Some(old_summary) = old {
-                if old_summary != s {
-                    sqlx::query(
-                        "INSERT INTO entity_revisions (id, entity_id, old_summary, edited_by) \
-                         VALUES ($1, $2, $3, $4)",
-                    )
-                    .bind(Uuid::now_v7())
-                    .bind(id)
-                    .bind(&old_summary)
-                    .bind(actor)
-                    .execute(&self.pool)
-                    .await?;
-                }
+            if let Some(old_summary) = old
+                && old_summary != s
+            {
+                sqlx::query(
+                    "INSERT INTO entity_revisions (id, entity_id, old_summary, edited_by) \
+                     VALUES ($1, $2, $3, $4)",
+                )
+                .bind(Uuid::now_v7())
+                .bind(id)
+                .bind(&old_summary)
+                .bind(actor)
+                .execute(&self.pool)
+                .await?;
             }
             sqlx::query(
                 "UPDATE entities SET summary = $2, manually_edited = true, updated_at = now() \
@@ -1371,7 +1386,11 @@ impl MemoryService {
         .fetch_all(&self.pool)
         .await?;
         let relations = self.list_relations(None).await?;
-        Ok(EntityGraph { nodes, edges, relations })
+        Ok(EntityGraph {
+            nodes,
+            edges,
+            relations,
+        })
     }
 
     /// 全局记忆时间轴：原子（occurred_at 优先）/场景/实体按时间倒序合并。
