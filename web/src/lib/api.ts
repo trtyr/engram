@@ -196,6 +196,12 @@ export interface EntityRevision {
   edited_by: string
   created_at: string
 }
+export interface TimelineEvent {
+  id: string
+  at: string
+  kind: string
+  content: string
+}
 export interface SearchHit {
   id: string
   score: number
@@ -221,12 +227,24 @@ export interface GraphEdge {
 export interface EntityGraph {
   nodes: EntityNode[]
   edges: GraphEdge[]
+  relations: EntityRelation[]
+}
+export interface EntityRelation {
+  id: string
+  from_id: string
+  to_id: string
+  rel_type: string
+  weight: number
+  source: string
+  created_at: string
+  updated_at: string
 }
 export interface EntityDetail {
   entity: EntityNode
   atoms: Atom[]
   scenarios: Scenario[]
   neighbors: EntityNode[]
+  relations: EntityRelation[]
 }
 export interface WikiPage {
   id: string

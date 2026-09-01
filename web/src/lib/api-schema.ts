@@ -424,6 +424,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/entities/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量删除实体（破坏性：erase scope + 确认短语）。 */
+        post: operations["batch_entities"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/entities/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 圈子独立实体导出（数据主权，memory scope，无破坏性）。 */
+        get: operations["export_entities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/entities/graph": {
         parameters: {
             query?: never;
@@ -808,6 +842,23 @@ export interface paths {
         put?: never;
         /** P5 会话作废：「这段白记了」——蒸馏跳过、记录保留（只对未蒸馏会话）。 */
         post: operations["void_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全局记忆时间轴：原子（occurred_at 优先）/场景/实体按时间倒序合并。 */
+        get: operations["timeline"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1332,6 +1383,13 @@ export interface components {
             old_content: string;
             old_kind: string;
         };
+        BatchEntitiesRequest: {
+            /** @description 破坏性批量操作确认短语："批量删除" */
+            confirm: string;
+            /** @description true = 级联归档原子后再删实体（forget 语义） */
+            forget?: boolean;
+            ids: string[];
+        };
         CascadeReport: {
             cleaned_links: number;
             deleted_pages: string[];
@@ -1507,6 +1565,8 @@ export interface components {
             /** @description 共现边：同一原子同时关联的两个实体（weight = 共同原子数） */
             edges: components["schemas"]["GraphEdge"][];
             nodes: components["schemas"]["EntityDto"][];
+            /** @description 类型化关系（有向）：图升级成知识图谱的关系边 */
+            relations: components["schemas"]["EntityRelationDto"][];
         };
         /** @description 实体关系（迁移 0021）：有向类型化关系，图升级成知识图谱。 */
         EntityRelationDto: {
@@ -1843,6 +1903,16 @@ export interface components {
         TestResult: {
             message: string;
             ok: boolean;
+        };
+        /** @description 全局记忆时间轴事件（原子/场景/实体按时间倒序合并）。 */
+        TimelineEvent: {
+            /** Format: date-time */
+            at: string;
+            content: string;
+            /** Format: uuid */
+            id: string;
+            /** @description atom | scenario | entity */
+            kind: string;
         };
         /** @description 统一命中（跨域检索的最小公分母）。 */
         UnifiedHit: {
@@ -2646,6 +2716,48 @@ export interface operations {
             };
         };
     };
+    batch_entities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchEntitiesRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    export_entities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     entity_graph: {
         parameters: {
             query?: never;
@@ -3341,6 +3453,28 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    timeline: {
+        parameters: {
+            query?: {
+                /** @description 返回条数（默认 100） */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineEvent"][];
+                };
             };
         };
     };

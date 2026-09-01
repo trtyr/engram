@@ -10,7 +10,7 @@ import Sigma from 'sigma'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
 import type { EntityGraph as GraphData } from '@/lib/api'
 import { useThemeTick } from '@/lib/theme'
-import { ENTITY_KIND_COLOR } from '@/lib/ui'
+import { ENTITY_KIND_COLOR, REL_TYPE_COLOR } from '@/lib/ui'
 
 /** 实体类型色：见 lib/ui.ts ENTITY_KIND_COLOR（与 WikiGraph 调色板同源） */
 const KIND_COLOR = ENTITY_KIND_COLOR
@@ -77,6 +77,16 @@ export default function EntityGalaxy({
     for (const e of graph.edges) {
       if (!g.hasNode(e.a) || !g.hasNode(e.b)) continue
       g.addEdge(e.a, e.b, { size: Math.min(1 + e.weight * 0.6, 4), color: theme.muted, weight: e.weight })
+    }
+    // 类型化关系边：有向箭头 + 关系色，与共现边（细灰线）区分——图升级成知识图谱
+    for (const r of graph.relations) {
+      if (!g.hasNode(r.from_id) || !g.hasNode(r.to_id)) continue
+      g.addEdge(r.from_id, r.to_id, {
+        size: Math.min(1 + r.weight * 0.6, 3),
+        color: REL_TYPE_COLOR[r.rel_type] ?? theme.muted,
+        type: 'arrow',
+        weight: r.weight,
+      })
     }
     const sigma = new Sigma(g, el, {
       labelRenderedSizeThreshold: 3,

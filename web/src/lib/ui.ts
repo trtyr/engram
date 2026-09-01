@@ -14,6 +14,21 @@ export const ENTITY_KIND_COLOR: Record<string, string> = {
   group: '#ec4899',
   place: '#14b8a6',
 }
+/** 实体关系类型（有向）：中文标签 + 边色（与实体 kind 色同源，中明度双主题安全）。 */
+export const REL_TYPE_LABEL: Record<string, string> = {
+  member_of: '成员',
+  located_in: '位于',
+  works_on: '在做',
+  part_of: '部分',
+  related_to: '相关',
+}
+export const REL_TYPE_COLOR: Record<string, string> = {
+  member_of: '#3b82f6',
+  located_in: '#14b8a6',
+  works_on: '#e6772e',
+  part_of: '#8b5cf6',
+  related_to: '#6b7280',
+}
 /** 相对时间：feed/活动流的紧凑展示（超过 7 天退回绝对时间）。 */
 export function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()

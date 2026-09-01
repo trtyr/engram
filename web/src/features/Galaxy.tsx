@@ -12,10 +12,11 @@ import {
   type EntityNode,
   type EntityRevision,
   type SearchHit,
+  type TimelineEvent,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, Empty, ErrorBox, Spinner, StatusBadge } from '@/components/ui-bits'
-import { ENTITY_KIND_COLOR as KIND_COLOR } from '@/lib/ui'
+import { ENTITY_KIND_COLOR as KIND_COLOR, REL_TYPE_COLOR, REL_TYPE_LABEL } from '@/lib/ui'
 import { relTime, inputCls, selectCls } from '@/lib/ui'
 import { cn } from '@/lib/utils'
 
@@ -45,6 +46,7 @@ export default function Galaxy({
   const [kind, setKind] = useState('')
   const [creating, setCreating] = useState(false)
   const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   const load = () =>
     api
@@ -101,6 +103,31 @@ export default function Galaxy({
   }, [graph])
   // 低密度态：所有实体关联数 ≤1 → 图退化成均匀星形，诚实提示看列表
   const sparse = graph.nodes.length > 0 && graph.nodes.every((n) => n.atom_count <= 1)
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const doExport = async () => {
+    const data = await api.get<Record<string, unknown>>('/memory/entities/export')
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'engram-entities-export.json'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  const doBatchDelete = async () => {
+    const phrase = window.prompt('输入确认短语「批量删除」以删除选中的实体（不可逆）：')
+    if (phrase !== '批量删除') return
+    await api.post('/memory/entities/batch', { ids: [...selectedIds], confirm: '批量删除' })
+    setSelectedIds(new Set())
+    load()
+  }
 
   return (
     <div className="flex h-[calc(100vh-13rem)] min-h-[32rem] flex-col gap-4 lg:flex-row">
@@ -108,6 +135,22 @@ export default function Galaxy({
       <Card className="flex min-h-0 flex-col overflow-hidden lg:w-80 lg:shrink-0">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <span className="font-mono text-xs text-muted-foreground">{graph.nodes.length} 实体</span>
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={doBatchDelete}
+              className="rounded border border-destructive/30 px-1.5 py-px text-xs text-destructive transition-colors hover:bg-destructive/10"
+            >
+              批量删除 {selectedIds.size}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={doExport}
+            className="rounded border border-border px-1.5 py-px text-xs text-muted-foreground transition-colors hover:border-foreground/30"
+          >
+            导出
+          </button>
           <div className="relative ml-auto">
             <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <input
@@ -171,33 +214,42 @@ export default function Galaxy({
           <ul className="min-h-0 flex-1 divide-y divide-border/60 overflow-y-auto">
             {visible.map((n) => (
               <li key={n.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelected(n.id)}
-                  aria-current={n.id === selected ? 'true' : undefined}
-                  className={cn(
-                    'w-full px-3 py-2 text-left transition-colors',
-                    n.id === selected ? 'bg-foreground text-background' : 'hover:bg-muted/40',
-                  )}
-                >
-                  <p className="flex items-center gap-2">
-                    <span
-                      className="inline-block size-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: KIND_COLOR[n.kind] ?? 'var(--muted-foreground)' }}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate text-sm font-medium">{n.name}</span>
-                    <span className="ml-auto shrink-0 font-mono text-xs tabular-nums">{n.atom_count}</span>
-                  </p>
-                  {n.summary && (
-                    <p className={cn(
-                      'mt-0.5 truncate text-xs',
-                      n.id === selected ? 'text-background/70' : 'text-muted-foreground',
-                    )}>
-                      {n.summary}
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(n.id)}
+                    onChange={() => toggleSelect(n.id)}
+                    aria-label={`选择 ${n.name}`}
+                    className="ml-2.5 size-3 shrink-0 accent-foreground"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSelected(n.id)}
+                    aria-current={n.id === selected ? 'true' : undefined}
+                    className={cn(
+                      'min-w-0 flex-1 px-2 py-2 text-left transition-colors',
+                      n.id === selected ? 'bg-foreground text-background' : 'hover:bg-muted/40',
+                    )}
+                  >
+                    <p className="flex items-center gap-2">
+                      <span
+                        className="inline-block size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: KIND_COLOR[n.kind] ?? 'var(--muted-foreground)' }}
+                        aria-hidden="true"
+                      />
+                      <span className="truncate text-sm font-medium">{n.name}</span>
+                      <span className="ml-auto shrink-0 font-mono text-xs tabular-nums">{n.atom_count}</span>
                     </p>
-                  )}
-                </button>
+                    {n.summary && (
+                      <p className={cn(
+                        'mt-0.5 truncate text-xs',
+                        n.id === selected ? 'text-background/70' : 'text-muted-foreground',
+                      )}>
+                        {n.summary}
+                      </p>
+                    )}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -214,6 +266,7 @@ export default function Galaxy({
             onMutated={load}
             onGoAtoms={onGoAtoms}
             onSelectEntity={setSelected}
+            allNodes={graph.nodes}
           />
         ) : visible.length === 0 && graph.nodes.length === 0 ? (
           <Card className="p-4">
@@ -221,6 +274,27 @@ export default function Galaxy({
           </Card>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-3">
+            {/* 视图切换：图谱 / 时间轴 */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setViewMode('graph')}
+                className={cn('rounded border px-2 py-0.5 text-xs transition-colors', viewMode === 'graph' ? 'border-foreground bg-foreground text-background' : 'border-border text-muted-foreground hover:border-foreground/30')}
+              >
+                图谱
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('timeline')}
+                className={cn('rounded border px-2 py-0.5 text-xs transition-colors', viewMode === 'timeline' ? 'border-foreground bg-foreground text-background' : 'border-border text-muted-foreground hover:border-foreground/30')}
+              >
+                时间轴
+              </button>
+            </div>
+            {viewMode === 'timeline' ? (
+              <TimelineView />
+            ) : (
+              <>
             {/* 图示：三行定义式，不再挤一段 */}
             <div className="grid gap-0.5 text-xs text-muted-foreground sm:grid-cols-2">
               <p><span className="text-foreground">圆点</span> = 记忆里的人 / 项目 / 主题（大小 = 记忆条数）</p>
@@ -242,11 +316,13 @@ export default function Galaxy({
             )}
             <Suspense fallback={<div className="min-h-0 flex-1 animate-pulse rounded-lg bg-muted/30" />}>
               <EntityGalaxy
-                graph={{ nodes: visible, edges: graph.edges }}
+                graph={{ nodes: visible, edges: graph.edges, relations: graph.relations }}
                 onSelect={setSelected}
                 onGoPersona={onGoPersona}
               />
             </Suspense>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -299,12 +375,14 @@ function EntityDetailPane({
   onMutated,
   onGoAtoms,
   onSelectEntity,
+  allNodes,
 }: {
   entityId: string
   onBack: () => void
   onMutated: () => void
   onGoAtoms: () => void
   onSelectEntity: (id: string) => void
+  allNodes: EntityNode[]
 }) {
   const [detail, setDetail] = useState<EntityDetail | null>(null)
   const [err, setErr] = useState('')
@@ -314,6 +392,8 @@ function EntityDetailPane({
   const [mergeOpen, setMergeOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [entityRevisions, setEntityRevisions] = useState<EntityRevision[]>([])
+  const [relOpen, setRelOpen] = useState(false)
+  const [viewMode, setViewMode] = useState<'graph' | 'timeline'>('graph')
 
   useEffect(() => {
     api
@@ -324,7 +404,8 @@ function EntityDetailPane({
 
   if (err) return <ErrorBox msg={err} />
   if (!detail) return <Spinner />
-  const { entity, atoms, scenarios, neighbors } = detail
+  const { entity, atoms, scenarios, neighbors, relations } = detail
+  const nameById = useMemo(() => new Map(allNodes.map((n) => [n.id, n.name])), [allNodes])
 
   return (
     <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -458,6 +539,71 @@ function EntityDetailPane({
             </div>
           </section>
         )}
+
+        {/* 关系（有向类型化） */}
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">关系（{relations.length}）</h3>
+            <Button variant="ghost" size="sm" onClick={() => setRelOpen((v) => !v)}>
+              {relOpen ? '取消' : '＋ 建关系'}
+            </Button>
+          </div>
+          {relOpen && (
+            <RelationForm
+              entityId={entity.id}
+              allNodes={allNodes}
+              onDone={() => {
+                setRelOpen(false)
+                api.get<EntityDetail>(`/memory/entities/${entityId}`).then(setDetail)
+                onMutated()
+              }}
+            />
+          )}
+          {relations.length === 0 ? (
+            <p className="text-xs text-muted-foreground">暂无类型化关系——蒸馏抽取或手动建立</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {relations.map((r) => {
+                const isFrom = r.from_id === entity.id
+                const otherId = isFrom ? r.to_id : r.from_id
+                const otherName = nameById.get(otherId) ?? otherId.slice(0, 8)
+                const label = (
+                  <span className="font-mono" style={{ color: REL_TYPE_COLOR[r.rel_type] ?? 'var(--muted-foreground)' }}>
+                    {REL_TYPE_LABEL[r.rel_type] ?? r.rel_type}
+                  </span>
+                )
+                const other = (
+                  <button type="button" onClick={() => onSelectEntity(otherId)} className="hover:underline">
+                    {otherName}
+                  </button>
+                )
+                return (
+                  <span key={r.id} className="flex items-center gap-1 rounded border border-border px-1.5 py-px text-xs">
+                    {isFrom ? (
+                      <>我 {label}→ {other}</>
+                    ) : (
+                      <>{other} {label}→ 我</>
+                    )}
+                    {r.weight > 1 && <span className="font-mono text-muted-foreground/60">×{r.weight}</span>}
+                    <button
+                      type="button"
+                      aria-label="删除关系"
+                      title="删除关系"
+                      className="text-muted-foreground/0 transition-colors hover:text-destructive"
+                      onClick={async () => {
+                        await api.del(`/memory/entities/${entity.id}/relations/${r.id}`)
+                        api.get<EntityDetail>(`/memory/entities/${entityId}`).then(setDetail)
+                        onMutated()
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+          )}
+        </section>
 
         {/* 相关场景 */}
         {scenarios.length > 0 && (
@@ -631,5 +777,73 @@ function MergeForm({ entity, onDone }: { entity: EntityNode; onDone: () => void 
       </Button>
       {err && <p className="w-full text-xs text-destructive">{err}</p>}
     </form>
+  )
+}
+
+function RelationForm({ entityId, allNodes, onDone }: { entityId: string; allNodes: EntityNode[]; onDone: () => void }) {
+  const [to, setTo] = useState('')
+  const [relType, setRelType] = useState('member_of')
+  const [err, setErr] = useState('')
+  return (
+    <form
+      className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 p-2.5"
+      onSubmit={async (e) => {
+        e.preventDefault()
+        if (!to) return
+        try {
+          await api.post(`/memory/entities/${entityId}/relations`, { to_id: to, rel_type: relType })
+          onDone()
+        } catch (ex) {
+          setErr(ex instanceof Error ? ex.message : '建关系失败')
+        }
+      }}
+    >
+      <select className={`${selectCls} min-w-48 flex-1`} value={to} onChange={(e) => setTo(e.target.value)}>
+        <option value="">选择目标实体…</option>
+        {allNodes
+          .filter((n) => n.id !== entityId)
+          .map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.name}（{KIND_LABEL[n.kind] ?? n.kind}）
+            </option>
+          ))}
+      </select>
+      <select className={`${selectCls} w-28`} value={relType} onChange={(e) => setRelType(e.target.value)}>
+        {Object.entries(REL_TYPE_LABEL).map(([k, label]) => (
+          <option key={k} value={k}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <Button size="sm" type="submit" disabled={!to}>
+        建关系
+      </Button>
+      {err && <p className="w-full text-xs text-destructive">{err}</p>}
+    </form>
+  )
+}
+
+function TimelineView() {
+  const [events, setEvents] = useState<TimelineEvent[] | null>(null)
+  useEffect(() => {
+    api.get<TimelineEvent[]>('/memory/timeline?limit=100').then(setEvents).catch(() => setEvents([]))
+  }, [])
+  if (!events) return <div className="min-h-0 flex-1 animate-pulse rounded-lg bg-muted/30" />
+  if (events.length === 0) return <Empty text="暂无记忆事件——蒸馏后这里会形成时间脉络" />
+  const kindLabel: Record<string, string> = { atom: '原子', scenario: '场景', entity: '实体' }
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-card">
+      <ul className="divide-y divide-border/60">
+        {events.map((e) => (
+          <li key={`${e.kind}-${e.id}`} className="flex items-start gap-3 px-4 py-2.5">
+            <span className="mt-0.5 w-10 shrink-0 font-mono text-xs text-muted-foreground">{kindLabel[e.kind] ?? e.kind}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm">{e.content}</p>
+              <p className="mt-0.5 font-mono text-xs text-muted-foreground/70">{relTime(e.at)}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
