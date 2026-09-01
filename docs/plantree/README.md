@@ -7,7 +7,8 @@ agent-memory 仓库的规划树根。项目级基线由 [baseline/](baseline/REA
 | Plan | Status | Current Phase | Last Landed | Next Target |
 |---|---|---|---|---|
 | [frontend-polish](plans/frontend-polish/README.md) | In Progress | R1+R2 已落地并推送（ffc5568 双绿） | 双 P1 修复 + /jobs Accept 分流 + 侧栏四件套（收缩/徽章/检索/分区）+ 六轮视觉修复 | R3 移动端与可达性 |
-| [memory-rhythm](plans/memory-rhythm/README.md) | Planning | 方案地图已立（2026-09-01 用户拍板双节律方向） | D-001 双节律 + 冲突矩阵（8 既有防线 + 5 增量）+ 设置页方案 | R-0 语义拍板（cron 层级/宿主） |
+| [memory-rhythm](plans/memory-rhythm/README.md) | Done | 双节律收官（cron scope 分权 d7a8345 + 落档 8db2c36） | 外部 cron + 层 A+B + 心跳/status + 三线分权 + 设置节律页 | 上线后观察：conflict-matrix B/D 项 |
+| [circle](plans/circle/README.md) | Planning | 四维分离审计完成（2026-09-01），P1/P2/P3 清单成文 | 审计报告 + 分级清单 + 数据密度瓶颈洞察 + 关系升级方案 | 实施轮（用户过目清单后另开） |
 
 ## Registered Roots
 
