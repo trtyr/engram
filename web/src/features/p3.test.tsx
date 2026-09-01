@@ -23,7 +23,7 @@ describe('Settings 危险区：清空记忆库确认短语门禁', () => {
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 type WikiPageM = {
   id: string
@@ -172,7 +172,7 @@ describe('Dashboard 概览：管线主视觉 + 用量图', () => {
 })
 
 describe('Memory 检索面板（?tab=search 深链直达，tab 条已收敛入全局 palette）', () => {
-  it('实体段先于原子段渲染，点击直达星系选中', async () => {
+  it('实体段先于原子段渲染，点击直达圈子页', async () => {
     mockState.memorySearch = {
       entities: [{ id: 'e1', title: '张三', snippet: '同事，负责后端', score: 1.3, kind: 'person' }],
       l1: [],
@@ -180,7 +180,14 @@ describe('Memory 检索面板（?tab=search 深链直达，tab 条已收敛入�
       l3: [],
     }
     window.history.pushState({}, '', '/memory?tab=search')
-    render(wrap(<Memory />))
+    render(
+      <MemoryRouter initialEntries={['/memory?tab=search']}>
+        <Routes>
+          <Route path="/memory" element={<Memory />} />
+          <Route path="/circle" element={<div data-testid="circle-page" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
     await screen.findByPlaceholderText('中文检索记忆…')
     fireEvent.change(screen.getByPlaceholderText('中文检索记忆…'), { target: { value: '张三' } })
     fireEvent.click(screen.getByRole('button', { name: '检索' }))
@@ -189,8 +196,9 @@ describe('Memory 检索面板（?tab=search 深链直达，tab 条已收敛入�
       expect(screen.getByText('张三')).toBeInTheDocument()
     })
     fireEvent.click(screen.getByText('张三'))
+    // 实体命中 → 路由到独立圈子页（/circle?entity=），MemoryRouter 内以标记路由断言
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '圈子' }).getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByTestId('circle-page')).toBeInTheDocument()
     })
   })
 

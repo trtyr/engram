@@ -16,6 +16,7 @@ import {
   PanelLeftOpen,
   Search,
   Settings as SettingsIcon,
+  Users,
   Waypoints,
 } from 'lucide-react'
 import { clearToken, getToken } from '@/lib/api'
@@ -28,6 +29,7 @@ import Login from '@/features/Login'
 
 const Dashboard = lazy(() => import('@/features/Dashboard'))
 const Memory = lazy(() => import('@/features/Memory'))
+const Circle = lazy(() => import('@/features/Circle'))
 const Knowledge = lazy(() => import('@/features/Knowledge'))
 const Wiki = lazy(() => import('@/features/Wiki'))
 const CodeGraph = lazy(() => import('@/features/CodeGraph'))
@@ -52,6 +54,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
     label: '资产域',
     items: [
       { to: '/memory', label: '用户记忆', icon: Brain, pulse: (s) => s.distilling > 0 },
+      { to: '/circle', label: '圈子', icon: Users },
       { to: '/knowledge', label: '知识库', icon: BookOpen },
       { to: '/wiki', label: 'Wiki', icon: Network },
       { to: '/codegraph', label: '代码图谱', icon: Waypoints },
@@ -301,6 +304,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/memory" element={<Memory />} />
+              <Route path="/circle" element={<Circle />} />
               <Route path="/knowledge" element={<Knowledge />} />
               <Route path="/wiki" element={<Wiki />} />
               <Route path="/codegraph" element={<CodeGraph />} />

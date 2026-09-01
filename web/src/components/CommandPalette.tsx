@@ -18,7 +18,7 @@ const DOMAIN_LABEL: Record<string, string> = {
 }
 
 function domainRoute(domain: string, id?: string): string {
-  if (domain === 'entity') return id ? `/memory?tab=galaxy&entity=${id}` : '/memory'
+  if (domain === 'entity') return id ? `/circle?entity=${id}` : '/circle'
   if (domain === 'memory') return '/memory?tab=atoms'
   if (domain === 'knowledge') return '/knowledge'
   if (domain === 'wiki') return '/wiki'

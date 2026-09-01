@@ -1,8 +1,7 @@
 /** Memory 域：会话 / 原子 / 场景 / 画像 / 检索。 */
 import { Fragment, useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { api, type Atom, type Job, type Persona, type Scenario, type Session } from '@/lib/api'
-import Galaxy from '@/features/Galaxy'
 import {
   Card,
   Empty,
@@ -18,7 +17,7 @@ import { useSystemStatus } from '@/lib/status'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-type Tab = 'galaxy' | 'sessions' | 'atoms' | 'review' | 'scenarios' | 'persona' | 'search'
+type Tab = 'sessions' | 'atoms' | 'review' | 'scenarios' | 'persona' | 'search'
 
 /** 原子 kind 中英对照（蒸馏产出的 8 类记忆形态）。 */
 const KIND_LABEL: Record<string, string> = {
@@ -47,20 +46,20 @@ const ASPECT_LABEL: Record<string, string> = {
 /** 路由入口：按 search 键重挂载——palette/概览带 ?tab=&entity= 深链进来时重新读参。 */
 export default function MemoryRoute() {
   const search = useLocation().search
+  // 旧深链兼容：圈子 2026-09-01 拆独立页（/circle），galaxy tab 不复存在
+  if (new URLSearchParams(search).get('tab') === 'galaxy')
+    return <Navigate to="/circle" replace />
   return <MemoryPage key={search} />
 }
 
 function MemoryPage() {
+  const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>(() => {
     // 支持 ?tab= 深链（Dashboard 管线主视觉点击穿透 / palette 实体直达）：仅首次挂载读一次
     const t = new URLSearchParams(window.location.search).get('tab')
-    const valid: readonly string[] = ['galaxy', 'sessions', 'atoms', 'review', 'scenarios', 'persona', 'search']
-    return valid.includes(t ?? '') ? (t as Tab) : 'galaxy'
+    const valid: readonly string[] = ['sessions', 'atoms', 'review', 'scenarios', 'persona', 'search']
+    return valid.includes(t ?? '') ? (t as Tab) : 'sessions'
   })
-  // palette 实体命中直达：?entity=<id> → 圈子选中该实体
-  const [galaxyEntity, setGalaxyEntity] = useState<string | null>(() =>
-    new URLSearchParams(window.location.search).get('entity'),
-  )
   // tab 计数（原管线条带的职责）：挂载时取一次；蒸馏脉冲只表「正在炼」（processing）
   const [counts, setCounts] = useState<{ l0: number; l1: number; l2: number; l3: number; review: number } | null>(null)
   useEffect(() => {
@@ -82,7 +81,6 @@ function MemoryPage() {
   const { distilling } = useSystemStatus()
 
   const tabs = [
-    { value: 'galaxy' as Tab, label: '圈子' },
     { value: 'sessions' as Tab, label: '会话', count: counts?.l0, pulse: distilling > 0 },
     { value: 'atoms' as Tab, label: '原子', count: counts?.l1 },
     { value: 'review' as Tab, label: '人审', count: counts?.review },
@@ -94,14 +92,6 @@ function MemoryPage() {
     <div className="space-y-6">
       <PageHeader title="用户记忆" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
       <Tabs items={tabs} value={tab} onChange={setTab} />
-      {tab === 'galaxy' && (
-        <Galaxy
-          key={galaxyEntity ?? 'none'}
-          initialEntity={galaxyEntity}
-          onGoPersona={() => setTab('persona')}
-          onGoAtoms={() => setTab('atoms')}
-        />
-      )}
       {tab === 'sessions' && <Sessions />}
       {tab === 'atoms' && <Atoms />}
 
@@ -111,10 +101,7 @@ function MemoryPage() {
       {tab === 'search' && (
         <SearchPane
           onGoAtoms={() => setTab('atoms')}
-          onGoEntity={(id) => {
-            setGalaxyEntity(id)
-            setTab('galaxy')
-          }}
+          onGoEntity={(id) => navigate(`/circle?entity=${id}`)}
         />
       )}
     </div>

@@ -166,7 +166,7 @@ export default function Galaxy({
           />
         ) : visible.length === 0 && graph.nodes.length === 0 ? (
           <Card className="p-4">
-            <Empty text="圈子是你的记忆世界：人物 / 项目 / 主题。蒸馏会自动把对话里的人和事挂进来，也可以先手动新建" />
+            <Empty text="圈子是你的记忆世界：人物 / 项目 / 主题 / 群组 / 地点。蒸馏会自动把对话里的人和事挂进来，也可以先手动新建" />
           </Card>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-3">

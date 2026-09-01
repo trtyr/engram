@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 const postMock = vi.fn()
 
@@ -91,5 +91,29 @@ describe('CommandPalette', () => {
     fireEvent.change(input, { target: { value: 'x' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => expect(screen.getByText('后端不可达')).toBeTruthy())
+  })
+
+  it('entity 域命中点击跳转独立圈子页（/circle?entity=）', async () => {
+    postMock.mockResolvedValue({
+      query: '张三',
+      hits: [{ id: 'e1', domain: 'entity', score: 1.3, snippet: '同事', title: '张三', kind: 'person' }],
+    })
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route path="/" element={<CommandPalette onClose={() => {}} />} />
+          <Route path="/circle" element={<div data-testid="circle-page" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    const input = screen.getByPlaceholderText(/跨域检索/)
+    fireEvent.change(input, { target: { value: '张三' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(screen.getByText('张三')).toBeTruthy())
+    fireEvent.click(screen.getByText('张三'))
+    // 点击后路由到独立圈子页（/circle?entity=e1）
+    await waitFor(() => {
+      expect(screen.getByTestId('circle-page')).toBeTruthy()
+    })
   })
 })

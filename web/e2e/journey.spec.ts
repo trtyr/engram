@@ -77,9 +77,8 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
     ],
   }, aiKey)
   await page.reload()
-  // reload 后回到默认「星系」tab——重新进会话列表断言
-  await page.getByRole('button', { name: '会话', exact: true }).click()
-  await expect(page.getByText('e2e-browser').first(), '\u4f1a\u8bdd\u5e94\u5217\u51fa').toBeVisible({ timeout: 15_000 })
+  // 默认 tab 即会话（圈子已拆独立页 /circle）——直接断言列表
+  await expect(page.getByText('e2e-browser').first(), '会话应列出').toBeVisible({ timeout: 15_000 })
   if (hasLlm) {
     await page.getByRole('button', { name: '\u89e6\u53d1\u84b8\u998f' }).click()
     await page.getByRole('button', { name: '\u539f\u5b50', exact: true }).click()
