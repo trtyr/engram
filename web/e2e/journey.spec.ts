@@ -43,6 +43,10 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
     test.info().annotations.push({ type: 'note', description: '栈无 LLM provider：跳过蒸馏与 Wiki 生成断言（其余旅程照常）' })
   }
 
+  // 实体基线快照（自清差分的依据）：跑之前库里已有的实体一个都不许动
+  const baselineRows = (await api('GET', '/memory/entities?limit=500', undefined, adminToken)) as { id: string }[]
+  const entityBaseline = new Set((baselineRows ?? []).map((e) => e.id))
+
   // ---------- 1. 登录 UI ----------
   await page.goto('/')
   await page.getByLabel('管理员密码').fill(ADMIN_PW)
@@ -134,17 +138,19 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   await page.locator('tbody tr').first().click()
   await expect(page.getByText(/\u4efb\u52a1|\u5165\u961f/).first(), '\u4e8b\u4ef6\u65f6\u95f4\u7ebf\u5e94\u5c55\u793a').toBeVisible({ timeout: 15_000 })
 
-  // ---------- 7. 自清（P11 精神：不留测试污染在真库；本地跑打的是生产栈） ----------
-  // 按 agent 清场（void 会话 + 归档原子）+ 删 journey 蒸出的测试实体 + 自撤 key
+  // ---------- 7. 自清（快照差分：只删 journey 自己造成的，绝不按名字猜） ----------
+  // 事故教训（2026-09-01）：旧版按名字正则猜测试实体，误删了 13 个真实体——
+  // 测试工程师的真实世界里本来就满是 e2e/playwright。集合差分是唯一安全语义。
   try {
+    const now = (await api('GET', '/memory/entities?limit=500', undefined, adminToken)) as { id: string }[]
+    const nowIds = new Set((now ?? []).map((e) => e.id))
+    const created = [...nowIds].filter((id) => !entityBaseline.has(id))
     await api('POST', '/memory/purge', { agent: 'e2e-browser' }, adminToken)
-    const ents = (await api('GET', '/memory/entities?limit=200', undefined, adminToken)) as { id: string; name: string }[]
-    const junk = (ents ?? []).filter((e) => /e2e|冲焰|playwright/i.test(e.name))
-    for (const e of junk) await api('DELETE', `/memory/entities/${e.id}`, undefined, adminToken)
+    for (const id of created) await api('DELETE', `/memory/entities/${id}`, undefined, adminToken)
     const keys = (await api('GET', '/settings/api-keys', undefined, adminToken)) as { id: string; name: string }[]
     const mine = (keys ?? []).filter((k) => k.name.startsWith('e2e-'))
     for (const k of mine) await api('POST', `/settings/api-keys/${k.id}/revoke`, {}, adminToken)
-    test.info().annotations.push({ type: 'note', description: `自清完成：实体 ${junk.length} 个，key ${mine.length} 把` })
+    test.info().annotations.push({ type: 'note', description: `自清完成：本轮新建实体 ${created.length} 个，key ${mine.length} 把（基线 ${entityBaseline.size} 实体未动）` })
   } catch (e) {
     test.info().annotations.push({ type: 'warning', description: `自清失败（需人工检查残留）：${e}` })
   }

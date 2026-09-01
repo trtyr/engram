@@ -928,6 +928,12 @@ impl MemoryService {
         if n == 0 {
             return Err(MemoryError::NotFound(format!("实体 {id} 不存在")));
         }
+        // 审计（2026-09-01 补：entity 删除曾无审计行，排查全靠猜）——best-effort
+        self.audit(
+            "delete_entity",
+            serde_json::json!({ "entity_id": id, "tombstones": n - 1 }),
+        )
+        .await;
         Ok(())
     }
 
