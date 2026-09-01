@@ -7,7 +7,7 @@
 ```text
 server/
 ├── Cargo.toml              # workspace（version 0.1.0，edition 2024，resolver 2）
-├── migrations/             # 14 个 SQL 迁移（0001 起，含 CREATE EXTENSION vector）
+├── migrations/             # 19 个 SQL 迁移（0001 起，含 CREATE EXTENSION vector）
 └── crates/
     ├── api/                # HTTP 门面（axum + utoipa + rust-embed）——唯一二进制出口
     ├── core/               # 领域类型与共享原语
