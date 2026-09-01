@@ -1,6 +1,6 @@
 # API
 
-> 2026-09-01 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **67 路径**。
+> 2026-09-01 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **67 路径 / 84 方法注册**（GET 34 · POST 37 · PUT 4 · PATCH 3 · DELETE 6）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 六 scope：memory/knowledge/wiki/codegraph/llm/erase）。
@@ -61,7 +61,7 @@
 | GET | /wiki/graph | 链接图谱（节点=页面，社区发现结果） |
 | POST | /wiki/lint | 页面一致性检查 |
 | GET/POST | /wiki/reviews、POST /wiki/reviews/{id}/resolve | 人审队列与裁决 |
-| GET/POST | /wiki/insights、/insights/dismiss、/insights/reset | 洞察卡片管理 |
+| POST | /wiki/insights、/insights/dismiss、/insights/reset | 洞察卡片管理 |
 | POST | /wiki/proposals/apply | 应用结构提案 |
 | POST | /wiki/queries/archive | 查询归档 |
 | GET/PUT | /wiki/purpose | Wiki 目的（goals/scope/key_questions） |

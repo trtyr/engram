@@ -20,7 +20,7 @@
 | [overview.md](overview.md) | 产品定位、仓库形状、记忆蒸馏阶梯 | 30 秒了解全貌 |
 | [architecture.md](architecture.md) | 系统总图、前后端接缝决策表 | 理解两端如何咬合 |
 | [tech-stack.md](tech-stack.md) | 双端技术汇总（版本实查） | 选版本/排环境 |
-| [api.md](api.md) | 67 端点域速览 + 分权矩阵 + 契约管理 | 找端点入口（全表在 server 档案） |
+| [api.md](api.md) | 67 路径域速览 + 分权矩阵 + 契约管理 | 找端点入口（全表在 server 档案） |
 | [data-model.md](data-model.md) | 全栈数据流 + schema 三处同步点 | 改 schema 前 |
 | [frontend-backend.md](frontend-backend.md) | 代理/托管/认证流//jobs 分流 | 两端集成问题 |
 | [run-and-deploy.md](run-and-deploy.md) | 本地全栈最短路径 + 全量验证 | 跑起来 |
