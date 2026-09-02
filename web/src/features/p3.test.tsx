@@ -307,7 +307,7 @@ describe('AI 功能页全景', () => {
     is_default: true,
   }
 
-  it('默认 tab 展示 8 个 AI 功能点，嵌入功能点可配新 API（capability=embedding）', async () => {
+  it('默认 tab 展示 8 个 AI 功能点，嵌入功能点无向量供应商时提示去注册', async () => {
     mockState.providers = [p1]
     render(wrap(<Settings />))
     // 默认 tab 即「AI 功能」，8 个功能点都在
@@ -315,22 +315,25 @@ describe('AI 功能页全景', () => {
     expect(screen.getByText('嵌入')).toBeInTheDocument()
     expect(screen.getByText('画像')).toBeInTheDocument()
     expect(screen.getByText('Wiki 生成')).toBeInTheDocument()
-    // 嵌入是第 3 个功能点（抽取/仲裁/嵌入），点它的「配新 API」
-    const addButtons = screen.getAllByRole('button', { name: '配新 API' })
-    expect(addButtons).toHaveLength(8)
-    fireEvent.click(addButtons[2])
-    fireEvent.change(screen.getByPlaceholderText('https://api.example.com'), { target: { value: 'https://embed.example.com' } })
-    fireEvent.change(screen.getByPlaceholderText('BAAI/bge-m3'), { target: { value: 'bge-m3' } })
-    fireEvent.change(screen.getByPlaceholderText('sk-…'), { target: { value: 'sk-embed' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存并配给「嵌入」' }))
+    // 只有 chat provider → 嵌入功能点无匹配，提示去「供应商」注册
+    expect(screen.getByText('无匹配供应商（去「供应商」注册）')).toBeInTheDocument()
+  })
+
+  it('供应商 tab 类型下拉可注册向量供应商（capability=embedding）', async () => {
+    mockState.providers = []
+    render(wrap(<Settings />))
+    fireEvent.click(screen.getByRole('button', { name: '供应商' }))
+    fireEvent.click(screen.getByRole('button', { name: '注册供应商' }))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'embed-gw' } })
+    fireEvent.change(screen.getByLabelText('Base URL（OpenAI 兼容）'), { target: { value: 'https://embed.example.com' } })
+    fireEvent.change(screen.getByLabelText(/API Key/), { target: { value: 'sk-embed' } })
+    fireEvent.change(screen.getByLabelText('模型 ID'), { target: { value: 'bge-m3' } })
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'embedding' } })
+    fireEvent.click(screen.getByRole('button', { name: '注册 Provider' }))
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith(
         '/settings/llm/providers',
         expect.objectContaining({ capability: 'embedding', model_id: 'bge-m3' }),
-      )
-      expect(api.put).toHaveBeenCalledWith(
-        '/settings/llm/routing',
-        expect.objectContaining({ embed: [{ provider: '嵌入-bge-m3', model: 'bge-m3' }] }),
       )
     })
   })

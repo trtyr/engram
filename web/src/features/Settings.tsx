@@ -130,6 +130,18 @@ function Providers() {
               onChange={(e) => setForm({ ...form, model_id: e.target.value })}
             />
           </div>
+          <div className="space-y-1.5">
+            <label htmlFor="prov-cap" className="block text-xs font-medium">类型</label>
+            <select
+              id="prov-cap"
+              className={`${inputCls} w-full`}
+              value={form.capability}
+              onChange={(e) => setForm({ ...form, capability: e.target.value })}
+            >
+              <option value="chat">对话模型（生成文字）</option>
+              <option value="embedding">向量模型（文字转向量）</option>
+            </select>
+          </div>
           <div className="flex items-center gap-2 md:col-span-2">
             <Button size="sm" type="submit">
               {editingId ? '保存修改' : '注册 Provider'}
@@ -172,6 +184,9 @@ function Providers() {
               <div className="min-w-0">
                 <p className="font-medium">
                   {p.name}{' '}
+                  <span className="ml-1 rounded border border-border px-1.5 py-0.5 align-middle text-xs text-muted-foreground">
+                    {p.capability === 'embedding' ? '向量' : '对话'}
+                  </span>
                   {p.is_default && <span className="ml-1 text-xs text-success">默认</span>}
                 </p>
                 <p className="mt-0.5 font-mono text-sm">{p.model_id}</p>
@@ -236,8 +251,6 @@ function Routing() {
   const [providers, setProviders] = useState<Provider[]>([])
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
-  const [adding, setAdding] = useState<string | null>(null)
-  const [form, setForm] = useState({ base_url: '', api_key: '', model_id: '' })
   const load = () => {
     api
       .get<Record<string, Array<{ provider: string; model: string }>>>('/settings/llm/routing')
@@ -253,7 +266,6 @@ function Routing() {
   const defaultFor = (key: string) => providers.find((p) => p.capability === capFor(key) && p.is_default)
   const currentFor = (key: string) => routing?.[key]?.[0]?.provider ?? ''
 
-  // 选已有供应商（下拉）
   const save = async (key: string, providerName: string) => {
     setBusy(true)
     setMsg('')
@@ -276,41 +288,10 @@ function Routing() {
     }
   }
 
-  // 配一个新 API（能力由功能点自动定：嵌入→向量，其余→对话）
-  const addApi = async (key: string) => {
-    setBusy(true)
-    setMsg('')
-    try {
-      const cap = capFor(key)
-      const label = PURPOSES.find((x) => x.key === key)?.label ?? key
-      const name = `${label}-${form.model_id.trim() || cap}`
-      const prov = await api.post<Provider>('/settings/llm/providers', {
-        name,
-        base_url: form.base_url,
-        api_key: form.api_key,
-        model_id: form.model_id,
-        capability: cap,
-        is_default: providers.length === 0,
-      })
-      const next: Record<string, Array<{ provider: string; model: string }>> = { ...(routing ?? {}) }
-      next[key] = [{ provider: prov.name, model: prov.model_id }]
-      await api.put('/settings/llm/routing', next)
-      setRouting(next)
-      setAdding(null)
-      setForm({ base_url: '', api_key: '', model_id: '' })
-      load()
-      setMsg(`「${label}」已配新 API（${prov.name}）`)
-    } catch (ex) {
-      setMsg(ex instanceof Error ? ex.message : '保存失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        系统里共有 <span className="font-medium text-foreground">{PURPOSES.length}</span> 个 AI 功能，逐个给它们配 API；没配的走默认供应商。
+        系统里共有 <span className="font-medium text-foreground">{PURPOSES.length}</span> 个 AI 功能，逐个给它们选 API；没选的走默认供应商。
       </p>
 
       <Card className="divide-y divide-border">
@@ -319,82 +300,30 @@ function Routing() {
           const cur = currentFor(p.key)
           const dft = defaultFor(p.key)
           return (
-            <div key={p.key} className="px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">
-                    {p.label} <span className="font-mono text-xs text-muted-foreground">{p.key}</span>
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{p.desc}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {matches.length > 0 && (
-                    <select
-                      className={`${inputCls} w-56`}
-                      value={cur}
-                      onChange={(e) => save(p.key, e.target.value)}
-                      disabled={busy}
-                      aria-label={`${p.label} 配 API`}
-                    >
-                      <option value="">用默认{dft ? `（${dft.name}）` : '（未设默认）'}</option>
-                      {matches.map((prov) => (
-                        <option key={prov.name} value={prov.name}>
-                          {prov.name}（{prov.model_id}）
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setAdding(adding === p.key ? null : p.key)
-                      setForm({ base_url: '', api_key: '', model_id: '' })
-                    }}
-                  >
-                    {adding === p.key ? '收起' : '配新 API'}
-                  </Button>
-                </div>
+            <div key={p.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">
+                  {p.label} <span className="font-mono text-xs text-muted-foreground">{p.key}</span>
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{p.desc}</p>
               </div>
-              {adding === p.key && (
-                <div className="mt-3 grid gap-3 rounded-md border border-border bg-muted/30 p-3 md:grid-cols-3">
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-medium">Base URL</label>
-                    <input
-                      className={`${inputCls} w-full`}
-                      placeholder="https://api.example.com"
-                      value={form.base_url}
-                      onChange={(e) => setForm({ ...form, base_url: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-medium">模型 ID</label>
-                    <input
-                      className={`${inputCls} w-full font-mono`}
-                      placeholder={capFor(p.key) === 'embedding' ? 'BAAI/bge-m3' : 'MiniMax-M3'}
-                      value={form.model_id}
-                      onChange={(e) => setForm({ ...form, model_id: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-medium">API Key</label>
-                    <input
-                      className={`${inputCls} w-full`}
-                      type="password"
-                      placeholder="sk-…"
-                      value={form.api_key}
-                      onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-                    />
-                  </div>
-                  <div className="flex items-end gap-2 md:col-span-3">
-                    <Button size="sm" onClick={() => addApi(p.key)} disabled={busy || !form.base_url || !form.model_id || !form.api_key}>
-                      保存并配给「{p.label}」
-                    </Button>
-                    <span className="text-xs text-muted-foreground">
-                      这是一个{capFor(p.key) === 'embedding' ? '向量' : '对话'} API
-                    </span>
-                  </div>
-                </div>
+              {matches.length === 0 ? (
+                <span className="text-xs text-muted-foreground">无匹配供应商（去「供应商」注册）</span>
+              ) : (
+                <select
+                  className={`${inputCls} w-56`}
+                  value={cur}
+                  onChange={(e) => save(p.key, e.target.value)}
+                  disabled={busy}
+                  aria-label={`${p.label} 配 API`}
+                >
+                  <option value="">用默认{dft ? `（${dft.name}）` : '（未设默认）'}</option>
+                  {matches.map((prov) => (
+                    <option key={prov.name} value={prov.name}>
+                      {prov.name}（{prov.model_id}）
+                    </option>
+                  ))}
+                </select>
               )}
             </div>
           )
