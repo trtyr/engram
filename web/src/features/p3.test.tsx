@@ -254,13 +254,15 @@ describe('Provider 编辑 / 删除', () => {
     id: 'p1',
     name: 'openai',
     base_url: 'https://api.openai.com/v1',
-    models: [{ id: 'gpt-4', capabilities: ['chat'] }],
+    model_id: 'gpt-4',
+    capability: 'chat',
     is_default: true,
   }
 
   it('编辑：填表单后 PUT（name 不可改，key 留空不传）', async () => {
     mockState.providers = [p1]
     render(wrap(<Settings />))
+    fireEvent.click(screen.getByRole('button', { name: '供应商' }))
     await screen.findByText('openai')
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     const baseInput = screen.getByLabelText('Base URL（OpenAI 兼容）') as HTMLInputElement
@@ -281,6 +283,7 @@ describe('Provider 编辑 / 删除', () => {
     mockState.providers = [p1]
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(wrap(<Settings />))
+    fireEvent.click(screen.getByRole('button', { name: '供应商' }))
     await screen.findByText('openai')
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => {

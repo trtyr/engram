@@ -16,18 +16,18 @@ const TABS: { value: Tab; label: string }[] = [
 ]
 
 const PURPOSES: { key: string; label: string; desc: string }[] = [
-  { key: 'extract', label: '抽取', desc: 'L0 会话 → L1 原子（高频，flash 档）' },
-  { key: 'arbitrate', label: '仲裁', desc: '近重复/矛盾判定（flash 档）' },
-  { key: 'embed', label: '嵌入', desc: '文本向量化（embedding 模型）' },
-  { key: 'organize', label: '组织', desc: 'L1 原子 → L2 场景（中档）' },
-  { key: 'consolidate', label: '整理', desc: '画像 + 实体档案 + 关系回溯（中档）' },
-  { key: 'wiki_analysis', label: 'Wiki 分析', desc: '源文本分析' },
-  { key: 'persona', label: '画像', desc: 'L2 场景 → L3 画像（pro 档）' },
-  { key: 'wiki_generation', label: 'Wiki 生成', desc: '页面生成（pro 档）' },
+  { key: 'extract', label: '抽取', desc: '把对话提炼成一条条记忆（最频繁，用便宜的模型）' },
+  { key: 'arbitrate', label: '仲裁', desc: '判断两条记忆是否重复或矛盾（用便宜的模型）' },
+  { key: 'embed', label: '嵌入', desc: '把文字转成向量，供语义搜索（用 embedding 模型）' },
+  { key: 'organize', label: '组织', desc: '把零散记忆聚成一个个话题场景（中等模型）' },
+  { key: 'consolidate', label: '整理', desc: '定期更新你的画像和人物档案（中等模型）' },
+  { key: 'wiki_analysis', label: 'Wiki 分析', desc: '分析你喂进去的文档，提取结构' },
+  { key: 'persona', label: '画像', desc: '沉淀对你的长期了解（用最强的模型）' },
+  { key: 'wiki_generation', label: 'Wiki 生成', desc: '把素材写成成篇的 Wiki 页面（用最强的模型）' },
 ]
 
 export default function Settings() {
-  const [tab, setTab] = useState<Tab>('providers')
+  const [tab, setTab] = useState<Tab>('routing')
   return (
     <div className="space-y-6">
       <PageHeader title="设置" desc="LLM 供应商、模型路由、API 密钥与记忆节律" />
@@ -244,121 +244,119 @@ function Providers() {
 
 function Routing() {
   const [routing, setRouting] = useState<Record<string, Array<{ provider: string; model: string }>> | null>(null)
-  const [editing, setEditing] = useState(false)
-  const [text, setText] = useState('')
+  const [providers, setProviders] = useState<Provider[]>([])
   const [msg, setMsg] = useState('')
-  useEffect(() => {
+  const [busy, setBusy] = useState(false)
+  const load = () => {
     api
       .get<Record<string, Array<{ provider: string; model: string }>>>('/settings/llm/routing')
       .then(setRouting)
       .catch(() => setRouting({}))
+    api.get<Provider[]>('/settings/llm/providers').then(setProviders).catch(() => setProviders([]))
+  }
+  useEffect(() => {
+    load()
   }, [])
 
-  if (editing) {
-    return (
-      <div className="space-y-3">
-        <p className="text-sm text-muted-foreground">purpose → provider/model 回退链（JSON 整表替换，PUT 非 PATCH）</p>
-        <textarea
-          className={`${inputCls} h-72 w-full font-mono`}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={async () => {
-              try {
-                const parsed = JSON.parse(text)
-                await api.put('/settings/llm/routing', parsed)
-                setRouting(parsed)
-                setEditing(false)
-                setMsg('已保存')
-              } catch (ex) {
-                setMsg(ex instanceof Error ? ex.message : '保存失败（JSON 非法?）')
-              }
-            }}
-          >
-            保存
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
-            取消
-          </Button>
-          {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
-        </div>
-      </div>
-    )
+  const capFor = (key: string) => (key === 'embed' ? 'embedding' : 'chat')
+  const defaultFor = (key: string) => providers.find((p) => p.capability === capFor(key) && p.is_default)
+  const currentFor = (key: string) => routing?.[key]?.[0]?.provider ?? ''
+
+  const save = async (key: string, providerName: string) => {
+    setBusy(true)
+    setMsg('')
+    try {
+      const next: Record<string, Array<{ provider: string; model: string }>> = { ...(routing ?? {}) }
+      if (providerName === '') {
+        delete next[key]
+      } else {
+        const p = providers.find((x) => x.name === providerName)
+        if (p) next[key] = [{ provider: p.name, model: p.model_id }]
+      }
+      await api.put('/settings/llm/routing', next)
+      setRouting(next)
+      const label = PURPOSES.find((x) => x.key === key)?.label ?? key
+      setMsg(providerName === '' ? `「${label}」已切回默认` : `「${label}」已配 ${providerName}`)
+    } catch (ex) {
+      setMsg(ex instanceof Error ? ex.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
   }
+
+  const suggest = async () => {
+    setBusy(true)
+    setMsg('AI 正在按现有供应商生成建议…')
+    try {
+      const suggestion = await api.post<Record<string, Array<{ provider: string; model: string }>>>('/settings/llm/routing/suggest', {})
+      await api.put('/settings/llm/routing', suggestion)
+      setRouting(suggestion)
+      setMsg('AI 建议已应用——每个功能点的 API 已配好，可再逐个微调')
+    } catch (ex) {
+      setMsg(ex instanceof Error ? ex.message : '生成失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const chatDefault = defaultFor('extract')
+  const embedDefault = defaultFor('embed')
 
   return (
     <div className="space-y-4">
-      <Card className="overflow-x-auto">
-        <table className={tableCls.root}>
-          <thead className={tableCls.thead}>
-            <tr>
-              <th className={tableCls.th}>用途</th>
-              <th className={tableCls.th}>说明</th>
-              <th className={tableCls.th}>回退链</th>
-            </tr>
-          </thead>
-          <tbody>
-            {PURPOSES.map((p) => {
-              const chain = routing?.[p.key] ?? []
-              return (
-                <tr key={p.key} className={tableCls.row}>
-                  <td className={`${tableCls.td} whitespace-nowrap`}>
-                    <span className="font-medium">{p.label}</span>{' '}
-                    <span className="font-mono text-xs text-muted-foreground">{p.key}</span>
-                  </td>
-                  <td className={`${tableCls.td} text-muted-foreground`}>{p.desc}</td>
-                  <td className={`${tableCls.td} font-mono text-xs`}>
-                    {chain.length === 0 ? (
-                      <span className="text-muted-foreground">未配置 · 用默认供应商</span>
-                    ) : (
-                      chain.map((c, i) => (
-                        <span key={i}>
-                          {c.provider}
-                          <span className="text-muted-foreground"> → </span>
-                          {c.model}
-                          {i < chain.length - 1 && <span className="text-muted-foreground"> · </span>}
-                        </span>
-                      ))
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </Card>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          size="sm"
-          onClick={async () => {
-            setMsg('AI 正在生成建议…')
-            try {
-              const suggestion = await api.post<Record<string, Array<{ provider: string; model: string }>>>('/settings/llm/routing/suggest', {})
-              setText(JSON.stringify(suggestion, null, 2))
-              setEditing(true)
-              setMsg('AI 建议已生成——确认后点「保存」')
-            } catch (ex) {
-              setMsg(ex instanceof Error ? ex.message : '生成失败')
-            }
-          }}
-        >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          系统里共有 <span className="font-medium text-foreground">{PURPOSES.length}</span> 个 AI 功能点，逐个给它们选 API；没选的走默认（对话默认{chatDefault ? `「${chatDefault.name}」` : '未设'} · 嵌入默认{embedDefault ? `「${embedDefault.name}」` : '未设'}）。
+        </p>
+        <Button size="sm" onClick={suggest} disabled={busy || providers.length === 0}>
           让 AI 帮我配
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setText(JSON.stringify(routing ?? {}, null, 2))
-            setEditing(true)
-          }}
-        >
-          编辑 JSON
-        </Button>
-        <p className="text-xs text-muted-foreground">8 个 AI 功能点映射到供应商/模型回退链；未配置的回退到默认供应商。也可以一键让 AI 按现有供应商生成建议。</p>
       </div>
+
+      {providers.length === 0 ? (
+        <Card className="p-6 text-center">
+          <p className="text-sm font-medium">还没有任何 API 供应商</p>
+          <p className="mt-1 text-xs text-muted-foreground">先到「供应商」注册一个对话（chat）和一个向量（embedding）供应商，再回来给功能配 API。</p>
+        </Card>
+      ) : (
+        <Card className="divide-y divide-border">
+          {PURPOSES.map((p) => {
+            const matches = providers.filter((x) => x.capability === capFor(p.key))
+            const cur = currentFor(p.key)
+            const dft = defaultFor(p.key)
+            return (
+              <div key={p.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">
+                    {p.label} <span className="font-mono text-xs text-muted-foreground">{p.key}</span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{p.desc}</p>
+                </div>
+                {matches.length === 0 ? (
+                  <span className="text-xs text-muted-foreground">无匹配供应商（去「供应商」注册）</span>
+                ) : (
+                  <select
+                    className={`${inputCls} w-64`}
+                    value={cur}
+                    onChange={(e) => save(p.key, e.target.value)}
+                    disabled={busy}
+                    aria-label={`${p.label} 配 API`}
+                  >
+                    <option value="">用默认{dft ? `（${dft.name}）` : '（未设默认）'}</option>
+                    {matches.map((prov) => (
+                      <option key={prov.name} value={prov.name}>
+                        {prov.name}（{prov.model_id}）
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )
+          })}
+        </Card>
+      )}
+
+      {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
     </div>
   )
 }
