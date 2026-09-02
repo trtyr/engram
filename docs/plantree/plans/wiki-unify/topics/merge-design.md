@@ -66,6 +66,39 @@
 4. 拖拽节点（复用 EntityGalaxy 的 captor-disable 模式）
 5. 图例：页面类型色 + 链接类型（wikilink vs source-overlap）
 
+## llm_wiki 对照（2026-09-02 检查）
+
+参考 [nashsu/llm_wiki](https://github.com/nashsu/llm_wiki)（Karpathy 方法论的完整实现）。结论：**我们的 Wiki 域已是 llm_wiki 的忠实实现**，核心 + 大部分增强全齐，代码注释直接标「llm_wiki 对齐/模式」。
+
+| llm_wiki 能力 | 我们现状 | 位置 |
+|---|---|---|
+| 两步思维链摄入（分析→生成） | ✅ analyze_job + generate_job | wiki-engine/src/ingest.rs |
+| 四信号关联度（直接链×3/源重叠×4/AA×1.5/类型×1） | ✅ 完全一致 | wiki-engine/src/relevance.rs |
+| Louvain 社区 + 内聚度评分 | ✅ louvain_communities + community_cohesion | wiki-engine/src/community.rs |
+| 图谱洞察（惊奇连接/孤立页/稀疏社区/桥接） | ✅ 四种全有 | wiki-engine/src/insights.rs |
+| 级联删除（三重匹配） | ✅ 三路径对齐 | wiki-engine/src/cascade.rs |
+| purpose.md（Wiki 灵魂） | ✅ /wiki/purpose | — |
+| index.md + log.md | ✅ page_type 枚举含 index/log | migration 0007 |
+| SHA256 增量缓存 | ✅ documents/wikisources sha256 UNIQUE | — |
+| 持久化摄入队列 | ✅ jobs 队列 | — |
+| 异步审核 | ✅ reviews（人审） | — |
+| wikilink + frontmatter | ✅ WikilinkText + frontmatter jsonb | — |
+
+**我们缺的（llm_wiki 有，我们没有）**：
+
+1. 多模态图片摄入（PDF 内嵌图片 + 视觉模型描述）
+2. 多格式文档（我们 5 种：pdf/docx/html/md/txt；缺 pptx/xlsx/图片/音视频）
+3. 文件夹导入 + 目录结构（我们 documents 平铺，无目录树）
+4. Source 自动监听（检测外部变更）
+5. 深度研究（网络搜索 Tavily/SerpApi/SearXNG）
+6. Chrome 网页剪藏
+7. KaTeX 数学渲染
+8. 聊天界面（多对话 + 引用面板）——我们是检索，不是聊天
+
+**Obsidian 式的关键差异**：llm_wiki 是文件系统存储（wiki/ 目录直接当 Obsidian vault 打开），我们是 DB 存储。所以「Obsidian 兼容」走两条路之一：a) Web 内做 Obsidian 式体验（图谱 + wikilink + 双向链接面板 + 目录树感）；b) 一键导出 Obsidian vault（.obsidian + markdown 文件）。合并方案先走 a，b 作为 Deferred。
+
+**对合并方案的影响**：不是「从零造 Obsidian」，而是「把已经很强的 Wiki 域 + 原料 RAG 层合并成一体，再补体验层」。知识图谱（四信号 + Louvain + 洞察）已存在，升级点只在**前端体验**（hover 高亮/label 常显/拖拽/双向链接面板）。
+
 ## 非目标
 
 - 不做 Obsidian 的插件体系 / 全量 Markdown 编辑器（现有 Markdown 渲染 + 阅读足够）
