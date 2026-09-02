@@ -37,7 +37,7 @@ pub struct SubmitUrlRequest {
 }
 
 /// 提交 URL 摄取（SSRF 防护在管道内）。
-#[utoipa::path(post, path = "/knowledge/documents",
+#[utoipa::path(post, path = "/wiki/documents",
     request_body(content = SubmitUrlRequest, content_type = "application/json"),
     responses((status = 201, body = DocumentDto)))]
 pub async fn submit_url(
@@ -59,7 +59,7 @@ pub async fn submit_url(
 }
 
 /// 上传文件摄取（multipart，字段名 file）。
-#[utoipa::path(post, path = "/knowledge/upload",
+#[utoipa::path(post, path = "/wiki/upload",
     request_body(content = Vec<u8>, content_type = "multipart/form-data"),
     responses((status = 201, body = DocumentDto)))]
 pub async fn upload(
@@ -124,7 +124,7 @@ pub struct ListDocsParams {
     pub limit: Option<i64>,
 }
 
-#[utoipa::path(get, path = "/knowledge/documents", params(ListDocsParams),
+#[utoipa::path(get, path = "/wiki/documents", params(ListDocsParams),
     responses((status = 200, body = [DocumentDto])))]
 pub async fn list_documents(
     principal: axum::Extension<Principal>,
@@ -140,7 +140,7 @@ pub async fn list_documents(
     ))
 }
 
-#[utoipa::path(get, path = "/knowledge/documents/{id}",
+#[utoipa::path(get, path = "/wiki/documents/{id}",
     responses((status = 200, body = DocumentDto)))]
 pub async fn get_document(
     principal: axum::Extension<Principal>,
@@ -151,7 +151,7 @@ pub async fn get_document(
     Ok(Json(svc(&state).get_document(id).await.map_err(ke)?))
 }
 
-#[utoipa::path(get, path = "/knowledge/documents/{id}/chunks",
+#[utoipa::path(get, path = "/wiki/documents/{id}/chunks",
     responses((status = 200, body = [(i32, String, bool)])))]
 pub async fn document_chunks(
     principal: axum::Extension<Principal>,
@@ -174,7 +174,7 @@ pub async fn document_chunks(
     ))
 }
 
-#[utoipa::path(delete, path = "/knowledge/documents/{id}", responses((status = 204)))]
+#[utoipa::path(delete, path = "/wiki/documents/{id}", responses((status = 204)))]
 pub async fn delete_document(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
@@ -186,7 +186,7 @@ pub async fn delete_document(
 }
 
 /// 重新嵌入缺失块（embed_failed / NULL 向量的显式恢复入口，K8）。
-#[utoipa::path(post, path = "/knowledge/documents/{id}/re-embed",
+#[utoipa::path(post, path = "/wiki/documents/{id}/re-embed",
     responses((status = 202, description = "补嵌 job 已入队")))]
 pub async fn reembed(
     principal: axum::Extension<Principal>,
@@ -205,7 +205,7 @@ pub struct KnowledgeSearchRequest {
 }
 
 /// 知识混合检索（结果带文档引用 + 高亮片段）。
-#[utoipa::path(post, path = "/knowledge/search", operation_id = "knowledge_search",
+#[utoipa::path(post, path = "/wiki/documents/search", operation_id = "knowledge_search",
     request_body = KnowledgeSearchRequest,
     responses((status = 200, body = [ChunkHit])))]
 pub async fn search(

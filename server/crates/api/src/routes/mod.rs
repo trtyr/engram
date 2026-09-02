@@ -202,11 +202,33 @@ pub fn router(state: AppState) -> Router {
             delete(memory_api::delete_entity_relation),
         )
         .route("/search", post(search_api::search))
+        // 知识域并入 Wiki 前缀（/wiki/documents、/wiki/upload）；/knowledge/* 为兼容别名（过渡期，不进 OpenAPI）
+        .route(
+            "/wiki/documents",
+            post(knowledge_api::submit_url).get(knowledge_api::list_documents),
+        )
+        .route("/wiki/upload", post(knowledge_api::upload))
+        // search 先于 {id}，避免 "search" 被当作 id 解析
+        .route("/wiki/documents/search", post(knowledge_api::search))
+        .route(
+            "/wiki/documents/{id}",
+            get(knowledge_api::get_document).delete(knowledge_api::delete_document),
+        )
+        .route(
+            "/wiki/documents/{id}/chunks",
+            get(knowledge_api::document_chunks),
+        )
+        .route(
+            "/wiki/documents/{id}/re-embed",
+            post(knowledge_api::reembed),
+        )
+        // 兼容别名
         .route(
             "/knowledge/documents",
             post(knowledge_api::submit_url).get(knowledge_api::list_documents),
         )
         .route("/knowledge/upload", post(knowledge_api::upload))
+        .route("/knowledge/search", post(knowledge_api::search))
         .route(
             "/knowledge/documents/{id}",
             get(knowledge_api::get_document).delete(knowledge_api::delete_document),
@@ -219,7 +241,6 @@ pub fn router(state: AppState) -> Router {
             "/knowledge/documents/{id}/re-embed",
             post(knowledge_api::reembed),
         )
-        .route("/knowledge/search", post(knowledge_api::search))
         .route("/wiki/ingest", post(wiki_api::ingest))
         .route("/wiki/pages", get(wiki_api::list_pages))
         .route(
