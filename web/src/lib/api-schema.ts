@@ -1959,6 +1959,8 @@ export interface components {
             distill_status: string;
             /** Format: uuid */
             id: string;
+            /** @description 会话元数据（source=import 标记批量导入的历史；蒸馏据此过滤对方观点） */
+            metadata: Record<string, never>;
             /** @description 会话级敏感标记：蒸馏产物自动继承 */
             sensitive: boolean;
         };

@@ -47,7 +47,7 @@ async fn chinese_hybrid_search_hits() {
     }
 
     // 纯 FTS：中文关键词命中
-    let hits = agent_memory_search::search_atoms(&pool, "用户偏好", None, 5, false)
+    let hits = agent_memory_search::search_atoms(&pool, "用户偏好", None, 5, false, None, None)
         .await
         .unwrap();
     assert!(!hits.is_empty(), "中文 FTS 应有命中");
@@ -55,13 +55,13 @@ async fn chinese_hybrid_search_hits() {
 
     // 纯向量：用一个确定性的向量（与第一条同构）命中
     let probe: Vec<f32> = (0..1024).map(|j| ((j * 13) % 97) as f32 / 97.0).collect();
-    let hits = agent_memory_search::search_atoms(&pool, "偏好", Some(&probe), 3, false)
+    let hits = agent_memory_search::search_atoms(&pool, "偏好", Some(&probe), 3, false, None, None)
         .await
         .unwrap();
     assert!(!hits.is_empty(), "向量通道应有命中");
 
     // 无关查询不应误伤（空命中合法，但这里「Rust 后端」应命中决策条）
-    let hits = agent_memory_search::search_atoms(&pool, "后端 选型", None, 5, false)
+    let hits = agent_memory_search::search_atoms(&pool, "后端 选型", None, 5, false, None, None)
         .await
         .unwrap();
     assert!(
@@ -139,7 +139,7 @@ async fn search_demotes_expired_atoms() {
     .await
     .unwrap();
 
-    let hits = agent_memory_search::search_atoms(&pool, "周报", None, 10, false)
+    let hits = agent_memory_search::search_atoms(&pool, "周报", None, 10, false, None, None)
         .await
         .unwrap();
     let score_of = |id: uuid::Uuid| {
@@ -154,4 +154,50 @@ async fn search_demotes_expired_atoms() {
         score_of(expired_id),
         score_of(fresh_id)
     );
+}
+
+/// phase-2 时间范围过滤：from/to 过滤（occurred_at 优先 NULL fallback created_at）。
+#[tokio::test]
+async fn search_filters_by_time_range() {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
+
+    // 三条同题材原子，occurred_at 分处 8/9/10 月
+    for month in ["2026-08-15", "2026-09-15", "2026-10-15"] {
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, status, tsv, occurred_at) \
+             VALUES ($1, 'event', '时间过滤测试事件', 'active', to_tsvector('simple', $2), $3::timestamptz)",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(tsv_text("时间过滤测试事件"))
+        .bind(format!("{month}T00:00:00Z"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let from: chrono::DateTime<chrono::Utc> =
+        chrono::DateTime::parse_from_rfc3339("2026-08-15T00:00:00Z")
+            .unwrap()
+            .into();
+    let to: chrono::DateTime<chrono::Utc> =
+        chrono::DateTime::parse_from_rfc3339("2026-09-30T00:00:00Z")
+            .unwrap()
+            .into();
+    let hits = agent_memory_search::search_atoms(
+        &pool,
+        "时间过滤测试",
+        None,
+        20,
+        false,
+        Some(from),
+        Some(to),
+    )
+    .await
+    .unwrap();
+    assert_eq!(hits.len(), 2, "8/15~9/30 窗内应命中 8 月和 9 月两条");
 }

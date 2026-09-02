@@ -963,6 +963,10 @@ pub struct SearchRequest {
     /// true = 结果包含 sensitive 原子（隐私项默认排除；P3）
     #[serde(default)]
     pub reveal: bool,
+    /// 时间范围过滤起点（occurred_at 优先，NULL fallback created_at；UTC）
+    pub from: Option<chrono::DateTime<chrono::Utc>>,
+    /// 时间范围过滤终点
+    pub to: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[utoipa::path(post, path = "/memory/search", operation_id = "memory_search",
@@ -983,6 +987,8 @@ pub async fn search(
                 req.max_items.unwrap_or(20),
                 req.no_feedback,
                 req.reveal,
+                req.from,
+                req.to,
             )
             .await
             .map_err(me)?,

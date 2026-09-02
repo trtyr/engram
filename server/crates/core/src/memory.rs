@@ -43,6 +43,9 @@ pub struct SessionDto {
     /// 会话级敏感标记：蒸馏产物自动继承
     pub sensitive: bool,
     pub created_at: DateTime<Utc>,
+    /// 会话元数据（source=import 标记批量导入的历史；蒸馏据此过滤对方观点）
+    #[schema(value_type = Object)]
+    pub metadata: serde_json::Value,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
@@ -1585,6 +1588,7 @@ impl MemoryService {
     }
 
     /// 分层检索。无 embedding 通道时自动退化为纯 FTS。
+    #[allow(clippy::too_many_arguments)]
     pub async fn search(
         &self,
         query: &str,
@@ -1592,6 +1596,8 @@ impl MemoryService {
         max_items: i64,
         no_feedback: bool,
         reveal: bool,
+        from: Option<chrono::DateTime<chrono::Utc>>,
+        to: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<SearchResponse, MemoryError> {
         let qv = self
             .try_embed(&[query.to_string()])
@@ -1610,7 +1616,16 @@ impl MemoryService {
             vec![]
         };
         let l1 = if want_l1 {
-            search_atoms(&self.pool, query, qv.as_deref(), max_items, reveal).await?
+            search_atoms(
+                &self.pool,
+                query,
+                qv.as_deref(),
+                max_items,
+                reveal,
+                from,
+                to,
+            )
+            .await?
         } else {
             vec![]
         };
@@ -1777,8 +1792,16 @@ impl MemoryService {
             budget_items.saturating_sub(persona.len() + out_scenarios.len() + out_entities.len());
         let atoms: Vec<AtomDto> = match query {
             Some(q) => {
-                let hits =
-                    search_atoms(&self.pool, q, qv.as_deref(), remaining as i64, false).await?;
+                let hits = search_atoms(
+                    &self.pool,
+                    q,
+                    qv.as_deref(),
+                    remaining as i64,
+                    false,
+                    None,
+                    None,
+                )
+                .await?;
                 let ids: Vec<Uuid> = hits.iter().map(|h| h.id).collect();
                 if ids.is_empty() {
                     vec![]

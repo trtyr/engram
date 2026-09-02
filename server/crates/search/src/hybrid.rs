@@ -29,6 +29,8 @@ pub async fn search_atoms(
     query_vec: Option<&[f32]>,
     limit: i64,
     include_sensitive: bool,
+    from: Option<chrono::DateTime<chrono::Utc>>,
+    to: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<Vec<SearchHit>, sqlx::Error> {
     // K7：无 token 且无查询向量 → 短路空结果（单字/纯标点不再空跑 to_tsquery）
     if query_vec.is_none() && !has_query_tokens(query) {
@@ -78,7 +80,17 @@ pub async fn search_atoms(
     if has_vec {
         qb.push(" OR vec.id IS NOT NULL");
     }
-    qb.push(") ORDER BY score DESC LIMIT ");
+    qb.push(")");
+    // 时间范围过滤（phase-2）：occurred_at 优先 NULL fallback created_at
+    if let Some(f) = from {
+        qb.push(" AND COALESCE(a.occurred_at, a.created_at) >= ");
+        qb.push_bind(f);
+    }
+    if let Some(t) = to {
+        qb.push(" AND COALESCE(a.occurred_at, a.created_at) <= ");
+        qb.push_bind(t);
+    }
+    qb.push(" ORDER BY score DESC LIMIT ");
     qb.push_bind(limit);
 
     let rows = qb.build().fetch_all(pool).await?;

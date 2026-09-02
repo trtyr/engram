@@ -95,7 +95,7 @@ async fn search_hits_bump_hit_count() {
     .unwrap();
 
     let _ = svc
-        .search("Rust", &[], 10, false, false)
+        .search("Rust", &[], 10, false, false, None, None)
         .await
         .expect("search");
 
@@ -602,10 +602,16 @@ async fn sensitive_atoms_hidden_until_reveal() {
     assert!(s.sensitive);
 
     // 默认检索：不可见
-    let r = svc.search("降压药", &[], 10, true, false).await.unwrap();
+    let r = svc
+        .search("降压药", &[], 10, true, false, None, None)
+        .await
+        .unwrap();
     assert!(r.l1.is_empty(), "sensitive 默认不可见");
     // reveal：可见
-    let r = svc.search("降压药", &[], 10, true, true).await.unwrap();
+    let r = svc
+        .search("降压药", &[], 10, true, true, None, None)
+        .await
+        .unwrap();
     assert!(r.l1.iter().any(|h| h.id == s.id), "reveal 后可见");
     // context_pack：恒排除（注入路径不给 reveal）
     let pack = svc
