@@ -50,18 +50,20 @@
 | GET | /memory/rhythm/status | 节律状态：最近心跳 + pending 会话数 + 最老积压年龄（**memory scope 可读**——AI 的健康观察线，积压暴涨=蒸馏链故障） |
 | POST | /memory/distill `{via:"cron"}` | cron 通道（**需 cron scope**，AI 标 cron 403）：consolidate 走 cron-consolidate-{日桶} 幂等（同日只跑一次全量整理），extract 永不去重（扫 pending 兜底） |
 
-## knowledge（知识库域）
+## wiki·文档原料（原 knowledge，已并入 /wiki 前缀）
+
+> 2026-09-02 合并：knowledge 端点并入 /wiki 前缀，前端融合成一个 Wiki 页（文档/页面/图谱/人审/提案/目标）。`/knowledge/*` 仍作兼容别名（过渡期，不进 OpenAPI）。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET/POST | /knowledge/documents | 文档列表 / 直建文本文档 |
-| POST | /knowledge/upload | multipart 文件上传（pdf/docx/html/md/txt；二进制拒绝） |
-| DELETE/GET | /knowledge/documents/{id} | 详情 / 删除 |
-| GET | /knowledge/documents/{id}/chunks | 分块明细 |
-| POST | /knowledge/documents/{id}/re-embed | 重嵌入（换模型后补向量） |
-| POST | /knowledge/search | 语义+关键词融合检索 |
+| GET/POST | /wiki/documents | 文档列表 / 直建文本文档 |
+| POST | /wiki/upload | multipart 文件上传（pdf/docx/html/md/txt；二进制拒绝） |
+| DELETE/GET | /wiki/documents/{id} | 详情 / 删除 |
+| GET | /wiki/documents/{id}/chunks | 分块明细 |
+| POST | /wiki/documents/{id}/re-embed | 重嵌入（换模型后补向量） |
+| POST | /wiki/documents/search | 文档块语义+关键词融合检索 |
 
-## wiki（LLM Wiki 域）
+## wiki·知识网（LLM 增量织入）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

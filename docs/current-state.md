@@ -15,7 +15,7 @@ origin/main 双 workflow 绿（圈子强化 + 权限收窄 + 二期三项：过�
 | server | cargo test --workspace | 155 passed（36 套件，含权限收窄 + 二期三项测试） |
 | web | pnpm test / lint / build | 35/35 / 0 警告 / exit 0 |
 | e2e | playwright journey（一次性栈 scripts/e2e-local.sh） | PASS 1 / FAIL 0（含快照差分自清） |
-| 事实 | OpenAPI 活体 / 迁移 / 表 | **79 路径 / 97 方法注册**（GET 40/POST 43/PUT 4/PATCH 3/DELETE 7）/ **22 迁移** / **24 业务表** |
+| 事实 | OpenAPI 活体 / 迁移 / 表 | **79 路径 / 97 方法注册**（GET 40/POST 43/PUT 4/PATCH 3/DELETE 7）/ **24 迁移** / **24 业务表** |
 
 ## 2026-08-30 基线以来的大事记
 
@@ -30,6 +30,7 @@ origin/main 双 workflow 绿（圈子强化 + 权限收窄 + 二期三项：过�
 9. **测试隔离提级**（P11）：E2E_BASE 必填拒跑 + 一次性栈脚本 + journey 快照差分自清
 10. **圈子强化 + 关系回溯**（0020/0021 迁移）：13 项强化——详情邻居/语义检索/社区聚类/实体历史/关系升级 A（entity_relations 类型化有向关系 + 蒸馏抽取）/全局时间轴/批量删除/实体导出；关系回溯：consolidate 对存量实体直接抽关系（无 session 重放兜底），常识关系 + 记忆明确关系
 11. **权限收窄 + 二期三项**（2026-09-02）：AI 只写会话（收回直写 atom/entity/relation/attach），删实体/摘原子/删关系收进 erase scope；会话级敏感标记；文件批量导入（source=import + 蒸馏过滤对方观点）；过期自动降权/过滤（检索 ×0.5 + 注入硬过滤，归档先不做）；检索时间范围过滤（from/to，occurred_at 优先 NULL fallback created_at）
+12. **Wiki+Knowledge 合并**（2026-09-02）：/knowledge 端点并入 /wiki 前缀（保留 /knowledge 兼容别名）；上传文档 ready 后自动织入 Wiki；前端融合成一个 Wiki 页（文档/页面/图谱/人审/提案/目标 tabs，删 Knowledge.tsx）；图谱 Obsidian 化（hover 邻居高亮/拖拽/缩放控件/边按权重编码/位置缓存）
 
 ## 已知未了项
 

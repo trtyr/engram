@@ -8,11 +8,11 @@
 ```text
 ┌────────────────────────── 浏览器 ──────────────────────────┐
 │  Engram SPA（web/，React 19）                              │
-│  八页（概览/记忆/圈子/知识/Wiki/图谱/任务/设置）+ 壳         │
+│  七页（概览/记忆/圈子/Wiki/图谱/任务/设置）+ 壳              │
 └───────────────┬────────────────────────────────────────────┘
                 │ 同源 fetch（Bearer ams_/amk_）
 ┌───────────────▼──────────────── agent-memory-server ───────┐
-│ axum Router（79 路径，9 域）                                │
+│ axum Router（79 路径，8 域）                                │
 │ ├─ 认证层 bearer_auth（/jobs 对 text/html 分流回 SPA）       │
 │ ├─ rust-embed：web/dist 静态托管（生产单二进制）             │
 │ └─ 域 crate：distill / wiki-engine / cg-bridge / search     │
@@ -21,7 +21,7 @@
         │ sqlx                          │ reqwest（任务化异步）
 ┌───────▼──────────┐          ┌────────▼──────────┐
 │ PostgreSQL+pgvector│         │ 外部 LLM API       │
-│ 24 业务表/22 迁移   │         │ （OpenAI 兼容系）   │
+│ 24 业务表/24 迁移   │         │ （OpenAI 兼容系）   │
 └───────────────────┘          └───────────────────┘
                 另：cg-bridge 调用外部 codegraph CLI（Node+git）
 ```

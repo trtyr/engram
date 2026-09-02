@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-工作树干净，origin/main 双 workflow 绿。cargo **155** 测试 / vitest **35** / 22 迁移 / 79 路径 / 24 业务表。
+工作树干净，origin/main 双 workflow 绿。cargo **155** 测试 / vitest **37** / 24 迁移 / 79 路径 / 24 业务表。
 生产栈 :19180 跑真数据（用户真实记忆 + pi-xiamu 消费者 key 在役）。
 
 ## 2026-08-30 基线以来的落地（按主题）
@@ -23,6 +23,8 @@
 | e2e 自清 | journey 收尾清 agent/实体/key | a7ae4f4 |
 | 测试隔离 | E2E_BASE 必填 + 一次性栈 + 差分自清 | 399deab |
 | 双节律 | cron 兜底 + 心跳/status + cron scope 分权 | 775aea2/c1f877f/d7a8345 |
+| 会话敏感 + 直写残留 | raw_sessions.sensitive 蒸馏继承 + 无溯源原子打标 origin（0023/0024 迁移） | f6fca87/73d0d65 |
+| Wiki+Knowledge 合并 | 端点并入 /wiki（兼容别名）+ 上传自动织入 + 前端融合一个 Wiki 页 + 图谱 Obsidian 化 | bb98d07/c37ede3/a69fcb3/c1b5804 |
 
 ## 运行中的真数据
 

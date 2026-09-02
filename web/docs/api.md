@@ -34,7 +34,7 @@ api.get<T>(path) / post / put / patch / del / upload(path, file)
 ## 前端调用点分布（按域）
 
 Dashboard：POST /search；Memory：sessions/atoms/scenarios/persona + distill + 擦除 + 检索；
-Knowledge：upload/documents/chunks/re-embed/search；Wiki：pages/graph/lint/reviews/insights/
+Wiki·文档（原 Knowledge）：upload/documents/chunks/re-embed/documents-search；Wiki·知识网：pages/graph/lint/reviews/insights/
 proposals/sources/purpose/ingest/search；CodeGraph：projects/index/sync/query；
 Jobs：jobs/events/revive；Settings：providers/routing/suggest/api-keys/batch-revoke/re-encrypt/test + /llm/usage；
 Login：POST /auth/login；壳：/jobs?limit=1 探活 + /jobs?limit=200 徽章轮询。

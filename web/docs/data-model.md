@@ -16,7 +16,7 @@
 | EntityRelation | from_id/to_id、rel_type（5 类：member_of/located_in/works_on/part_of/related_to）、weight、source（distill/manual） | 圈子关系 |
 | EntityGraph | nodes + edges（共现权重）+ relations（类型化有向关系） | 圈子图谱 |
 | Job / JobEvent | kind、status（含 **cancelled**）、attempts、error / level、message | Jobs、壳徽章 |
-| Document / ChunkHit | status（pending→parsing→chunking→embedding→ready/failed）/ score | Knowledge |
+| Document / ChunkHit | status（pending→parsing→chunking→embedding→ready/failed）/ score | Wiki 文档（原 Knowledge） |
 | WikiPage | slug、page_type、frontmatter、origin、version | Wiki |
 | GraphDto | nodes/edges/communities（社区发现） | Wiki 图谱 |
 | Provider / UsageRow / ApiKey | model_id、capability、is_default、warning / tokens、latency / scopes | Settings |
@@ -27,7 +27,7 @@
 
 - 无全局 store；页面级 `useState` + `@tanstack/react-query`（部分页面）+ 路由参数（如 `/wiki?page=slug`）。
 - 壳级状态：`authed`（登录守卫）、`collapsed`（侧栏）、`openedAt`（命令面板，派生自 locationKey）。
-- 轮询：Knowledge 状态机 3s（有待处理文档时）；壳徽章 10s（useSystemStatus，页面隐藏跳过）。
+- 轮询：Wiki 文档状态机 3s（有待处理文档时）；壳徽章 10s（useSystemStatus，页面隐藏跳过）。
 
 ## localStorage 键（全部本地，无跨设备）
 

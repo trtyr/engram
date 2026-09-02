@@ -3,6 +3,10 @@
 > 审计日期：2026-08-28
 > 范围：web 前端 vs server 后端
 > 权威基准：后端 8090 OpenAPI
+>
+> ⚠️ **2026-09-02 过时标注**：knowledge 域端点已并入 /wiki 前缀（`/knowledge/*` 保留兼容别名），
+> 前端融合成一个 Wiki 页（删 Knowledge.tsx）。本报告为历史快照，knowledge 行请按
+> `/wiki/documents*` 理解；合并后的最新调用点分布见 [api.md](api.md)。
 
 ## 1. 端点覆盖核对
 

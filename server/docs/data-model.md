@@ -1,6 +1,6 @@
 # 数据模型
 
-> 2026-09-02 实查：迁移目录 22 个 SQL；运行库 public schema 业务表 24 张（另有 `_sqlx_migrations` 簿记表）。
+> 2026-09-02 实查：迁移目录 24 个 SQL；运行库 public schema 业务表 24 张（另有 `_sqlx_migrations` 簿记表）。
 > 权威 schema 以 `server/migrations/` 为准。
 
 ## 表清单（24 张业务表）
@@ -32,7 +32,7 @@
 | LLM | settings | 路由表等 JSONB 配置 |
 | LLM | llm_usage | 用量记账（provider/model/purpose/tokens/latency） |
 
-## 迁移史（22 个）
+## 迁移史（24 个）
 
 | 迁移 | 内容要点 |
 |---|---|
@@ -49,6 +49,8 @@
 | 0020 | **entity_revisions**（实体摘要版本链） |
 | 0021 | **entity_relations**（有向类型化关系：5 类枚举 + 方向唯一索引 + weight） |
 | 0022 | llm_providers **models→model_id+capability**（一个供应商一个模型一个 key，多模型拆分成行） |
+| 0023 | raw_sessions.**sensitive**（会话级敏感标记，蒸馏产物自动继承） |
+| 0024 | atoms 无 source_refs 的 active 残留打标 `origin=direct-write`（溯源断但可审计） |
 
 ## 数据流（写路径）
 

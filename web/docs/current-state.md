@@ -4,8 +4,8 @@
 
 ## 一句话状态
 
-vitest 35 / oxlint 0 警告 / tsc 0 / build 0 / journey PASS（含收尾自清）。
-IA 定稿为八页：圈子拆独立页，用户记忆回归纯梯子。
+vitest 37 / oxlint 0 警告 / tsc 0 / build 0 / journey PASS（含收尾自清）。
+IA 定稿为七页：圈子拆独立页，Wiki+Knowledge 合并成一个 Wiki 页。
 
 ## 2026-08-30 基线以来的前端大事记
 
@@ -20,6 +20,7 @@ IA 定稿为八页：圈子拆独立页，用户记忆回归纯梯子。
 8. **e2e 自清**（a7ae4f4）：journey 收尾清 agent/实体/key
 9. **测试隔离**（399deab）：E2E_BASE 必填拒跑 + 一次性栈脚本 + 快照差分自清
 10. **设置节律 tab**（c1f877f）：cron 心跳三态 / 积压年龄 / crontab 安装向导 / 节律事件流
+11. **Wiki+Knowledge 合并**（2026-09-02）：/knowledge 并入 /wiki 前缀，前端融合一个 Wiki 页（文档 tab 默认，接管上传/URL/阅读/检索），删 Knowledge.tsx + 侧栏「知识库」项；图谱 Obsidian 化（hover 邻居高亮/拖拽/缩放/边权重/位置缓存）
 
 ## 已知前端未了项
 
