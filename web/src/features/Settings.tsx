@@ -8,10 +8,21 @@ import { Button } from '@/components/ui/button'
 type Tab = 'providers' | 'routing' | 'keys' | 'rhythm'
 
 const TABS: { value: Tab; label: string }[] = [
-  { value: 'providers', label: 'Providers' },
+  { value: 'providers', label: '供应商' },
   { value: 'routing', label: '路由' },
-  { value: 'keys', label: 'API Keys' },
+  { value: 'keys', label: 'API 密钥' },
   { value: 'rhythm', label: '节律' },
+]
+
+const PURPOSES: { key: string; label: string; desc: string }[] = [
+  { key: 'extract', label: '抽取', desc: 'L0 会话 → L1 原子（高频，flash 档）' },
+  { key: 'arbitrate', label: '仲裁', desc: '近重复/矛盾判定（flash 档）' },
+  { key: 'embed', label: '嵌入', desc: '文本向量化（embedding 模型）' },
+  { key: 'organize', label: '组织', desc: 'L1 原子 → L2 场景（中档）' },
+  { key: 'consolidate', label: '整理', desc: '画像 + 实体档案 + 关系回溯（中档）' },
+  { key: 'wiki_analysis', label: 'Wiki 分析', desc: '源文本分析' },
+  { key: 'persona', label: '画像', desc: 'L2 场景 → L3 画像（pro 档）' },
+  { key: 'wiki_generation', label: 'Wiki 生成', desc: '页面生成（pro 档）' },
 ]
 
 export default function Settings() {
@@ -25,8 +36,9 @@ export default function Settings() {
       {tab === 'keys' && <Keys />}
       {tab === 'rhythm' && <RhythmPane />}
 
-      <div className="mt-10 space-y-3">
+      <div className="mt-10 space-y-3 border-t border-border pt-6">
         <h2 className="text-sm font-semibold text-destructive">危险区域</h2>
+        <p className="text-xs text-muted-foreground">以下操作不可逆，执行前会二次确认。</p>
         <ReencryptPane />
         <DeepPurgePane />
       </div>
@@ -40,13 +52,24 @@ function Providers() {
   const [form, setForm] = useState({ name: '', base_url: '', api_key: '', chat_model: '', embed_model: '' })
   const [testMsg, setTestMsg] = useState<Record<string, string>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
   const load = () => api.get<Provider[]>('/settings/llm/providers').then(setRows).catch((e) => setErr(e.message))
+  const closeForm = () => {
+    setShowForm(false)
+    setEditingId(null)
+    setForm({ name: '', base_url: '', api_key: '', chat_model: '', embed_model: '' })
+  }
   useEffect(() => {
     load()
   }, [])
   return (
     <div className="space-y-4">
+      {showForm ? (
       <Card className="p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold">{editingId ? '编辑供应商' : '注册供应商'}</h3>
+          <button type="button" onClick={closeForm} className="text-xs text-muted-foreground transition-colors hover:text-foreground">收起</button>
+        </div>
         <form
           className="grid gap-3 md:grid-cols-2"
           onSubmit={async (e) => {
@@ -135,8 +158,7 @@ function Providers() {
                 variant="outline"
                 type="button"
                 onClick={() => {
-                  setEditingId(null)
-                  setForm({ name: '', base_url: '', api_key: '', chat_model: '', embed_model: '' })
+                  closeForm()
                 }}
               >
                 取消
@@ -145,6 +167,17 @@ function Providers() {
           </div>
         </form>
       </Card>
+      ) : (
+        <Button
+          onClick={() => {
+            setEditingId(null)
+            setForm({ name: '', base_url: '', api_key: '', chat_model: '', embed_model: '' })
+            setShowForm(true)
+          }}
+        >
+          {rows?.length ? '注册新供应商' : '注册供应商'}
+        </Button>
+      )}
       {err && <ErrorBox msg={err} />}
       {rows === null ? (
         <Spinner />
@@ -189,6 +222,7 @@ function Providers() {
                   setEditingId(p.id)
                   setForm({ name: p.name, base_url: p.base_url, api_key: '', chat_model: chat, embed_model: embed })
                   setErr('')
+                  setShowForm(true)
                 }}
               >
                 编辑
@@ -217,36 +251,105 @@ function Providers() {
 }
 
 function Routing() {
+  const [routing, setRouting] = useState<Record<string, Array<{ provider: string; model: string }>> | null>(null)
+  const [editing, setEditing] = useState(false)
   const [text, setText] = useState('')
   const [msg, setMsg] = useState('')
   useEffect(() => {
-    api.get<Record<string, unknown>>('/settings/llm/routing').then((r) => setText(JSON.stringify(r, null, 2))).catch(() => {})
+    api
+      .get<Record<string, Array<{ provider: string; model: string }>>>('/settings/llm/routing')
+      .then(setRouting)
+      .catch(() => setRouting({}))
   }, [])
+
+  if (editing) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">purpose → provider/model 回退链（JSON 整表替换，PUT 非 PATCH）</p>
+        <textarea
+          className={`${inputCls} h-72 w-full font-mono`}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={async () => {
+              try {
+                const parsed = JSON.parse(text)
+                await api.put('/settings/llm/routing', parsed)
+                setRouting(parsed)
+                setEditing(false)
+                setMsg('已保存')
+              } catch (ex) {
+                setMsg(ex instanceof Error ? ex.message : '保存失败（JSON 非法?）')
+              }
+            }}
+          >
+            保存
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+            取消
+          </Button>
+          {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        purpose → provider/model 回退链（extract/arbitrate/organize/consolidate/persona/wiki_analysis/wiki_generation）
-      </p>
-      <textarea
-        className={`${inputCls} h-72 w-full font-mono`}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-      <div className="flex items-center gap-2">
+    <div className="space-y-4">
+      <Card className="overflow-x-auto">
+        <table className={tableCls.root}>
+          <thead className={tableCls.thead}>
+            <tr>
+              <th className={tableCls.th}>用途</th>
+              <th className={tableCls.th}>说明</th>
+              <th className={tableCls.th}>回退链</th>
+            </tr>
+          </thead>
+          <tbody>
+            {PURPOSES.map((p) => {
+              const chain = routing?.[p.key] ?? []
+              return (
+                <tr key={p.key} className={tableCls.row}>
+                  <td className={`${tableCls.td} whitespace-nowrap`}>
+                    <span className="font-medium">{p.label}</span>{' '}
+                    <span className="font-mono text-xs text-muted-foreground">{p.key}</span>
+                  </td>
+                  <td className={`${tableCls.td} text-muted-foreground`}>{p.desc}</td>
+                  <td className={`${tableCls.td} font-mono text-xs`}>
+                    {chain.length === 0 ? (
+                      <span className="text-muted-foreground">未配置 · 用默认供应商</span>
+                    ) : (
+                      chain.map((c, i) => (
+                        <span key={i}>
+                          {c.provider}
+                          <span className="text-muted-foreground"> → </span>
+                          {c.model}
+                          {i < chain.length - 1 && <span className="text-muted-foreground"> · </span>}
+                        </span>
+                      ))
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </Card>
+      <div className="flex items-center gap-3">
         <Button
           size="sm"
-          onClick={async () => {
-            try {
-              await api.put('/settings/llm/routing', JSON.parse(text))
-              setMsg('已保存')
-            } catch (ex) {
-              setMsg(ex instanceof Error ? ex.message : '保存失败（JSON 非法?）')
-            }
+          variant="outline"
+          onClick={() => {
+            setText(JSON.stringify(routing ?? {}, null, 2))
+            setEditing(true)
           }}
         >
-          保存
+          编辑 JSON
         </Button>
-        {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+        <p className="text-xs text-muted-foreground">8 个 purpose 映射到 provider/model 回退链；未配置的 purpose 回退到默认供应商。</p>
       </div>
     </div>
   )
@@ -262,28 +365,32 @@ function Keys() {
   }, [])
   return (
     <div className="space-y-4">
-      <form
-        className="flex gap-2"
-        onSubmit={async (e) => {
-          e.preventDefault()
-          const r = await api.post<{ key: string }>('/settings/api-keys', { name })
-          setNewKey(r.key)
-          setName('')
-          load()
-        }}
-      >
-        <label htmlFor="key-name" className="text-sm font-medium">名称</label>
-        <input
-          id="key-name"
-          className={`${inputCls} w-48`}
-          placeholder="pi-agent"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <Button size="sm" variant="outline" type="submit">
-          签发
-        </Button>
-      </form>
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold">签发新密钥</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">给 AI 客户端签发 amk_ 密钥（scope 在签发时选择）</p>
+        <form
+          className="mt-3 flex flex-wrap items-center gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault()
+            const r = await api.post<{ key: string }>('/settings/api-keys', { name })
+            setNewKey(r.key)
+            setName('')
+            load()
+          }}
+        >
+          <label htmlFor="key-name" className="text-sm font-medium">名称</label>
+          <input
+            id="key-name"
+            className={`${inputCls} w-48`}
+            placeholder="pi-agent"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Button size="sm" type="submit">
+            签发
+          </Button>
+        </form>
+      </Card>
       {newKey && (
         <Card className="border-success/30 bg-success/10 p-4">
           <p className="text-xs text-muted-foreground">新 key（只显示这一次，给 AI 客户端用）：</p>
