@@ -80,6 +80,11 @@ vi.mock('@/lib/api', () => {
       if (p.includes('/re-embed')) return undefined
       if (p === '/wiki/search') return state.wikiSearchResult
       if (p.endsWith('/re-encrypt')) return { re_encrypted: state.reencryptResult }
+      if (p === '/settings/llm/providers') {
+        const b = _b as { name: string; base_url: string; model_id: string; capability: string }
+        return { id: 'new1', name: b.name, base_url: b.base_url, model_id: b.model_id, capability: b.capability, is_default: false }
+      }
+      if (p === '/settings/llm/routing/suggest') return {}
       return {}
     }),
     patch: vi.fn(async (_p: string, _b?: unknown) => ({})),
@@ -288,6 +293,57 @@ describe('Provider 编辑 / 删除', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => {
       expect(api.del).toHaveBeenCalledWith('/settings/llm/providers/p1')
+    })
+  })
+})
+
+describe('AI 功能页全景', () => {
+  const p1 = {
+    id: 'p1',
+    name: 'openai',
+    base_url: 'https://api.openai.com/v1',
+    model_id: 'gpt-4',
+    capability: 'chat',
+    is_default: true,
+  }
+
+  it('默认 tab 展示 8 个 AI 功能点，嵌入功能点可配新 API（capability=embedding）', async () => {
+    mockState.providers = [p1]
+    render(wrap(<Settings />))
+    // 默认 tab 即「AI 功能」，8 个功能点都在
+    await screen.findByText('抽取')
+    expect(screen.getByText('嵌入')).toBeInTheDocument()
+    expect(screen.getByText('画像')).toBeInTheDocument()
+    expect(screen.getByText('Wiki 生成')).toBeInTheDocument()
+    // 嵌入是第 3 个功能点（抽取/仲裁/嵌入），点它的「配新 API」
+    const addButtons = screen.getAllByRole('button', { name: '配新 API' })
+    expect(addButtons).toHaveLength(8)
+    fireEvent.click(addButtons[2])
+    fireEvent.change(screen.getByPlaceholderText('https://api.example.com'), { target: { value: 'https://embed.example.com' } })
+    fireEvent.change(screen.getByPlaceholderText('BAAI/bge-m3'), { target: { value: 'bge-m3' } })
+    fireEvent.change(screen.getByPlaceholderText('sk-…'), { target: { value: 'sk-embed' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存并配给「嵌入」' }))
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith(
+        '/settings/llm/providers',
+        expect.objectContaining({ capability: 'embedding', model_id: 'bge-m3' }),
+      )
+      expect(api.put).toHaveBeenCalledWith(
+        '/settings/llm/routing',
+        expect.objectContaining({ embed: [{ provider: '嵌入-bge-m3', model: 'bge-m3' }] }),
+      )
+    })
+  })
+
+  it('有供应商时「让 AI 帮我配」调 suggest 并 PUT 应用', async () => {
+    mockState.providers = [p1]
+    render(wrap(<Settings />))
+    const aiBtn = screen.getByRole('button', { name: '让 AI 帮我配' })
+    await waitFor(() => expect(aiBtn).not.toBeDisabled())
+    fireEvent.click(aiBtn)
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith('/settings/llm/routing/suggest', {})
+      expect(api.put).toHaveBeenCalledWith('/settings/llm/routing', expect.anything())
     })
   })
 })
