@@ -12,7 +12,7 @@
 └───────────────┬────────────────────────────────────────────┘
                 │ 同源 fetch（Bearer ams_/amk_）
 ┌───────────────▼──────────────── agent-memory-server ───────┐
-│ axum Router（78 路径，9 域）                                │
+│ axum Router（79 路径，9 域）                                │
 │ ├─ 认证层 bearer_auth（/jobs 对 text/html 分流回 SPA）       │
 │ ├─ rust-embed：web/dist 静态托管（生产单二进制）             │
 │ └─ 域 crate：distill / wiki-engine / cg-bridge / search     │

@@ -1,6 +1,6 @@
 # API
 
-> 2026-09-02 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **78 路径 / 96 方法注册**（GET 40 · POST 42 · PUT 4 · PATCH 3 · DELETE 7）。
+> 2026-09-02 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **79 路径 / 97 方法注册**（GET 40 · POST 43 · PUT 4 · PATCH 3 · DELETE 7）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 七 scope：memory/knowledge/wiki/codegraph/llm/erase/cron）。
@@ -20,6 +20,7 @@
 | GET/POST | /memory/sessions | 会话列表（过滤 agent/distill_status）/ 写入新会话（turns 数组、distill auto/manual/off、30s 防抖自动蒸馏） |
 | DELETE/GET | /memory/sessions/{id} | 详情 / 擦除（**需 erase scope**；关联原子溯源标记 erased） |
 | POST | /memory/sessions/{id}/append | 追加轮次（仅 pending 会话；agent 维度；已蒸馏 400 引导开新会话） |
+| POST | /memory/sessions/import | 批量导入历史对话为会话（JSONL/文本 → turns → source=import；蒸馏感知 import 过滤对方观点） |
 | POST | /memory/sessions/{id}/void | 作废未蒸馏会话（one-way，区别于擦除） |
 | POST | /memory/distill | 触发蒸馏流水线（202 + Job[]；full=true 附带 consolidate——含实体档案 + **关系回溯**：存量实体无 session 重放也抽关系，常识关系 + 记忆明确关系；空认领也链 organize——直写原子可聚类） |
 | GET/POST | /memory/atoms | 原子列表（needs_review/sensitive 过滤）/ 手工补录（幂等：同 kind+content 活体返回既有；低置信自动人审） |
@@ -29,7 +30,7 @@
 | GET | /memory/persona、/history | 画像分面（含 manually_edited）/ 版本历史（evidence_refs） |
 | PATCH | /memory/persona | 用户编辑分面（钉住）/ 解锁 / 查询钉住态——AI 403 |
 | POST | /memory/persona/rollback | 回滚到历史版本（Json body {aspect, to_version}，回滚也钉住） |
-| POST | /memory/search | 四层检索（layers: l1/l2/l3/entities；max_items；reveal 敏感；no_feedback 防热度污染） |
+| POST | /memory/search | 四层检索（layers: l1/l2/l3/entities；max_items；reveal 敏感；no_feedback 防热度污染；from/to 时间窗过滤——occurred_at 优先 NULL fallback created_at；valid_until 过期原子 score ×0.5 降权） |
 | GET | /memory/context | Agent 上下文（画像+记忆+**实体透镜**+**pending_review 代问**；no_feedback） |
 | GET/POST | /memory/entities、/graph | 实体列表（kind 过滤、密度排序）/ 新建 / 共现图谱（边=同原子共现强度） |
 | GET | /memory/entities/search | 圈子语义检索（token 打分，名字命中 1.0 > 摘要 0.3） |
