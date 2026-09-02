@@ -101,6 +101,17 @@ export default function Galaxy({
     }
     return [...m.values()].filter((g) => g.length > 1)
   }, [graph])
+  // 图数据 useMemo 缓存：EntityGalaxy 的 useEffect 依赖 graph 引用——直接传字面量
+  // 会在每次 re-render 造新对象，触发图销毁重建 + 力导向重跑（卡顿/闪动的根因）。
+  // 图显示全量实体（Obsidian 全貌），搜索/类型过滤只作用于左侧列表。
+  const galaxyData = useMemo(
+    () => ({
+      nodes: graph?.nodes ?? [],
+      edges: graph?.edges ?? [],
+      relations: graph?.relations ?? [],
+    }),
+    [graph],
+  )
 
   if (err) return <ErrorBox msg={err} />
   if (!graph) return <Spinner />
@@ -318,7 +329,7 @@ export default function Galaxy({
             )}
             <Suspense fallback={<div className="min-h-0 flex-1 animate-pulse rounded-lg bg-muted/30" />}>
               <EntityGalaxy
-                graph={{ nodes: visible, edges: graph.edges, relations: graph.relations }}
+                graph={galaxyData}
                 onSelect={setSelected}
                 onGoPersona={onGoPersona}
               />

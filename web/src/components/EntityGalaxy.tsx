@@ -103,24 +103,33 @@ export default function EntityGalaxy({
     })
     sigmaRef.current = sigma
 
-    // 力导向自组织：约 2.5 秒的活布局（重力收拢 + 共现抱团），然后定格。
-    // 「我」fixed 居中，实体围绕成簇——图不再是一张死画。
+    // 力导向自组织：约 2 秒的活布局（重力收拢 + 共现抱团），然后定格。
+    // 降频 + skipIndexation 防卡顿：每 2 帧算一次力导向，refresh 跳过空间索引重建
+    // （只重绘不重索引），定格前最后一次全量 refresh 收尾。
     let running = true
+    let frame = 0
     const start = performance.now()
     const tick = () => {
       if (!running) return
-      forceAtlas2.assign(g, {
-        iterations: 3,
-        settings: {
-          gravity: 4,
-          scalingRatio: 10,
-          slowDown: 6,
-          barnesHutOptimize: true,
-          edgeWeightInfluence: 0.5,
-        },
-      })
-      sigma.refresh()
-      if (performance.now() - start < 2500) requestAnimationFrame(tick)
+      frame += 1
+      if (frame % 2 === 0) {
+        forceAtlas2.assign(g, {
+          iterations: 3,
+          settings: {
+            gravity: 4,
+            scalingRatio: 10,
+            slowDown: 6,
+            barnesHutOptimize: true,
+            edgeWeightInfluence: 0.5,
+          },
+        })
+        sigma.refresh({ skipIndexation: true })
+      }
+      if (performance.now() - start < 2000) {
+        requestAnimationFrame(tick)
+      } else {
+        sigma.refresh() // 定格前全量重绘（含索引重建）
+      }
     }
     requestAnimationFrame(tick)
 
