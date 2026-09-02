@@ -133,7 +133,7 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
           </div>
 
           <p className="mt-8 text-center font-mono text-xs text-muted-foreground/70">
-            Memory · Knowledge · Wiki · CodeGraph
+            Memory · Circle · Wiki · CodeGraph
           </p>
         </form>
       </div>

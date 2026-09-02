@@ -6,7 +6,6 @@ import {
   Card,
   Empty,
   ErrorBox,
-  PageHeader,
   Spinner,
   StatusBadge,
 } from '@/components/ui-bits'
@@ -27,7 +26,7 @@ const MIME_LABEL: Record<string, string> = {
 const mimeTag = (m: string | null) =>
   m ? MIME_LABEL[m] ?? m.replace(/^application\//, '').slice(0, 8) : '—'
 
-export default function Knowledge() {
+export function DocumentsPane() {
   const [docs, setDocs] = useState<Document[] | null>(null)
   const [err, setErr] = useState('')
   const [url, setUrl] = useState('')
@@ -41,7 +40,7 @@ export default function Knowledge() {
   const [hits, setHits] = useState<ChunkHit[] | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const load = () => api.get<Document[]>('/knowledge/documents?limit=100').then(setDocs).catch((e) => setErr(e.message))
+  const load = () => api.get<Document[]>('/wiki/documents?limit=100').then(setDocs).catch((e) => setErr(e.message))
   useEffect(() => {
     load()
   }, [])
@@ -57,7 +56,7 @@ export default function Knowledge() {
     setIngesting(true)
     setNotice(`摄取中：${f.name}`)
     try {
-      await api.upload('/knowledge/upload', f)
+      await api.upload('/wiki/upload', f)
       setNotice(`已入列：${f.name}`)
       load()
     } catch (ex) {
@@ -75,9 +74,7 @@ export default function Knowledge() {
   const activeDoc = (docs ?? []).find((d) => d.id === activeId) ?? null
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="知识库" desc="文档 / URL 摄取 → 分块 → 嵌入 → 混合检索" />
-
+    <div className="space-y-4">
       <div
         className={cn(
           'rounded-lg border-2 border-dashed px-4 py-3 transition-colors',
@@ -123,7 +120,7 @@ export default function Knowledge() {
               setIngesting(true)
               setNotice(`摄取中：${url}`)
               try {
-                await api.post('/knowledge/documents', { url })
+                await api.post('/wiki/documents', { url })
                 setNotice(`已提交：${url}`)
                 setUrl('')
                 load()
@@ -166,7 +163,7 @@ export default function Knowledge() {
           if (searching || !q.trim()) return
           setSearching(true)
           try {
-            setHits(await api.post<ChunkHit[]>('/knowledge/search', { query: q, max_items: 10 }))
+            setHits(await api.post<ChunkHit[]>('/wiki/documents/search', { query: q, max_items: 10 }))
           } finally {
             setSearching(false)
           }
@@ -293,7 +290,7 @@ function DocReader({ doc, onDeleted }: { doc: Document; onDeleted: () => void })
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   useEffect(() => {
-    api.get<typeof rows>(`/knowledge/documents/${doc.id}/chunks`).then(setRows).catch(() => setRows([]))
+    api.get<typeof rows>(`/wiki/documents/${doc.id}/chunks`).then(setRows).catch(() => setRows([]))
   }, [doc.id])
   const failedCount = (rows ?? []).filter((c) => c.embed_failed).length
   return (
@@ -321,7 +318,7 @@ function DocReader({ doc, onDeleted }: { doc: Document; onDeleted: () => void })
             className="hover:bg-destructive/10 hover:text-destructive"
             onClick={async () => {
               if (!confirm(`删除文档「${doc.title}」？分块与嵌入向量将一并删除，不可恢复。`)) return
-              await api.del(`/knowledge/documents/${doc.id}`)
+              await api.del(`/wiki/documents/${doc.id}`)
               onDeleted()
             }}
           >
@@ -347,7 +344,7 @@ function DocReader({ doc, onDeleted }: { doc: Document; onDeleted: () => void })
                     setBusy(true)
                     setMsg('')
                     try {
-                      await api.post(`/knowledge/documents/${doc.id}/re-embed`)
+                      await api.post(`/wiki/documents/${doc.id}/re-embed`)
                       setMsg('重嵌任务已入队')
                     } catch (ex) {
                       setMsg(ex instanceof Error ? ex.message : '重嵌失败')

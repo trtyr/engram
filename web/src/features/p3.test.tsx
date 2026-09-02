@@ -56,8 +56,8 @@ vi.mock('@/lib/api', () => {
   const api = {
     get: vi.fn(async (p: string) => {
       if (p.startsWith('/settings/llm/providers')) return state.providers
-      if (p.startsWith('/knowledge/documents/') && p.endsWith('/chunks')) return state.chunks
-      if (p.startsWith('/knowledge/documents')) return state.docs
+      if (p.startsWith('/wiki/documents/') && p.endsWith('/chunks')) return state.chunks
+      if (p.startsWith('/wiki/documents')) return state.docs
       if (p.startsWith('/memory/sessions')) return state.sessions
       if (p.startsWith('/memory/atoms')) return state.atoms
       if (p.startsWith('/memory/entities/graph')) return { nodes: [], edges: [] }
@@ -119,7 +119,7 @@ const mockState = (api as unknown as { __state: MockState }).__state
 import Dashboard from '@/features/Dashboard'
 import Memory from '@/features/Memory'
 import Settings from '@/features/Settings'
-import Knowledge from '@/features/Knowledge'
+import { DocumentsPane } from '@/features/Knowledge'
 import Wiki from '@/features/Wiki'
 
 const wrap = (ui: React.ReactElement) => <MemoryRouter initialEntries={['/']}>{ui}</MemoryRouter>
@@ -348,14 +348,14 @@ describe('Knowledge re-embed', () => {
       { seq: 1, content: '块1', embed_failed: true },
       { seq: 2, content: '块2', embed_failed: false },
     ]
-    render(wrap(<Knowledge />))
+    render(wrap(<DocumentsPane />))
     // 主从版式：目录项 + 阅读区标题都显示文档名
     await screen.findAllByText('doc')
     // 主从版式：首篇自动选中，阅读区直接可见
     await screen.findByText('1 个分块嵌入失败（FTS 降级）')
     fireEvent.click(screen.getByRole('button', { name: '重嵌缺失块' }))
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith('/knowledge/documents/d1/re-embed')
+      expect(api.post).toHaveBeenCalledWith('/wiki/documents/d1/re-embed')
     })
   })
 })
@@ -383,6 +383,7 @@ describe('Wiki 搜索', () => {
       pages: [{ id: 'w1', slug: 'tokio', title: 'Tokio', page_type: 'concept', content: '', frontmatter: {}, origin: 'llm', version: 1, updated_at: '2026-08-20T00:00:00Z' }],
     }
     render(wrap(<Wiki />))
+    fireEvent.click(screen.getByRole('button', { name: '页面' }))
     const input = await screen.findByPlaceholderText('搜索 Wiki…')
     fireEvent.change(input, { target: { value: 'tokio' } })
     fireEvent.click(screen.getByRole('button', { name: '搜索' }))

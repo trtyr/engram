@@ -53,8 +53,8 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   await page.getByRole('button', { name: '登录' }).click()
   await expect(page.getByRole('link', { name: '用户记忆' })).toBeVisible({ timeout: 10_000 })
 
-  // ---------- 2. Knowledge：上传 -> ready -> 分块预览 ----------
-  await page.getByRole('link', { name: '知识库' }).click()
+  // ---------- 2. Wiki 文档 tab（原 Knowledge）：上传 -> ready -> 分块预览 ----------
+  await page.getByRole('link', { name: 'Wiki' }).click()
   await expect(page.getByTestId('dropzone'), '拖拽上传区应存在').toBeVisible()
   const mdContent = '# Playwright \u4e4b\u65c5\n\nPlaywright \u9a71\u52a8\u771f\u5b9e\u6d4f\u89c8\u5668\u5b8c\u6210\u7aef\u5230\u7aef\u9a8c\u8bc1\u3002\n\n## \u65ad\u8a00\u6a21\u578b\n\nexpect(locator).toBeVisible() \u662f\u81ea\u52a8\u91cd\u8bd5\u65ad\u8a00\u3002\n\n## \u8865\u5145\n\n' + '\u6d4b\u8bd5\u6700\u4f73\u5b9e\u8df5\u8865\u5145\u5185\u5bb9\u3002'.repeat(40)
   await page.setInputFiles('input[type=file]', {
@@ -95,6 +95,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   // ---------- 4. Wiki：ingest -> 页面出现 -> sigma 图谱（依赖 LLM 生成，无 provider 跳过） ----------
   if (hasLlm) {
     await page.getByRole('link', { name: 'Wiki' }).click()
+    await page.getByRole('button', { name: '\u9875\u9762' }).click()
     await page.getByText('\u65b0\u6587\u6863 ingest').click()
     await page.getByPlaceholder('\u6807\u9898').fill(`e2e-wiki-${Date.now()}`)
     await page.getByPlaceholder('\u6e90\u6587\u672c').fill('Playwright \u662f\u6d4f\u89c8\u5668\u81ea\u52a8\u5316\u6846\u67b6\u3002\u81ea\u52a8\u91cd\u8bd5\u65ad\u8a00\u662f\u5176\u6838\u5fc3\u7279\u6027\uff0c\u8ba9\u7aef\u5230\u7aef\u6d4b\u8bd5\u7a33\u5b9a\u53ef\u9760\u3002web-first assertions \u662f\u63a8\u8350\u5199\u6cd5\u3002')

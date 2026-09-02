@@ -4,15 +4,17 @@ import WikiGraph from '@/components/WikiGraph'
 import InsightsPanel from '@/components/InsightsPanel'
 import ReviewQueue from '@/components/ReviewQueue'
 import WikiMarkdown from '@/components/WikiMarkdown'
+import { DocumentsPane } from './Knowledge'
 import { useSearchParams } from 'react-router-dom'
 import { api, type GraphDto, type LintReport, type Purpose, type WikiPage, type WikiSearchResponse } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'pages' | 'graph' | 'insights' | 'lint' | 'proposals' | 'sources' | 'purpose'
+type Tab = 'documents' | 'pages' | 'graph' | 'insights' | 'lint' | 'proposals' | 'sources' | 'purpose'
 
 const TABS: { value: Tab; label: string }[] = [
+  { value: 'documents', label: '文档' },
   { value: 'pages', label: '页面' },
   { value: 'graph', label: '图谱' },
   { value: 'insights', label: '洞察' },
@@ -23,11 +25,12 @@ const TABS: { value: Tab; label: string }[] = [
 ]
 
 export default function Wiki() {
-  const [tab, setTab] = useState<Tab>('pages')
+  const [tab, setTab] = useState<Tab>('documents')
   return (
     <div className="space-y-6">
-      <PageHeader title="Wiki" desc="LLM 增量维护的互链知识库" />
+      <PageHeader title="Wiki" desc="文档 → 自动织入互链知识库（原料可检索原文，页面由 LLM 增量维护）" />
       <Tabs items={TABS} value={tab} onChange={setTab} />
+      {tab === 'documents' && <DocumentsPane />}
       {tab === 'pages' && <PagesPane />}
       {tab === 'graph' && <GraphPane />}
       {tab === 'insights' && <GraphWithInsights />}
