@@ -10,6 +10,7 @@ agent-memory 仓库的规划树根。项目级基线由 [baseline/](baseline/REA
 | [memory-rhythm](plans/memory-rhythm/README.md) | Done | 双节律收官（cron scope 分权 d7a8345 + 落档 8db2c36） | 外部 cron + 层 A+B + 心跳/status + 三线分权 + 设置节律页 | 上线后观察：conflict-matrix B/D 项 |
 | [circle](plans/circle/README.md) | Done | 13 项强化全量落地（2026-09-01 goal mtiojzx1） | 审计 + P1/P2/P3 实施：关系升级 A/时间轴/批量/导出/检索/去重/历史 | 数据密度自然积累 |
 | [ai-permissions](plans/ai-permissions/README.md) | Done | 权限收窄 + 二期三项全落地验收（2026-09-02） | 收窄直写/erase 分权 + 会话敏感 + 文件导入 + 过期降权 + 时间过滤 | 稳定运行（Deferred 观察项） |
+| [wiki-unify](plans/wiki-unify/README.md) | Planning | Knowledge+Wiki 合并方案已成（2026-09-02，用户拍板：彻底合一/保留 Wiki/自动织 + Obsidian 式知识图谱） | 无（规划中） | 等 open-questions 拍板后实施：后端合一 → 自动织 → 前端融合 → 图谱升级 |
 
 ## Registered Roots
 
