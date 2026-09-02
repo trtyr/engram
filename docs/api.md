@@ -1,6 +1,6 @@
 # API（集成索引）
 
-全栈共一个 HTTP API，**76 路径 / 94 方法注册**（GET 40 · POST 40 · PUT 4 · PATCH 3 · DELETE 7，2026-09-02 运行中服务
+全栈共一个 HTTP API，**78 路径 / 96 方法注册**（GET 40 · POST 42 · PUT 4 · PATCH 3 · DELETE 7，2026-09-02 运行中服务
 OpenAPI 活体导出）。权威全表在 [server/docs/api.md](../server/docs/api.md)；
 前端消费约定（认证、类型双轨、/jobs 分流）在 [web/docs/api.md](../web/docs/api.md)。
 
@@ -16,7 +16,7 @@ OpenAPI 活体导出）。权威全表在 [server/docs/api.md](../server/docs/ap
 | wiki | /wiki/ingest、/wiki/pages/{slug}、/wiki/graph | 摄取→页面→图谱 |
 | codegraph | /codegraph/projects/{id}/index、/query | 注册→索引→查询 |
 | jobs | /jobs、/jobs/{id}/events、/jobs/{id}/revive | 任务观测与恢复 |
-| settings | /settings/llm/providers、/settings/llm/routing、/settings/api-keys | LLM 网关配置 |
+| settings | /settings/llm/providers、/settings/llm/routing（含 /suggest）、/settings/api-keys（含 /batch-revoke） | LLM 网关配置 |
 | search | POST /search | 跨域统一检索（含实体域） |
 | health | /health、/ready | 探针 |
 

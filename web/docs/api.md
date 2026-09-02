@@ -1,6 +1,6 @@
 # API 面（前端视角）
 
-> 前端是后端 76 路径（94 方法注册）的纯消费者，不自有接口。本文档写消费约定；端点全表见
+> 前端是后端 78 路径（96 方法注册）的纯消费者，不自有接口。本文档写消费约定；端点全表见
 > [server/docs/api.md](../../server/docs/api.md)（当日 OpenAPI 活体导出）。
 
 ## 调用约定（lib/api.ts）
@@ -36,7 +36,7 @@ api.get<T>(path) / post / put / patch / del / upload(path, file)
 Dashboard：POST /search；Memory：sessions/atoms/scenarios/persona + distill + 擦除 + 检索；
 Knowledge：upload/documents/chunks/re-embed/search；Wiki：pages/graph/lint/reviews/insights/
 proposals/sources/purpose/ingest/search；CodeGraph：projects/index/sync/query；
-Jobs：jobs/events/revive；Settings：providers/routing/api-keys/re-encrypt/test + /llm/usage；
+Jobs：jobs/events/revive；Settings：providers/routing/suggest/api-keys/batch-revoke/re-encrypt/test + /llm/usage；
 Login：POST /auth/login；壳：/jobs?limit=1 探活 + /jobs?limit=200 徽章轮询。
 
 历史对接审计（44 调用点零缺漏）见 [api-alignment-audit.md](api-alignment-audit.md)（2026-08-28，

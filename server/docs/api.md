@@ -1,6 +1,6 @@
 # API
 
-> 2026-09-02 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **76 路径 / 94 方法注册**（GET 40 · POST 40 · PUT 4 · PATCH 3 · DELETE 7）。
+> 2026-09-02 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **78 路径 / 96 方法注册**（GET 40 · POST 42 · PUT 4 · PATCH 3 · DELETE 7）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 七 scope：memory/knowledge/wiki/codegraph/llm/erase/cron）。
@@ -98,14 +98,16 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET/POST | /settings/llm/providers | provider 列表 / 注册（**admin 或 llm scope**；base_url 不带 /v1；密钥服务端加密） |
+| GET/POST | /settings/llm/providers | provider 列表 / 注册（**admin 或 llm scope**；base_url 不带 /v1；一个供应商一个模型一个 key——chat 与 embedding 分开注册） |
 | DELETE/PUT | /settings/llm/providers/{id} | 删除（路由引用时 400）/ 更新 |
-| POST | /settings/llm/providers/{id}/test | 连通性测试（chat+embed 探针） |
+| POST | /settings/llm/providers/{id}/test | 连通性测试（按 capability 探针 chat 或 embed） |
 | POST | /settings/llm/providers/re-encrypt | 主密钥轮换后全量重加密（危险操作，admin-only） |
 | GET/PUT | /settings/llm/routing | purpose→provider/model 路由表（整表替换；8 purpose 三档用量） |
+| POST | /settings/llm/routing/suggest | AI 路由建议（读供应商 + 8 用途调 LLM 生成建议，不落库） |
 | GET | /llm/usage | 用量记账（token/延迟/用途） |
 | GET/POST | /settings/api-keys | API Key 列表 / 签发（scope；明文只在创建时返回一次）——admin-only |
 | POST | /settings/api-keys/{id}/revoke | 吊销（admin-only；吊销后 401 文案区分"已撤销"） |
+| POST | /settings/api-keys/batch-revoke | 批量吊销（{ids}；幂等，返回实际吊销数） |
 
 ## 错误文案三问规范（2026-08-31 起）
 

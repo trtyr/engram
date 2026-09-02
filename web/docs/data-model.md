@@ -19,7 +19,7 @@
 | Document / ChunkHit | status（pending→parsing→chunking→embedding→ready/failed）/ score | Knowledge |
 | WikiPage | slug、page_type、frontmatter、origin、version | Wiki |
 | GraphDto | nodes/edges/communities（社区发现） | Wiki 图谱 |
-| Provider / UsageRow / ApiKey | is_default、warning / tokens、latency / scopes | Settings |
+| Provider / UsageRow / ApiKey | model_id、capability、is_default、warning / tokens、latency / scopes | Settings |
 | UnifiedHit / SearchResponse | domain、score、snippet | Dashboard、命令面板 |
 | Purpose / WikiSearchResponse | goals/scope/key_questions | Wiki 目的 |
 
