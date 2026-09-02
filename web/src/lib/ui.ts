@@ -51,4 +51,5 @@ export const tableCls = {
 /** 统一输入框 / 下拉样式。 */
 export const inputCls =
   'rounded-md border border-input bg-card px-3 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-foreground/40'
-export const selectCls = inputCls
+export const selectCls =
+  'appearance-none rounded-md border border-input bg-card px-3 py-1.5 pr-8 text-sm outline-none transition-colors focus-visible:border-foreground/40'

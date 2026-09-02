@@ -169,7 +169,7 @@ export function PersonaHistoryDrawer({ aspect, label, onClose, onGoScenario, onM
                 <span>对比</span>
                 <select
                   aria-label="基线版本（旧）"
-                  className="rounded-md border border-border bg-background px-1.5 py-0.5 text-xs"
+                  className="appearance-none rounded-md border border-border bg-background px-1.5 py-0.5 pr-6 text-xs"
                   value={pickB}
                   onChange={(e) => setPickB(Number(e.target.value))}
                 >
@@ -182,7 +182,7 @@ export function PersonaHistoryDrawer({ aspect, label, onClose, onGoScenario, onM
                 <span>→</span>
                 <select
                   aria-label="对比版本（新）"
-                  className="rounded-md border border-border bg-background px-1.5 py-0.5 text-xs"
+                  className="appearance-none rounded-md border border-border bg-background px-1.5 py-0.5 pr-6 text-xs"
                   value={pickA}
                   onChange={(e) => setPickA(Number(e.target.value))}
                 >

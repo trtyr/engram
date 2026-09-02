@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { api, type ApiKey, type Job, type Provider } from '@/lib/api'
 import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
-import { fmtTime, inputCls, relTime, tableCls } from '@/lib/ui'
+import { fmtTime, inputCls, selectCls, relTime, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
 type Tab = 'providers' | 'routing' | 'keys' | 'rhythm' | 'danger'
@@ -134,7 +134,7 @@ function Providers() {
             <label htmlFor="prov-cap" className="block text-xs font-medium">类型</label>
             <select
               id="prov-cap"
-              className={`${inputCls} w-full`}
+              className={`${selectCls} w-full`}
               value={form.capability}
               onChange={(e) => setForm({ ...form, capability: e.target.value })}
             >
@@ -311,7 +311,7 @@ function Routing() {
                 <span className="text-xs text-muted-foreground">无匹配供应商（去「供应商」注册）</span>
               ) : (
                 <select
-                  className={`${inputCls} w-56`}
+                  className={`${selectCls} w-56`}
                   value={cur}
                   onChange={(e) => save(p.key, e.target.value)}
                   disabled={busy}
@@ -717,7 +717,7 @@ function RhythmPane() {
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             期望周期
             <select
-              className={inputCls + ' h-8 w-28'}
+              className={selectCls + ' h-8 w-28'}
               value={expected}
               onChange={(e) => onExpected(e.target.value)}
               aria-label="期望心跳周期"
