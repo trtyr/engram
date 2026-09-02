@@ -498,6 +498,12 @@ pub async fn create_atom(
     Json(req): Json<CreateAtomRequest>,
 ) -> Result<(StatusCode, Json<AtomDto>), ApiError> {
     require_memory(&principal)?;
+    // 权限收窄：AI 只写会话（原料），直写原子是蒸馏的活——收回直写加工权
+    if !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+            "原子由会话蒸馏产生——AI 记录对话（session-write）即可，蒸馏自动抽取；人工直写断溯源且绕过判重".into(),
+        ));
+    }
     let a = svc(&state)
         .create_atom(
             &req.kind,
@@ -549,7 +555,13 @@ pub async fn update_atom(
     let rewriting = req.content.is_some() || req.kind.is_some() || req.confidence.is_some();
     if rewriting && !matches!(&*principal, Principal::Admin) {
         return Err(ApiError::Forbidden(
-            "content/kind/confidence 编辑仅限用户（Web 登录态）；AI 纠错走 correction：atom-add 新原子 + PATCH 旧原子 superseded_by".into(),
+            "content/kind/confidence 编辑仅限用户（Web 登录态）；AI 纠错走 correction：写纠正对话（session-write），蒸馏自动取代".into(),
+        ));
+    }
+    // 权限收窄：superseded_by 收回——correction 走会话，取代链由蒸馏自动维护
+    if req.superseded_by.is_some() && !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+            "取代链由蒸馏自动维护——AI 写纠正对话（session-write）即可，correction 走会话".into(),
         ));
     }
     Ok(Json(
@@ -627,6 +639,12 @@ pub async fn create_entity_relation(
     Json(req): Json<CreateRelationRequest>,
 ) -> Result<(StatusCode, Json<agent_memory_core::EntityRelationDto>), ApiError> {
     require_memory(&principal)?;
+    // 权限收窄：关系由蒸馏抽取（source=distill），AI 写会话即可
+    if !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+            "关系由蒸馏抽取（source=distill）——AI 写会话即可，蒸馏自动抽取实体间关系".into(),
+        ));
+    }
     let r = svc(&state)
         .create_relation(id, req.to_id, &req.rel_type, "manual")
         .await
@@ -1036,6 +1054,12 @@ pub async fn create_entity(
     Json(req): Json<CreateEntityRequest>,
 ) -> Result<(StatusCode, Json<EntityDto>), ApiError> {
     require_memory(&principal)?;
+    // 权限收窄：实体由蒸馏从会话抽取，AI 写会话即可
+    if !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+            "实体由蒸馏从会话中抽取——AI 写会话即可，蒸馏自动抽取人物/项目/主题/群组".into(),
+        ));
+    }
     let e = svc(&state)
         .create_entity(&req.name, &req.kind, &req.summary)
         .await
@@ -1125,6 +1149,12 @@ pub async fn attach_atom(
     Path((id, atom_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     require_memory(&principal)?;
+    // 权限收窄：原子-实体挂接由蒸馏自动完成
+    if !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+            "原子-实体挂接由蒸馏自动完成——AI 写会话即可".into(),
+        ));
+    }
     svc(&state).attach_atom(id, atom_id).await.map_err(me)?;
     Ok(StatusCode::NO_CONTENT)
 }

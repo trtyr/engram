@@ -212,7 +212,7 @@ async fn api_key_memory_journey() {
         assert_eq!(resp.status(), StatusCode::OK, "GET {uri} 应 200");
     }
 
-    // 写路径：原子 + 实体 + 检索 + context + 蒸馏
+    // 写路径：直写加工权已收回（atom-add/entity-add 403），AI 本职 = 写会话 + 蒸馏 + 检索
     let resp = send(
         &app,
         "POST",
@@ -221,7 +221,11 @@ async fn api_key_memory_journey() {
     )
     .await
     .unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED, "key 应能直写原子");
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "AI 直写原子应 403（蒸馏代劳）"
+    );
     let resp = send(
         &app,
         "POST",
@@ -230,7 +234,11 @@ async fn api_key_memory_journey() {
     )
     .await
     .unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED, "key 应能建实体");
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "AI 建实体应 403（蒸馏代劳）"
+    );
     let resp = send(
         &app,
         "POST",
@@ -711,6 +719,159 @@ async fn edit_split_atom_rewrite_user_only() {
     .await
     .unwrap();
     assert_eq!(audit, 1, "审计行应存在");
+}
+
+// 权限收窄：AI 直写加工权收回（atom-add/entity-add/relation-add/attach/superseded-by 403，用户直写不变）。
+#[tokio::test]
+async fn ai_direct_write_revoked() {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
+    let state = agent_memory_api::state::AppState::new(pool.clone())
+        .with_admin_password(Some("test-admin-pw".into()))
+        .with_master_key(Some("ab".repeat(32)));
+    let app = agent_memory_api::routes::router(state.clone());
+    let admin = login_token(&app).await;
+
+    let svc = agent_memory_core::MemoryService::new(
+        pool.clone(),
+        agent_memory_llm::ProviderRegistry::new(
+            pool.clone(),
+            agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+        ),
+    );
+    // 预置数据：一个原子 + 两个实体（走 svc 直造，绕过 handler 的收窄检查）
+    let atom = svc
+        .create_atom("fact", "测试原子", 0.9, None, None, false)
+        .await
+        .unwrap();
+    let e1 = svc.create_entity("张三", "person", "").await.unwrap();
+    let e2 = svc.create_entity("李四", "person", "").await.unwrap();
+
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+
+    let call = |key: &str, method: &str, uri: String, body: String| {
+        let app = app.clone();
+        let key = key.to_string();
+        let method = method.to_string();
+        async move {
+            let resp = app
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method(method.as_str())
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .header("authorization", format!("Bearer {key}"))
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let code = resp.status();
+            let b = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (code, String::from_utf8_lossy(&b).to_string())
+        }
+    };
+
+    let atom_count: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms WHERE status = 'active'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let entity_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM entities WHERE merged_into IS NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let rel_count: i64 = sqlx::query_scalar("SELECT count(*) FROM entity_relations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // T1.1.1 AI 直写原子 → 403 + 教学文案
+    let (code, body) = call(
+        &mem_key,
+        "POST",
+        "/memory/atoms".into(),
+        r#"{"kind":"fact","content":"T1.1.1","confidence":0.9}"#.into(),
+    )
+    .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains("session-write"), "文案应教写会话：{body}");
+
+    // T1.1.2 AI 直建实体 → 403
+    let (code, body) = call(
+        &mem_key,
+        "POST",
+        "/memory/entities".into(),
+        r#"{"name":"T1.1.2","kind":"person","summary":""}"#.into(),
+    )
+    .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains("蒸馏"), "{body}");
+
+    // T1.1.3 AI 直建关系 → 403
+    let (code, body) = call(
+        &mem_key,
+        "POST",
+        format!("/memory/entities/{}/relations", e1.id),
+        format!(r#"{{"to_id":"{}","rel_type":"related_to"}}"#, e2.id),
+    )
+    .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{body}");
+
+    // T1.1.4 AI 挂原子 → 403
+    let (code, _) = call(
+        &mem_key,
+        "POST",
+        format!("/memory/entities/{}/atoms/{}", e1.id, atom.id),
+        "{}".into(),
+    )
+    .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+
+    // T1.1.5 AI 手动取代链 → 403
+    let (code, body) = call(
+        &mem_key,
+        "PATCH",
+        format!("/memory/atoms/{}", atom.id),
+        r#"{"superseded_by":"00000000-0000-0000-0000-000000000001"}"#.into(),
+    )
+    .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains("correction"), "{body}");
+
+    // T1.1.6 库原封不动
+    let atom_after: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms WHERE status = 'active'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let entity_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM entities WHERE merged_into IS NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let rel_after: i64 = sqlx::query_scalar("SELECT count(*) FROM entity_relations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(atom_after, atom_count, "原子数应原封不动");
+    assert_eq!(entity_after, entity_count, "实体数应原封不动");
+    assert_eq!(rel_after, rel_count, "关系数应原封不动");
+
+    // T1.3 用户（admin）直写原子 → 201，编辑权不变
+    let (code, _) = call(
+        &admin,
+        "POST",
+        "/memory/atoms".into(),
+        r#"{"kind":"fact","content":"用户直写仍可用","confidence":0.9}"#.into(),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED);
 }
 
 // persona 编辑/回滚、实体名/摘要：全部仅用户（amk_ 403）。
