@@ -1032,6 +1032,175 @@ async fn erase_requires_dedicated_scope() {
     assert_eq!(resp.status(), StatusCode::NO_CONTENT, "双 scope 擦除应 204");
 }
 
+/// 权限收窄补充（2026-09-02）：删实体/摘原子/删关系与擦除会话同级——memory-only key 403。
+#[tokio::test]
+async fn delete_endpoints_require_erase_scope() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+    let erase_key = create_key(&app, &admin, &["memory", "erase"]).await;
+
+    let send = |app: &Router, method: &str, uri: &str, auth: &str, body: Option<&str>| {
+        let mut b = Request::builder().method(method).uri(uri);
+        if body.is_some() {
+            b = b.header("content-type", "application/json");
+        }
+        app.clone().oneshot(
+            b.header("authorization", format!("Bearer {auth}"))
+                .body(Body::from(body.unwrap_or_default().to_string()))
+                .unwrap(),
+        )
+    };
+    let id_of = |resp: axum::response::Response| async {
+        let v: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        v["id"].as_str().unwrap().to_string()
+    };
+
+    // 造两个实体（admin，绕过 AI 直写收回）
+    let a = id_of(
+        send(
+            &app,
+            "POST",
+            "/memory/entities",
+            &admin,
+            Some(r#"{"name":"删测A","kind":"person","summary":""}"#),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    let b = id_of(
+        send(
+            &app,
+            "POST",
+            "/memory/entities",
+            &admin,
+            Some(r#"{"name":"删测B","kind":"topic","summary":""}"#),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    // 造关系（admin）
+    let rid = id_of(
+        send(
+            &app,
+            "POST",
+            &format!("/memory/entities/{a}/relations"),
+            &admin,
+            Some(&format!(r#"{{"to_id":"{b}","rel_type":"related_to"}}"#)),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+
+    // ① 删关系
+    let resp = send(
+        &app,
+        "DELETE",
+        &format!("/memory/entities/{a}/relations/{rid}"),
+        &mem_key,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "memory-only 删关系应 403"
+    );
+    let resp = send(
+        &app,
+        "DELETE",
+        &format!("/memory/entities/{a}/relations/{rid}"),
+        &erase_key,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "erase 删关系应 204");
+
+    // ② 删实体
+    let resp = send(
+        &app,
+        "DELETE",
+        &format!("/memory/entities/{a}"),
+        &mem_key,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "memory-only 删实体应 403"
+    );
+    let resp = send(
+        &app,
+        "DELETE",
+        &format!("/memory/entities/{a}"),
+        &erase_key,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "erase 删实体应 204");
+
+    // ③ 摘原子（先造原子 + 挂接）
+    let atom_id = id_of(
+        send(
+            &app,
+            "POST",
+            "/memory/atoms",
+            &admin,
+            Some(r#"{"kind":"fact","content":"摘测原子","confidence":0.9}"#),
+        )
+        .await
+        .unwrap(),
+    )
+    .await;
+    let _ = send(
+        &app,
+        "POST",
+        &format!("/memory/entities/{b}/atoms/{atom_id}"),
+        &admin,
+        None,
+    )
+    .await
+    .unwrap();
+    let resp = send(
+        &app,
+        "DELETE",
+        &format!("/memory/entities/{b}/atoms/{atom_id}"),
+        &mem_key,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "memory-only 摘原子应 403"
+    );
+    let resp = send(
+        &app,
+        "DELETE",
+        &format!("/memory/entities/{b}/atoms/{atom_id}"),
+        &erase_key,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "erase 摘原子应 204");
+}
+
 #[tokio::test]
 async fn openapi_snapshot() {
     let (app, _pg) = app().await;

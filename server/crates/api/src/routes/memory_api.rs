@@ -32,6 +32,17 @@ fn require_cron(p: &Principal) -> Result<(), ApiError> {
     ))
 }
 
+/// erase scope（破坏性分权）：删实体/摘原子/删关系与擦除会话同级——admin 全权 / erase scope。
+/// 权限收窄后 AI（memory-only key）能读能建（走会话蒸馏），但不能毁（删除类操作都要 erase）。
+fn require_erase(p: &Principal) -> Result<(), ApiError> {
+    if p.has_scope("erase") {
+        return Ok(());
+    }
+    Err(ApiError::Forbidden(
+        "删除需要 erase scope（不可逆操作，与读写分权）".into(),
+    ))
+}
+
 fn me(e: MemoryError) -> ApiError {
     match e {
         MemoryError::NotFound(m) => ApiError::NotFound(m),
@@ -664,6 +675,7 @@ pub async fn delete_entity_relation(
     Path((_id, rid)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     require_memory(&principal)?;
+    require_erase(&principal)?;
     svc(&state).delete_relation(rid).await.map_err(me)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1131,6 +1143,7 @@ pub async fn delete_entity(
     axum::extract::Query(fp): axum::extract::Query<ForgetParams>,
 ) -> Result<axum::response::Response, ApiError> {
     require_memory(&principal)?;
+    require_erase(&principal)?;
     if fp.forget.unwrap_or(false) {
         let n = svc(&state).forget_entity(id).await.map_err(me)?;
         return Ok((
@@ -1171,6 +1184,7 @@ pub async fn detach_atom(
     Path((id, atom_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     require_memory(&principal)?;
+    require_erase(&principal)?;
     svc(&state).detach_atom(id, atom_id).await.map_err(me)?;
     Ok(StatusCode::NO_CONTENT)
 }
