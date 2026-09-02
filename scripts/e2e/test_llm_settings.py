@@ -52,11 +52,11 @@ async def main() -> None:
         return
     admin.post("/settings/llm/providers", json={
         "name": "e2e-rt-default", "base_url": e.llm_base_url, "api_key": e.llm_api_key,
-        "models": [
-            {"id": e.llm_chat_model, "capabilities": ["chat"]},
-            {"id": e.llm_embed_model, "capabilities": ["embedding"]},
-        ],
-        "is_default": True,
+        "model_id": e.llm_chat_model, "capability": "chat", "is_default": True,
+    })
+    admin.post("/settings/llm/providers", json={
+        "name": "e2e-rt-embed", "base_url": e.llm_base_url, "api_key": e.llm_api_key,
+        "model_id": e.llm_embed_model, "capability": "embedding", "is_default": True,
     })
 
     section("L4：routing 写入校验（幽灵 provider / typo purpose 拒绝）")

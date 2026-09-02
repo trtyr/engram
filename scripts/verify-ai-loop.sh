@@ -26,7 +26,10 @@ if [ "$PN" -eq 0 ]; then
   fi
   curl -fsS -X POST "$API/settings/llm/providers" -H "authorization: Bearer $TOKEN" \
     -H 'content-type: application/json' \
-    -d "{\"name\":\"gw\",\"base_url\":\"$GW_URL\",\"api_key\":\"$GW_KEY\",\"models\":[{\"id\":\"$GW_CHAT\",\"capabilities\":[\"chat\"]},{\"id\":\"$GW_EMBED\",\"capabilities\":[\"embedding\"]}],\"is_default\":true}" >/dev/null
+    -d "{\"name\":\"gw\",\"base_url\":\"$GW_URL\",\"api_key\":\"$GW_KEY\",\"model_id\":\"$GW_CHAT\",\"capability\":\"chat\",\"is_default\":true}" >/dev/null
+  curl -fsS -X POST "$API/settings/llm/providers" -H "authorization: Bearer $TOKEN" \
+    -H 'content-type: application/json' \
+    -d "{\"name\":\"gw-embed\",\"base_url\":\"$GW_URL\",\"api_key\":\"$GW_KEY\",\"model_id\":\"$GW_EMBED\",\"capability\":\"embedding\",\"is_default\":true}" >/dev/null
   echo "   provider 已配置（$GW_CHAT + $GW_EMBED）"
 else
   echo "   provider 已存在（$PN 个）"

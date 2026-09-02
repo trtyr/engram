@@ -38,23 +38,32 @@ async def main() -> None:
 
     admin = Client.login(e.base_url, e.admin_password)
 
-    section("注册 provider（chat + embedding）")
+    section("注册 provider（chat + embedding 各一行）")
     prov = admin.post("/settings/llm/providers", json={
         "name": "e2e-gw",
         "base_url": e.llm_base_url,
         "api_key": e.llm_api_key,
-        "models": [
-            {"id": e.llm_chat_model, "capabilities": ["chat"]},
-            {"id": e.llm_embed_model, "capabilities": ["embedding"]},
-        ],
+        "model_id": e.llm_chat_model,
+        "capability": "chat",
         "is_default": True,
     })
     ok(str(prov.get("id", "")) != "", "provider 创建返回 id")
     pid = prov["id"]
+    prov2 = admin.post("/settings/llm/providers", json={
+        "name": "e2e-gw-embed",
+        "base_url": e.llm_base_url,
+        "api_key": e.llm_api_key,
+        "model_id": e.llm_embed_model,
+        "capability": "embedding",
+        "is_default": True,
+    })
+    pid2 = prov2["id"]
 
     section("连通探测：chat + embedding")
-    result = admin.post(f"/settings/llm/providers/{pid}/test", timeout=120)
-    eq(result.get("ok"), True, f"探测 ok=true（{result.get('message', '')}）")
+    r1 = admin.post(f"/settings/llm/providers/{pid}/test", timeout=120)
+    eq(r1.get("ok"), True, f"chat 探测 ok=true（{r1.get('message', '')}）")
+    r2 = admin.post(f"/settings/llm/providers/{pid2}/test", timeout=120)
+    eq(r2.get("ok"), True, f"embed 探测 ok=true（{r2.get('message', '')}）")
 
     section("用量记账出现")
     usage = admin.get("/llm/usage")

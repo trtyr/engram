@@ -89,10 +89,11 @@ async def main() -> None:
     admin = Client.login(e.base_url, e.admin_password)
     admin.post("/settings/llm/providers", json={
         "name": "e2e-distill", "base_url": e.llm_base_url, "api_key": e.llm_api_key,
-        "models": [
-            {"id": e.llm_chat_model, "capabilities": ["chat"]},
-            {"id": e.llm_embed_model, "capabilities": ["embedding"]},
-        ], "is_default": True,
+        "model_id": e.llm_chat_model, "capability": "chat", "is_default": True,
+    })
+    admin.post("/settings/llm/providers", json={
+        "name": "e2e-distill-embed", "base_url": e.llm_base_url, "api_key": e.llm_api_key,
+        "model_id": e.llm_embed_model, "capability": "embedding", "is_default": True,
     })
     mem = admin.with_key(admin.create_api_key("e2e-distill", ["memory"]))
 

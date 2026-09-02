@@ -118,10 +118,11 @@ async def main() -> None:
         if gw:
             admin.post("/settings/llm/providers", json={
                 "name": "e2e-gov", "base_url": e.llm_base_url, "api_key": e.llm_api_key,
-                "models": [
-                    {"id": e.llm_chat_model, "capabilities": ["chat"]},
-                    {"id": e.llm_embed_model, "capabilities": ["embedding"]},
-                ], "is_default": True,
+                "model_id": e.llm_chat_model, "capability": "chat", "is_default": True,
+            })
+            admin.post("/settings/llm/providers", json={
+                "name": "e2e-gov-embed", "base_url": e.llm_base_url, "api_key": e.llm_api_key,
+                "model_id": e.llm_embed_model, "capability": "embedding", "is_default": True,
             })
             wiki.post("/wiki/ingest", json={
                 "title": "Rust 异步补充材料",

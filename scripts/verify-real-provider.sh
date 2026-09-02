@@ -46,14 +46,13 @@ echo "== 3. 登录 + 注册 provider"
 TOKEN=$(curl -fsS -X POST "http://127.0.0.1:$PORT/auth/login" \
   -H 'content-type: application/json' -d '{"password":"verify-admin"}' | jq -r .token)
 
-MODELS="[]"
-[ -n "$CHAT_MODEL" ] && MODELS=$(jq -c --arg m "$CHAT_MODEL" '[{"id":$m,"capabilities":["chat"]}] + . ' <<<"$MODELS")
-[ -n "$EMBED_MODEL" ] && MODELS=$(jq -c --arg m "$EMBED_MODEL" '. + [{"id":$m,"capabilities":["embedding"]}]' <<<"$MODELS")
-
 PID=$(curl -fsS -X POST "http://127.0.0.1:$PORT/settings/llm/providers" \
   -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d "{\"name\":\"verify-real\",\"base_url\":\"$BASE_URL\",\"api_key\":\"$API_KEY\",\"models\":$MODELS,\"is_default\":true}" | jq -r .id)
+  -d "{\"name\":\"verify-real\",\"base_url\":\"$BASE_URL\",\"api_key\":\"$API_KEY\",\"model_id\":\"$CHAT_MODEL\",\"capability\":\"chat\",\"is_default\":true}" | jq -r .id)
 echo "   provider id=$PID"
+[ -n "$EMBED_MODEL" ] && curl -fsS -X POST "http://127.0.0.1:$PORT/settings/llm/providers" \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d "{\"name\":\"verify-real-embed\",\"base_url\":\"$BASE_URL\",\"api_key\":\"$API_KEY\",\"model_id\":\"$EMBED_MODEL\",\"capability\":\"embedding\",\"is_default\":true}" >/dev/null
 
 echo "== 4. 连通测试（chat + embedding 真实调用）"
 curl -fsS -X POST "http://127.0.0.1:$PORT/settings/llm/providers/$PID/test" \

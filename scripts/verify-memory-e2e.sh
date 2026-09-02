@@ -40,12 +40,12 @@ echo "== 2. 登录 + 配置 provider/路由 + 签发 key"
 TOKEN=$(curl -fsS -X POST "$API/auth/login" -H 'content-type: application/json' \
   -d '{"password":"e2e-admin"}' | jq -r .token)
 
-MODELS="[]"
-[ -n "$CHAT_MODEL" ] && MODELS=$(jq -c --arg m "$CHAT_MODEL" '[{"id":$m,"capabilities":["chat"]}]' <<<"$MODELS")
-[ -n "$EMBED_MODEL" ] && MODELS=$(jq -c --arg m "$EMBED_MODEL" '. + [{"id":$m,"capabilities":["embedding"]}]' <<<"$MODELS")
-curl -fsS -X POST "$API/settings/llm/providers" -H "authorization: Bearer $TOKEN" \
+[ -n "$CHAT_MODEL" ] && curl -fsS -X POST "$API/settings/llm/providers" -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d "{\"name\":\"gw\",\"base_url\":\"$BASE_URL\",\"api_key\":\"$API_KEY\",\"models\":$MODELS,\"is_default\":true}" | jq -c '{id,name}'
+  -d "{\"name\":\"gw\",\"base_url\":\"$BASE_URL\",\"api_key\":\"$API_KEY\",\"model_id\":\"$CHAT_MODEL\",\"capability\":\"chat\",\"is_default\":true}" | jq -c '{id,name}'
+[ -n "$EMBED_MODEL" ] && curl -fsS -X POST "$API/settings/llm/providers" -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d "{\"name\":\"gw-embed\",\"base_url\":\"$BASE_URL\",\"api_key\":\"$API_KEY\",\"model_id\":\"$EMBED_MODEL\",\"capability\":\"embedding\",\"is_default\":true}" | jq -c '{id,name}'
 
 MKEY=$(curl -fsS -X POST "$API/settings/api-keys" -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' -d '{"name":"e2e","scopes":["memory"]}' | jq -r .key)
