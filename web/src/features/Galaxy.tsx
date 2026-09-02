@@ -144,7 +144,7 @@ export default function Galaxy({
   }
 
   return (
-    <div className="flex h-[calc(100vh-13rem)] min-h-[32rem] flex-col gap-4 lg:flex-row">
+    <div className="flex h-[calc(100vh-8rem)] min-h-[32rem] flex-col gap-4 lg:flex-row">
       {/* 左：实体列表——清点与管理（独立滚动，与右侧互不牵连） */}
       <Card className="flex min-h-0 flex-col overflow-hidden lg:w-80 lg:shrink-0">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
