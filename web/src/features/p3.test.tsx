@@ -334,18 +334,6 @@ describe('AI 功能页全景', () => {
       )
     })
   })
-
-  it('有供应商时「让 AI 帮我配」调 suggest 并 PUT 应用', async () => {
-    mockState.providers = [p1]
-    render(wrap(<Settings />))
-    const aiBtn = screen.getByRole('button', { name: '让 AI 帮我配' })
-    await waitFor(() => expect(aiBtn).not.toBeDisabled())
-    fireEvent.click(aiBtn)
-    await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith('/settings/llm/routing/suggest', {})
-      expect(api.put).toHaveBeenCalledWith('/settings/llm/routing', expect.anything())
-    })
-  })
 })
 
 describe('Knowledge re-embed', () => {

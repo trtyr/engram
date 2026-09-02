@@ -307,32 +307,11 @@ function Routing() {
     }
   }
 
-  // AI 一键生成建议并应用
-  const suggest = async () => {
-    setBusy(true)
-    setMsg('AI 正在按现有供应商生成建议…')
-    try {
-      const suggestion = await api.post<Record<string, Array<{ provider: string; model: string }>>>('/settings/llm/routing/suggest', {})
-      await api.put('/settings/llm/routing', suggestion)
-      setRouting(suggestion)
-      setMsg('AI 建议已应用——每个功能的 API 已配好，可再逐个微调')
-    } catch (ex) {
-      setMsg(ex instanceof Error ? ex.message : '生成失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          系统里共有 <span className="font-medium text-foreground">{PURPOSES.length}</span> 个 AI 功能，逐个给它们配 API；没配的走默认供应商。
-        </p>
-        <Button size="sm" variant="outline" onClick={suggest} disabled={busy || providers.length === 0}>
-          让 AI 帮我配
-        </Button>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        系统里共有 <span className="font-medium text-foreground">{PURPOSES.length}</span> 个 AI 功能，逐个给它们配 API；没配的走默认供应商。
+      </p>
 
       <Card className="divide-y divide-border">
         {PURPOSES.map((p) => {
