@@ -358,6 +358,32 @@ async fn atom_time_and_supersede_chain() {
     assert_eq!(archived.superseded_by, Some(new.id), "取代链应指向新原子");
 }
 
+/// 输入校验：空 content + 超长 content（>120 字）都应 BadRequest（测试方 2026-09-02 刁钻实测发现）。
+#[tokio::test]
+async fn create_atom_rejects_empty_and_oversize_content() {
+    let (_pool, svc, _container) = setup().await;
+
+    let empty = svc.create_atom("fact", "   ", 0.9, None, None, false).await;
+    assert!(
+        matches!(empty, Err(MemoryError::BadRequest(_))),
+        "空内容应被拒"
+    );
+
+    let long = "长".repeat(121);
+    let oversize = svc.create_atom("fact", &long, 0.9, None, None, false).await;
+    assert!(
+        matches!(oversize, Err(MemoryError::BadRequest(_))),
+        "超 120 字应被拒"
+    );
+
+    // 边界：120 字应通过
+    let ok_len = "字".repeat(120);
+    let ok = svc
+        .create_atom("fact", &ok_len, 0.9, None, None, false)
+        .await;
+    assert!(ok.is_ok(), "120 字应通过");
+}
+
 /// 议题三：context_pack 带人审队列（代问）；no_feedback 不刷热度。
 #[tokio::test]
 async fn context_pack_pending_review_and_no_feedback() {

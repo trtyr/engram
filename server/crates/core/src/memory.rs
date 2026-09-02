@@ -491,6 +491,16 @@ impl MemoryService {
         sensitive: bool,
     ) -> Result<AtomDto, MemoryError> {
         let text = content.trim();
+        // 输入校验：空内容 + 超长（对齐蒸馏链的 1~120 字契约）
+        if text.is_empty() {
+            return Err(MemoryError::BadRequest("原子内容不能为空".into()));
+        }
+        if text.chars().count() > 120 {
+            return Err(MemoryError::BadRequest(format!(
+                "原子内容超长：最多 120 字，当前 {} 字",
+                text.chars().count()
+            )));
+        }
         // A4 幂等护栏：同 kind + 同内容（trim 后）的 active 原子已存在则直接返回它——
         // AI 重试/重复直写不会双份（2026-08-31 测试方实测两条一模一样的生日原子）。
         // 近重复的语义合并仍归 arbitrate/consolidate，这里只挡精确重复。
