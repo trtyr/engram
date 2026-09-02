@@ -21,5 +21,6 @@
 - FDE 误译修正（画像把 Forward Deployed Engineer 译成"前端部署工程师"）
 - 关系 source 混存（38 manual + 22 distill）去重
 - 小王→小程序误识别（人名实体抽取有误，低优先级，测试方 2026-09-02 顺手记）
+- 同名不同 kind 实体自动合并（correction 修实体 kind 留重复实体：去重只按 name+kind，不同 kind 就新建——鱼韵 person→group 已手工 merge 清一次，根因待下批修）
 - 微信导入（用户尚未想清楚加解密方案，搁置，等用户想清楚再催）
 - 多 agent 画像（当前单 agent 场景用不上，往后放）
