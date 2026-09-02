@@ -1293,6 +1293,7 @@ async fn openapi_snapshot() {
             "/memory/scenarios/{id}",
             "/memory/search",
             "/memory/sessions",
+            "/memory/sessions/import",
             "/memory/sessions/{id}",
             "/memory/sessions/{id}/append",
             "/memory/sessions/{id}/void",

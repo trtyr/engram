@@ -323,6 +323,106 @@ impl MemoryService {
         Ok(row)
     }
 
+    /// 批量导入历史对话为会话（phase-2）：JSONL（每行 {role, content}）或纯文本（空行分段）。
+    /// metadata.source = "import"——蒸馏据此感知「导入的历史，对方的话是素材不是用户事实」。
+    pub async fn import_session(
+        &self,
+        agent: &str,
+        content: &str,
+        format: &str,
+        distill: &str,
+    ) -> Result<SessionDto, MemoryError> {
+        let turns = Self::parse_import(content, format)?;
+        let id = Uuid::now_v7();
+        let row = sqlx::query_as::<_, SessionDto>(
+            "INSERT INTO raw_sessions (id, agent, content, metadata) VALUES ($1, $2, $3, $4) RETURNING *",
+        )
+        .bind(id)
+        .bind(agent)
+        .bind(sqlx::types::Json(&turns))
+        .bind(serde_json::json!({"source": "import"}))
+        .fetch_one(&self.pool)
+        .await?;
+        match distill {
+            "auto" => {
+                agent_memory_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
+                    .await
+                    .ok();
+            }
+            "manual" => {
+                self.queue
+                    .enqueue(
+                        JobTemplate::new("extract_atoms").with_payload(json!({"reason": "import"})),
+                    )
+                    .await
+                    .ok();
+            }
+            _ => {}
+        }
+        Ok(row)
+    }
+
+    /// 解析导入文本 → turns（[{speaker, text}]）。jsonl：每行 {role, content}；text：空行分段交替。
+    fn parse_import(content: &str, format: &str) -> Result<serde_json::Value, MemoryError> {
+        let turns: Vec<serde_json::Value> = match format {
+            "jsonl" => {
+                let mut out = Vec::new();
+                for (i, line) in content.lines().enumerate() {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let v: serde_json::Value = serde_json::from_str(line).map_err(|e| {
+                        MemoryError::BadRequest(format!(
+                            "第 {} 行不是合法 JSON：{}（格式：每行 {{\"role\":\"user\"|\"assistant\",\"content\":\"...\"}}）",
+                            i + 1,
+                            e
+                        ))
+                    })?;
+                    let role = v.get("role").and_then(|r| r.as_str()).unwrap_or("");
+                    let text = v.get("content").and_then(|c| c.as_str()).unwrap_or("").trim();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let speaker = match role {
+                        "user" | "human" => "user",
+                        "assistant" | "ai" | "bot" => "assistant",
+                        _ => {
+                            return Err(MemoryError::BadRequest(format!(
+                                "第 {} 行 role 必须是 user/assistant（含 human/ai 别名），实得 {:?}",
+                                i + 1,
+                                role
+                            )))
+                        }
+                    };
+                    out.push(serde_json::json!({"speaker": speaker, "text": text}));
+                }
+                out
+            }
+            "text" => content
+                .split("\n\n")
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .enumerate()
+                .map(|(i, seg)| {
+                    serde_json::json!({"speaker": if i % 2 == 0 { "user" } else { "assistant" }, "text": seg})
+                })
+                .collect(),
+            _ => {
+                return Err(MemoryError::BadRequest(format!(
+                    "未知导入格式 {:?}：支持 jsonl / text",
+                    format
+                )))
+            }
+        };
+        if turns.is_empty() {
+            return Err(MemoryError::BadRequest(
+                "导入内容为空——没有任何有效轮次".into(),
+            ));
+        }
+        Ok(serde_json::Value::Array(turns))
+    }
+
     /// 增量追加轮次到既有会话（长对话分片落库，不等收尾——自动节律 b 配套）。
     /// 只允许追加未蒸馏（pending）会话：已蒸馏的会话追加会割裂 L1 溯源。
     /// agent 可选补记（首个 append 补上会话归属，多 agent 视角的数据从现在记对）。

@@ -268,6 +268,68 @@ async fn context_pack_excludes_expired_atoms() {
     );
 }
 
+/// phase-2 文件批量导入：JSONL/文本解析 → 落 session（source=import）+ 解析错误三问。
+#[tokio::test]
+async fn import_session_parses_jsonl_and_text() {
+    let (pool, svc, _container) = setup().await;
+
+    // JSONL 解析：3 行（空行跳过 + human/ai 别名映射 user/assistant）
+    let s = svc
+        .import_session(
+            "import-test",
+            "{\"role\":\"user\",\"content\":\"我喜欢骑行\"}\n\n{\"role\":\"assistant\",\"content\":\"收到\"}\n{\"role\":\"human\",\"content\":\"每周六骑行\"}\n",
+            "jsonl",
+            "off",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        s.content.as_array().map(|a| a.len()),
+        Some(3),
+        "JSONL 应解析 3 轮"
+    );
+    assert_eq!(s.content[0]["speaker"], "user");
+    assert_eq!(s.content[2]["speaker"], "user", "human 别名映射 user");
+
+    // 纯文本：空行分段交替（奇数段 user 偶数段 assistant）
+    let s2 = svc
+        .import_session("import-test", "第一段用户话\n\n第二段助手话", "text", "off")
+        .await
+        .unwrap();
+    assert_eq!(s2.content.as_array().map(|a| a.len()), Some(2));
+    assert_eq!(s2.content[0]["speaker"], "user");
+    assert_eq!(s2.content[1]["speaker"], "assistant");
+
+    // 坏 JSON → 400
+    assert!(matches!(
+        svc.import_session("import-test", "这不是json\n", "jsonl", "off")
+            .await,
+        Err(MemoryError::BadRequest(_))
+    ));
+
+    // 空内容 → 400
+    assert!(matches!(
+        svc.import_session("import-test", "\n\n", "text", "off")
+            .await,
+        Err(MemoryError::BadRequest(_))
+    ));
+
+    // 未知格式 → 400
+    assert!(matches!(
+        svc.import_session("import-test", "x", "csv", "off").await,
+        Err(MemoryError::BadRequest(_))
+    ));
+
+    // metadata.source = import 落库
+    let meta: serde_json::Value =
+        sqlx::query_scalar("SELECT metadata FROM raw_sessions WHERE id = $1")
+            .bind(s.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(meta["source"], "import", "metadata.source 应标记 import");
+}
+
 /// 议题一 b：append_session 增量写——pending 可追加、已蒸馏拒绝、agent 可补记。
 #[tokio::test]
 async fn append_session_semantics() {

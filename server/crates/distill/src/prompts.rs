@@ -3,7 +3,7 @@
 /// 提示词标识：(名称, 版本)。
 pub struct PromptId(pub &'static str, pub u32);
 
-pub const P_EXTRACT: PromptId = PromptId("extract", 2);
+pub const P_EXTRACT: PromptId = PromptId("extract", 3);
 pub const P_ARBITRATE: PromptId = PromptId("arbitrate", 1);
 pub const P_ORGANIZE: PromptId = PromptId("organize", 1);
 pub const P_PERSONA: PromptId = PromptId("persona", 2);
@@ -31,6 +31,7 @@ pub fn extract_system() -> String {
 6. **event 类或含明确时间的信息**给 occurred_at（ISO8601，如 \"2026-09-02T00:00:00Z\"）；有过期语义的（活动/安排）再给 valid_until。无法定位时间的省略这两个字段。
 7. 不值得记的对话输出空数组。宁缺毋滥。
 8. relations 是这些实体之间的关系（可选）：from 与 to 用 entities 里的规范称呼，rel_type ∈ member_of|located_in|works_on|part_of|related_to。方向：from --rel_type--> to（如 张三 member_of 后端组，长亭科技 located_in 上海）。只输出对话中明确表达的关系，没有则为空数组。
+9. 会话头若标注「批量导入的历史」——这是用户导入的旧聊天记录（如微信导出），里面对方（assistant/ai 或第三人）说的话只是理解用户事实的素材，不是用户本人的记忆：只抽用户自己的事实/偏好/人脉/约定，不要把对方表达的观点、身份、行为当成用户记忆。
 
 输出严格 JSON： {{\"atoms\":[{{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"turn_refs\":[1],\"occurred_at\":\"2026-09-02T00:00:00Z\",\"valid_until\":null,\"entities\":[{{\"name\":\"张三\",\"kind\":\"person\"}}]}}],\"relations\":[{{\"from\":\"张三\",\"to\":\"后端组\",\"rel_type\":\"member_of\"}}]}}",
         today = chrono::Utc::now().date_naive(),

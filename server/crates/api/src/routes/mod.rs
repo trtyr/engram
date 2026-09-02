@@ -30,7 +30,7 @@ use utoipa::OpenApi;
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
         llm_api::batch_revoke_api_keys,
         memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
-        memory_api::erase_session, memory_api::append_session, memory_api::void_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
+        memory_api::erase_session, memory_api::append_session, memory_api::import_session, memory_api::void_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
         memory_api::list_scenarios, memory_api::get_scenario,
         memory_api::get_persona, memory_api::persona_edit, memory_api::persona_history,
@@ -109,6 +109,7 @@ pub fn router(state: AppState) -> Router {
             post(llm_api::batch_revoke_api_keys),
         )
         .route("/llm/usage", get(llm_api::usage))
+        .route("/memory/sessions/import", post(memory_api::import_session))
         .route(
             "/memory/sessions",
             post(memory_api::write_session).get(memory_api::list_sessions),

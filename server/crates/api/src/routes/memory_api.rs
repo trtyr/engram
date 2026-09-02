@@ -93,6 +93,36 @@ pub async fn write_session(
     Ok((StatusCode::CREATED, Json(s)))
 }
 
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct ImportSessionRequest {
+    pub agent: Option<String>,
+    /// 导入内容全文：JSONL（每行 {role, content}）或纯文本（空行分段）
+    pub content: String,
+    /// jsonl | text
+    pub format: String,
+    /// auto（默认，防抖触发蒸馏）| manual（立即）| off
+    #[serde(default = "default_distill")]
+    pub distill: String,
+}
+
+/// 批量导入历史对话为会话（phase-2）：JSONL/纯文本 → turns → 落 session（source=import）。
+#[utoipa::path(post, path = "/memory/sessions/import",
+    request_body = ImportSessionRequest,
+    responses((status = 201, body = SessionDto)))]
+pub async fn import_session(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<ImportSessionRequest>,
+) -> Result<(StatusCode, Json<SessionDto>), ApiError> {
+    require_memory(&principal)?;
+    let agent = req.agent.unwrap_or_else(|| "default".into());
+    let s = svc(&state)
+        .import_session(&agent, &req.content, &req.format, &req.distill)
+        .await
+        .map_err(me)?;
+    Ok((StatusCode::CREATED, Json(s)))
+}
+
 #[derive(Deserialize, IntoParams)]
 pub struct ListSessionsParams {
     pub agent: Option<String>,

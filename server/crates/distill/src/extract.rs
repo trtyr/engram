@@ -27,27 +27,30 @@ struct SessionRow {
     agent: String,
     content: serde_json::Value,
     sensitive: bool,
+    metadata: serde_json::Value,
 }
 
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {
     let pool = ctx.pool();
 
     // 1. 认领待蒸馏会话（processing 中防重复认领）
-    let sessions: Vec<SessionRow> = sqlx::query_as::<_, (Uuid, String, serde_json::Value, bool)>(
-        "UPDATE raw_sessions SET distill_status = 'processing' \
-         WHERE distill_status = 'pending' RETURNING id, agent, content, sensitive",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| JobError::Retryable(e.to_string()))?
-    .into_iter()
-    .map(|(id, agent, content, sensitive)| SessionRow {
-        id,
-        agent,
-        content,
-        sensitive,
-    })
-    .collect();
+    let sessions: Vec<SessionRow> =
+        sqlx::query_as::<_, (Uuid, String, serde_json::Value, bool, serde_json::Value)>(
+            "UPDATE raw_sessions SET distill_status = 'processing' \
+         WHERE distill_status = 'pending' RETURNING id, agent, content, sensitive, metadata",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .into_iter()
+        .map(|(id, agent, content, sensitive, metadata)| SessionRow {
+            id,
+            agent,
+            content,
+            sensitive,
+            metadata,
+        })
+        .collect();
 
     if sessions.is_empty() {
         // P-B（直写重建死路）：无待蒸馏会话 ≠ 无事可做——直写原子（scenario_id NULL）
@@ -102,8 +105,19 @@ async fn run_claimed(
     let mut lines: Vec<SegmentLine> = Vec::new();
     let mut turn_map: Vec<Uuid> = Vec::new(); // 轮次编号(1-based) → session_id
     for s in &sessions {
+        let is_import = s
+            .metadata
+            .get("source")
+            .and_then(|v| v.as_str())
+            .map(|src| src == "import")
+            .unwrap_or(false);
+        let import_hint = if is_import {
+            "（批量导入的历史——对方的话是素材，不是用户本人的记忆）"
+        } else {
+            ""
+        };
         lines.push(SegmentLine {
-            text: format!("— 会话 {}（agent: {}）—", s.id, s.agent),
+            text: format!("— 会话 {}（agent: {}）{}—", s.id, s.agent, import_hint),
             is_header: true,
         });
         if let Some(turns) = s.content.as_array() {

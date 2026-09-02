@@ -798,6 +798,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/sessions/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量导入历史对话为会话（phase-2）：JSONL/纯文本 → turns → 落 session（source=import）。 */
+        post: operations["import_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/sessions/{id}": {
         parameters: {
             query?: never;
@@ -1669,6 +1686,15 @@ export interface components {
         };
         HealthBody: {
             status: string;
+        };
+        ImportSessionRequest: {
+            agent?: string | null;
+            /** @description 导入内容全文：JSONL（每行 {role, content}）或纯文本（空行分段） */
+            content: string;
+            /** @description auto（默认，防抖触发蒸馏）| manual（立即）| off */
+            distill?: string;
+            /** @description jsonl | text */
+            format: string;
         };
         IngestAccepted: {
             skipped: boolean;
@@ -3384,6 +3410,29 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["WriteSessionRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDto"];
+                };
+            };
+        };
+    };
+    import_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportSessionRequest"];
             };
         };
         responses: {
