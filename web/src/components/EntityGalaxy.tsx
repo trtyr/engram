@@ -10,7 +10,7 @@ import Sigma from 'sigma'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
 import type { EntityGraph as GraphData } from '@/lib/api'
 import { useThemeTick } from '@/lib/theme'
-import { ENTITY_KIND_COLOR, REL_TYPE_COLOR } from '@/lib/ui'
+import { ENTITY_KIND_COLOR } from '@/lib/ui'
 
 /** 实体类型色：见 lib/ui.ts ENTITY_KIND_COLOR（与 WikiGraph 调色板同源） */
 const KIND_COLOR = ENTITY_KIND_COLOR
@@ -44,49 +44,52 @@ export default function EntityGalaxy({
     const el = ref.current
     if (!el) return
     const g = new Graph({ multi: false })
-    // 中心锚点：用户本人（画像的视觉化身；fixed = 力导向中稳居中央）
+    // 度数统计：共现 + 关系都算连接——Obsidian 图谱里连接多的枢纽自然更大
+    const deg = new Map<string, number>()
+    const bump = (a: string, b: string) => {
+      deg.set(a, (deg.get(a) ?? 0) + 1)
+      deg.set(b, (deg.get(b) ?? 0) + 1)
+    }
+    for (const e of graph.edges) bump(e.a, e.b)
+    for (const r of graph.relations) bump(r.from_id, r.to_id)
+    // 用户锚：普通节点（不 fixed，让力导向自然布局——Obsidian 没有固定中心）
     g.addNode(ME, {
       label: '我',
-      size: 16,
+      size: 6,
       color: theme.fg,
       x: 0,
       y: 0,
-      fixed: true,
     })
-    // 实体：密度定大小（cap 防爆炸），类型着色。社区聚类的轻量实现——
-    // 同 kind 节点初始落在同一扇区（人物/项目/主题/群组/地点各占一角），
-    // 力导向后同类型自然聚拢，实体多时不再是一团乱麻。
-    const kindOrder = ['person', 'project', 'topic', 'group', 'place']
-    const sectorAngle = (2 * Math.PI) / kindOrder.length
+    // 实体：Obsidian 风格——小圆点，按度数定大小（枢纽更大），初始随机散布自然聚拢
     for (const n of graph.nodes) {
-      const sector = kindOrder.indexOf(n.kind)
-      const base = sector >= 0 ? sector * sectorAngle : 0
-      const r = 6 + Math.random() * 4
-      const a = base + Math.random() * sectorAngle
+      const d = deg.get(n.id) ?? 0
       g.addNode(n.id, {
         label: n.name,
-        size: 5 + Math.min(n.atom_count * 1.1, 9),
+        size: 4 + Math.min(d * 0.8, 8),
         color: KIND_COLOR[n.kind] ?? theme.muted,
-        x: Math.cos(a) * r,
-        y: Math.sin(a) * r,
+        x: Math.random() * 24 - 12,
+        y: Math.random() * 24 - 12,
       })
-      // 用户锚边：细而淡（都连着「我」，信息量低——只做结构提示）
-      g.addEdge(ME, n.id, { size: 0.6, color: theme.border, weight: 0.2 })
+      // 我-实体边：细而淡（都连着「我」，信息量低——只做结构提示）
+      g.addEdge(ME, n.id, { size: 0.5, color: theme.border, weight: 0.1 })
     }
-    // 共现边：粗细随强度（这是图的真正信息所在）；weight 参与力导向——常一起出现的实体聚拢
+    // 边：Obsidian 风格——无向细线，统一柔和色（不区分箭头/关系色），
+    // 同一对节点只画一条（graphology single-graph 下同对 addEdge 会抛错）
+    const edgeKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
+    const seen = new Set<string>()
     for (const e of graph.edges) {
       if (!g.hasNode(e.a) || !g.hasNode(e.b)) continue
-      g.addEdge(e.a, e.b, { size: Math.min(1 + e.weight * 0.6, 4), color: theme.muted, weight: e.weight })
+      const k = edgeKey(e.a, e.b)
+      if (seen.has(k)) continue
+      seen.add(k)
+      g.addEdge(e.a, e.b, { size: Math.min(1 + e.weight * 0.4, 2.5), color: theme.border, weight: e.weight })
     }
-    // 类型化关系边：有向箭头 + 关系色，与共现边（细灰线）区分——图升级成知识图谱
     for (const r of graph.relations) {
       if (!g.hasNode(r.from_id) || !g.hasNode(r.to_id)) continue
-      g.addEdge(r.from_id, r.to_id, {
-        size: Math.min(1 + r.weight * 0.6, 3),
-        color: REL_TYPE_COLOR[r.rel_type] ?? theme.muted,
-        type: 'arrow',
-        weight: r.weight,
-      })
+      const k = edgeKey(r.from_id, r.to_id)
+      if (seen.has(k)) continue
+      seen.add(k)
+      g.addEdge(r.from_id, r.to_id, { size: Math.min(1 + r.weight * 0.4, 2.5), color: theme.border, weight: r.weight })
     }
     const sigma = new Sigma(g, el, {
       labelRenderedSizeThreshold: 3,
