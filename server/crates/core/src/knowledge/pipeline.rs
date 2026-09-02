@@ -505,6 +505,27 @@ pub async fn embed_job(
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
 
+    // 自动织入 Wiki：文档 ready 后，把原文档喂给 wiki-engine 织成互链页面。
+    // best-effort（sha256 去重 + 失败不影响文档 ready，页面层降级为空）。
+    if let Ok(Some((Some(raw_path), mime))) = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+        "SELECT raw_path, mime FROM documents WHERE id = $1",
+    )
+    .bind(doc_id)
+    .fetch_optional(pool)
+    .await
+    {
+        let name = std::path::Path::new(&raw_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if let Ok(bytes) = tokio::fs::read(&raw_path).await {
+            let wiki = crate::wiki::WikiService::new(pool.clone(), registry.clone());
+            let _ = wiki
+                .ingest_knowledge_document(doc_id, &bytes, &name, mime.as_deref())
+                .await;
+        }
+    }
+
     // 清理 extracted 临时文件
     let _ = tokio::fs::remove_file(data_uploads().join(format!("{doc_id}.extracted.txt"))).await;
 
