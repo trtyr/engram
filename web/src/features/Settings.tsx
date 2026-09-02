@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/button'
 type Tab = 'providers' | 'routing' | 'keys' | 'rhythm' | 'danger'
 
 const TABS: { value: Tab; label: string }[] = [
-  { value: 'providers', label: '供应商' },
   { value: 'routing', label: 'AI 功能' },
+  { value: 'providers', label: '供应商' },
   { value: 'keys', label: 'API 密钥' },
   { value: 'rhythm', label: '节律' },
   { value: 'danger', label: '危险操作' },
@@ -32,8 +32,8 @@ export default function Settings() {
     <div className="space-y-6">
       <PageHeader title="设置" desc="LLM 供应商、模型路由、API 密钥与记忆节律" />
       <Tabs items={TABS} value={tab} onChange={setTab} />
-      {tab === 'providers' && <Providers />}
       {tab === 'routing' && <Routing />}
+      {tab === 'providers' && <Providers />}
       {tab === 'keys' && <Keys />}
       {tab === 'rhythm' && <RhythmPane />}
       {tab === 'danger' && <DangerZone />}
@@ -121,23 +121,11 @@ function Providers() {
             />
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="prov-cap" className="block text-xs font-medium">能力</label>
-            <select
-              id="prov-cap"
-              className={`${inputCls} w-full`}
-              value={form.capability}
-              onChange={(e) => setForm({ ...form, capability: e.target.value })}
-            >
-              <option value="chat">chat（对话 / 抽取 / 画像）</option>
-              <option value="embedding">embedding（向量化）</option>
-            </select>
-          </div>
-          <div className="space-y-1.5">
             <label htmlFor="prov-model" className="block text-xs font-medium">模型 ID</label>
             <input
               id="prov-model"
               className={`${inputCls} w-full font-mono`}
-              placeholder={form.capability === 'chat' ? 'MiniMax-M3' : 'BAAI/bge-m3'}
+              placeholder="MiniMax-M3"
               value={form.model_id}
               onChange={(e) => setForm({ ...form, model_id: e.target.value })}
             />
@@ -179,62 +167,63 @@ function Providers() {
         <Empty text="未配置 provider" />
       ) : (
         rows.map((p) => (
-          <Card key={p.id} className="flex items-center justify-between p-4">
-            <div>
-              <p className="font-medium">
-                {p.name}{' '}
-                {p.is_default && <span className="ml-1 text-xs text-success">默认</span>}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {p.base_url} · {p.capability} · {p.model_id}
-              </p>
-              {testMsg[p.id] && <p className="mt-1 text-xs text-foreground">{testMsg[p.id]}</p>}
+          <Card key={p.id} className="p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-medium">
+                  {p.name}{' '}
+                  {p.is_default && <span className="ml-1 text-xs text-success">默认</span>}
+                </p>
+                <p className="mt-0.5 font-mono text-sm">{p.model_id}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{p.base_url}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      const r = await api.post<{ ok: boolean; message: string }>(
+                        `/settings/llm/providers/${p.id}/test`,
+                      )
+                      setTestMsg({ ...testMsg, [p.id]: r.message })
+                    } catch (ex) {
+                      setTestMsg({ ...testMsg, [p.id]: ex instanceof Error ? ex.message : '测试失败' })
+                    }
+                  }}
+                >
+                  测试连通
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingId(p.id)
+                    setForm({ name: p.name, base_url: p.base_url, api_key: '', model_id: p.model_id, capability: p.capability })
+                    setErr('')
+                    setShowForm(true)
+                  }}
+                >
+                  编辑
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={async () => {
+                    if (!confirm(`删除「${p.name}」？该操作不可撤销。`)) return
+                    try {
+                      await api.del(`/settings/llm/providers/${p.id}`)
+                      load()
+                    } catch (ex) {
+                      setErr(ex instanceof Error ? ex.message : '删除失败')
+                    }
+                  }}
+                >
+                  删除
+                </Button>
+              </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={async () => {
-                  try {
-                    const r = await api.post<{ ok: boolean; message: string }>(
-                      `/settings/llm/providers/${p.id}/test`,
-                    )
-                    setTestMsg({ ...testMsg, [p.id]: r.message })
-                  } catch (ex) {
-                    setTestMsg({ ...testMsg, [p.id]: ex instanceof Error ? ex.message : '测试失败' })
-                  }
-                }}
-              >
-                测试连通
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setEditingId(p.id)
-                  setForm({ name: p.name, base_url: p.base_url, api_key: '', model_id: p.model_id, capability: p.capability })
-                  setErr('')
-                  setShowForm(true)
-                }}
-              >
-                编辑
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={async () => {
-                  if (!confirm(`删除 provider「${p.name}」？该操作不可撤销。`)) return
-                  try {
-                    await api.del(`/settings/llm/providers/${p.id}`)
-                    load()
-                  } catch (ex) {
-                    setErr(ex instanceof Error ? ex.message : '删除失败')
-                  }
-                }}
-              >
-                删除
-              </Button>
-            </div>
+            {testMsg[p.id] && <p className="mt-2 text-xs text-foreground">{testMsg[p.id]}</p>}
           </Card>
         ))
       )}
@@ -284,33 +273,12 @@ function Routing() {
     }
   }
 
-  const suggest = async () => {
-    setBusy(true)
-    setMsg('AI 正在按现有供应商生成建议…')
-    try {
-      const suggestion = await api.post<Record<string, Array<{ provider: string; model: string }>>>('/settings/llm/routing/suggest', {})
-      await api.put('/settings/llm/routing', suggestion)
-      setRouting(suggestion)
-      setMsg('AI 建议已应用——每个功能点的 API 已配好，可再逐个微调')
-    } catch (ex) {
-      setMsg(ex instanceof Error ? ex.message : '生成失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const chatDefault = defaultFor('extract')
-  const embedDefault = defaultFor('embed')
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          系统里共有 <span className="font-medium text-foreground">{PURPOSES.length}</span> 个 AI 功能点，逐个给它们选 API；没选的走默认（对话默认{chatDefault ? `「${chatDefault.name}」` : '未设'} · 嵌入默认{embedDefault ? `「${embedDefault.name}」` : '未设'}）。
+          系统里共有 <span className="font-medium text-foreground">{PURPOSES.length}</span> 个 AI 功能，逐个给它们配 API；没配的走默认供应商。
         </p>
-        <Button size="sm" onClick={suggest} disabled={busy || providers.length === 0}>
-          让 AI 帮我配
-        </Button>
       </div>
 
       {providers.length === 0 ? (

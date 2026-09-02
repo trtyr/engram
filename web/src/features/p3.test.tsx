@@ -41,7 +41,7 @@ type WikiPageM = {
 // ---- api mock ----
 vi.mock('@/lib/api', () => {
   const state = {
-    providers: [] as { id: string; name: string; base_url: string; models: { id: string; capabilities: string[] }[]; is_default: boolean }[],
+    providers: [] as { id: string; name: string; base_url: string; model_id: string; capability: string; is_default: boolean }[],
     docs: [] as { id: string; title: string; source_uri: string; mime: string | null; status: string; error: string | null; created_at: string }[],
     chunks: [] as { seq: number; content: string; embed_failed: boolean }[],
     searchResult: null as { query: string; hits: { id: string; domain: string; score: number; snippet: string; title?: string | null }[] } | null,
@@ -96,7 +96,7 @@ vi.mock('@/lib/api', () => {
 import { api } from '@/lib/api'
 
 interface MockState {
-  providers: { id: string; name: string; base_url: string; models: { id: string; capabilities: string[] }[]; is_default: boolean }[]
+  providers: { id: string; name: string; base_url: string; model_id: string; capability: string; is_default: boolean }[]
   docs: { id: string; title: string; source_uri: string; mime: string | null; status: string; error: string | null; created_at: string }[]
   chunks: { seq: number; content: string; embed_failed: boolean }[]
   searchResult: { query: string; hits: { id: string; domain: string; score: number; snippet: string; title?: string | null }[] } | null
