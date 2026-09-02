@@ -6,6 +6,7 @@ describe('Settings 危险区：清空记忆库确认短语门禁', () => {
         <Settings />
       </MemoryRouter>,
     )
+    fireEvent.click(screen.getByRole('button', { name: '危险操作' }))
     fireEvent.click(screen.getByRole('button', { name: '清空记忆库…' }))
     const input = await screen.findByLabelText('清空确认短语')
     const btn = screen.getByRole('button', { name: '执行清空' })
@@ -347,6 +348,7 @@ describe('主密钥重加密', () => {
     mockState.reencryptResult = 2
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(wrap(<Settings />))
+    fireEvent.click(screen.getByRole('button', { name: '危险操作' }))
     const input = await screen.findByPlaceholderText('openssl rand -hex 32 的旧值')
     fireEvent.change(input, { target: { value: 'aabbccdd' } })
     fireEvent.click(screen.getByRole('button', { name: '执行重加密' }))

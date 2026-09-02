@@ -1,17 +1,18 @@
 /** Settings 域：LLM providers / 路由 / API keys / 节律。 */
 import { useEffect, useState } from 'react'
 import { api, type ApiKey, type Job, type Provider } from '@/lib/api'
-import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
+import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, relTime, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'providers' | 'routing' | 'keys' | 'rhythm'
+type Tab = 'providers' | 'routing' | 'keys' | 'rhythm' | 'danger'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'providers', label: '供应商' },
-  { value: 'routing', label: '路由' },
+  { value: 'routing', label: 'AI 功能' },
   { value: 'keys', label: 'API 密钥' },
   { value: 'rhythm', label: '节律' },
+  { value: 'danger', label: '危险操作' },
 ]
 
 const PURPOSES: { key: string; label: string; desc: string }[] = [
@@ -35,13 +36,7 @@ export default function Settings() {
       {tab === 'routing' && <Routing />}
       {tab === 'keys' && <Keys />}
       {tab === 'rhythm' && <RhythmPane />}
-
-      <div className="mt-10 space-y-3 border-t border-border pt-6">
-        <h2 className="text-sm font-semibold text-destructive">危险区域</h2>
-        <p className="text-xs text-muted-foreground">以下操作不可逆，执行前会二次确认。</p>
-        <ReencryptPane />
-        <DeepPurgePane />
-      </div>
+      {tab === 'danger' && <DangerZone />}
     </div>
   )
 }
@@ -49,7 +44,7 @@ export default function Settings() {
 function Providers() {
   const [rows, setRows] = useState<Provider[] | null>(null)
   const [err, setErr] = useState('')
-  const [form, setForm] = useState({ name: '', base_url: '', api_key: '', chat_model: '', embed_model: '' })
+  const [form, setForm] = useState({ name: '', base_url: '', api_key: '', model_id: '', capability: 'chat' })
   const [testMsg, setTestMsg] = useState<Record<string, string>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -57,7 +52,7 @@ function Providers() {
   const closeForm = () => {
     setShowForm(false)
     setEditingId(null)
-    setForm({ name: '', base_url: '', api_key: '', chat_model: '', embed_model: '' })
+    setForm({ name: '', base_url: '', api_key: '', model_id: '', capability: 'chat' })
   }
   useEffect(() => {
     load()
@@ -74,19 +69,16 @@ function Providers() {
           className="grid gap-3 md:grid-cols-2"
           onSubmit={async (e) => {
             e.preventDefault()
-            const models = []
-            if (form.chat_model) models.push({ id: form.chat_model, capabilities: ['chat'] })
-            if (form.embed_model) models.push({ id: form.embed_model, capabilities: ['embedding'] })
             try {
               if (editingId) {
                 // name 不可改；key 留空表示不更新
-                const body: Record<string, unknown> = { base_url: form.base_url, models }
+                const body: Record<string, unknown> = { base_url: form.base_url, model_id: form.model_id, capability: form.capability }
                 if (form.api_key) body.api_key = form.api_key
                 await api.put(`/settings/llm/providers/${editingId}`, body)
               } else {
-                await api.post('/settings/llm/providers', { ...form, models, is_default: rows?.length === 0 })
+                await api.post('/settings/llm/providers', { ...form, is_default: rows?.length === 0 })
               }
-              setForm({ name: '', base_url: '', api_key: '', chat_model: '', embed_model: '' })
+              setForm({ name: '', base_url: '', api_key: '', model_id: '', capability: 'chat' })
               setEditingId(null)
               load()
             } catch (ex) {
@@ -129,23 +121,25 @@ function Providers() {
             />
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="prov-chat" className="block text-xs font-medium">chat 模型 ID</label>
-            <input
-              id="prov-chat"
-              className={`${inputCls} w-full font-mono`}
-              placeholder="deepseek-ai/DeepSeek-V4"
-              value={form.chat_model}
-              onChange={(e) => setForm({ ...form, chat_model: e.target.value })}
-            />
+            <label htmlFor="prov-cap" className="block text-xs font-medium">能力</label>
+            <select
+              id="prov-cap"
+              className={`${inputCls} w-full`}
+              value={form.capability}
+              onChange={(e) => setForm({ ...form, capability: e.target.value })}
+            >
+              <option value="chat">chat（对话 / 抽取 / 画像）</option>
+              <option value="embedding">embedding（向量化）</option>
+            </select>
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="prov-embed" className="block text-xs font-medium">embedding 模型 ID</label>
+            <label htmlFor="prov-model" className="block text-xs font-medium">模型 ID</label>
             <input
-              id="prov-embed"
+              id="prov-model"
               className={`${inputCls} w-full font-mono`}
-              placeholder="Qwen/Qwen3-Embedding-8B"
-              value={form.embed_model}
-              onChange={(e) => setForm({ ...form, embed_model: e.target.value })}
+              placeholder={form.capability === 'chat' ? 'MiniMax-M3' : 'BAAI/bge-m3'}
+              value={form.model_id}
+              onChange={(e) => setForm({ ...form, model_id: e.target.value })}
             />
           </div>
           <div className="flex items-center gap-2 md:col-span-2">
@@ -171,7 +165,7 @@ function Providers() {
         <Button
           onClick={() => {
             setEditingId(null)
-            setForm({ name: '', base_url: '', api_key: '', chat_model: '', embed_model: '' })
+            setForm({ name: '', base_url: '', api_key: '', model_id: '', capability: 'chat' })
             setShowForm(true)
           }}
         >
@@ -192,7 +186,7 @@ function Providers() {
                 {p.is_default && <span className="ml-1 text-xs text-success">默认</span>}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {p.base_url} · {p.models.map((m) => m.id).join(', ')}
+                {p.base_url} · {p.capability} · {p.model_id}
               </p>
               {testMsg[p.id] && <p className="mt-1 text-xs text-foreground">{testMsg[p.id]}</p>}
             </div>
@@ -217,10 +211,8 @@ function Providers() {
                 size="sm"
                 variant="outline"
                 onClick={() => {
-                  const chat = p.models.find((m) => m.capabilities.includes('chat'))?.id ?? ''
-                  const embed = p.models.find((m) => m.capabilities.includes('embedding'))?.id ?? ''
                   setEditingId(p.id)
-                  setForm({ name: p.name, base_url: p.base_url, api_key: '', chat_model: chat, embed_model: embed })
+                  setForm({ name: p.name, base_url: p.base_url, api_key: '', model_id: p.model_id, capability: p.capability })
                   setErr('')
                   setShowForm(true)
                 }}
@@ -338,7 +330,23 @@ function Routing() {
           </tbody>
         </table>
       </Card>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          size="sm"
+          onClick={async () => {
+            setMsg('AI 正在生成建议…')
+            try {
+              const suggestion = await api.post<Record<string, Array<{ provider: string; model: string }>>>('/settings/llm/routing/suggest', {})
+              setText(JSON.stringify(suggestion, null, 2))
+              setEditing(true)
+              setMsg('AI 建议已生成——确认后点「保存」')
+            } catch (ex) {
+              setMsg(ex instanceof Error ? ex.message : '生成失败')
+            }
+          }}
+        >
+          让 AI 帮我配
+        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -349,7 +357,7 @@ function Routing() {
         >
           编辑 JSON
         </Button>
-        <p className="text-xs text-muted-foreground">8 个 purpose 映射到 provider/model 回退链；未配置的 purpose 回退到默认供应商。</p>
+        <p className="text-xs text-muted-foreground">8 个 AI 功能点映射到供应商/模型回退链；未配置的回退到默认供应商。也可以一键让 AI 按现有供应商生成建议。</p>
       </div>
     </div>
   )
@@ -359,7 +367,17 @@ function Keys() {
   const [rows, setRows] = useState<ApiKey[] | null>(null)
   const [newKey, setNewKey] = useState('')
   const [name, setName] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const load = () => api.get<ApiKey[]>('/settings/api-keys').then(setRows).catch(() => {})
+  const active = rows?.filter((k) => !k.revoked_at) ?? []
+  const allSelected = active.length > 0 && active.every((k) => selected.has(k.id))
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(active.map((k) => k.id)))
+  const toggle = (id: string) => {
+    const next = new Set(selected)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelected(next)
+  }
   useEffect(() => {
     load()
   }, [])
@@ -402,49 +420,88 @@ function Keys() {
       ) : rows.length === 0 ? (
         <Empty text="无 API key" />
       ) : (
-        <Card className="overflow-x-auto">
-          <table className={tableCls.root}>
-            <thead className={tableCls.thead}>
-              <tr>
-                <th className={tableCls.th}>名称</th>
-                <th className={tableCls.th}>前缀</th>
-                <th className={tableCls.th}>创建</th>
-                <th className={tableCls.th}>最近使用</th>
-                <th className={tableCls.th} />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((k) => (
-                <tr key={k.id} className={tableCls.row}>
-                  <td className={`${tableCls.td} font-medium`}>{k.name}</td>
-                  <td className={`${tableCls.td} font-mono`}>{k.key_prefix}…</td>
-                  <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(k.created_at)}</td>
-                  <td className={`${tableCls.td} text-muted-foreground`}>
-                    {k.last_used_at ? fmtTime(k.last_used_at) : '—'}
-                  </td>
-                  <td className={`${tableCls.td} text-right`}>
-                    {k.revoked_at ? (
-                      <span className="text-xs text-destructive">已吊销</span>
-                    ) : (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={async () => {
-                          if (!confirm(`吊销 key「${k.name}」？使用它的 AI 将立即失权。`)) return
-                          await api.post(`/settings/api-keys/${k.id}/revoke`)
-                          load()
-                        }}
-                      >
-                        吊销
-                      </Button>
-                    )}
-                  </td>
+        <Card className="overflow-hidden">
+          {selected.size > 0 && (
+            <div className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-2">
+              <span className="text-xs text-muted-foreground">已选 {selected.size} 把</span>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={async () => {
+                  if (!confirm(`批量吊销 ${selected.size} 把 key？使用它们的 AI 将立即失权。`)) return
+                  await api.post('/settings/api-keys/batch-revoke', { ids: [...selected] })
+                  setSelected(new Set())
+                  load()
+                }}
+              >
+                批量吊销
+              </Button>
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className={tableCls.root}>
+              <thead className={tableCls.thead}>
+                <tr>
+                  <th className={`${tableCls.th} w-10`}>
+                    <Checkbox checked={allSelected} onChange={toggleAll} label="全选" />
+                  </th>
+                  <th className={tableCls.th}>名称</th>
+                  <th className={tableCls.th}>前缀</th>
+                  <th className={tableCls.th}>创建</th>
+                  <th className={tableCls.th}>最近使用</th>
+                  <th className={tableCls.th} />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((k) => (
+                  <tr key={k.id} className={tableCls.row}>
+                    <td className={tableCls.td}>
+                      {!k.revoked_at && <Checkbox checked={selected.has(k.id)} onChange={() => toggle(k.id)} label={`选择 ${k.name}`} />}
+                    </td>
+                    <td className={`${tableCls.td} font-medium`}>{k.name}</td>
+                    <td className={`${tableCls.td} font-mono`}>{k.key_prefix}…</td>
+                    <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(k.created_at)}</td>
+                    <td className={`${tableCls.td} text-muted-foreground`}>
+                      {k.last_used_at ? fmtTime(k.last_used_at) : '—'}
+                    </td>
+                    <td className={`${tableCls.td} text-right`}>
+                      {k.revoked_at ? (
+                        <span className="text-xs text-destructive">已吊销</span>
+                      ) : (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={async () => {
+                            if (!confirm(`吊销 key「${k.name}」？使用它的 AI 将立即失权。`)) return
+                            await api.post(`/settings/api-keys/${k.id}/revoke`)
+                            load()
+                          }}
+                        >
+                          吊销
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
+    </div>
+  )
+}
+
+/** 危险操作 tab：主密钥重加密 + 清空记忆库（从设置页底部移入独立子 tab）。 */
+function DangerZone() {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+        <h2 className="text-sm font-semibold text-destructive">危险操作</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">以下操作不可逆，执行前会二次确认。</p>
+      </div>
+      <ReencryptPane />
+      <DeepPurgePane />
     </div>
   )
 }

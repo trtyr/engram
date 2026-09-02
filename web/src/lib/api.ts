@@ -281,7 +281,8 @@ export interface Provider {
   id: string
   name: string
   base_url: string
-  models: { id: string; capabilities: string[] }[]
+  model_id: string
+  capability: string
   is_default: boolean
   warning?: string | null
 }
