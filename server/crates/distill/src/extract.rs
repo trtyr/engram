@@ -26,21 +26,27 @@ struct SessionRow {
     id: Uuid,
     agent: String,
     content: serde_json::Value,
+    sensitive: bool,
 }
 
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {
     let pool = ctx.pool();
 
     // 1. 认领待蒸馏会话（processing 中防重复认领）
-    let sessions: Vec<SessionRow> = sqlx::query_as::<_, (Uuid, String, serde_json::Value)>(
+    let sessions: Vec<SessionRow> = sqlx::query_as::<_, (Uuid, String, serde_json::Value, bool)>(
         "UPDATE raw_sessions SET distill_status = 'processing' \
-         WHERE distill_status = 'pending' RETURNING id, agent, content",
+         WHERE distill_status = 'pending' RETURNING id, agent, content, sensitive",
     )
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?
     .into_iter()
-    .map(|(id, agent, content)| SessionRow { id, agent, content })
+    .map(|(id, agent, content, sensitive)| SessionRow {
+        id,
+        agent,
+        content,
+        sensitive,
+    })
     .collect();
 
     if sessions.is_empty() {
@@ -86,6 +92,9 @@ async fn run_claimed(
 ) -> Result<serde_json::Value, JobError> {
     let pool = ctx.pool();
     let session_ids: Vec<Uuid> = sessions.iter().map(|s| s.id).collect();
+    // 会话敏感标记映射：任一轮次来源会话标 sensitive → 产物继承敏感
+    let session_sensitive: std::collections::HashMap<Uuid, bool> =
+        sessions.iter().map(|s| (s.id, s.sensitive)).collect();
 
     // 2. 构建行列表（会话头 + 全局编号轮次）→ 按预算贪心分段
     //    B1：一批会话全拼一个 prompt 时，超上下文的中间轮次会被模型静默丢弃；
@@ -147,6 +156,7 @@ async fn run_claimed(
         entities: Vec<(String, String)>,
         occurred_at: Option<chrono::DateTime<chrono::Utc>>,
         valid_until: Option<chrono::DateTime<chrono::Utc>>,
+        sensitive: bool,
     }
     let mut texts: Vec<String> = Vec::new();
     let mut pending: Vec<PendingAtom> = Vec::new();
@@ -265,6 +275,14 @@ async fn run_claimed(
                         .collect()
                 })
                 .unwrap_or_default();
+            // 会话敏感继承：任一轮次来源会话标 sensitive → 产物 sensitive
+            let sensitive = refs.iter().any(|r| {
+                r.get("session_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<Uuid>().ok())
+                    .map(|sid| *session_sensitive.get(&sid).unwrap_or(&false))
+                    .unwrap_or(false)
+            });
             texts.push(content.clone());
             pending.push(PendingAtom {
                 kind,
@@ -274,6 +292,7 @@ async fn run_claimed(
                 entities,
                 occurred_at,
                 valid_until,
+                sensitive,
             });
         }
         if seg_count == 0 {
@@ -314,12 +333,13 @@ async fn run_claimed(
                 entities,
                 occurred_at,
                 valid_until,
+                sensitive,
             } = p;
             let id = Uuid::now_v7();
             let needs_review = confidence < 0.55;
             sqlx::query(
-                "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, occurred_at, valid_until, embedding, tsv)
-                 VALUES ($1, $2, $3, $4, 'candidate', $5, $6, $7, $8, $9, to_tsvector('simple', $10))",
+                "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, occurred_at, valid_until, sensitive, embedding, tsv)
+                 VALUES ($1, $2, $3, $4, 'candidate', $5, $6, $7, $8, $9, $10, to_tsvector('simple', $11))",
             )
             .bind(id)
             .bind(&kind)
@@ -329,6 +349,7 @@ async fn run_claimed(
             .bind(needs_review)
             .bind(occurred_at)
             .bind(valid_until)
+            .bind(sensitive)
             // B2：嵌入缺失或全零（上游异常）一律置 NULL——零向量会污染余弦近邻
             .bind(
                 embeddings

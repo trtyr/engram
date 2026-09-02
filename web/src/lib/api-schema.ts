@@ -1933,6 +1933,8 @@ export interface components {
             distill_status: string;
             /** Format: uuid */
             id: string;
+            /** @description 会话级敏感标记：蒸馏产物自动继承 */
+            sensitive: boolean;
         };
         SetPurposeRequest: {
             goals: string[];
@@ -2058,6 +2060,8 @@ export interface components {
             agent?: string | null;
             /** @description auto（默认，防抖触发蒸馏）| manual（立即）| off */
             distill?: string;
+            /** @description 会话级敏感标记：整段对话含隐私（医疗/感情/财务），蒸馏产物自动继承 sensitive */
+            sensitive?: boolean;
             /** @description 轮次数组：[{speaker, text, ts?}] */
             turns: Record<string, never>;
         };

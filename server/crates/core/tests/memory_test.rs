@@ -224,6 +224,7 @@ async fn append_session_semantics() {
             "pi-ext",
             serde_json::json!([{"speaker":"user","text":"第一轮"}]),
             "off",
+            false,
         )
         .await
         .unwrap();
@@ -440,6 +441,7 @@ async fn concurrent_append_keeps_all_turns() {
             "pi",
             serde_json::json!([{"speaker":"user","text":"第1轮"}]),
             "off",
+            false,
         )
         .await
         .unwrap();
@@ -528,6 +530,7 @@ async fn void_session_semantics() {
             "t",
             serde_json::json!([{"speaker":"user","text":"x"}]),
             "off",
+            false,
         )
         .await
         .unwrap();
@@ -542,6 +545,7 @@ async fn void_session_semantics() {
             "t",
             serde_json::json!([{"speaker":"user","text":"y"}]),
             "off",
+            false,
         )
         .await
         .unwrap();
@@ -562,6 +566,7 @@ async fn purge_agent_clears_test_data() {
             "test-agent",
             serde_json::json!([{"speaker":"user","text":"a"}]),
             "off",
+            false,
         )
         .await
         .unwrap();
@@ -570,6 +575,7 @@ async fn purge_agent_clears_test_data() {
             "real-agent",
             serde_json::json!([{"speaker":"user","text":"b"}]),
             "off",
+            false,
         )
         .await
         .unwrap();
@@ -616,6 +622,7 @@ async fn export_contains_all_domains() {
         "e",
         serde_json::json!([{"speaker":"user","text":"x"}]),
         "off",
+        false,
     )
     .await
     .unwrap();
@@ -745,6 +752,7 @@ async fn rhythm_status_reports_heartbeat_and_backlog() {
                 "cron-test",
                 serde_json::json!([{"speaker":"user","text":format!("第{i}条")}]),
                 "off",
+                false,
             )
             .await
             .unwrap();

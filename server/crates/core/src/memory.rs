@@ -40,6 +40,8 @@ pub struct SessionDto {
     #[schema(value_type = Object)]
     pub content: serde_json::Value,
     pub distill_status: String,
+    /// 会话级敏感标记：蒸馏产物自动继承
+    pub sensitive: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -283,6 +285,7 @@ impl MemoryService {
         agent: &str,
         turns: serde_json::Value,
         distill: &str,
+        sensitive: bool,
     ) -> Result<SessionDto, MemoryError> {
         let Some(arr) = turns.as_array() else {
             return Err(MemoryError::BadRequest("content 必须是轮次数组".into()));
@@ -292,11 +295,12 @@ impl MemoryService {
         }
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, SessionDto>(
-            "INSERT INTO raw_sessions (id, agent, content) VALUES ($1, $2, $3) RETURNING *",
+            "INSERT INTO raw_sessions (id, agent, content, sensitive) VALUES ($1, $2, $3, $4) RETURNING *",
         )
         .bind(id)
         .bind(agent)
         .bind(sqlx::types::Json(&turns))
+        .bind(sensitive)
         .fetch_one(&self.pool)
         .await?;
 

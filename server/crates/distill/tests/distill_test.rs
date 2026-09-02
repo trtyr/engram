@@ -774,6 +774,51 @@ async fn extract_creates_and_links_entities() {
     env.handle.join().await;
 }
 
+/// 会话级敏感标记：session sensitive=true → 蒸馏产物自动继承 sensitive。
+#[tokio::test]
+async fn extract_inherits_session_sensitive() {
+    let env = setup(vec![
+        json!({"atoms": [
+            {"kind": "fact", "content": "用户对青霉素过敏", "confidence": 0.9, "turn_refs": [1]}
+        ]}),
+        json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
+        json!({"actions": []}),
+    ])
+    .await;
+
+    let sid = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO raw_sessions (id, agent, content, sensitive) VALUES ($1, 'pi', $2, true)",
+    )
+    .bind(sid)
+    .bind(session(&[("user", "我有个隐私：对青霉素严重过敏")]))
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "extract_atoms").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "extract 应成功: {:?}",
+        j.error
+    );
+    wait_done(&env.queue, "arbitrate_atoms").await;
+
+    let sensitive_n: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms WHERE sensitive")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(sensitive_n, 1, "敏感会话的产物应自动 sensitive");
+
+    env.handle.shutdown();
+    env.handle.join().await;
+}
+
 /// 圈子强化 P3：extract 抽取类型化关系（顶层 relations → entity_relations）。
 #[tokio::test]
 async fn extract_creates_relations() {

@@ -118,6 +118,7 @@ export interface Session {
   agent: string
   content: { speaker: string; text: string; ts?: string }[]
   distill_status: string
+  sensitive: boolean
   created_at: string
 }
 export interface Atom {

@@ -56,6 +56,9 @@ pub struct WriteSessionRequest {
     /// auto（默认，防抖触发蒸馏）| manual（立即）| off
     #[serde(default = "default_distill")]
     pub distill: String,
+    /// 会话级敏感标记：整段对话含隐私（医疗/感情/财务），蒸馏产物自动继承 sensitive
+    #[serde(default)]
+    pub sensitive: bool,
 }
 fn default_distill() -> String {
     "auto".into()
@@ -73,7 +76,7 @@ pub async fn write_session(
     require_memory(&principal)?;
     let agent = req.agent.unwrap_or_else(|| "default".into());
     let s = svc(&state)
-        .write_session(&agent, req.turns, &req.distill)
+        .write_session(&agent, req.turns, &req.distill, req.sensitive)
         .await
         .map_err(me)?;
     Ok((StatusCode::CREATED, Json(s)))

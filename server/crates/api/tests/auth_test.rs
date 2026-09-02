@@ -522,6 +522,7 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
         "t",
         serde_json::json!([{"speaker":"user","text":"x"}]),
         "off",
+        false,
     )
     .await
     .unwrap();
