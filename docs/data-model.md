@@ -1,6 +1,6 @@
 # 数据模型（集成索引）
 
-数据库 22 张业务表 + 19 迁移（2026-09-01 运行库实查）。表清单、迁移史、约束陷阱在
+数据库 24 张业务表 + 21 迁移（2026-09-02 运行库实查）。表清单、迁移史、约束陷阱在
 [server/docs/data-model.md](../server/docs/data-model.md)；前端消费形状在
 [web/docs/data-model.md](../web/docs/data-model.md)。
 

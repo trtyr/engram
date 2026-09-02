@@ -12,7 +12,7 @@
 └───────────────┬────────────────────────────────────────────┘
                 │ 同源 fetch（Bearer ams_/amk_）
 ┌───────────────▼──────────────── agent-memory-server ───────┐
-│ axum Router（69 路径，9 域）                                │
+│ axum Router（76 路径，9 域）                                │
 │ ├─ 认证层 bearer_auth（/jobs 对 text/html 分流回 SPA）       │
 │ ├─ rust-embed：web/dist 静态托管（生产单二进制）             │
 │ └─ 域 crate：distill / wiki-engine / cg-bridge / search     │
@@ -21,7 +21,7 @@
         │ sqlx                          │ reqwest（任务化异步）
 ┌───────▼──────────┐          ┌────────▼──────────┐
 │ PostgreSQL+pgvector│         │ 外部 LLM API       │
-│ 22 业务表/19 迁移   │         │ （OpenAI 兼容系）   │
+│ 24 业务表/21 迁移   │         │ （OpenAI 兼容系）   │
 └───────────────────┘          └───────────────────┘
                 另：cg-bridge 调用外部 codegraph CLI（Node+git）
 ```

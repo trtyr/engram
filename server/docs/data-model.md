@@ -1,9 +1,9 @@
 # 数据模型
 
-> 2026-09-01 实查：迁移目录 19 个 SQL；运行库 public schema 业务表 22 张（另有 `_sqlx_migrations` 簿记表）。
+> 2026-09-02 实查：迁移目录 21 个 SQL；运行库 public schema 业务表 24 张（另有 `_sqlx_migrations` 簿记表）。
 > 权威 schema 以 `server/migrations/` 为准。
 
-## 表清单（22 张业务表）
+## 表清单（24 张业务表）
 
 | 域 | 表 | 说明 |
 |---|---|---|
@@ -16,6 +16,8 @@
 | 记忆 | **entities** | 记忆坐标系（name+kind 唯一[活体]、kind ∈ person/project/topic/group/place、summary、merged_into 合并墓碑、manually_edited） |
 | 记忆 | **atom_revisions** | 原子编辑留痕（old_content/kind/confidence、edited_by、append-only） |
 | 记忆 | **atom_entities** | 原子↔实体挂链（复合主键，双向 CASCADE） |
+| 记忆 | **entity_revisions** | 实体摘要编辑留痕（old_summary/edited_by、append-only） |
+| 记忆 | **entity_relations** | 实体关系（from/to/rel_type 5 类、weight、source distill/manual、方向唯一索引） |
 | 知识 | documents | 上传文档（title/mime/status/error、sha256 UNIQUE） |
 | 知识 | chunks | 分块（seq/snippet、embed pgvector 向量列、embed_failed） |
 | wiki | wiki_sources | 摄取源（sha256 UNIQUE、error） |
@@ -30,7 +32,7 @@
 | LLM | settings | 路由表等 JSONB 配置 |
 | LLM | llm_usage | 用量记账（provider/model/purpose/tokens/latency） |
 
-## 迁移史（19 个）
+## 迁移史（21 个）
 
 | 迁移 | 内容要点 |
 |---|---|
@@ -44,6 +46,8 @@
 | 0017 | atoms.**sensitive**（隐私标记）+ raw_sessions distill_status +**void** |
 | 0018 | **atom_revisions** + persona_aspects/entities.**manually_edited** |
 | 0019 | jobs status +**cancelled**（deep purge 两阶段） |
+| 0020 | **entity_revisions**（实体摘要版本链） |
+| 0021 | **entity_relations**（有向类型化关系：5 类枚举 + 方向唯一索引 + weight） |
 
 ## 数据流（写路径）
 

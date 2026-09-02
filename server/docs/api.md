@@ -1,6 +1,6 @@
 # API
 
-> 2026-09-01 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **69 路径 / 86 方法注册**（GET 35 · POST 38 · PUT 4 · PATCH 3 · DELETE 6）。
+> 2026-09-02 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **76 路径 / 94 方法注册**（GET 40 · POST 40 · PUT 4 · PATCH 3 · DELETE 7）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 七 scope：memory/knowledge/wiki/codegraph/llm/erase/cron）。
@@ -21,7 +21,7 @@
 | DELETE/GET | /memory/sessions/{id} | 详情 / 擦除（**需 erase scope**；关联原子溯源标记 erased） |
 | POST | /memory/sessions/{id}/append | 追加轮次（仅 pending 会话；agent 维度；已蒸馏 400 引导开新会话） |
 | POST | /memory/sessions/{id}/void | 作废未蒸馏会话（one-way，区别于擦除） |
-| POST | /memory/distill | 触发蒸馏流水线（202 + Job[]；full=true 附带 consolidate；空认领也链 organize——直写原子可聚类） |
+| POST | /memory/distill | 触发蒸馏流水线（202 + Job[]；full=true 附带 consolidate——含实体档案 + **关系回溯**：存量实体无 session 重放也抽关系，常识关系 + 记忆明确关系；空认领也链 organize——直写原子可聚类） |
 | GET/POST | /memory/atoms | 原子列表（needs_review/sensitive 过滤）/ 手工补录（幂等：同 kind+content 活体返回既有；低置信自动人审） |
 | PATCH | /memory/atoms/{id} | **分权**：AI 可改 sensitive/needs_review/status/superseded_by/时间；content/kind/confidence 仅用户（403 教学文案指路 correction 流） |
 | GET | /memory/atoms/{id}/revisions | 编辑留痕（atom_revisions 表，append-only） |
@@ -32,9 +32,16 @@
 | POST | /memory/search | 四层检索（layers: l1/l2/l3/entities；max_items；reveal 敏感；no_feedback 防热度污染） |
 | GET | /memory/context | Agent 上下文（画像+记忆+**实体透镜**+**pending_review 代问**；no_feedback） |
 | GET/POST | /memory/entities、/graph | 实体列表（kind 过滤、密度排序）/ 新建 / 共现图谱（边=同原子共现强度） |
-| GET/PATCH/DELETE | /memory/entities/{id} | 详情（atoms+scenarios）/ 用户改摘要（钉住）/ 删除（?forget=true 连带归档关联活体原子） |
+| GET | /memory/entities/search | 圈子语义检索（token 打分，名字命中 1.0 > 摘要 0.3） |
+| GET/PATCH/DELETE | /memory/entities/{id} | 详情（atoms+scenarios+neighbors+relations）/ 用户改摘要（钉住）/ 删除（?forget=true 连带归档关联活体原子） |
+| GET | /memory/entities/{id}/revisions | 摘要历史版本（append-only 编辑留痕） |
+| GET/POST | /memory/entities/{id}/relations | 关系列表 / 建关系（有向 5 类：member_of/located_in/works_on/part_of/related_to；同向同类型 upsert weight+1） |
+| DELETE | /memory/entities/{id}/relations/{rid} | 删关系 |
 | POST/DELETE | /memory/entities/{id}/atoms/{atom_id} | 挂/摘原子（幂等） |
 | POST | /memory/entities/{id}/merge | 合并（loser 成墓碑释放名字槽，返回 moved 计数） |
+| GET | /memory/timeline | 全局时间轴（原子/场景/实体按时间倒序合并，图谱/时间轴切换） |
+| POST | /memory/entities/batch | 批量删除（**erase scope + confirm="批量删除"** 双因子；forget 级联归档） |
+| GET | /memory/entities/export | 圈子导出（实体+关系 JSON，数据主权） |
 | POST | /memory/purge | **一等清空**：按 agent（可逆归档）或 deep（两阶段：arm 5min 冷却→token 执行/cancel 后悔药；**需 erase scope + 确认短语"清空记忆库"**；deep+agent 互斥 400） |
 | GET | /memory/export | 全量导出（数据主权；敏感默认排除，?include_sensitive=true 可选，响应带 sensitive_excluded 口径） |
 | GET/POST | /memory/embeddings/status、/memory/reembed | 向量缺失诊断 / 重嵌修复（202 任务，fail loudly） |

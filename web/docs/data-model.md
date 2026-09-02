@@ -11,8 +11,10 @@
 | AtomRevision | old_content/old_kind/old_confidence、edited_by、created_at | 原子历史抽屉 |
 | Scenario | topic、atom_refs、version、hit_count | Memory |
 | Persona | aspect、evidence_refs、prompt_version、**manually_edited** | Memory 画像 |
-| **Entity** | name、kind（5 种：person/project/topic/group/place）、summary、atom_count、**manually_edited** | 圈子 |
-| EntityGraph | nodes + edges（共现权重） | 圈子图谱 |
+| **Entity** | name、kind（5 种：person/project/topic/group/place）、summary、atom_count、**manually_edited**；详情带 neighbors（共现邻居）+ relations | 圈子 |
+| EntityRevision | old_summary、edited_by、created_at | 实体历史抽屉 |
+| EntityRelation | from_id/to_id、rel_type（5 类：member_of/located_in/works_on/part_of/related_to）、weight、source（distill/manual） | 圈子关系 |
+| EntityGraph | nodes + edges（共现权重）+ relations（类型化有向关系） | 圈子图谱 |
 | Job / JobEvent | kind、status（含 **cancelled**）、attempts、error / level、message | Jobs、壳徽章 |
 | Document / ChunkHit | status（pending→parsing→chunking→embedding→ready/failed）/ score | Knowledge |
 | WikiPage | slug、page_type、frontmatter、origin、version | Wiki |
