@@ -595,13 +595,12 @@ async fn embed_short_response_marks_batch_failed_not_silent_null() {
     let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
     let key_enc = cipher.encrypt("mock-key").unwrap();
     sqlx::query(
-        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, models, is_default) \
-         VALUES ($1, 'mock-embed', $2, $3, $4::jsonb, true)",
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default) \
+         VALUES ($1, 'mock-embed', $2, $3, 'mock-model', 'embedding', true)",
     )
     .bind(uuid::Uuid::now_v7())
     .bind(format!("http://127.0.0.1:{port}"))
     .bind(&key_enc)
-    .bind(r#"[{"id":"mock-model","capabilities":["embedding"]}]"#)
     .execute(&pool)
     .await
     .unwrap();

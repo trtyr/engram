@@ -5,9 +5,7 @@ use std::sync::Arc;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::types::{
-    ChatRequest, ChatResponse, EmbedRequest, EmbedResponse, LlmError, ModelInfo, UsageRecord,
-};
+use crate::types::{ChatRequest, ChatResponse, EmbedRequest, EmbedResponse, LlmError, UsageRecord};
 
 /// Provider 能力 trait。mock 与真实实现共用；测试注入换实现即可。
 pub trait LlmProvider: Send + Sync {
@@ -401,8 +399,9 @@ struct ProviderRow {
     name: String,
     base_url: String,
     api_key_encrypted: Vec<u8>,
+    model_id: String,
     #[allow(dead_code, reason = "SELECT * 伴随字段")]
-    models: sqlx::types::Json<Vec<ModelInfo>>,
+    capability: String,
     #[allow(dead_code, reason = "SELECT * 伴随字段")]
     is_default: bool,
 }
@@ -451,7 +450,8 @@ impl ProviderRegistry {
     }
 
     /// 按名取 provider（每次从 DB 取，配置即时生效；单用户量级无性能问题）。
-    pub async fn get(&self, name: &str) -> Result<Arc<OpenAiCompatProvider>, LlmError> {
+    /// 返回 (provider, model_id)——一个 provider 一个模型。
+    pub async fn get(&self, name: &str) -> Result<(Arc<OpenAiCompatProvider>, String), LlmError> {
         let row = sqlx::query_as::<_, ProviderRow>("SELECT * FROM llm_providers WHERE name = $1")
             .bind(name)
             .fetch_optional(&self.pool)
@@ -460,15 +460,14 @@ impl ProviderRegistry {
             .ok_or_else(|| LlmError::NotConfigured(format!("provider 不存在: {name}")))?;
 
         let api_key = self.cipher.decrypt(&row.api_key_encrypted)?;
-        Ok(Arc::new(OpenAiCompatProvider::new(
-            row.name,
-            row.base_url,
-            api_key,
-        )))
+        Ok((
+            Arc::new(OpenAiCompatProvider::new(row.name, row.base_url, api_key)),
+            row.model_id,
+        ))
     }
 
     /// 按用途解析 (provider, model)：路由链优先；回退默认 provider 中
-    /// **具备对应能力**的模型（Embed→embedding 能力，chat 用途→非 embedding）。
+    /// **对应能力**的一个（Embed→embedding，chat 用途→chat；一个 provider 一个模型）。
     pub async fn resolve(
         &self,
         purpose: crate::types::Purpose,
@@ -478,7 +477,7 @@ impl ProviderRegistry {
             .await?;
         for rule in table.chain(purpose) {
             match self.get(&rule.provider).await {
-                Ok(p) => return Ok((p, rule.model.clone())),
+                Ok((p, model)) => return Ok((p, model)),
                 // L4：幽灵路由不再静默——warn 留痕（typo/改名导致的失效路由可发现）
                 Err(e) => tracing::warn!(
                     purpose = purpose.as_str(),
@@ -488,41 +487,27 @@ impl ProviderRegistry {
                 ),
             }
         }
-        // 默认 provider + 按能力选模型
-        // L3：ORDER BY 兜底确定性——存量多 default 行（本修复前数据/直插库）时
-        // 取最早创建的，不再依赖物理顺序（热路径：resolve 是所有默认选择的唯一入口）
-        type DefaultRow = (String, String, Vec<u8>, sqlx::types::Json<Vec<ModelInfo>>);
-        let row: Option<DefaultRow> =
-            sqlx::query_as(
-                "SELECT name, base_url, api_key_encrypted, models FROM llm_providers WHERE is_default = true ORDER BY created_at LIMIT 1",
-            )
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| LlmError::Transient(e.to_string()))?;
-        let Some((name, base_url, enc, models)) = row else {
-            return Err(LlmError::NotConfigured("未配置任何 LLM provider".into()));
-        };
+        // 默认回退：按能力选默认 provider（chat 与 embedding 各有一个默认）。
+        // L3：ORDER BY 兜底确定性——存量多 default 行时取最早创建的。
         let want_embed = purpose == crate::types::Purpose::Embed;
-        // L1：能力找不到直接报配置错误——旧实现 or_else(first) 会把 embedding-only
-        // provider 的第一个嵌入模型选为 chat 模型（静默地雷：全部调用 400 却不指根因）
-        let model = models
-            .0
-            .iter()
-            .find(|m| {
-                let has_emb = m.capabilities.iter().any(|c| c == "embedding");
-                want_embed == has_emb
-            })
-            .map(|m| m.id.clone())
-            .ok_or_else(|| {
-                LlmError::NotConfigured(format!(
-                    "provider {name} 无{}能力的模型，请检查 models 的 capabilities 配置",
-                    if want_embed { "embedding" } else { "chat" }
-                ))
-            })?;
+        let capability = if want_embed { "embedding" } else { "chat" };
+        let row: Option<(String, String, Vec<u8>, String)> = sqlx::query_as(
+            "SELECT name, base_url, api_key_encrypted, model_id FROM llm_providers \
+             WHERE is_default = true AND capability = $1 ORDER BY created_at LIMIT 1",
+        )
+        .bind(capability)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| LlmError::Transient(e.to_string()))?;
+        let Some((name, base_url, enc, model_id)) = row else {
+            return Err(LlmError::NotConfigured(format!(
+                "未配置任何 {capability} LLM provider"
+            )));
+        };
         let api_key = self.cipher.decrypt(&enc)?;
         Ok((
             Arc::new(OpenAiCompatProvider::new(name, base_url, api_key)),
-            model,
+            model_id,
         ))
     }
 

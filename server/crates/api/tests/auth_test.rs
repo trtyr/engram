@@ -385,7 +385,7 @@ async fn llm_scope_key_manages_providers() {
         "/settings/llm/providers",
         key.clone(),
         Some(
-            r#"{"name":"t","base_url":"https://gw.example.com","api_key":"sk-x","models":[{"id":"m","capabilities":["chat"]}],"is_default":false}"#,
+            r#"{"name":"t","base_url":"https://gw.example.com","api_key":"sk-x","model_id":"m","capability":"chat","is_default":false}"#,
         ),
     )
     .await
@@ -969,12 +969,14 @@ async fn openapi_snapshot() {
             "/ready",
             "/search",
             "/settings/api-keys",
+            "/settings/api-keys/batch-revoke",
             "/settings/api-keys/{id}/revoke",
             "/settings/llm/providers",
             "/settings/llm/providers/re-encrypt",
             "/settings/llm/providers/{id}",
             "/settings/llm/providers/{id}/test",
             "/settings/llm/routing",
+            "/settings/llm/routing/suggest",
             "/wiki/graph",
             "/wiki/ingest",
             "/wiki/insights",
@@ -993,6 +995,136 @@ async fn openapi_snapshot() {
             "/wiki/sources/{id}",
         ],
         "API 端点集合发生变化时必须同步更新快照"
+    );
+}
+
+#[tokio::test]
+async fn batch_revoke_api_keys_revokes_selected_only() {
+    let (app, _pg) = app().await;
+    let token = login_token(&app).await;
+
+    // 建 3 把 key，拿 id
+    let mut ids: Vec<String> = Vec::new();
+    for i in 0..3 {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/settings/api-keys")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(format!(
+                        r#"{{"name":"batch-{i}","scopes":["memory"]}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        ids.push(v["id"].as_str().unwrap().to_string());
+    }
+
+    // 批量吊销前 2 把
+    let ids_json = serde_json::json!([ids[0], ids[1]]);
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys/batch-revoke")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(format!(r#"{{"ids":{ids_json}}}"#)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["revoked"], 2, "应吊销 2 把: {v:?}");
+
+    // 列表验证：前 2 把 revoked_at 已置，第 3 把未吊销
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/settings/api-keys")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let list: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let batch_keys: Vec<&serde_json::Value> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|k| k["name"].as_str().unwrap_or("").starts_with("batch-"))
+        .collect();
+    assert_eq!(batch_keys.len(), 3, "应建 3 把 batch- key");
+    let revoked = batch_keys
+        .iter()
+        .filter(|k| !k["revoked_at"].is_null())
+        .count();
+    assert_eq!(revoked, 2, "前 2 把应吊销，第 3 把未吊销");
+
+    // 空数组 → 400
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys/batch-revoke")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(r#"{"ids":[]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "空 ids 应 400");
+}
+
+#[tokio::test]
+async fn routing_suggest_reports_no_provider() {
+    let (app, _pg) = app().await;
+    let token = login_token(&app).await;
+
+    // 无供应商 → 400 带明确报错（AI 建议的正路径需真实 LLM，走 live 验证）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/llm/routing/suggest")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(r#"{}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "无供应商应 400");
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        v["error"]["message"].as_str().unwrap().contains("供应商"),
+        "报错应提示注册供应商: {v:?}"
     );
 }
 

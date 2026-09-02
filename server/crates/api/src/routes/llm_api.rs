@@ -10,7 +10,7 @@ use uuid::Uuid;
 use agent_memory_llm::crypto::KeyCipher;
 use agent_memory_llm::provider::{LlmProvider, OpenAiCompatProvider, ProviderRegistry};
 use agent_memory_llm::router::{PurposeRouter, RoutingTable};
-use agent_memory_llm::types::{ChatMessage, ChatRequest, ModelInfo, UsageRecord};
+use agent_memory_llm::types::{ChatMessage, ChatRequest, Purpose, UsageRecord};
 
 use crate::auth::{Principal, create_api_key};
 use crate::error::ApiError;
@@ -55,10 +55,17 @@ pub struct CreateProviderRequest {
     pub base_url: String,
     /// 明文 API key（只在请求中出现，落库前加密）
     pub api_key: String,
-    #[serde(default)]
-    pub models: Vec<ModelInfo>,
+    /// 单一模型 id（一个供应商一个模型一个 key）
+    pub model_id: String,
+    /// 能力：chat | embedding（默认 chat）
+    #[serde(default = "default_capability")]
+    pub capability: String,
     #[serde(default)]
     pub is_default: bool,
+}
+
+fn default_capability() -> String {
+    "chat".to_string()
 }
 
 #[derive(Serialize, ToSchema)]
@@ -66,7 +73,8 @@ pub struct ProviderDto {
     pub id: Uuid,
     pub name: String,
     pub base_url: String,
-    pub models: Vec<ModelInfo>,
+    pub model_id: String,
+    pub capability: String,
     pub is_default: bool,
     /// L10：占位主密钥生效时的告示（不阻断；换真实密钥后需 re-encrypt 迁移）
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -111,23 +119,14 @@ pub async fn create_provider(
     if req.api_key.trim().is_empty() {
         return Err(ApiError::BadRequest("api_key 不能为空".into()));
     }
-    for m in &req.models {
-        if m.id.trim().is_empty() {
-            return Err(ApiError::BadRequest("models[].id 不能为空".into()));
-        }
-        let bad: Vec<&str> = m
-            .capabilities
-            .iter()
-            .map(|s| s.as_str())
-            .filter(|c| !matches!(*c, "chat" | "embedding"))
-            .collect();
-        if !bad.is_empty() {
-            return Err(ApiError::BadRequest(format!(
-                "模型「{}」的 capabilities 仅接受 chat / embedding（非法值：{}）",
-                m.id,
-                bad.join("、")
-            )));
-        }
+    if req.model_id.trim().is_empty() {
+        return Err(ApiError::BadRequest("model_id 不能为空".into()));
+    }
+    if !matches!(req.capability.as_str(), "chat" | "embedding") {
+        return Err(ApiError::BadRequest(format!(
+            "capability 仅接受 chat / embedding（非法值：{}）",
+            req.capability
+        )));
     }
 
     let cipher = cipher_from(&state)?;
@@ -141,19 +140,24 @@ pub async fn create_provider(
     // L1：UNIQUE 冲突（重名）映射 400（旧路径经 From<sqlx::Error> 变 503 retryable）
     let mut tx = state.pool.begin().await?;
     if req.is_default {
-        sqlx::query("UPDATE llm_providers SET is_default = false WHERE is_default")
-            .execute(&mut *tx)
-            .await?;
+        // 同 capability 的唯一默认（chat 与 embedding 各有一个默认）
+        sqlx::query(
+            "UPDATE llm_providers SET is_default = false WHERE is_default AND capability = $1",
+        )
+        .bind(&req.capability)
+        .execute(&mut *tx)
+        .await?;
     }
     let insert = sqlx::query(
-        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, models, is_default)
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(id)
     .bind(req.name.trim())
     .bind(&req.base_url)
     .bind(&enc)
-    .bind(sqlx::types::Json(&req.models))
+    .bind(req.model_id.trim())
+    .bind(&req.capability)
     .bind(req.is_default)
     .execute(&mut *tx)
     .await;
@@ -179,7 +183,8 @@ pub async fn create_provider(
             id,
             name: req.name.trim().to_string(),
             base_url: req.base_url,
-            models: req.models,
+            model_id: req.model_id.trim().to_string(),
+            capability: req.capability,
             is_default: req.is_default,
             warning,
         }),
@@ -192,9 +197,11 @@ pub struct UpdateProviderRequest {
     pub base_url: Option<String>,
     /// 新明文 key（可选；提供则重新加密）
     pub api_key: Option<String>,
-    /// 新模型列表（可选）
-    pub models: Option<Vec<ModelInfo>>,
-    /// 默认切换（可选；true 时事务降级存量默认）
+    /// 新模型 id（可选）
+    pub model_id: Option<String>,
+    /// 新能力（可选）
+    pub capability: Option<String>,
+    /// 默认切换（可选；true 时事务降级同能力存量默认）
     pub is_default: Option<bool>,
 }
 
@@ -227,21 +234,17 @@ pub async fn update_provider(
     {
         return Err(ApiError::BadRequest("api_key 不能为空".into()));
     }
-    if let Some(models) = &req.models {
-        for m in models {
-            if m.id.trim().is_empty() {
-                return Err(ApiError::BadRequest("models[].id 不能为空".into()));
-            }
-            if m.capabilities
-                .iter()
-                .any(|c| !matches!(c.as_str(), "chat" | "embedding"))
-            {
-                return Err(ApiError::BadRequest(format!(
-                    "模型「{}」的 capabilities 仅接受 chat / embedding",
-                    m.id
-                )));
-            }
-        }
+    if let Some(mid) = &req.model_id
+        && mid.trim().is_empty()
+    {
+        return Err(ApiError::BadRequest("model_id 不能为空".into()));
+    }
+    if let Some(cap) = &req.capability
+        && !matches!(cap.as_str(), "chat" | "embedding")
+    {
+        return Err(ApiError::BadRequest(format!(
+            "capability 仅接受 chat / embedding（非法值：{cap}）"
+        )));
     }
 
     let cipher = cipher_from(&state)?;
@@ -256,36 +259,43 @@ pub async fn update_provider(
 
     let mut tx = state.pool.begin().await?;
     if req.is_default == Some(true) {
-        sqlx::query("UPDATE llm_providers SET is_default = false WHERE is_default AND id <> $1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
+        // 同 capability 的唯一默认（capability 变更时用新值降级存量）
+        let cur_cap: Option<String> =
+            sqlx::query_scalar("SELECT capability FROM llm_providers WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&state.pool)
+                .await?;
+        let new_cap = req
+            .capability
+            .clone()
+            .or(cur_cap)
+            .unwrap_or_else(|| "chat".to_string());
+        sqlx::query(
+            "UPDATE llm_providers SET is_default = false WHERE is_default AND capability = $2 AND id <> $1",
+        )
+        .bind(id)
+        .bind(&new_cap)
+        .execute(&mut *tx)
+        .await?;
     }
 
     // COALESCE 逐字段更新；未提供的字段保持原值
-    let row = sqlx::query_as::<
-        _,
-        (
-            Uuid,
-            String,
-            String,
-            sqlx::types::Json<Vec<ModelInfo>>,
-            bool,
-        ),
-    >(
+    let row = sqlx::query_as::<_, (Uuid, String, String, String, String, bool)>(
         "UPDATE llm_providers SET \
             base_url = COALESCE($2, base_url), \
             api_key_encrypted = COALESCE($3, api_key_encrypted), \
-            models = COALESCE($4, models), \
-            is_default = COALESCE($5, is_default), \
+            model_id = COALESCE($4, model_id), \
+            capability = COALESCE($5, capability), \
+            is_default = COALESCE($6, is_default), \
             updated_at = now() \
          WHERE id = $1 \
-         RETURNING id, name, base_url, models, is_default",
+         RETURNING id, name, base_url, model_id, capability, is_default",
     )
     .bind(id)
     .bind(&req.base_url)
     .bind(&enc_new)
-    .bind(req.models.as_ref().map(sqlx::types::Json))
+    .bind(&req.model_id)
+    .bind(&req.capability)
     .bind(req.is_default)
     .fetch_optional(&mut *tx)
     .await
@@ -298,7 +308,7 @@ pub async fn update_provider(
     })?;
     tx.commit().await?;
 
-    let Some((id, name, base_url, models, is_default)) = row else {
+    let Some((id, name, base_url, model_id, capability, is_default)) = row else {
         return Err(ApiError::NotFound(format!("provider {id} 不存在")));
     };
     let warning = if req.api_key.is_some() && state.is_placeholder_master_key() {
@@ -310,7 +320,8 @@ pub async fn update_provider(
         id,
         name,
         base_url,
-        models: models.0,
+        model_id,
+        capability,
         is_default,
         warning,
     }))
@@ -432,28 +443,25 @@ pub async fn list_providers(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ProviderDto>>, ApiError> {
     require_llm(&principal)?;
-    type ProvRow = (
-        Uuid,
-        String,
-        String,
-        sqlx::types::Json<Vec<ModelInfo>>,
-        bool,
-    );
+    type ProvRow = (Uuid, String, String, String, String, bool);
     let rows: Vec<ProvRow> = sqlx::query_as(
-        "SELECT id, name, base_url, models, is_default FROM llm_providers ORDER BY created_at",
+        "SELECT id, name, base_url, model_id, capability, is_default FROM llm_providers ORDER BY created_at",
     )
     .fetch_all(&state.pool)
     .await?;
     Ok(Json(
         rows.into_iter()
-            .map(|(id, name, base_url, models, is_default)| ProviderDto {
-                id,
-                name,
-                base_url,
-                models: models.0,
-                is_default,
-                warning: None,
-            })
+            .map(
+                |(id, name, base_url, model_id, capability, is_default)| ProviderDto {
+                    id,
+                    name,
+                    base_url,
+                    model_id,
+                    capability,
+                    is_default,
+                    warning: None,
+                },
+            )
             .collect(),
     ))
 }
@@ -476,14 +484,14 @@ pub async fn test_provider(
     let cipher = cipher_from(&state)?;
     let registry = ProviderRegistry::new(state.pool.clone(), cipher.clone());
 
-    type Row = (String, String, Vec<u8>, sqlx::types::Json<Vec<ModelInfo>>);
+    type Row = (String, String, Vec<u8>, String, String);
     let row: Option<Row> = sqlx::query_as(
-        "SELECT name, base_url, api_key_encrypted, models FROM llm_providers WHERE id = $1",
+        "SELECT name, base_url, api_key_encrypted, model_id, capability FROM llm_providers WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(&state.pool)
     .await?;
-    let Some((name, base_url, enc, models)) = row else {
+    let Some((name, base_url, enc, model_id, capability)) = row else {
         return Err(ApiError::NotFound(format!("provider {id} 不存在")));
     };
 
@@ -497,17 +505,17 @@ pub async fn test_provider(
             .decrypt(&enc)
             .map_err(|e| ApiError::BadRequest(e.to_string()))?,
     );
-    let chat_model = models
-        .0
-        .iter()
-        .find(|m| m.capabilities.iter().any(|c| c == "chat"))
-        .map(|m| m.id.clone())
-        .unwrap_or_else(|| models.0.first().map(|m| m.id.clone()).unwrap_or_default());
-    let embed_model = models
-        .0
-        .iter()
-        .find(|m| m.capabilities.iter().any(|c| c == "embedding"))
-        .map(|m| m.id.clone());
+    // 一个 provider 一个模型：按 capability 只探测对应方向
+    let chat_model = if capability == "chat" {
+        model_id.clone()
+    } else {
+        String::new()
+    };
+    let embed_model = if capability == "embedding" {
+        Some(model_id)
+    } else {
+        None
+    };
 
     // chat 探测（有 chat 模型时）
     let mut chat_result: Option<Result<_, _>> = None;
@@ -594,6 +602,81 @@ pub async fn get_routing(
     Ok(Json(PurposeRouter::new(state.pool).table().await?))
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct RoutingSuggestRequest {
+    /// 指定用哪个 provider 生成建议（可选；默认用 chat 能力的默认 provider）
+    pub provider: Option<String>,
+}
+
+/// AI 路由建议：读现有供应商 + 8 用途，调 LLM 生成建议路由表（不落库，返回给前端确认）。
+#[utoipa::path(post, path = "/settings/llm/routing/suggest",
+    request_body = RoutingSuggestRequest,
+    responses((status = 200, body = RoutingTable)))]
+pub async fn suggest_routing(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<RoutingSuggestRequest>,
+) -> Result<Json<RoutingTable>, ApiError> {
+    require_llm(&principal)?;
+
+    // 读现有供应商
+    let providers: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT name, model_id, capability FROM llm_providers ORDER BY name")
+            .fetch_all(&state.pool)
+            .await?;
+    if providers.is_empty() {
+        return Err(ApiError::BadRequest(
+            "没有可用的 LLM 供应商——请先在「供应商」注册至少一个 chat 供应商".into(),
+        ));
+    }
+    if !providers.iter().any(|(_, _, c)| c == "chat") {
+        return Err(ApiError::BadRequest(
+            "没有 chat 能力的供应商——AI 建议需要至少一个 chat 供应商".into(),
+        ));
+    }
+
+    let provider_desc = providers
+        .iter()
+        .map(|(n, m, c)| format!("- {n}（{c}，模型 {m}）"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let system = "你是 AI 配置助手，为单用户 AI 长期记忆系统生成 LLM 路由表。\
+        \n系统有 8 个用途：extract（抽取）、arbitrate（仲裁）、embed（嵌入）、organize（组织）、consolidate（整理）、wiki_analysis（Wiki 分析）、persona（画像）、wiki_generation（Wiki 生成）。\
+        \n规则：1) embed 用途必须用 embedding 能力的供应商；2) 其余用途用 chat 能力的供应商；3) 高频低成本的用途（extract / arbitrate / embed）优先便宜的模型，低频高价值的（persona / wiki_generation）优先强的模型；4) provider 与 model 必须来自下面给定的列表，不得臆造。";
+    let user = format!(
+        "可用的供应商：\n{provider_desc}\n\n请为 8 个用途生成路由建议，每个用途一条回退链（至少一条）。只输出严格 JSON，形如 {{\"extract\":[{{\"provider\":\"...\",\"model\":\"...\"}}],\"embed\":[...]}}。"
+    );
+
+    let cipher = cipher_from(&state)?;
+    let registry = ProviderRegistry::new(state.pool.clone(), cipher);
+    let (provider, model) = match &req.provider {
+        Some(name) => registry
+            .get(name)
+            .await
+            .map_err(|e| ApiError::BadRequest(e.to_string()))?,
+        None => registry
+            .resolve(Purpose::Extract)
+            .await
+            .map_err(|e| ApiError::Unavailable(e.to_string()))?,
+    };
+    let resp = provider
+        .chat(ChatRequest {
+            model,
+            messages: vec![ChatMessage::system(system), ChatMessage::user(&user)],
+            temperature: Some(0.2),
+            json_mode: true,
+            max_tokens: Some(2000),
+        })
+        .await
+        .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+
+    let content = resp.content.trim();
+    let table: RoutingTable = serde_json::from_str(content)
+        .map_err(|e| ApiError::BadRequest(format!("LLM 生成的路由建议无法解析（{e}）")))?;
+
+    Ok(Json(table))
+}
+
 /// 保存路由表。L4：落库前全量校验（purpose 枚举 / provider 存在 / model 在册）。
 #[utoipa::path(put, path = "/settings/llm/routing",
     request_body = RoutingTable,
@@ -616,17 +699,15 @@ pub async fn put_routing(
         "wiki_generation",
     ];
 
-    // 一次取全部 provider（name → models）
-    let providers: Vec<(String, sqlx::types::Json<Vec<ModelInfo>>)> =
-        sqlx::query_as("SELECT name, models FROM llm_providers")
+    // 一次取全部 provider（name → model_id，一个 provider 一个模型）
+    let providers: Vec<(String, String)> =
+        sqlx::query_as("SELECT name, model_id FROM llm_providers")
             .fetch_all(&state.pool)
             .await?;
-    let provider_models: std::collections::HashMap<String, Vec<String>> = providers
-        .into_iter()
-        .map(|(n, m)| (n, m.0.into_iter().map(|x| x.id).collect()))
-        .collect();
+    let provider_models: std::collections::HashMap<String, String> =
+        providers.into_iter().collect();
 
-    // L4：逐条校验，违规收集明细一次性返回（typo purpose/幽灵 provider/不在册 model
+    // L4：逐条校验，违规收集明细一次性返回（typo purpose/幽灵 provider/model 与 provider 不一致
     // 不再静默入库——旧路径落库后 resolve 静默跳过，用户以为在用路由实际全走默认）
     let mut errors: Vec<String> = Vec::new();
     for (purpose, chain) in &table.routes {
@@ -644,14 +725,14 @@ pub async fn put_routing(
                     i + 1,
                     rule.provider
                 )),
-                Some(models) => {
-                    if !models.contains(&rule.model) {
+                Some(model_id) => {
+                    if &rule.model != model_id {
                         errors.push(format!(
-                            "{purpose} 第{}条：模型「{}」不在 provider「{}」的 models 列表中（{}）",
+                            "{purpose} 第{}条：模型「{}」与 provider「{}」的 model_id（{}）不一致",
                             i + 1,
                             rule.model,
                             rule.provider,
-                            models.join("、")
+                            model_id
                         ));
                     }
                 }
@@ -798,4 +879,38 @@ pub async fn revoke_api_key(
         return Err(ApiError::NotFound(format!("API key {id} 不存在或已吊销")));
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct BatchRevokeRequest {
+    pub ids: Vec<Uuid>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct BatchRevokeResult {
+    pub revoked: usize,
+}
+
+/// 批量吊销 API key（幂等：已吊销的忽略，返回实际吊销数）。
+#[utoipa::path(post, path = "/settings/api-keys/batch-revoke",
+    request_body = BatchRevokeRequest,
+    responses((status = 200, body = BatchRevokeResult)))]
+pub async fn batch_revoke_api_keys(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<BatchRevokeRequest>,
+) -> Result<Json<BatchRevokeResult>, ApiError> {
+    require_admin(&principal)?;
+    if req.ids.is_empty() {
+        return Err(ApiError::BadRequest("ids 不能为空".into()));
+    }
+    let result = sqlx::query(
+        "UPDATE api_keys SET revoked_at = now() WHERE id = ANY($1) AND revoked_at IS NULL",
+    )
+    .bind(&req.ids)
+    .execute(&state.pool)
+    .await?;
+    Ok(Json(BatchRevokeResult {
+        revoked: result.rows_affected() as usize,
+    }))
 }

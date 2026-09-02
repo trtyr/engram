@@ -40,13 +40,6 @@ impl Purpose {
     }
 }
 
-/// 模型信息（provider 配置内）。
-#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct ModelInfo {
-    pub id: String,
-    pub capabilities: Vec<String>,
-}
-
 /// 聊天消息。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {

@@ -917,6 +917,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/api-keys/batch-revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量吊销 API key（幂等：已吊销的忽略，返回实际吊销数）。 */
+        post: operations["batch_revoke_api_keys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/api-keys/{id}/revoke": {
         parameters: {
             query?: never;
@@ -1019,6 +1036,23 @@ export interface paths {
         /** 保存路由表。L4：落库前全量校验（purpose 枚举 / provider 存在 / model 在册）。 */
         put: operations["put_routing"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/llm/routing/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** AI 路由建议：读现有供应商 + 8 用途，调 LLM 生成建议路由表（不落库，返回给前端确认）。 */
+        post: operations["suggest_routing"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1390,6 +1424,12 @@ export interface components {
             forget?: boolean;
             ids: string[];
         };
+        BatchRevokeRequest: {
+            ids: string[];
+        };
+        BatchRevokeResult: {
+            revoked: number;
+        };
         CascadeReport: {
             cleaned_links: number;
             deleted_pages: string[];
@@ -1498,8 +1538,11 @@ export interface components {
             /** @description 明文 API key（只在请求中出现，落库前加密） */
             api_key: string;
             base_url: string;
+            /** @description 能力：chat | embedding（默认 chat） */
+            capability?: string;
             is_default?: boolean;
-            models?: components["schemas"]["ModelInfo"][];
+            /** @description 单一模型 id（一个供应商一个模型一个 key） */
+            model_id: string;
             name: string;
         };
         CreateRelationRequest: {
@@ -1732,11 +1775,6 @@ export interface components {
              */
             into: string;
         };
-        /** @description 模型信息（provider 配置内）。 */
-        ModelInfo: {
-            capabilities: string[];
-            id: string;
-        };
         PersonaEditRequest: {
             /** @description 分面（identity/preferences/skills/constraints/communication_style/goals/routines） */
             aspect: string;
@@ -1760,10 +1798,11 @@ export interface components {
         };
         ProviderDto: {
             base_url: string;
+            capability: string;
             /** Format: uuid */
             id: string;
             is_default: boolean;
-            models: components["schemas"]["ModelInfo"][];
+            model_id: string;
             name: string;
             /** @description L10：占位主密钥生效时的告示（不阻断；换真实密钥后需 re-encrypt 迁移） */
             warning?: string | null;
@@ -1844,6 +1883,10 @@ export interface components {
             aspect: string;
             /** Format: int32 */
             to_version: number;
+        };
+        RoutingSuggestRequest: {
+            /** @description 指定用哪个 provider 生成建议（可选；默认用 chat 能力的默认 provider） */
+            provider?: string | null;
         };
         RoutingTable: Record<string, never>;
         ScenarioDto: {
@@ -1961,10 +2004,12 @@ export interface components {
             api_key?: string | null;
             /** @description 新 base_url（可选） */
             base_url?: string | null;
-            /** @description 默认切换（可选；true 时事务降级存量默认） */
+            /** @description 新能力（可选） */
+            capability?: string | null;
+            /** @description 默认切换（可选；true 时事务降级同能力存量默认） */
             is_default?: boolean | null;
-            /** @description 新模型列表（可选） */
-            models?: components["schemas"]["ModelInfo"][] | null;
+            /** @description 新模型 id（可选） */
+            model_id?: string | null;
         };
         /** @description 用量记账行。 */
         UsageRecord: {
@@ -3570,6 +3615,29 @@ export interface operations {
             };
         };
     };
+    batch_revoke_api_keys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchRevokeRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchRevokeResult"];
+                };
+            };
+        };
+    };
     revoke_api_key: {
         parameters: {
             query?: never;
@@ -3756,6 +3824,29 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    suggest_routing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoutingSuggestRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoutingTable"];
+                };
             };
         };
     };

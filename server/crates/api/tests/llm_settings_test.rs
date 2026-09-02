@@ -69,7 +69,8 @@ fn valid_body(name: &str) -> serde_json::Value {
         "name": name,
         "base_url": "https://api.example.com/v1",
         "api_key": "sk-x",
-        "models": [{"id": "m-chat", "capabilities": ["chat"]}],
+        "model_id": "m-chat",
+        "capability": "chat",
         "is_default": false,
     })
 }
@@ -96,7 +97,7 @@ async fn l1_invalid_provider_inputs_rejected_400() {
     assert_eq!(create(&app, &token, &b).await, StatusCode::BAD_REQUEST);
     // 非法 capability
     b = valid_body("p4");
-    b["models"] = serde_json::json!([{"id": "m", "capabilities": ["vision"]}]);
+    b["capability"] = "vision".into();
     assert_eq!(create(&app, &token, &b).await, StatusCode::BAD_REQUEST);
     // 全部非法输入都没有落库
     let resp = app
@@ -234,10 +235,6 @@ async fn l2_provider_lifecycle_update_delete_reencrypt() {
     // 建 default + 普通 provider
     let mut d = valid_body("main");
     d["is_default"] = true.into();
-    d["models"] = serde_json::json!([
-        {"id": "m-chat", "capabilities": ["chat"]},
-        {"id": "m-emb", "capabilities": ["embedding"]},
-    ]);
     let dp = create_full(&app, &token, &d).await;
     let sp = create_full(&app, &token, &valid_body("spare")).await;
 
@@ -249,14 +246,14 @@ async fn l2_provider_lifecycle_update_delete_reencrypt() {
         &format!("/settings/llm/providers/{}", sp["id"].as_str().unwrap()),
         Some(serde_json::json!({
             "api_key": "sk-new-key",
-            "models": [{"id": "s-chat", "capabilities": ["chat"]}],
+            "model_id": "s-chat",
             "is_default": true,
         })),
     )
     .await;
     assert_eq!(st, StatusCode::OK, "{v:?}");
     assert_eq!(v["is_default"], true, "spare 应升为默认");
-    assert_eq!(v["models"][0]["id"], "s-chat");
+    assert_eq!(v["model_id"], "s-chat");
     // 旧默认被降级
     let (_, list) = req_json(&app, &token, "GET", "/settings/llm/providers", None).await;
     let main = list
@@ -350,11 +347,7 @@ async fn l4_routing_put_validation() {
     let token = token(&app).await;
 
     // 建 provider 供合法路由引用
-    let mut d = valid_body("routed");
-    d["models"] = serde_json::json!([
-        {"id": "m-chat", "capabilities": ["chat"]},
-        {"id": "m-emb", "capabilities": ["embedding"]},
-    ]);
+    let d = valid_body("routed");
     create_full(&app, &token, &d).await;
 
     // typo purpose → 400（旧路径静默入库永不生效）
@@ -398,7 +391,7 @@ async fn l4_routing_put_validation() {
             .contains("no-such-model")
     );
 
-    // 合法表 → 204 且读回一致
+    // 合法表 → 204 且读回一致（routed 是 chat provider，model 需与 model_id 一致）
     let (st, _) = req_json(
         &app,
         &token,
@@ -406,7 +399,6 @@ async fn l4_routing_put_validation() {
         "/settings/llm/routing",
         Some(serde_json::json!({
             "extract": [{"provider": "routed", "model": "m-chat"}],
-            "embed": [{"provider": "routed", "model": "m-emb"}],
         })),
     )
     .await;
@@ -414,7 +406,7 @@ async fn l4_routing_put_validation() {
     let (st, v) = req_json(&app, &token, "GET", "/settings/llm/routing", None).await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(v["extract"][0]["provider"], "routed");
-    assert_eq!(v["embed"][0]["model"], "m-emb");
+    assert_eq!(v["extract"][0]["model"], "m-chat");
 
     // 空表合法（清空路由的文档化路径）
     let (st, _) = req_json(
@@ -489,18 +481,13 @@ async fn l3_resolve_hot_path_deterministic_default() {
         ("newer", "2024-01-01T00:00:00Z"),
     ] {
         sqlx::query(
-            "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, models, is_default, created_at)
-             VALUES ($1, $2, 'http://127.0.0.1:1', $3, $4, true, $5::timestamptz)",
+            "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default, created_at)
+             VALUES ($1, $2, 'http://127.0.0.1:1', $3, $4, 'chat', true, $5::timestamptz)",
         )
         .bind(uuid::Uuid::new_v4())
         .bind(name)
         .bind(cipher.encrypt("k").unwrap())
-        .bind(sqlx::types::Json(vec![
-            agent_memory_llm::types::ModelInfo {
-                id: format!("{name}-chat"),
-                capabilities: vec!["chat".into()],
-            },
-        ]))
+        .bind(format!("{name}-chat"))
         .bind(created)
         .execute(&pool)
         .await

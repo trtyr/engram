@@ -71,18 +71,12 @@ async fn provider_roundtrip_and_usage_accounting() {
     let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
     let enc = cipher.encrypt("sk-mock-key").unwrap();
     sqlx::query(
-        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, models, is_default)
-         VALUES ($1, 'mock', $2, $3, $4, true)",
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default)
+         VALUES ($1, 'mock', $2, $3, 'bge-m3', 'embedding', true)",
     )
     .bind(uuid::Uuid::new_v4())
     .bind(&base_url)
     .bind(&enc)
-    .bind(sqlx::types::Json(vec![
-        agent_memory_llm::types::ModelInfo {
-            id: "bge-m3".into(),
-            capabilities: vec!["embedding".into()],
-        },
-    ]))
     .execute(&pool)
     .await
     .unwrap();
@@ -99,11 +93,12 @@ async fn provider_roundtrip_and_usage_accounting() {
     );
 
     // 经注册表取出（自动解密）→ 真实 HTTP 调用 mock embedding
-    let provider = registry.get("mock").await.unwrap();
+    let (provider, model) = registry.get("mock").await.unwrap();
     assert_eq!(provider.name(), "mock");
+    assert_eq!(model, "bge-m3", "get 应返回 provider 的 model_id");
     let resp = provider
         .embed(EmbedRequest {
-            model: "bge-m3".into(),
+            model,
             inputs: vec!["你好世界".into(), "hello".into()],
             dimensions: None,
         })
@@ -204,17 +199,11 @@ async fn l1_capability_mismatch_reports_not_configured() {
     // embedding-only 默认 provider（旧实现 or_else(first) 会把 bge-m3 当 chat 模型选出去）
     let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
     sqlx::query(
-        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, models, is_default)
-         VALUES ($1, 'embed-only', 'http://127.0.0.1:1', $2, $3, true)",
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default)
+         VALUES ($1, 'embed-only', 'http://127.0.0.1:1', $2, 'bge-m3', 'embedding', true)",
     )
     .bind(uuid::Uuid::new_v4())
     .bind(cipher.encrypt("k").unwrap())
-    .bind(sqlx::types::Json(vec![
-        agent_memory_llm::types::ModelInfo {
-            id: "bge-m3".into(),
-            capabilities: vec!["embedding".into()],
-        },
-    ]))
     .execute(&pool)
     .await
     .unwrap();
@@ -245,18 +234,12 @@ async fn l6_embed_for_records_usage() {
     let base_url = start_mock_llm().await;
     let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
     sqlx::query(
-        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, models, is_default)
-         VALUES ($1, 'facade-mock', $2, $3, $4, true)",
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default)
+         VALUES ($1, 'facade-mock', $2, $3, 'mock-emb', 'embedding', true)",
     )
     .bind(uuid::Uuid::new_v4())
     .bind(&base_url)
     .bind(cipher.encrypt("sk-k").unwrap())
-    .bind(sqlx::types::Json(vec![
-        agent_memory_llm::types::ModelInfo {
-            id: "mock-emb".into(),
-            capabilities: vec!["embedding".into()],
-        },
-    ]))
     .execute(&pool)
     .await
     .unwrap();

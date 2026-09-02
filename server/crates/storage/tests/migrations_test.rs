@@ -15,7 +15,7 @@ async fn migrations_apply_on_clean_pgvector() {
 
     // 版本可查（当前 15 份迁移：0015 = entities 实体层）
     let version = agent_memory_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(21), "0001-0021 迁移应已应用");
+    assert_eq!(version, Some(22), "0001-0022 迁移应已应用");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")
@@ -105,4 +105,91 @@ async fn all_domain_tables_exist_with_columns() {
             .execute(&pool)
             .await;
     assert!(dup.is_err(), "重复 idempotency_key 应被唯一约束拒绝");
+}
+
+#[tokio::test]
+async fn migration_0022_splits_multi_model_provider() {
+    let container = support::start_pgvector().await.expect("启动 pgvector 容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接容器");
+
+    // 建「旧格式」llm_providers（迁移 0021 之前：models jsonb 数组）
+    sqlx::query(
+        "CREATE TABLE llm_providers (\
+            id uuid PRIMARY KEY, name text NOT NULL UNIQUE, base_url text NOT NULL, \
+            api_key_encrypted bytea NOT NULL, models jsonb NOT NULL DEFAULT '[]', \
+            is_default boolean NOT NULL DEFAULT false, \
+            created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 旧数据：1 个 provider，2 个 model（chat + embedding）
+    sqlx::query(
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, models, is_default) \
+         VALUES ($1, 'newapi', 'http://127.0.0.1:1', decode('ab','hex'), $2::jsonb, true)",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(
+        r#"[{"id": "MiniMax-M3", "capabilities": ["chat"]}, {"id": "bge-m3", "capabilities": ["embedding"]}]"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 执行 0022 的拆分逻辑（与 0022_provider_single_model.sql 一致）
+    sqlx::query(
+        "ALTER TABLE llm_providers \
+            ADD COLUMN model_id text NOT NULL DEFAULT '', \
+            ADD COLUMN capability text NOT NULL DEFAULT 'chat'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TEMP TABLE _split_providers AS \
+         SELECT p.name, p.base_url, p.api_key_encrypted, p.is_default, p.created_at, p.updated_at, \
+            m.e->>'id' AS model_id, c.cap AS capability, \
+            row_number() OVER (PARTITION BY p.id ORDER BY (c.cap = 'chat') DESC, m.e->>'id', c.cap) AS rn \
+         FROM llm_providers p \
+         CROSS JOIN LATERAL jsonb_array_elements(p.models) AS m(e) \
+         CROSS JOIN LATERAL jsonb_array_elements_text(m.e->'capabilities') AS c(cap) \
+         WHERE jsonb_array_length(p.models) > 1",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM llm_providers WHERE jsonb_array_length(models) > 1")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default, created_at, updated_at) \
+         SELECT gen_random_uuid(), \
+            CASE WHEN rn = 1 THEN name ELSE name || '-' || capability END, \
+            base_url, api_key_encrypted, model_id, capability, is_default, created_at, updated_at \
+         FROM _split_providers",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 断言：1 provider × 2 model → 2 行（拆分前后模型数一致，无损）
+    let rows: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT name, model_id, capability FROM llm_providers ORDER BY name")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rows.len(), 2, "1 provider 2 model 应拆成 2 行: {rows:?}");
+    assert!(
+        rows.iter()
+            .any(|(n, m, c)| n == "newapi" && m == "MiniMax-M3" && c == "chat"),
+        "chat 模型应保留原名: {rows:?}"
+    );
+    assert!(
+        rows.iter()
+            .any(|(n, m, c)| n == "newapi-embedding" && m == "bge-m3" && c == "embedding"),
+        "embedding 模型应拆成 name-capability 后缀: {rows:?}"
+    );
 }

@@ -12,6 +12,6 @@ pub use crypto::KeyCipher;
 pub use provider::{OpenAiCompatProvider, ProviderRegistry};
 pub use router::PurposeRouter;
 pub use types::{
-    ChatMessage, ChatRequest, ChatResponse, EmbedRequest, EmbedResponse, LlmError, ModelInfo,
-    Purpose, UsageRecord,
+    ChatMessage, ChatRequest, ChatResponse, EmbedRequest, EmbedResponse, LlmError, Purpose,
+    UsageRecord,
 };

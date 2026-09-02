@@ -26,8 +26,9 @@ use utoipa::OpenApi;
         jobs_api::list_jobs, jobs_api::get_job, jobs_api::get_job_events, jobs_api::revive_job,
         llm_api::create_provider, llm_api::list_providers, llm_api::test_provider,
         llm_api::update_provider, llm_api::delete_provider, llm_api::reencrypt_providers,
-        llm_api::get_routing, llm_api::put_routing, llm_api::usage,
+        llm_api::get_routing, llm_api::put_routing, llm_api::suggest_routing, llm_api::usage,
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
+        llm_api::batch_revoke_api_keys,
         memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
         memory_api::erase_session, memory_api::append_session, memory_api::void_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
@@ -92,12 +93,20 @@ pub fn router(state: AppState) -> Router {
             get(llm_api::get_routing).put(llm_api::put_routing),
         )
         .route(
+            "/settings/llm/routing/suggest",
+            post(llm_api::suggest_routing),
+        )
+        .route(
             "/settings/api-keys",
             post(llm_api::create_api_key_handler).get(llm_api::list_api_keys),
         )
         .route(
             "/settings/api-keys/{id}/revoke",
             post(llm_api::revoke_api_key),
+        )
+        .route(
+            "/settings/api-keys/batch-revoke",
+            post(llm_api::batch_revoke_api_keys),
         )
         .route("/llm/usage", get(llm_api::usage))
         .route(
