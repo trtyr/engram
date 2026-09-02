@@ -105,3 +105,53 @@ async fn entity_token_search_prefers_name_hit() {
         .unwrap();
     assert!(hits.is_empty());
 }
+
+/// phase-2 过期降权：valid_until 已过的原子 score 减半排后（不消失，历史价值还在）。
+#[tokio::test]
+async fn search_demotes_expired_atoms() {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
+
+    // 同题材两条（同 content 保证基础分相同）：一条过期、一条未过期
+    // search crate 无 chrono 依赖，valid_until 用 SQL now()±interval 表达
+    let expired_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, tsv, valid_until) \
+         VALUES ($1, 'fact', '下周三要交周报', 'active', to_tsvector('simple', $2), now() - interval '1 day')",
+    )
+    .bind(expired_id)
+    .bind(tsv_text("下周三要交周报"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let fresh_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, tsv, valid_until) \
+         VALUES ($1, 'fact', '下周三要交周报', 'active', to_tsvector('simple', $2), now() + interval '1 day')",
+    )
+    .bind(fresh_id)
+    .bind(tsv_text("下周三要交周报"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let hits = agent_memory_search::search_atoms(&pool, "周报", None, 10, false)
+        .await
+        .unwrap();
+    let score_of = |id: uuid::Uuid| {
+        hits.iter()
+            .find(|h| h.id == id)
+            .map(|h| h.score)
+            .unwrap_or(f64::NAN)
+    };
+    assert!(
+        score_of(expired_id) < score_of(fresh_id),
+        "过期原子应降权（score 更低），实得 expired={} fresh={}",
+        score_of(expired_id),
+        score_of(fresh_id)
+    );
+}

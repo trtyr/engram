@@ -215,6 +215,59 @@ async fn context_pack_carries_entity_lenses() {
     assert!(!pack.entities.is_empty(), "无 query → 实体透镜应有密度头部");
 }
 
+/// phase-2 过期过滤：valid_until 已过的原子不进 context_pack（query + no-query 双路径都过滤）。
+#[tokio::test]
+async fn context_pack_excludes_expired_atoms() {
+    let (_pool, svc, _container) = setup().await;
+    let now = chrono::Utc::now();
+    // 过期原子（valid_until = 昨天）
+    let expired = svc
+        .create_atom(
+            "fact",
+            "过期事实：明天要交周报",
+            0.9,
+            None,
+            Some(now - chrono::Duration::days(1)),
+            false,
+        )
+        .await
+        .unwrap();
+    // 未过期原子（valid_until = 明天）
+    let _future = svc
+        .create_atom(
+            "fact",
+            "未来事实：下月出差北京",
+            0.9,
+            None,
+            Some(now + chrono::Duration::days(1)),
+            false,
+        )
+        .await
+        .unwrap();
+    // 永久原子（无 valid_until）
+    let _perm = svc
+        .create_atom("fact", "永久事实：喜欢喝美式咖啡", 0.9, None, None, false)
+        .await
+        .unwrap();
+
+    // no-query 路径：过期原子被过滤
+    let pack = svc.context_pack(None, 20, 10_000, false).await.unwrap();
+    assert!(
+        !pack.atoms.iter().any(|a| a.id == expired.id),
+        "no-query 注入不应含过期原子"
+    );
+
+    // query 路径：即使查询词命中过期原子，也不注入
+    let pack = svc
+        .context_pack(Some("周报"), 20, 10_000, false)
+        .await
+        .unwrap();
+    assert!(
+        !pack.atoms.iter().any(|a| a.id == expired.id),
+        "query 注入不应含过期原子"
+    );
+}
+
 /// 议题一 b：append_session 增量写——pending 可追加、已蒸馏拒绝、agent 可补记。
 #[tokio::test]
 async fn append_session_semantics() {

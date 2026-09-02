@@ -59,7 +59,7 @@ pub async fn search_atoms(
         );
     }
 
-    qb.push("SELECT a.id, a.kind, a.content, a.needs_review, COALESCE(1.0/(");
+    qb.push("SELECT a.id, a.kind, a.content, a.needs_review, (COALESCE(1.0/(");
     qb.push_bind(RRF_K);
     qb.push(" + fts.rank), 0)");
     if has_vec {
@@ -67,7 +67,8 @@ pub async fn search_atoms(
         qb.push_bind(RRF_K);
         qb.push(" + vec.rank), 0)");
     }
-    qb.push("::float8 AS score FROM atoms a LEFT JOIN fts ON fts.id = a.id ");
+    // 过期降权（phase-2）：valid_until 已过的原子分数减半排后——不消失，历史价值还在
+    qb.push(") * CASE WHEN a.valid_until IS NOT NULL AND a.valid_until < now() THEN 0.5::float8 ELSE 1.0::float8 END AS score FROM atoms a LEFT JOIN fts ON fts.id = a.id ");
     if has_vec {
         qb.push("LEFT JOIN vec ON vec.id = a.id ");
     }

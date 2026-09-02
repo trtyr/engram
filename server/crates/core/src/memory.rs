@@ -1690,26 +1690,31 @@ impl MemoryService {
                             .bind(&ids)
                             .fetch_all(&self.pool)
                             .await?;
+                    // 过期原子不注入（phase-2）：valid_until 已过 = 真记性不递过期记忆
+                    let now = chrono::Utc::now();
+                    fetched.retain(|a| a.valid_until.map(|vu| vu > now).unwrap_or(true));
                     // P10 新鲜度混排：final = 相关分 × 时间衰减（30 天半衰）——
                     // 老记忆不再凭旧高分挤掉新记忆；无 query 路径本就按新→旧。
-                    let now = chrono::Utc::now();
                     fetched.sort_by(|a, b| {
                         let f = |x: &AtomDto| {
                             let age = (now - x.created_at).num_days().max(0) as f64;
-                            score_of.get(&x.id).copied().unwrap_or(0.0)
-                                * (-age / 30.0).exp()
+                            score_of.get(&x.id).copied().unwrap_or(0.0) * (-age / 30.0).exp()
                         };
                         f(b).partial_cmp(&f(a)).unwrap_or(std::cmp::Ordering::Equal)
                     });
                     fetched
                 }
             }
-            None => sqlx::query_as(
-                "SELECT * FROM atoms WHERE status = 'active' AND NOT sensitive ORDER BY hit_count DESC, confidence DESC, created_at DESC LIMIT $1",
-            )
-            .bind(remaining as i64)
-            .fetch_all(&self.pool)
-            .await?,
+            None => {
+                sqlx::query_as(
+                    "SELECT * FROM atoms WHERE status = 'active' AND NOT sensitive \
+                 AND (valid_until IS NULL OR valid_until > now()) \
+                 ORDER BY hit_count DESC, confidence DESC, created_at DESC LIMIT $1",
+                )
+                .bind(remaining as i64)
+                .fetch_all(&self.pool)
+                .await?
+            }
         };
         let mut out_atoms = Vec::new();
         for a in atoms {
