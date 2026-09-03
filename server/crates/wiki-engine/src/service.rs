@@ -164,11 +164,18 @@ impl WikiService {
     }
 
     pub async fn get_page(&self, slug: &str) -> Result<WikiPageDto, WikiError> {
-        sqlx::query_as::<_, WikiPageDto>("SELECT * FROM wiki_pages WHERE slug = $1")
-            .bind(slug)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| WikiError::NotFound(format!("页面 {slug} 不存在")))
+        // 先精确匹配；未中则按「小写 + 空格转连字符」宽容重查——LLM 生成正文时
+        // 常把双链写成标题原文（[[Rust 异步运行时]]），与真实 slug（rust-异步运行时）
+        // 只差大小写和分隔符，精确匹配 404 后点过去就"没反应"。
+        sqlx::query_as::<_, WikiPageDto>(
+            "SELECT * FROM wiki_pages \
+             WHERE slug = $1 OR slug = lower(replace($1, ' ', '-')) \
+             ORDER BY (slug = $1) DESC LIMIT 1",
+        )
+        .bind(slug)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| WikiError::NotFound(format!("页面 {slug} 不存在")))
     }
 
     /// 人工编辑：origin=human、版本递增、重嵌入。folder 可选（None=保持原值/默认空）。
