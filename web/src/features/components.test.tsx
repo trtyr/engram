@@ -10,7 +10,7 @@ import { MemoryRouter } from 'react-router-dom'
 // ---- api mock ----
 vi.mock('@/lib/api', () => {
   interface WikiPageM {
-    id: string; slug: string; title: string; page_type: string; content: string
+    id: string; slug: string; title: string; page_type: string; folder: string; content: string
     frontmatter: Record<string, unknown>; origin: string; version: number; updated_at: string
   }
   const state: { atoms: unknown[]; persona: PersonaLike[]; history: PersonaLike[]; pages: WikiPageM[]; wikiPage?: WikiPageM; draftContent?: string } = {
@@ -90,6 +90,7 @@ interface WikiPageLike {
   slug: string
   title: string
   page_type: string
+  folder: string
   content: string
   frontmatter: Record<string, unknown>
   origin: string
@@ -210,14 +211,13 @@ describe('Persona 版本历史与回滚', () => {
 describe('Wiki 编辑器保存', () => {
   it('进入编辑、改内容、保存为 human 版本（PUT + 版本递增）', async () => {
     mockState.pages = [
-      { id: 'w1', slug: '向量检索', title: '向量检索', page_type: 'concept', content: '# 向量检索\n\n旧内容', frontmatter: {}, origin: 'llm', version: 1, updated_at: '2026-08-20T00:00:00Z' },
+      { id: 'w1', slug: '向量检索', title: '向量检索', page_type: 'concept', folder: '概念', content: '# 向量检索\n\n旧内容', frontmatter: {}, origin: 'llm', version: 1, updated_at: '2026-08-20T00:00:00Z' },
     ]
     mockState.wikiPage = mockState.pages[0]
     mockState.draftContent = '# 向量检索\n\n人工编辑后的新内容'
     render(wrap(<Wiki />))
-    fireEvent.click(screen.getByRole('button', { name: '页面' }))
     await screen.findByText('向量检索')
-    // 先选中页面（点卡片）再进入编辑
+    // 目录树点页面节点 → 阅读区加载，再进入编辑
     fireEvent.click(screen.getByText('向量检索'))
     await screen.findByText(/v1 ·/)
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))

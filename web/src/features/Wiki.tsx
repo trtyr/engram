@@ -1,60 +1,271 @@
-/** Wiki 域：页面浏览 / Markdown 渲染 / 人工编辑 / 图谱 / Lint / 提案。 */
-import { useEffect, useState } from 'react'
+/** Wiki 域：Obsidian 式浏览 —— 目录树（folder 层级）+ Markdown 阅读 + 图谱独立视图。
+ *  文档 = 收件箱入口；洞察/Lint/提案/原料/目标 = 运维二级入口。 */
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronRight, FileText, Folder, FolderOpen } from 'lucide-react'
 import WikiGraph from '@/components/WikiGraph'
 import InsightsPanel from '@/components/InsightsPanel'
 import ReviewQueue from '@/components/ReviewQueue'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { DocumentsPane } from './Knowledge'
 import { useSearchParams } from 'react-router-dom'
-import { api, type GraphDto, type LintReport, type Purpose, type WikiPage, type WikiSearchResponse } from '@/lib/api'
+import { api, type GraphDto, type LintReport, type Purpose, type WikiPage } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
-type Tab = 'documents' | 'pages' | 'graph' | 'insights' | 'lint' | 'proposals' | 'sources' | 'purpose'
-
-const TABS: { value: Tab; label: string }[] = [
-  { value: 'documents', label: '文档' },
-  { value: 'pages', label: '页面' },
-  { value: 'graph', label: '图谱' },
-  { value: 'insights', label: '洞察' },
-  { value: 'lint', label: 'Lint' },
-  { value: 'proposals', label: '提案' },
-  { value: 'sources', label: '原料' },
-  { value: 'purpose', label: '目标' },
-]
+type View = 'tree' | 'graph'
+type Panel = 'none' | 'inbox' | 'ops'
 
 export default function Wiki() {
-  const [tab, setTab] = useState<Tab>('documents')
+  const [view, setView] = useState<View>('tree')
+  const [panel, setPanel] = useState<Panel>('none')
   return (
-    <div className="space-y-6">
-      <PageHeader title="Wiki" desc="文档 → 自动织入互链知识库（原料可检索原文，页面由 LLM 增量维护）" />
-      <Tabs items={TABS} value={tab} onChange={setTab} />
-      {tab === 'documents' && <DocumentsPane />}
-      {tab === 'pages' && <PagesPane />}
-      {tab === 'graph' && <GraphPane />}
-      {tab === 'insights' && <GraphWithInsights />}
-      {tab === 'lint' && <LintPane />}
-      {tab === 'proposals' && <ReviewAndProposals />}
-      {tab === 'sources' && <SourcesPane />}
-      {tab === 'purpose' && <PurposePane />}
+    <div className="space-y-4">
+      <PageHeader title="Wiki" desc="AI 织入的互链知识库——目录树浏览页面，图谱看关系">
+        {panel !== 'none' ? (
+          <Button size="sm" variant="outline" onClick={() => setPanel('none')}>
+            ← 返回 Wiki
+          </Button>
+        ) : (
+          <>
+            <Tabs
+              items={[
+                { value: 'tree', label: '目录' },
+                { value: 'graph', label: '图谱' },
+              ]}
+              value={view}
+              onChange={setView}
+            />
+            <Button size="sm" variant="outline" onClick={() => setPanel('inbox')}>
+              收件箱
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setPanel('ops')}>
+              运维
+            </Button>
+          </>
+        )}
+      </PageHeader>
+      {panel === 'inbox' && <InboxPane />}
+      {panel === 'ops' && <OpsPanel />}
+      {panel === 'none' && view === 'tree' && <TreeReader />}
+      {panel === 'none' && view === 'graph' && <GraphPane />}
     </div>
   )
 }
 
-function PagesPane() {
-  const [pages, setPages] = useState<WikiPage[] | null>(null)
-  const [open, setOpen] = useState<WikiPage | null>(null)
+/** 文档收件箱：上传 / URL / 列表 / 阅读，织入后页面进目录树。 */
+function InboxPane() {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        上传或粘贴文档 → 自动解析、分块、织入 Wiki 页面树（原料可检索原文，页面由 LLM 增量维护）。
+      </p>
+      <DocumentsPane />
+    </div>
+  )
+}
+
+// ---------- 目录树 + 阅读 ----------
+
+interface FolderNode {
+  name: string
+  folders: FolderNode[]
+  pages: WikiPage[]
+}
+
+/** 按 folder（/ 分隔多级）把页面聚成嵌套树；folder='' 的页面落在根。 */
+function buildFolders(pages: WikiPage[]): FolderNode {
+  const root: FolderNode = { name: '', folders: [], pages: [] }
+  const ensure = (node: FolderNode, parts: string[]): FolderNode => {
+    let cur = node
+    for (const part of parts) {
+      let next = cur.folders.find((f) => f.name === part)
+      if (!next) {
+        next = { name: part, folders: [], pages: [] }
+        cur.folders.push(next)
+      }
+      cur = next
+    }
+    return cur
+  }
+  const sort = (n: FolderNode) => {
+    n.folders.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+    n.pages.sort((a, b) => a.title.localeCompare(b.title, 'zh'))
+    n.folders.forEach(sort)
+  }
+  for (const p of pages) {
+    const parts = (p.folder || '')
+      .split('/')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (parts.length === 0) root.pages.push(p)
+    else ensure(root, parts).pages.push(p)
+  }
+  sort(root)
+  return root
+}
+
+function countPages(n: FolderNode): number {
+  return n.pages.length + n.folders.reduce((acc, f) => acc + countPages(f), 0)
+}
+
+function FolderTree({
+  node,
+  path,
+  openId,
+  onSelect,
+  collapsed,
+  onToggleFolder,
+}: {
+  node: FolderNode
+  path: string
+  openId: string | null
+  onSelect: (slug: string) => void
+  collapsed: Set<string>
+  onToggleFolder: (p: string) => void
+}) {
+  return (
+    <div>
+      {node.folders.map((f) => {
+        const fp = path ? `${path}/${f.name}` : f.name
+        const isCollapsed = collapsed.has(fp)
+        return (
+          <div key={fp}>
+            <button
+              type="button"
+              onClick={() => onToggleFolder(fp)}
+              className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', !isCollapsed && 'rotate-90')} />
+              {isCollapsed ? <Folder className="size-3.5 shrink-0" /> : <FolderOpen className="size-3.5 shrink-0" />}
+              <span className="truncate">{f.name}</span>
+              <span aria-hidden="true" className="ml-auto font-mono text-xs tabular-nums text-muted-foreground/60">{countPages(f)}</span>
+            </button>
+            {!isCollapsed && (
+              <div className="ml-3 border-l border-border/60 pl-2">
+                <FolderTree
+                  node={f}
+                  path={fp}
+                  openId={openId}
+                  onSelect={onSelect}
+                  collapsed={collapsed}
+                  onToggleFolder={onToggleFolder}
+                />
+              </div>
+            )}
+          </div>
+        )
+      })}
+      {node.pages.map((p) => (
+        <button
+          key={p.id}
+          type="button"
+          onClick={() => onSelect(p.slug)}
+          className={cn(
+            'flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm',
+            openId === p.id ? 'bg-foreground text-background' : 'text-foreground hover:bg-muted',
+          )}
+        >
+          <FileText className="size-3.5 shrink-0" />
+          <span className="truncate">{p.title}</span>
+          {p.origin === 'human' && <span aria-hidden="true" className="ml-auto text-[10px] text-warning">人</span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function PageReader({ page, onSaved }: { page: WikiPage | null; onSaved: () => void }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [title, setTitle] = useState('')
-  const [ingestText, setIngestText] = useState('')
-  const [ingestTitle, setIngestTitle] = useState('')
-  const [msg, setMsg] = useState('')
-  const [searchQ, setSearchQ] = useState('')
-  const [searchResults, setSearchResults] = useState<WikiPage[] | null>(null)
+  const [folder, setFolder] = useState('')
+  if (!page) return <Empty text="选择左侧页面" />
+  if (!editing) {
+    return (
+      <Card className="flex min-h-0 flex-1 flex-col">
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-2.5">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold">{page.title}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {page.slug} · {page.page_type} · v{page.version} · {fmtTime(page.updated_at)}
+              {page.folder && ` · ${page.folder}`}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setDraft(page.content)
+              setTitle(page.title)
+              setFolder(page.folder)
+              setEditing(true)
+            }}
+          >
+            编辑
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <WikiMarkdown content={page.content} onNavigateSlug={() => {}} />
+        </div>
+      </Card>
+    )
+  }
+  return (
+    <Card className="space-y-3 p-4">
+      <input
+        className={`${inputCls} w-full`}
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        aria-label="页面标题"
+      />
+      <input
+        className={`${inputCls} w-full`}
+        value={folder}
+        onChange={(e) => setFolder(e.target.value)}
+        placeholder="文件夹（如 技术/Rust，留空=根目录）"
+        aria-label="文件夹"
+      />
+      <textarea
+        className={`${inputCls} h-96 w-full font-mono`}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        aria-label="页面内容"
+      />
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          onClick={async () => {
+            await api.put(`/wiki/pages/${encodeURIComponent(page.slug)}`, {
+              title,
+              content: draft,
+              folder: folder.trim() || undefined,
+            })
+            setEditing(false)
+            onSaved()
+          }}
+        >
+          保存（人工版）
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+          取消
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
+function TreeReader() {
+  const [pages, setPages] = useState<WikiPage[] | null>(null)
+  const [open, setOpen] = useState<WikiPage | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [params] = useSearchParams()
-  const load = () => api.get<WikiPage[]>('/wiki/pages?limit=100').then(setPages).catch(() => {})
+  const load = () =>
+    api
+      .get<WikiPage[]>('/wiki/pages?limit=300')
+      .then(setPages)
+      .catch(() => {})
   useEffect(() => {
     load()
   }, [])
@@ -62,177 +273,84 @@ function PagesPane() {
   useEffect(() => {
     const slug = params.get('page')
     if (slug) {
-      api.get<WikiPage>(`/wiki/pages/${encodeURIComponent(slug)}`).then(setOpen).catch(() => {})
+      api
+        .get<WikiPage>(`/wiki/pages/${encodeURIComponent(slug)}`)
+        .then(setOpen)
+        .catch(() => {})
     }
   }, [params])
-  if (!pages) return <Spinner />
-
+  const tree = useMemo(() => (pages ? buildFolders(pages) : null), [pages])
+  const onToggleFolder = (p: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(p)) next.delete(p)
+      else next.add(p)
+      return next
+    })
+  }
+  const onSelect = async (slug: string) => {
+    const page = await api.get<WikiPage>(`/wiki/pages/${encodeURIComponent(slug)}`)
+    setOpen(page)
+  }
+  if (!pages || !tree) return <Spinner />
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_2fr]">
-      <div className="space-y-2">
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            const q = searchQ.trim()
-            if (!q) {
-              setSearchResults(null)
-              return
-            }
-            api.post<WikiSearchResponse>('/wiki/search', { query: q, max_items: 20 })
-              .then((r) => setSearchResults(r.pages))
-              .catch(() => setSearchResults([]))
-          }}
-        >
-          <input
-            className={`${inputCls} flex-1`}
-            placeholder="搜索 Wiki…"
-            value={searchQ}
-            onChange={(e) => setSearchQ(e.target.value)}
-          />
-          <Button size="sm" variant="outline" type="submit">
-            搜索
-          </Button>
-        </form>
-        <Card className="p-3">
-          <details>
-            <summary className="cursor-pointer text-sm font-medium">新文档 ingest</summary>
-            <div className="mt-3 space-y-2">
-              <input
-                className={`${inputCls} w-full`}
-                placeholder="标题"
-                value={ingestTitle}
-                onChange={(e) => setIngestTitle(e.target.value)}
-              />
-              <textarea
-                className={`${inputCls} h-24 w-full`}
-                placeholder="源文本"
-                value={ingestText}
-                onChange={(e) => setIngestText(e.target.value)}
-              />
-              <Button
-                size="sm"
-                onClick={async () => {
-                  const r = await api.post<{ skipped: boolean }>('/wiki/ingest', {
-                    title: ingestTitle,
-                    text: ingestText,
-                  })
-                  setMsg(r.skipped ? '相同内容已摄取（sha 跳过）' : '已入队摄取')
-                  setIngestText('')
-                  setIngestTitle('')
-                  setTimeout(load, 3000)
-                }}
-              >
-                摄取
-              </Button>
-              {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
-            </div>
-          </details>
-        </Card>
-        {(searchResults ?? pages).map((p) => (
-          <Card
-            key={p.id}
-            className={`cursor-pointer p-3 transition-colors ${open?.id === p.id ? 'border-brand/50 bg-brand/5' : 'hover:bg-muted/30'}`}
-            onClick={async () => {
-              setOpen(await api.get<WikiPage>(`/wiki/pages/${encodeURIComponent(p.slug)}`))
-              setEditing(false)
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-medium">{p.title}</span>
-              <span className="text-xs text-muted-foreground">
-                {p.page_type} v{p.version}
-              </span>
-            </div>
-            {p.origin === 'human' && <span className="mt-1 inline-block text-xs text-warning">人工</span>}
-          </Card>
-        ))}
-      </div>
-      <div>
-        {!open ? (
-          <Empty text="选择左侧页面" />
-        ) : editing ? (
-          <Card className="space-y-3 p-4">
-            <input
-              className={`${inputCls} w-full`}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-            <textarea
-              className={`${inputCls} h-96 w-full font-mono`}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-            />
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={async () => {
-                  await api.put(`/wiki/pages/${encodeURIComponent(open.slug)}`, { title, content: draft })
-                  setOpen(await api.get<WikiPage>(`/wiki/pages/${encodeURIComponent(open.slug)}`))
-                  setEditing(false)
-                  load()
-                }}
-              >
-                保存（人工版）
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
-                取消
-              </Button>
-            </div>
-          </Card>
+    <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+      <Card className="p-2 lg:h-[calc(100vh-15rem)] lg:overflow-y-auto">
+        {pages.length === 0 ? (
+          <Empty text="还没有页面——去收件箱上传文档，织入后这里会长出目录树" />
         ) : (
-          <Card className="space-y-3 p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {open.slug} · v{open.version} · {fmtTime(open.updated_at)} · {open.origin}
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setDraft(open.content)
-                  setTitle(open.title)
-                  setEditing(true)
-                }}
-              >
-                编辑
-              </Button>
-            </div>
-            <WikiMarkdown content={open.content} onNavigateSlug={() => {}} />
-          </Card>
+          <FolderTree
+            node={tree}
+            path=""
+            openId={open?.id ?? null}
+            onSelect={onSelect}
+            collapsed={collapsed}
+            onToggleFolder={onToggleFolder}
+          />
         )}
+      </Card>
+      <div className="flex min-h-0 lg:h-[calc(100vh-15rem)]">
+        <PageReader key={open?.id} page={open} onSaved={load} />
       </div>
     </div>
   )
 }
 
+// ---------- 图谱独立视图 ----------
+
 function GraphPane({ highlightSlugs }: { highlightSlugs?: string[] }) {
   const [g, setG] = useState<GraphDto | null>(null)
   useEffect(() => {
-    api.get<GraphDto>('/wiki/graph').then(setG).catch(() => {})
+    api
+      .get<GraphDto>('/wiki/graph')
+      .then(setG)
+      .catch(() => {})
   }, [])
   if (!g) return <Spinner />
   return <WikiGraph graph={g} highlightSlugs={highlightSlugs} />
 }
 
-/** 图谱 + 洞察面板联动（点击洞察卡高亮图谱节点） */
-function GraphWithInsights() {
-  const [g, setG] = useState<GraphDto | null>(null)
-  const [highlight, setHighlight] = useState<string[] | null>(null)
-  useEffect(() => {
-    api.get<GraphDto>('/wiki/graph').then(setG).catch(() => {})
-  }, [])
-  if (!g) return <Spinner />
+// ---------- 运维二级入口 ----------
+
+type OpsSection = 'insights' | 'lint' | 'proposals' | 'sources' | 'purpose'
+const OPS_SECTIONS: { value: OpsSection; label: string }[] = [
+  { value: 'insights', label: '洞察' },
+  { value: 'lint', label: 'Lint' },
+  { value: 'proposals', label: '提案' },
+  { value: 'sources', label: '原料' },
+  { value: 'purpose', label: '目标' },
+]
+
+function OpsPanel() {
+  const [section, setSection] = useState<OpsSection>('insights')
   return (
-    <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
-      <div>
-        <h2 className="mb-2 text-sm font-medium">图谱（点击洞察卡联动高亮）</h2>
-        <WikiGraph graph={g} highlightSlugs={highlight ?? undefined} />
-      </div>
-      <div>
-        <h2 className="mb-2 text-sm font-medium">洞察</h2>
-        <InsightsPanel onHighlight={setHighlight} />
-      </div>
+    <div className="space-y-4">
+      <Tabs items={OPS_SECTIONS} value={section} onChange={setSection} />
+      {section === 'insights' && <InsightsPanel onHighlight={() => {}} />}
+      {section === 'lint' && <LintPane />}
+      {section === 'proposals' && <ReviewAndProposals />}
+      {section === 'sources' && <SourcesPane />}
+      {section === 'purpose' && <PurposePane />}
     </div>
   )
 }
@@ -258,7 +376,11 @@ function SourcesPane() {
   const [rows, setRows] = useState<{ id: string; title: string | null; status: string }[] | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
   const [report, setReport] = useState<{ deleted_pages: string[]; updated_shared: string[]; cleaned_links: number } | null>(null)
-  const load = () => api.get<{ id: string; title: string | null; status: string }[]>('/wiki/sources').then(setRows).catch(() => {})
+  const load = () =>
+    api
+      .get<{ id: string; title: string | null; status: string }[]>('/wiki/sources')
+      .then(setRows)
+      .catch(() => {})
   useEffect(() => {
     load()
   }, [])
@@ -317,8 +439,12 @@ function SourcesPane() {
       {report && (
         <Card className="p-3 text-xs" data-testid="cascade-report">
           <p className="mb-1 font-medium">级联删除报告：</p>
-          <p>整页删除：{report.deleted_pages.length}（{report.deleted_pages.join(', ')}）</p>
-          <p>共享页摘源：{report.updated_shared.length}（{report.updated_shared.join(', ')}）</p>
+          <p>
+            整页删除：{report.deleted_pages.length}（{report.deleted_pages.join(', ')}）
+          </p>
+          <p>
+            共享页摘源：{report.updated_shared.length}（{report.updated_shared.join(', ')}）
+          </p>
           <p>清理死链：{report.cleaned_links} 条</p>
         </Card>
       )}
@@ -351,9 +477,7 @@ function LintPane() {
           </p>
           {r.issues.map((i, idx) => (
             <div key={idx} className="border-b border-border/50 py-2 text-sm last:border-0">
-              <span className="mr-2 rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning">
-                {i.rule}
-              </span>
+              <span className="mr-2 rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning">{i.rule}</span>
               <span className="font-medium">{i.slug}</span>
               <span className="ml-2 text-muted-foreground">{i.detail}</span>
             </div>
@@ -365,7 +489,9 @@ function LintPane() {
 }
 
 function ProposalsPane() {
-  const [events, setEvents] = useState<{ job_id: string; data: { page_slug: string; proposal_content: string }; ts: string }[] | null>(null)
+  const [events, setEvents] = useState<
+    { job_id: string; data: { page_slug: string; proposal_content: string }; ts: string }[] | null
+  >(null)
   const load = async () => {
     const jobs = await api.get<{ id: string }[]>('/jobs?kind=wiki_generate&limit=20')
     const all = []
@@ -439,7 +565,11 @@ function PurposePane() {
       .catch(() => {})
   }, [])
   if (!p) return <Spinner />
-  const split = (s: string) => s.split('\n').map((x) => x.trim()).filter(Boolean)
+  const split = (s: string) =>
+    s
+      .split('\n')
+      .map((x) => x.trim())
+      .filter(Boolean)
   return (
     <Card className="space-y-4 p-4">
       <div>
@@ -459,7 +589,11 @@ function PurposePane() {
           size="sm"
           onClick={async () => {
             try {
-              await api.put('/wiki/purpose', { goals: split(goals), key_questions: split(questions), scope: split(scope) })
+              await api.put('/wiki/purpose', {
+                goals: split(goals),
+                key_questions: split(questions),
+                scope: split(scope),
+              })
               setMsg('已保存')
             } catch (ex) {
               setMsg(ex instanceof Error ? ex.message : '保存失败')

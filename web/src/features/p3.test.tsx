@@ -31,6 +31,7 @@ type WikiPageM = {
   slug: string
   title: string
   page_type: string
+  folder: string
   content: string
   frontmatter: Record<string, unknown>
   origin: string
@@ -47,6 +48,7 @@ vi.mock('@/lib/api', () => {
     searchResult: null as { query: string; hits: { id: string; domain: string; score: number; snippet: string; title?: string | null }[] } | null,
     purpose: { goals: [], key_questions: [], scope: [] } as { goals: string[]; key_questions: string[]; scope: string[] },
     wikiSearchResult: null as { purpose: { goals: string[]; key_questions: string[]; scope: string[] }; pages: WikiPageM[] } | null,
+    wikiPages: [] as WikiPageM[],
     reencryptResult: 0 as number,
     sessions: [] as { id: string; agent: string; content: { speaker: string; text: string; ts?: string }[]; distill_status: string; created_at: string }[],
     atoms: [] as { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; needs_review: boolean; hit_count: number; scenario_id: string | null; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[],
@@ -66,7 +68,8 @@ vi.mock('@/lib/api', () => {
       }
       if (p.startsWith('/memory/entities')) return []
       if (p.startsWith('/memory/scenarios')) return []
-      if (p.startsWith('/wiki/pages')) return []
+      if (p.startsWith('/wiki/pages/')) return state.wikiPages.find((x) => p.endsWith(`/${x.slug}`)) ?? null
+      if (p.startsWith('/wiki/pages')) return state.wikiPages
       if (p === '/wiki/purpose') return state.purpose
       if (p.startsWith('/memory/persona')) return []
       if (p.startsWith('/codegraph/projects')) return []
@@ -107,6 +110,7 @@ interface MockState {
   searchResult: { query: string; hits: { id: string; domain: string; score: number; snippet: string; title?: string | null }[] } | null
   purpose: { goals: string[]; key_questions: string[]; scope: string[] }
   wikiSearchResult: { purpose: { goals: string[]; key_questions: string[]; scope: string[] }; pages: WikiPageM[] } | null
+  wikiPages: WikiPageM[]
   reencryptResult: number
   sessions: { id: string; agent: string; content: { speaker: string; text: string; ts?: string }[]; distill_status: string; created_at: string }[]
   atoms: { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; needs_review: boolean; hit_count: number; scenario_id: string | null; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[]
@@ -132,6 +136,7 @@ beforeEach(() => {
   mockState.searchResult = null
   mockState.purpose = { goals: [], key_questions: [], scope: [] }
   mockState.wikiSearchResult = null
+  mockState.wikiPages = []
   mockState.reencryptResult = 0
   mockState.sessions = []
   mockState.atoms = []
@@ -364,6 +369,7 @@ describe('Wiki 目标（purpose）', () => {
   it('读 purpose 展示三栏，保存调 PUT', async () => {
     mockState.purpose = { goals: ['构建知识库'], key_questions: ['什么？'], scope: ['Rust'] }
     render(wrap(<Wiki />))
+    fireEvent.click(screen.getByRole('button', { name: '运维' }))
     fireEvent.click(screen.getByRole('button', { name: '目标' }))
     await screen.findByText('构建知识库')
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
@@ -376,21 +382,18 @@ describe('Wiki 目标（purpose）', () => {
   })
 })
 
-describe('Wiki 搜索', () => {
-  it('输入 query 调 POST /wiki/search 并展示 resp.pages', async () => {
-    mockState.wikiSearchResult = {
-      purpose: { goals: [], key_questions: [], scope: [] },
-      pages: [{ id: 'w1', slug: 'tokio', title: 'Tokio', page_type: 'concept', content: '', frontmatter: {}, origin: 'llm', version: 1, updated_at: '2026-08-20T00:00:00Z' }],
-    }
+describe('Wiki 目录树', () => {
+  it('按 folder 分组渲染页面，根页面 + 多级文件夹可见', async () => {
+    mockState.wikiPages = [
+      { id: 'w1', slug: 'tokio', title: 'Tokio', page_type: 'concept', folder: '技术/Rust', content: '# Tokio', frontmatter: {}, origin: 'llm', version: 1, updated_at: '2026-08-20T00:00:00Z' },
+      { id: 'w2', slug: 'root-page', title: '根页面', page_type: 'concept', folder: '', content: '', frontmatter: {}, origin: 'llm', version: 1, updated_at: '2026-08-20T00:00:00Z' },
+    ]
     render(wrap(<Wiki />))
-    fireEvent.click(screen.getByRole('button', { name: '页面' }))
-    const input = await screen.findByPlaceholderText('搜索 Wiki…')
-    fireEvent.change(input, { target: { value: 'tokio' } })
-    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
-    await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith('/wiki/search', { query: 'tokio', max_items: 20 })
-      expect(screen.getByText('Tokio')).toBeInTheDocument()
-    })
+    // 目录树：folder 层级（技术 → Rust）+ 页面标题 + 根页面
+    await screen.findByText('Tokio')
+    expect(screen.getByText('技术')).toBeInTheDocument()
+    expect(screen.getByText('Rust')).toBeInTheDocument()
+    expect(screen.getByText('根页面')).toBeInTheDocument()
   })
 })
 

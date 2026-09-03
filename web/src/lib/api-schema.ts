@@ -1867,6 +1867,8 @@ export interface components {
         };
         PutPageRequest: {
             content: string;
+            /** @description 目录树文件夹（可选；None = 保持原值，Obsidian 式 / 分隔多级路径） */
+            folder?: string | null;
             title: string;
         };
         ReEncryptRequest: {
@@ -2061,6 +2063,8 @@ export interface components {
         };
         WikiPageDto: {
             content: string;
+            /** @description 目录树层级（/ 分隔多级，Obsidian 式文件夹） */
+            folder: string;
             frontmatter: Record<string, never>;
             /** Format: uuid */
             id: string;

@@ -252,6 +252,8 @@ export interface WikiPage {
   slug: string
   title: string
   page_type: string
+  /** 目录树层级（/ 分隔多级，Obsidian 式文件夹） */
+  folder: string
   content: string
   frontmatter: Record<string, unknown>
   origin: string
