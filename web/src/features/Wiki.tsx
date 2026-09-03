@@ -49,6 +49,7 @@ export default function Wiki() {
   const [loadErr, setLoadErr] = useState('')
   const [open, setOpen] = useState<WikiPage | null>(null)
   const [opening, setOpening] = useState(false)
+  const [openErr, setOpenErr] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(lsGet<string[]>('engram-wiki-collapsed', [])))
   const [treeW, setTreeW] = useState<number>(() => {
     const v = lsGet<number>('engram-wiki-split', 0)
@@ -86,6 +87,7 @@ export default function Wiki() {
       .then((p) => {
         if (stale) return
         setOpen(p)
+        setOpenErr('')
         const parts = (p.folder || '')
           .split('/')
           .map((s) => s.trim())
@@ -103,7 +105,7 @@ export default function Wiki() {
           })
         }
       })
-      .catch(() => {})
+      .catch(() => setOpenErr(`页面「${slug}」打开失败：可能不存在或服务异常`))
       .finally(() => {
         if (!stale) setOpening(false)
       })
@@ -114,6 +116,7 @@ export default function Wiki() {
 
   const onSelect = async (slug: string) => {
     setOpening(true)
+    setOpenErr('')
     requestedRef.current = slug
     try {
       const page = await api.get<WikiPage>(`/wiki/pages/${encodeURIComponent(slug)}`)
@@ -122,6 +125,7 @@ export default function Wiki() {
       next.set('page', slug)
       setParams(next)
     } catch {
+      setOpenErr(`页面「${slug}」打开失败：可能不存在或服务异常`)
       void load() // 页面可能已删除：刷新目录树
     } finally {
       setOpening(false)
@@ -217,6 +221,7 @@ export default function Wiki() {
             <PageReader
               page={open}
               opening={opening}
+              openErr={openErr}
               hasPages={!!pages && pages.length > 0}
               onOpenInbox={() => setPanel('inbox')}
               onSaved={load}
@@ -439,6 +444,7 @@ function FolderTree({
 function PageReader({
   page,
   opening,
+  openErr,
   hasPages,
   onOpenInbox,
   onSaved,
@@ -446,6 +452,7 @@ function PageReader({
 }: {
   page: WikiPage | null
   opening: boolean
+  openErr: string
   hasPages: boolean
   onOpenInbox: () => void
   onSaved: () => void
@@ -473,7 +480,11 @@ function PageReader({
           className="m-3 flex min-h-0 flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border px-6 py-14 text-center"
         >
           <Inbox className="size-6 text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">从左侧目录树选一页开始阅读；正文里的 wikilink 可直接跳转</p>
+          {openErr ? (
+            <p className="text-sm text-destructive">{openErr}</p>
+          ) : (
+            <p className="text-sm text-muted-foreground">从左侧目录树选一页开始阅读；正文里的 wikilink 可直接跳转</p>
+          )}
           {hasPages && <p className="text-xs text-muted-foreground/80">织入的页面按文件夹层级自动归档</p>}
           <Button size="sm" variant="outline" onClick={onOpenInbox}>
             上传第一份文档
