@@ -21,7 +21,7 @@
 | 知识 | documents | 上传文档（title/mime/status/error、sha256 UNIQUE） |
 | 知识 | chunks | 分块（seq/snippet、embed pgvector 向量列、embed_failed） |
 | wiki | wiki_sources | 摄取源（sha256 UNIQUE、error） |
-| wiki | wiki_pages | 页面（slug/page_type/content/frontmatter/origin/version） |
+| wiki | wiki_pages | 页面（slug/page_type/folder/content/frontmatter/origin/version） |
 | wiki | wiki_links | 页面间链接（from/to/weight） |
 | wiki | wiki_review_items | 人审队列 |
 | wiki | wiki_insight_dismissals | 洞察卡片 dismissing 记录 |

@@ -39,6 +39,7 @@ schema 唯一定义在 `server/migrations/0007_wiki.sql`（核心三表）与 `0
 | `frontmatter` | jsonb | 元数据，含 `sources[]` |
 | `origin` | text CHECK | `llm` / `human` |
 | `version` | int | 递增版本，默认 1 |
+| `folder` | text | 目录树层级（`/` 分隔多级，Obsidian 式；蒸馏按 page_type 归文件夹，人工可改） |
 | `embedding` | vector(1024) | 页面嵌入（标题+正文） |
 | `tsv` | tsvector | 全文检索字段（`simple` 配置） |
 | `created_at` / `updated_at` | timestamptz | |

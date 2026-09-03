@@ -7,6 +7,7 @@
 - **自动织接线**（c37ede3）：上传文档 ready 后自动触发 `/wiki/ingest {document_id}`（两步思维链织入）
 - **前端融合**（a69fcb3）：一个 Wiki 页（tabs：文档/页面/图谱/洞察/Lint/提案/源数据/目的），删 Knowledge.tsx（改 DocumentsPane 具名导出）+ 侧栏「知识库」项
 - **图谱体验升级**（c1b5804）：hover 高亮邻居 / 拖拽（captor-disable）/ 缩放三控件 / 边按 weight 编码 / 位置缓存（localStorage）——Playwright 实测 9 节点拖拽缓存写入
+- **Obsidian 目录树 IA**（2026-09-03，goal mtkurxdv）：Wiki 前端重做成目录树（folder 层级，迁移 0025 加 folder 字段 + 蒸馏按 page_type 归文件夹）+ Markdown 阅读 + 图谱独立视图（树/图切换）；运维 5 项（洞察/Lint/提案/原料/目标）收二级入口，文档收收件箱——消除 8 平铺 tab
 
 ## Next
 
