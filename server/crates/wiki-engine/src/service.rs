@@ -41,12 +41,31 @@ pub struct WikiPageDto {
     pub slug: String,
     pub title: String,
     pub page_type: String,
+    /// 目录树层级（/ 分隔多级，Obsidian 式文件夹）
+    pub folder: String,
     pub content: String,
     #[schema(value_type = Object)]
     pub frontmatter: serde_json::Value,
     pub origin: String,
     pub version: i32,
     pub updated_at: DateTime<Utc>,
+}
+
+/// page_type → 目录树默认文件夹（Obsidian 式目录树层级）。
+pub fn folder_for_type(page_type: &str) -> &'static str {
+    match page_type {
+        "entity" => "实体",
+        "concept" => "概念",
+        "source" => "来源",
+        "synthesis" => "综合",
+        "comparison" => "对比",
+        "queries" => "查询",
+        "overview" => "总览",
+        "index" => "索引",
+        "log" => "日志",
+        "purpose" => "目标",
+        _ => "",
+    }
 }
 
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
@@ -152,28 +171,31 @@ impl WikiService {
             .ok_or_else(|| WikiError::NotFound(format!("页面 {slug} 不存在")))
     }
 
-    /// 人工编辑：origin=human、版本递增、重嵌入。
+    /// 人工编辑：origin=human、版本递增、重嵌入。folder 可选（None=保持原值/默认空）。
     pub async fn put_page(
         &self,
         slug: &str,
         title: &str,
         content: &str,
+        folder: Option<&str>,
     ) -> Result<WikiPageDto, WikiError> {
         if !crate::markup::is_valid_slug(slug) {
             return Err(WikiError::BadRequest("slug 非法".into()));
         }
         let row = sqlx::query_as::<_, WikiPageDto>(
-            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version, tsv) \
-             VALUES ($1, $2, $3, 'concept', $4, $5::jsonb, 'human', 1, to_tsvector('simple', $6)) \
+            "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
+             VALUES ($1, $2, $3, 'concept', COALESCE($4, ''), $5, $6::jsonb, 'human', 1, to_tsvector('simple', $7)) \
              ON CONFLICT (slug) DO UPDATE SET \
-                title = $3, content = $4, origin = 'human', \
+                title = $3, content = $5, origin = 'human', \
+                folder = COALESCE($4, wiki_pages.folder), \
                 version = wiki_pages.version + 1, updated_at = now(), \
-                tsv = to_tsvector('simple', $6) \
+                tsv = to_tsvector('simple', $7) \
              RETURNING *",
         )
         .bind(Uuid::now_v7())
         .bind(slug)
         .bind(title)
+        .bind(folder)
         .bind(content)
         .bind(serde_json::json!({"title": title, "sources": []}))
         .bind(tsv_text(content))
@@ -262,7 +284,7 @@ impl WikiService {
         title: &str,
     ) -> Result<WikiPageDto, WikiError> {
         // human 合入：保持 origin=human 语义（人确认的内容）
-        self.put_page(slug, title, content).await
+        self.put_page(slug, title, content, None).await
     }
 
     /// Wiki 检索（FTS + 向量 RRF 融合；W2：向量通道落地）。
@@ -417,8 +439,8 @@ impl WikiService {
         let slug = format!("query-{title}");
         let fm = serde_json::json!({"title": title, "page_type": "queries", "sources": []});
         sqlx::query(
-            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version, tsv) \
-             VALUES ($1, $2, $3, 'queries', $4, $5, 'human', 1, to_tsvector('simple', $6)) \
+            "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
+             VALUES ($1, $2, $3, 'queries', '查询', $4, $5, 'human', 1, to_tsvector('simple', $6)) \
              ON CONFLICT (slug) DO UPDATE SET content = $4, version = wiki_pages.version + 1, updated_at = now()",
         )
         .bind(Uuid::now_v7())

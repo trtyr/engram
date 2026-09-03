@@ -125,6 +125,9 @@ pub async fn get_page(
 pub struct PutPageRequest {
     pub title: String,
     pub content: String,
+    /// 目录树文件夹（可选；None = 保持原值，Obsidian 式 / 分隔多级路径）
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 /// 人工编辑（origin=human，版本递增；LLM 后续只提案不覆盖）。
@@ -140,7 +143,7 @@ pub async fn put_page(
     require_wiki(&principal)?;
     Ok(Json(
         svc(&state)
-            .put_page(&slug, &req.title, &req.content)
+            .put_page(&slug, &req.title, &req.content, req.folder.as_deref())
             .await
             .map_err(we)?,
     ))

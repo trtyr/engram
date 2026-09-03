@@ -233,7 +233,7 @@ async fn human_page_produces_proposal_not_overwrite() {
     .await;
 
     // 人先写页面
-    wiki.put_page("张三", "张三", "# 张三\n\n人工编写的内容。")
+    wiki.put_page("张三", "张三", "# 张三\n\n人工编写的内容。", None)
         .await
         .unwrap();
     let before = wiki.get_page("张三").await.unwrap();
@@ -288,16 +288,16 @@ async fn lint_reports_dead_links_and_orphans() {
     let (pool, wiki, handle, _pg) = setup(vec![]).await;
 
     // 正常互链两页 + 一个死链 + 一个孤儿
-    wiki.put_page("正常页A", "A", "内容链接 [[正常页B]]。")
+    wiki.put_page("正常页A", "A", "内容链接 [[正常页B]]。", None)
         .await
         .unwrap();
-    wiki.put_page("正常页B", "B", "回链 [[正常页A]]。")
+    wiki.put_page("正常页B", "B", "回链 [[正常页A]]。", None)
         .await
         .unwrap();
-    wiki.put_page("带死链", "D", "这里有个 [[不存在的页面]]。")
+    wiki.put_page("带死链", "D", "这里有个 [[不存在的页面]]。", None)
         .await
         .unwrap();
-    wiki.put_page("孤儿页", "O", "没有任何入链。")
+    wiki.put_page("孤儿页", "O", "没有任何入链。", None)
         .await
         .unwrap();
     // 手动建链接表（put_page 不自动建边——模拟 ingest 后状态）
@@ -561,7 +561,7 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
 
     // 人工接管该页
     let human = wiki
-        .put_page("w6-page", "W6页", "# W6页\n\n人工内容，不许覆盖。")
+        .put_page("w6-page", "W6页", "# W6页\n\n人工内容，不许覆盖。", None)
         .await
         .unwrap();
     assert_eq!(human.origin, "human");

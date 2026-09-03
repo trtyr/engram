@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::markup::{extract_wikilinks, is_valid_slug};
 use crate::prompts;
+use crate::service::folder_for_type;
 
 fn data_dir() -> std::path::PathBuf {
     std::env::var("AGENT_MEMORY_DATA_DIR")
@@ -358,10 +359,11 @@ pub async fn generate_job(
         // slug UNIQUE，也不会双 UPDATE 互相覆盖）。human 页保护语义收进
         // DO UPDATE 的 WHERE：冲突且 origin=human 时子句为假 → RETURNING 无行 → 提案路径。
         let upserted: Option<bool> = sqlx::query_scalar(
-            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
-             VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'llm', 1) \
+            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version, folder) \
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'llm', 1, $8) \
              ON CONFLICT (slug) DO UPDATE SET \
                 content = $5, \
+                folder = CASE WHEN wiki_pages.folder = '' THEN $8 ELSE wiki_pages.folder END, \
                 frontmatter = jsonb_set(wiki_pages.frontmatter, '{sources}', \
                     (SELECT COALESCE(jsonb_agg(DISTINCT s), '[]'::jsonb) FROM \
                         (SELECT jsonb_array_elements_text(wiki_pages.frontmatter->'sources') AS s \
@@ -377,6 +379,7 @@ pub async fn generate_job(
         .bind(&content)
         .bind(sqlx::types::Json(&fm))
         .bind(source_id.to_string())
+        .bind(folder_for_type(page_type))
         .fetch_optional(pool)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -675,8 +678,8 @@ async fn upsert_system_page(
     content: &str,
 ) -> Result<(), JobError> {
     sqlx::query(
-        "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
-         VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, 'llm', 1) \
+        "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version, folder) \
+         VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, 'llm', 1, '系统') \
          ON CONFLICT (slug) DO UPDATE SET content = $5, updated_at = now()",
     )
     .bind(Uuid::now_v7())
