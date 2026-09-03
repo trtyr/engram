@@ -100,6 +100,18 @@ async fn cascade_delete_removes_source_and_downstream() {
     .await
     .unwrap();
     assert_eq!(concept_sources, 0, "共享页 sources 应摘除该 source");
+
+    // 审计凭证：破坏性操作落 jobs succeeded 行（清空不吞审计）
+    let audit: Option<(String, String)> = sqlx::query_as(
+        "SELECT kind, payload->>'source_id' FROM jobs WHERE kind = 'wiki_source_cascade_delete' AND payload->>'source_id' = $1",
+    )
+    .bind(source_id.to_string())
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    let (kind, audited_source) = audit.expect("级联删除应落审计行");
+    assert_eq!(kind, "wiki_source_cascade_delete");
+    assert_eq!(audited_source, source_id.to_string());
 }
 
 // ---------- W5：级联删除不留幽灵边（事务内删边 + 无据边回收 + 权重重算） ----------

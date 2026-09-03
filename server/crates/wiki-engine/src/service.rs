@@ -477,9 +477,16 @@ impl WikiService {
         &self,
         source_id: Uuid,
     ) -> Result<crate::cascade::CascadeReport, WikiError> {
-        crate::cascade::cascade_delete_source(&self.pool, source_id)
+        let report = crate::cascade::cascade_delete_source(&self.pool, source_id)
             .await
-            .map_err(WikiError::from)
+            .map_err(WikiError::from)?;
+        // 破坏性操作落审计行（与 memory 域「job 行即审计链」同哲学）——best-effort，不阻断返回
+        self.audit(
+            "wiki_source_cascade_delete",
+            serde_json::json!({ "source_id": source_id, "report": report }),
+        )
+        .await;
+        Ok(report)
     }
 
     // ---------- 图洞察 ----------
@@ -511,5 +518,20 @@ impl WikiService {
         )
         .fetch_all(&self.pool)
         .await?)
+    }
+
+    /// 审计行（清空不吞审计凭证）：破坏性操作落 jobs 成功行，best-effort。
+    pub async fn audit(&self, kind: &str, payload: serde_json::Value) {
+        sqlx::query(
+            "INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, \
+             progress, started_at, finished_at) \
+             VALUES ($1, $2, $3, 'succeeded', 1, 1, $3, now(), now())",
+        )
+        .bind(Uuid::now_v7())
+        .bind(kind)
+        .bind(payload)
+        .execute(&self.pool)
+        .await
+        .ok();
     }
 }
