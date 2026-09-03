@@ -287,6 +287,36 @@ async fn human_page_produces_proposal_not_overwrite() {
     handle.join().await;
 }
 
+/// S-7：via 执行者标记落 frontmatter——AI 代执行（"ai"）与真人编辑可区分；
+/// 后续不带 via 的更新不清除已有标记（merge 块为空对象时保持原值）。
+#[tokio::test]
+async fn put_page_via_lands_in_frontmatter() {
+    let (_pool, wiki, handle, _pg) = setup(vec![]).await;
+
+    let p = wiki
+        .put_page("via-page", "V", "# V 内容", None, Some("ai"))
+        .await
+        .unwrap();
+    assert_eq!(
+        p.frontmatter.get("via").and_then(|v| v.as_str()),
+        Some("ai"),
+        "新建带 via 应落 frontmatter.via"
+    );
+
+    let p2 = wiki
+        .put_page("via-page", "V", "# V 内容 v2", None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        p2.frontmatter.get("via").and_then(|v| v.as_str()),
+        Some("ai"),
+        "无 via 的更新不得清除已有执行者标记"
+    );
+
+    handle.shutdown();
+    handle.join().await;
+}
+
 /// lint：注入死链 + 孤儿页 → 全部报出。
 #[tokio::test]
 async fn lint_reports_dead_links_and_orphans() {
