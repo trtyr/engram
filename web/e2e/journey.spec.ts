@@ -55,7 +55,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
 
   // ---------- 2. Wiki 收件箱（文档上传）：上传 -> ready -> 分块预览 ----------
   await page.getByRole('link', { name: 'Wiki' }).click()
-  await page.getByRole('button', { name: '收件箱' }).click()
+  await page.getByRole('button', { name: '收件箱', exact: true }).click()
   await expect(page.getByTestId('dropzone'), '拖拽上传区应存在').toBeVisible()
   const mdContent = '# Playwright \u4e4b\u65c5\n\nPlaywright \u9a71\u52a8\u771f\u5b9e\u6d4f\u89c8\u5668\u5b8c\u6210\u7aef\u5230\u7aef\u9a8c\u8bc1\u3002\n\n## \u65ad\u8a00\u6a21\u578b\n\nexpect(locator).toBeVisible() \u662f\u81ea\u52a8\u91cd\u8bd5\u65ad\u8a00\u3002\n\n## \u8865\u5145\n\n' + '\u6d4b\u8bd5\u6700\u4f73\u5b9e\u8df5\u8865\u5145\u5185\u5bb9\u3002'.repeat(40)
   await page.setInputFiles('input[type=file]', {

@@ -112,8 +112,8 @@ export function Tabs<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div className="inline-flex max-w-full flex-wrap items-stretch rounded-md border border-border">
-      {items.map((it, i) => (
+    <div className="inline-flex max-w-full flex-wrap items-stretch gap-px overflow-hidden rounded-md border border-border bg-border p-px">
+      {items.map((it) => (
         <button
           key={it.value}
           type="button"
@@ -122,15 +122,14 @@ export function Tabs<T extends string>({
           onClick={() => onChange(it.value)}
           className={cn(
             'px-3 py-1.5 text-sm font-medium transition-colors',
-            i > 0 && 'border-l border-border',
             value === it.value
               ? 'bg-foreground text-background'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+              : 'bg-card text-muted-foreground hover:text-foreground',
           )}
         >
           {it.label}
           {it.count !== undefined && (
-            <span aria-hidden="true" className={cn('ml-1.5 font-mono text-xs tabular-nums', value === it.value ? 'text-background/70' : 'text-muted-foreground/70')}>
+            <span aria-hidden="true" className={cn('ml-1.5 font-mono text-xs tabular-nums', value === it.value ? 'text-background/70' : 'text-muted-foreground/80')}>
               {it.count}
             </span>
           )}
