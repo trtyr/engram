@@ -211,7 +211,7 @@
      功能验证必须打一次性栈）
    - 编辑能力整章归档：批一分权/留痕/钉住 + 批二 Web（用户验收"差不多
      了"）+ 测试方四波复核全绿；pi-xiamu 正式 key 在役（v3/v4 已撤）
-0w. **Wiki 目录树重做——28 项审计全修**（40b7d49+03b102a+fc35d86，2026-09-03）：
+0w. **Wiki 目录树重做——28 项审计全修**（40b7d49+03b102a+fc35d86+f2eb4f2 审计修复，2026-09-03）：
    - 布局骨架：根容器 lg:h-[calc(100vh-3rem)] 消 150px 底部死空白；树/阅读
      min-h-0 独立滚动等高；空态 86px 小条 → 842px 全宽 + 分层引导
    - 状态提升：选中页面/折叠集合提到 Wiki 根（切图谱/收件箱/运维不丢）；
@@ -219,17 +219,28 @@
    - 交互：树宽拖拽分割线 220-480px（唯一新增交互）；折叠集合与树宽
      localStorage 持久化（lsGet/lsSet 守卫 Node26 实验性 localStorage）
    - 视觉：Tabs 脏竖线 → 发丝网格 chip；目录树层级底色 + folder 计数 +
-     人工版「人」徽标；meta 行 slug·type·vN·时间·folder；正文 70ch 居中
-   - 可访问性：folder aria-expanded、页面 aria-current、计数/徽标 aria-hidden、
-     canvas role=img、分割线 role=separator
+     人工版「人」徽标；meta 行 slug·type·vN·时间·folder；正文 70ch 居中；
+     层级缩进 ml-2+pl-2 = 16px/级（原 ml-3 20px/级——#8 三级嵌套省 12px+）
+   - 可访问性：**容器 role=tree(aria-label) + 节点 role=treeitem(aria-level 1/2/3)
+     + 子树 role=group**（f2eb4f2 补——初版漏做仅留 folder aria-expanded）、
+     页面 aria-current、计数/徽标 aria-hidden、canvas role=img、分割线 role=separator
    - 健壮性：树加载失败重试、300 条截断诚实提示、选中失败刷新树、
-     ProposalsPane 串行 N+1 → Promise.all 并行、图谱 canvas 撑满工作区
-   - 验证：Playwright 25/25 实测（几何/交互/持久化/深链/响应式）+
-     e2e 一次性栈 2/2（wiki-ia 新增折叠持久化/URL 写回/深链断言）+
-     vitest 37/37 + build 0（284kB）+ lint 0 新增 + 双主题截图 8 张
-     （docs/design/screenshots/r32-*.png）
-   - e2e 教训：折叠持久化断言必须在选中页面（写 URL）之前——reload 带
-     ?page= 触发深链自动展开定位（预期 UX），覆盖折叠态
+     ProposalsPane 1+N 串行 → GET /wiki/proposals 聚合端点单请求
+     （+ openapi_snapshot 同步、80 路径）、图谱 canvas 撑满工作区
+   - 几何实测制品（审计要求可检查证据）：e2e wiki-ia 测试 2
+     「Wiki 布局几何」断言五组——空态宽 ≥600px、工作区 bottom ≥852/900
+     （距视口底 ≤48px）、1100px 双列同行+树列 overflow-y auto、900px 堆叠
+     零横向溢出、拖拽 280→420px + reload ±6px 持久化；treeitem aria-level
+     1/2/3 断言。全部断言过 = 数字落进 git 而非自述
+   - 验证：e2e 一次性栈 3/3（journey + wiki-ia 2 用例）+ cargo 156/156
+     （36 套件，含 wiki_proposals_aggregates_latest_per_job + openapi_snapshot）
+     + clippy -D warnings 0 + fmt + lint 0 警告（Settings×2/Galaxy×1
+     set-state-in-effect 全清：expected lazy-init、nowTs 快照、清词移 onChange）
+     + vitest 37/37 + build 0（284kB）+ api-schema regen（80 路径）
+   - e2e 教训×2：①折叠持久化断言必须在选中页面（写 URL）之前——reload 带
+     ?page= 触发深链自动展开定位（预期 UX），覆盖折叠态；②role=treeitem
+     显式 role 覆盖隐式 button role，getByRole('button') 选择器全部失效
+     （与当年 Tabs role=tab 同坑）——树节点测试统一用 getByRole('treeitem')
 1. **收缩**：208px ↔ 56px icon 轨，localStorage(engram-sidebar) 持久化，title 提示，动画 200ms。
 2. **状态徽章**：useSystemStatus 10s 轮询（页面隐藏跳过）；Jobs 项 failed+dead 计数芯片（收起态角标点）、
    Memory 项蒸馏中脉冲（kind ∈ extract/extract_atoms/arbitrate/organize/consolidate）。
