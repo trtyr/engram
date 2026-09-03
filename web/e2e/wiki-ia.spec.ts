@@ -35,9 +35,9 @@ test('Wiki Obsidian IA：目录树 + 阅读 + 图谱 + 收件箱 + 运维', asyn
   await page.goto('/')
   await page.getByLabel('管理员密码').fill(ADMIN_PW)
   await page.getByRole('button', { name: '登录' }).click()
-  await expect(page.getByRole('link', { name: '用户记忆' })).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('aside nav a[href="/memory"]')).toBeVisible({ timeout: 10_000 })
 
-  await page.getByRole('link', { name: 'Wiki' }).click()
+  await page.locator('aside nav a[href="/wiki"]').click()
 
   // 目录树：多级 folder（技术 → Rust）+ 根页面
   await expect(page.getByRole('button', { name: '技术', exact: true })).toBeVisible({ timeout: 10_000 })
