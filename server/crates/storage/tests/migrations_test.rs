@@ -138,13 +138,16 @@ async fn migration_0022_splits_multi_model_provider() {
     .await
     .unwrap();
 
-    // 执行 0022 的拆分逻辑（与 0022_provider_single_model.sql 一致）
+    // 执行 0022 的拆分逻辑（与 0022_provider_split.sql 一致）
+    // 注意：TEMP TABLE 是会话级对象，PgPool 每次 execute 可能拿到不同连接——
+    // 必须包在同一个事务里保证三个语句共用一条连接，否则 CI 并发下必挂 42P01。
+    let mut tx = pool.begin().await.unwrap();
     sqlx::query(
         "ALTER TABLE llm_providers \
             ADD COLUMN model_id text NOT NULL DEFAULT '', \
             ADD COLUMN capability text NOT NULL DEFAULT 'chat'",
     )
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .unwrap();
     sqlx::query(
@@ -157,11 +160,11 @@ async fn migration_0022_splits_multi_model_provider() {
          CROSS JOIN LATERAL jsonb_array_elements_text(m.e->'capabilities') AS c(cap) \
          WHERE jsonb_array_length(p.models) > 1",
     )
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .unwrap();
     sqlx::query("DELETE FROM llm_providers WHERE jsonb_array_length(models) > 1")
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .unwrap();
     sqlx::query(
@@ -171,9 +174,10 @@ async fn migration_0022_splits_multi_model_provider() {
             base_url, api_key_encrypted, model_id, capability, is_default, created_at, updated_at \
          FROM _split_providers",
     )
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .unwrap();
+    tx.commit().await.unwrap();
 
     // 断言：1 provider × 2 model → 2 行（拆分前后模型数一致，无损）
     let rows: Vec<(String, String, String)> =
