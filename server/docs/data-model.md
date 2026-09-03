@@ -32,7 +32,7 @@
 | LLM | settings | 路由表等 JSONB 配置 |
 | LLM | llm_usage | 用量记账（provider/model/purpose/tokens/latency） |
 
-## 迁移史（24 个）
+## 迁移史（25 个）
 
 | 迁移 | 内容要点 |
 |---|---|
@@ -51,6 +51,7 @@
 | 0022 | llm_providers **models→model_id+capability**（一个供应商一个模型一个 key，多模型拆分成行） |
 | 0023 | raw_sessions.**sensitive**（会话级敏感标记，蒸馏产物自动继承） |
 | 0024 | atoms 无 source_refs 的 active 残留打标 `origin=direct-write`（溯源断但可审计） |
+| 0025 | wiki_pages.**folder**（Obsidian 式目录树层级，/ 分隔多级路径；蒸馏按 page_type 归文件夹） |
 
 ## 数据流（写路径）
 

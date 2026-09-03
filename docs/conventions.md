@@ -12,8 +12,8 @@
 
 | 门 | 内容 |
 |---|---|
-| backend | fmt → clippy(-D warnings) → test(141)；pgvector service；`mkdir -p ../web/dist` 占位 |
-| web | oxlint（0 警告）→ tsc → vitest(35) → build |
+| backend | fmt → clippy(-D warnings) → test(158)；pgvector service；`mkdir -p ../web/dist` 占位 |
+| web | oxlint（0 警告）→ tsc → vitest(37) → build |
 | api-types | OpenAPI 导出 → 生成 → 与 api-schema.ts 零漂移 |
 | docker | 多阶段镜像构建 |
 | e2e | compose 全栈 + Playwright journey（无 provider 部分旅程） |

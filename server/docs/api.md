@@ -1,6 +1,6 @@
 # API
 
-> 2026-09-02 从运行中服务（当日代码编译，:19180）`/openapi.json` 活体导出，共 **79 路径 / 97 方法注册**（GET 40 · POST 43 · PUT 4 · PATCH 3 · DELETE 7）。
+> 2026-09-03 从当日代码 `openapi-dump` 活体导出，共 **80 路径 / 98 方法注册**（GET 41 · POST 43 · PUT 4 · PATCH 3 · DELETE 7）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 七 scope：memory/knowledge/wiki/codegraph/llm/erase/cron）。
@@ -68,14 +68,14 @@
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | /wiki/pages | 页面列表 |
-| GET/PUT | /wiki/pages/{slug} | 页面读取 / 编辑（版本+1） |
+| GET/PUT | /wiki/pages/{slug} | 页面读取 / 编辑（版本+1；folder 可改，/ 分隔多级路径，0025） |
 | POST | /wiki/ingest | 源文本摄取（异步：分析→生成页面→建链） |
 | GET | /wiki/sources、DELETE /wiki/sources/{id} | 源数据管理 |
 | GET | /wiki/graph | 链接图谱（节点=页面，社区发现结果） |
 | POST | /wiki/lint | 页面一致性检查 |
 | GET/POST | /wiki/reviews、POST /wiki/reviews/{id}/resolve | 人审队列与裁决 |
 | POST | /wiki/insights、/insights/dismiss、/insights/reset | 洞察卡片管理 |
-| POST | /wiki/proposals/apply | 应用结构提案 |
+| GET/POST | /wiki/proposals、/wiki/proposals/apply | 待审提案聚合（DISTINCT ON job_id 取 wiki_generate 最新提案事件，修前端 N+1）/ 应用结构提案 |
 | POST | /wiki/queries/archive | 查询归档 |
 | GET/PUT | /wiki/purpose | Wiki 目的（goals/scope/key_questions） |
 | POST | /wiki/search | 目的导向 Wiki 检索 |

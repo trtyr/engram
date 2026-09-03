@@ -1,11 +1,20 @@
-# 当前状态（2026-09-01 验证基线）
+# 当前状态（2026-09-03 验证基线）
 
-> 2026-08-30 初始化后的首次全面更新。历史（CI 修复、Engram 重设计）见 git log 与根 docs/plantree/。
+> 2026-08-30 初始化，09-01/09-03 两次全面更新。历史（CI 修复、Engram 重设计）见 git log 与根 docs/plantree/。
 
 ## 一句话状态
 
-工作树干净，origin/main 双 workflow 绿。cargo **155** 测试 / vitest **37** / 24 迁移 / 79 路径 / 24 业务表。
-生产栈 :19180 跑真数据（用户真实记忆 + pi-xiamu 消费者 key 在役）。
+origin/main a3b6a2d 双 workflow 绿。cargo **158** 测试 / **25 迁移** / **80 路径 / 98 方法** / 24 业务表。
+级联删除补审计凭证（audit() 接线，cascade_test 断言）。**数据已由所有者主动清空，本地库已清理**。
+
+## 当日验证矩阵
+
+| 命令 | 结果 |
+|---|---|
+| cargo fmt --check | exit 0 |
+| cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
+| cargo test --workspace | 158 passed / 0 failed（36 套件） |
+| cargo run -q -p agent-memory-api --bin openapi-dump | 80 路径 / 98 方法（GET 41/POST 43/PUT 4/PATCH 3/DELETE 7） |
 
 ## 2026-08-30 基线以来的落地（按主题）
 
@@ -25,12 +34,24 @@
 | 双节律 | cron 兜底 + 心跳/status + cron scope 分权 | 775aea2/c1f877f/d7a8345 |
 | 会话敏感 + 直写残留 | raw_sessions.sensitive 蒸馏继承 + 无溯源原子打标 origin（0023/0024 迁移） | f6fca87/73d0d65 |
 | Wiki+Knowledge 合并 | 端点并入 /wiki（兼容别名）+ 上传自动织入 + 前端融合一个 Wiki 页 + 图谱 Obsidian 化 | bb98d07/c37ede3/a69fcb3/c1b5804 |
+| 供应商单模型 | llm_providers models→model_id+capability（0022）+ AI 路由建议 + 批量吊销 | 50dc2d4 |
+| 权限收窄 | AI 直写加工权收回（atom/entity/relation/attach 403）+ erase 分权 + atom 输入校验 | 176b070/fa88777/e48cdc5 |
+| 二期三项 | 过期降权/过滤 + 文件批量导入（source=import）+ 检索时间范围过滤 | d9316b1/1f082e7/9c45889 |
+| **Wiki 目录树** | **0025 wiki_pages.folder**（/ 分隔层级，蒸馏按 page_type 归文件夹，PUT 可改）+ **GET /wiki/proposals** 聚合端点（修 N+1）+ wiki lint uuid cast/review 404 + 0022 测试拆分（PgPool 42P01） | e568732/adbc57e/952035f/a1aea80 |
+| 双链健壮性 | 取页 slug 宽容重查（标题原文双链不再 404） | 6d1fadc |
 
-## 运行中的真数据
+## 当日落地：级联删除审计凭证
 
-- 记忆域：用户真实记忆运行中（原子/场景/画像/实体），2 条敏感带标
-- 消费者：pi-xiamu key（memory+llm+erase）在役；v2 只读 key 留用
-- LLM：newapi 网关（MiniMax-M3 chat + bge-m3 embed）
+- `WikiService::audit(kind, payload)`（jobs 表 succeeded 行，best-effort）接线到
+  `delete_source_cascade`——kind=`wiki_source_cascade_delete`，payload 含 source_id + CascadeReport；
+  破坏性操作不再无痕（与 memory 域「job 行即审计链」同哲学）。cascade_test 补落行断言。
+
+## 运行环境实况
+
+- **数据已由所有者主动清空**（2026-09-03 确认，非事故）：无生产数据在跑。
+- 本地 PG 已清理：仅存 postgres / project_manage；agent-memory 相关 11 库（含 agent_memory 老库、
+  am_design_audit 审计库）已删。:19180 审计栈进程已停。重建本地栈：
+  `psql -c "CREATE DATABASE am_dev"` + `AGENT_MEMORY_DATABASE_URL=… cargo run`（迁移自动跑）。
 
 ## 已知未了项
 

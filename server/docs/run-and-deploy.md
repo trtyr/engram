@@ -44,7 +44,7 @@ cargo run -q -p agent-memory-api --bin agent-memory-server
 ## 测试（本机 PG，无 Docker）
 
 ```bash
-cd server && cargo test --workspace   # 144 passed / 0 failed
+cd server && cargo test --workspace   # 158 passed / 0 failed
 ```
 
 每个测试 crate 经 `tests/support/mod.rs` 用 sqlx 建一次性库、Drop 时

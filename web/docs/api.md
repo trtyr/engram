@@ -1,6 +1,6 @@
 # API 面（前端视角）
 
-> 前端是后端 79 路径（97 方法注册）的纯消费者，不自有接口。本文档写消费约定；端点全表见
+> 前端是后端 80 路径（98 方法注册）的纯消费者，不自有接口。本文档写消费约定；端点全表见
 > [server/docs/api.md](../../server/docs/api.md)（当日 OpenAPI 活体导出）。
 
 ## 调用约定（lib/api.ts）
@@ -20,7 +20,7 @@ api.get<T>(path) / post / put / patch / del / upload(path, file)
 | 轨道 | 文件 | 性质 |
 |---|---|---|
 | 手写域类型 | `lib/api.ts`（Session/Atom/Scenario/Persona/Job/Document/…） | 页面实际消费的形状 |
-| 生成类型 | `lib/api-schema.ts`（openapi-typescript，80K） | 契约防漂移 |
+| 生成类型 | `lib/api-schema.ts`（openapi-typescript，122K） | 契约防漂移 |
 
 生成流程：`pnpm run gen:api`（OPENAPI_URL 指向运行中后端）；CI api-types job 做零漂移 diff。
 手写类型与生成类型尚未合一（历史渐进），改后端 DTO 时两处都要核对。

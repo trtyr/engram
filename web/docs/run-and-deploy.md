@@ -22,20 +22,23 @@ pnpm dev            # Vite :5173，/api /auth /jobs /memory … 代理到 VITE_P
 ```bash
 pnpm run lint       # oxlint；⚠️ 必须带 run（裸 pnpm lint 误报 eslint 缺失）
 pnpm exec tsc --noEmit
-pnpm test           # vitest 26/26（jsdom）
+pnpm test           # vitest 37/37（jsdom）
 pnpm run build      # tsc -b && vite build → dist/
 ```
 
-## e2e（Playwright journey）
+## e2e（Playwright journey + wiki-ia）
 
 ```bash
 # 需要运行中的栈（默认 E2E_BASE=http://127.0.0.1:19180）
 E2E_ADMIN_PW=<管理员密码> pnpm exec playwright test
 ```
 
-语义：登录→上传文档→ready→写会话→（有 provider 才走）蒸馏断言→wiki→（有 provider 才走）
-摄取断言→codegraph 注册/索引/查询。无 LLM provider 的栈跑部分旅程（探测 /settings/llm/providers）。
-配置：`playwright.config.ts`（SwiftShader WebGL，600s 超时）。
+两个 spec（testDir e2e/）：
+- **journey.spec.ts**：登录→上传文档→ready→写会话→（有 provider 才走）蒸馏断言→wiki→
+  （有 provider 才走）摄取断言→codegraph 注册/索引/查询。无 LLM provider 的栈跑部分旅程（探测 /settings/llm/providers）。
+- **wiki-ia.spec.ts**（2026-09-03 新增）：Wiki 目录树——折叠持久化 / URL 写回 / ?page= 深链断言。
+
+配置：`playwright.config.ts`（E2E_BASE 必填拒跑打生产库；SwiftShader WebGL，600s 超时）。
 
 ## 类型再生成
 

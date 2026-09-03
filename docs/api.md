@@ -1,7 +1,7 @@
 # API（集成索引）
 
-全栈共一个 HTTP API，**79 路径 / 97 方法注册**（GET 40 · POST 43 · PUT 4 · PATCH 3 · DELETE 7，2026-09-02 运行中服务
-OpenAPI 活体导出）。权威全表在 [server/docs/api.md](../server/docs/api.md)；
+全栈共一个 HTTP API，**80 路径 / 98 方法注册**（GET 41 · POST 43 · PUT 4 · PATCH 3 · DELETE 7，2026-09-03
+openapi-dump 活体导出）。权威全表在 [server/docs/api.md](../server/docs/api.md)；
 前端消费约定（认证、类型双轨、/jobs 分流）在 [web/docs/api.md](../web/docs/api.md)。
 
 ## 域速览
@@ -13,7 +13,7 @@ OpenAPI 活体导出）。权威全表在 [server/docs/api.md](../server/docs/ap
 | memory·实体 | /memory/entities、/memory/entities/graph | 记忆坐标系（人物/项目/主题/群组/地点） |
 | memory·治理 | /memory/purge、/memory/export、/memory/atoms/{id}/revisions | 一等清空（两阶段）/ 数据主权 / 编辑留痕 |
 | wiki·文档 | /wiki/documents、/wiki/upload、/wiki/documents/search | 文档→向量检索（原 knowledge，已并入 /wiki 前缀） |
-| wiki·知识网 | /wiki/ingest、/wiki/pages/{slug}、/wiki/graph | 摄取→页面→图谱 |
+| wiki·知识网 | /wiki/ingest、/wiki/pages/{slug}、/wiki/graph、/wiki/proposals | 摄取→页面→图谱；folder 目录树 + 提案聚合 |
 | codegraph | /codegraph/projects/{id}/index、/query | 注册→索引→查询 |
 | jobs | /jobs、/jobs/{id}/events、/jobs/{id}/revive | 任务观测与恢复 |
 | settings | /settings/llm/providers、/settings/llm/routing（含 /suggest）、/settings/api-keys（含 /batch-revoke） | LLM 网关配置 |

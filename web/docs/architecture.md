@@ -12,7 +12,7 @@ web/src/
 ├── vite-env.d.ts               # __APP_VERSION__ 构建期常量声明
 ├── lib/
 │   ├── api.ts                  # fetch 封装：Bearer、ApiError、401 广播、域类型（Session/Atom/Job/…）
-│   ├── api-schema.ts           # OpenAPI 生成（80K，CI 零漂移门禁管）
+│   ├── api-schema.ts           # OpenAPI 生成（122K，CI 零漂移门禁管）
 │   ├── theme.ts                # 主题引擎：useTheme/onThemeChange/useThemeTick + storage/matchMedia 监听
 │   ├── status.ts               # useSystemStatus：侧栏徽章 10s 轮询（failed/dead + 蒸馏中）
 │   ├── ui.ts                   # 共享样式原语（tableCls/inputCls/tdMono/fmtTime）
@@ -22,7 +22,7 @@ web/src/
 │   ├── ui/button.tsx           # Button（solid-ink primary / outline / destructive / ghost）
 │   ├── CommandPalette.tsx      # 全局检索覆盖层（Cmd+K、/；实体命中直达 /circle?entity=）
 │   ├── ThemeToggle.tsx         # 主题切换（iconClass 透传给窄轨）
-│   ├── WikiMarkdown.tsx        # Markdown 渲染：70ch prose、mermaid 主题注入、wikilink 跳转
+│   ├── WikiMarkdown.tsx        # Markdown 渲染：prose（4xl 放宽）、mermaid 主题注入、wikilink 跳转（递归行内 children）
 │   ├── WikiGraph.tsx           # sigma 图谱：度数定尺寸、token 取色、32px 网格底纹、主题跟随
 │   ├── EntityGalaxy.tsx        # 圈子 sigma 图（lazy：拖拽用 captor-disable 模式；KIND_COLOR 常量在 lib/ui）
 │   ├── PersonaHistory.tsx      # 画像历史右滑抽屉（版本列表/零依赖 LCS diff/证据链跳场景）
@@ -31,7 +31,7 @@ web/src/
 └── features/                   # 七页（路由级 lazy）
     ├── Login.tsx  Dashboard.tsx  Memory.tsx  Circle.tsx（圈子薄壳：PageHeader + Galaxy）
     ├── Galaxy.tsx（圈子主体：实体列表+图谱+档案，被 Circle 挂载）
-    ├── Knowledge.tsx（DocumentsPane，被 Wiki 挂载）  Wiki.tsx  CodeGraph.tsx  Jobs.tsx  Settings.tsx
+    ├── Knowledge.tsx（DocumentsPane，被 Wiki 挂载）  Wiki.tsx（30k：目录树/树图双视图/收件箱/运维）  CodeGraph.tsx  Jobs.tsx  Settings.tsx
     └── *.test.tsx + components/CommandPalette.test.tsx
 ```
 
@@ -65,7 +65,8 @@ lib/api.ts（唯一出站点）──► 后端 HTTP
 ## 路由与代码分割
 
 - react-router-dom 7；7 页全部 `React.lazy` 路由级分割（/circle 薄壳 + Galaxy 主体）。
-- 旧深链兼容：`/memory?tab=galaxy` → `<Navigate to="/circle" replace />`（MemoryRoute 顶部守卫）。
+- 旧深链兼容：`/memory?tab=galaxy` → `/Navigate to="/circle" replace />`（MemoryRoute 顶部守卫）；
+  `/knowledge` → `/wiki`（2026-09-02 合并后的重定向，App.tsx 路由表）。
 - 重组件二级 lazy：sigma（EntityGalaxy）、mermaid（WikiMarkdown 内动态 import）、cytoscape（CodeGraph 内）；
   lazy 组件的常量必须住在无依赖模块（lib/ui）再 re-export，保住 bundler 边（sigma 156kB 独立 chunk）。
 - `__APP_VERSION__` 由 vite.config.ts 构建期从 `server/Cargo.toml` workspace version 注入（版本单一来源）。
