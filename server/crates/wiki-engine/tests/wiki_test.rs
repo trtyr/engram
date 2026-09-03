@@ -233,7 +233,7 @@ async fn human_page_produces_proposal_not_overwrite() {
     .await;
 
     // 人先写页面
-    wiki.put_page("张三", "张三", "# 张三\n\n人工编写的内容。", None)
+    wiki.put_page("张三", "张三", "# 张三\n\n人工编写的内容。", None, None)
         .await
         .unwrap();
     let before = wiki.get_page("张三").await.unwrap();
@@ -272,7 +272,12 @@ async fn human_page_produces_proposal_not_overwrite() {
 
     // 人审合入
     let merged = wiki
-        .apply_proposal("张三", data["proposal_content"].as_str().unwrap(), "张三")
+        .apply_proposal(
+            "张三",
+            data["proposal_content"].as_str().unwrap(),
+            "张三",
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(merged.version, 2);
@@ -288,16 +293,23 @@ async fn lint_reports_dead_links_and_orphans() {
     let (pool, wiki, handle, _pg) = setup(vec![]).await;
 
     // 正常互链两页 + 一个死链 + 一个孤儿
-    wiki.put_page("正常页A", "A", "内容链接 [[正常页B]]。", None)
+    wiki.put_page("正常页A", "A", "内容链接 [[正常页B]]。", None, None)
         .await
         .unwrap();
-    wiki.put_page("正常页B", "B", "回链 [[正常页A]]。", None)
+    wiki.put_page("正常页B", "B", "回链 [[正常页A]]。", None, None)
         .await
         .unwrap();
-    wiki.put_page("带死链", "D", "这里有个 [[不存在的页面]]。", None)
+    wiki.put_page("带死链", "D", "这里有个 [[不存在的页面]]。", None, None)
         .await
         .unwrap();
-    wiki.put_page("孤儿页", "O", "没有任何入链。", None)
+    wiki.put_page("孤儿页", "O", "没有任何入链。", None, None)
+        .await
+        .unwrap();
+    // W-1：大小写变体链接（[[Engram]] vs slug=engram）——不判死链，报 case_mismatch
+    wiki.put_page("engram", "Engram", "实体页。", None, None)
+        .await
+        .unwrap();
+    wiki.put_page("引用页", "R", "产品是 [[Engram]]。", None, None)
         .await
         .unwrap();
     // 手动建链接表（put_page 不自动建边——模拟 ingest 后状态）
@@ -321,6 +333,21 @@ async fn lint_reports_dead_links_and_orphans() {
     assert!(
         dead.iter().any(|i| i.slug == "带死链"),
         "死链应报出: {dead:?}"
+    );
+    // W-1：[[Engram]] 只差大小写——不得进 dead_link，应进 case_mismatch
+    assert!(
+        !dead.iter().any(|i| i.slug == "引用页"),
+        "大小写变体不是死链: {dead:?}"
+    );
+    let case: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.rule == "case_mismatch")
+        .collect();
+    assert!(
+        case.iter()
+            .any(|i| i.slug == "引用页" && i.detail.contains("[[engram]]")),
+        "大小写变体应报 case_mismatch 并给出正确 slug: {case:?}"
     );
     // 孤儿：带死链/孤儿页 无入链（正常页有互链）
     assert!(
@@ -611,7 +638,13 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
 
     // 人工接管该页
     let human = wiki
-        .put_page("w6-page", "W6页", "# W6页\n\n人工内容，不许覆盖。", None)
+        .put_page(
+            "w6-page",
+            "W6页",
+            "# W6页\n\n人工内容，不许覆盖。",
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(human.origin, "human");

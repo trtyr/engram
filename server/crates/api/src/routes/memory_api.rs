@@ -216,15 +216,30 @@ pub async fn trigger_distill(
     Ok((StatusCode::ACCEPTED, Json(jobs)))
 }
 
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct HeartbeatParams {
+    /// 调用方声明：仅 `cron` 值合法——crontab 命令模板自带，防 AI 误报心跳
+    pub via: Option<String>,
+}
+
 /// 节律心跳（memory-rhythm）：外部 cron 每次运行时报到——设置页据此判定逾期。
 /// 落 jobs 审计行（kind=rhythm_heartbeat），不新建表。
-#[utoipa::path(post, path = "/memory/rhythm/heartbeat",
+#[utoipa::path(post, path = "/memory/rhythm/heartbeat", params(HeartbeatParams),
     responses((status = 200, body = serde_json::Value)))]
 pub async fn rhythm_heartbeat(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
+    Query(p): Query<HeartbeatParams>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_cron(&principal)?;
+    // 防伪第二道（2026-09-03 测试报告 R-1）：scope 是软挡（取决于签 key 纪律，
+    // 管理员可能给 AI 签出含 cron 的 key）；via=cron 是显式声明——普通 AI 误调用
+    // （不带 via）直接 403，不再可能无声伪造「cron 在役」状态。
+    if p.via.as_deref() != Some("cron") {
+        return Err(ApiError::Forbidden(
+            "heartbeat 仅限 crontab 报到（需 via=cron）——AI 请勿调用：会伪造「cron 在役」状态，掩盖真实 cron 失联".into(),
+        ));
+    }
     let by = actor_of(&principal);
     svc(&state)
         .audit("rhythm_heartbeat", serde_json::json!({ "by": by }))
@@ -359,7 +374,7 @@ pub use agent_memory_core::memory::PURGE_CONFIRM_PHRASE;
 #[utoipa::path(post, path = "/memory/purge",
     request_body = PurgeRequest,
     responses(
-        (status = 200, description = "agent 清场 {voided_sessions, archived_atoms} 或 deep 清空五计数"),
+        (status = 200, description = "agent 清场 {erased_sessions, archived_atoms}（SEC-E：全部会话物理删除）或 deep 清空五计数"),
         (status = 400, body = crate::error::ErrorEnvelope),
         (status = 403, body = crate::error::ErrorEnvelope),
     ))]
@@ -381,6 +396,16 @@ pub async fn purge_agent(
     }
 
     if req.deep.unwrap_or(false) {
+        // deep 收权（2026-09-03 测试报告 SEC-D/R-1 决策）：全库清空仅限管理员会话
+        // （Web 登录态 → 设置 → 危险区）。确认短语是公开常量（防误操作），挡不住蓄意；
+        // 真正的防线是把 deep 移出 AI key 能力面——erase scope 保留给 agent 级清场。
+        if !matches!(&*principal, Principal::Admin) {
+            return Err(ApiError::Forbidden(
+                "deep 全库清空仅限管理员（Web 登录态 → 设置 → 危险区）——AI key 即使有 erase scope 也不可。\
+                 按 agent 清场请用 {\"agent\":\"…\"}（erase scope 即可）"
+                    .into(),
+            ));
+        }
         // 事故防线（2026-08-31 测试方案）：deep 是全库清空，agent 在此无过滤语义——
         // 组合传入会让人误以为"只清这个 agent"。强制分开调用，语义零歧义。
         if req.agent.is_some() {
@@ -390,10 +415,8 @@ pub async fn purge_agent(
                     .into(),
             ));
         }
-        let source = match &*principal {
-            Principal::Admin => "admin".to_string(),
-            Principal::ApiKey { name, .. } => format!("key:{name}"),
-        };
+        // 此处 principal 已收权为 Admin（见上），审计 executed_by 恒为 admin
+        let source = "admin".to_string();
         // P-C 后悔药先于确认短语：取消是安全方向，不该要危险确认
         if let Some(job_id) = req.cancel {
             // 后悔药：取消 armed job
@@ -472,9 +495,9 @@ pub async fn purge_agent(
             "agent 清场需要 agent 参数；全库清空用 deep=true + confirm".into(),
         ));
     }
-    let (voided, archived) = svc(&state).purge_agent(&agent).await.map_err(me)?;
+    let (erased, archived) = svc(&state).purge_agent(&agent).await.map_err(me)?;
     Ok(Json(serde_json::json!({
-        "voided_sessions": voided, "archived_atoms": archived
+        "erased_sessions": erased, "archived_atoms": archived
     })))
 }
 

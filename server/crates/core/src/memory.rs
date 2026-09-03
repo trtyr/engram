@@ -245,6 +245,39 @@ pub struct MemoryService {
 /// deep purge 确认短语（canonical 常量，API 层引用）。
 pub const PURGE_CONFIRM_PHRASE: &str = "清空记忆库";
 
+/// 单轮 text 上限（SEC-B，2026-09-03）：防超长文本整轮灌进会话爆蒸馏 token；
+/// 长文档应走知识域 /wiki/upload 分块摄取。
+pub const TURN_TEXT_MAX_CHARS: usize = 50_000;
+
+/// M-1/SEC-B（2026-09-03）：轮次逐条校验——speaker 合法、text 非空且有上限。
+/// 此前空 text 轮次被原样落库（进蒸馏浪费 LLM 调用）、超长轮次无界 accepted。
+fn validate_turns(arr: &[serde_json::Value]) -> Result<(), MemoryError> {
+    for (i, t) in arr.iter().enumerate() {
+        let speaker = t.get("speaker").and_then(|v| v.as_str()).unwrap_or("");
+        if !matches!(speaker, "user" | "assistant") {
+            return Err(MemoryError::BadRequest(format!(
+                "第 {} 轮 speaker 必须是 user/assistant（得到「{speaker}」）",
+                i + 1
+            )));
+        }
+        let text = t.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        if text.trim().is_empty() {
+            return Err(MemoryError::BadRequest(format!(
+                "第 {} 轮 text 不能为空（空轮次进蒸馏只会浪费 LLM 调用）",
+                i + 1
+            )));
+        }
+        let n = text.chars().count();
+        if n > TURN_TEXT_MAX_CHARS {
+            return Err(MemoryError::BadRequest(format!(
+                "第 {} 轮 text 超长（{n} 字 > 上限 {TURN_TEXT_MAX_CHARS} 字）——长文档请走 /wiki/upload 分块摄取",
+                i + 1
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// deep purge 核心（供 MemoryService 与 API 的 deep_purge 定时 job 复用）。
 pub async fn purge_deep_pool(pool: &sqlx::PgPool) -> Result<serde_json::Value, sqlx::Error> {
     let mut tx = pool.begin().await?;
@@ -296,6 +329,7 @@ impl MemoryService {
         if arr.is_empty() {
             return Err(MemoryError::BadRequest("会话至少一轮".into()));
         }
+        validate_turns(arr)?;
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, SessionDto>(
             "INSERT INTO raw_sessions (id, agent, content, sensitive) VALUES ($1, $2, $3, $4) RETURNING *",
@@ -336,6 +370,10 @@ impl MemoryService {
         distill: &str,
     ) -> Result<SessionDto, MemoryError> {
         let turns = Self::parse_import(content, format)?;
+        // M-1/SEC-B 同口径：导入的 turns 也过校验（jsonl 行 content 为空同样挡）
+        if let Some(arr) = turns.as_array() {
+            validate_turns(arr)?;
+        }
         let id = Uuid::now_v7();
         let row = sqlx::query_as::<_, SessionDto>(
             "INSERT INTO raw_sessions (id, agent, content, metadata) VALUES ($1, $2, $3, $4) RETURNING *",
@@ -442,6 +480,7 @@ impl MemoryService {
         if arr.is_empty() {
             return Err(MemoryError::BadRequest("追加至少一轮".into()));
         }
+        validate_turns(arr)?;
         let cur = sqlx::query_as::<_, SessionDto>("SELECT * FROM raw_sessions WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.pool)
@@ -1290,9 +1329,24 @@ impl MemoryService {
         Ok(n)
     }
 
-    /// P5 会话作废：「这段白记了」——标记 void，蒸馏跳过（claim 只取 pending）、
-    /// 记录保留。只允许 pending 会话作废（已蒸馏的产出用 purge/归档处理）。
+    /// P5 会话作废：「这段白记了」——标记 void，蒸馏跳过（claim 只取 pending）。
+    /// 只允许 pending 会话作废（已蒸馏的产出用 purge 清场处理）。
+    /// M-2（2026-09-03）：「不存在」404 与「非 pending」400 分开报，不再合并一句。
     pub async fn void_session(&self, id: Uuid) -> Result<SessionDto, MemoryError> {
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT distill_status FROM raw_sessions WHERE id = $1")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+        match status.as_deref() {
+            None => return Err(MemoryError::NotFound(format!("会话 {id} 不存在"))),
+            Some("pending") => {}
+            Some(s) => {
+                return Err(MemoryError::BadRequest(format!(
+                    "会话 {id} 已处理（当前状态 {s}）——作废只对未蒸馏会话；已蒸馏的用 purge 清场"
+                )));
+            }
+        }
         let row = sqlx::query_as::<_, SessionDto>(
             "UPDATE raw_sessions SET distill_status = 'void' WHERE id = $1 AND distill_status = 'pending' RETURNING *",
         )
@@ -1300,24 +1354,20 @@ impl MemoryService {
         .fetch_optional(&self.pool)
         .await?;
         row.ok_or_else(|| {
+            // 查询与更新之间的竞态兜底（状态刚被蒸馏 worker 抢走）
             MemoryError::BadRequest(format!(
-                "会话 {id} 不存在或已蒸馏（作废只对未蒸馏会话；已蒸馏的用 purge/归档）"
+                "会话 {id} 刚被蒸馏任务取走（processing）——请稍后用 purge 清场"
             ))
         })
     }
 
-    /// P11 按 agent 清场（测试隔离）：该 agent 全部会话置 void + 其产出的 active
-    /// 原子归档。返回 (voided_sessions, archived_atoms)。可恢复（archived 可逆）。
+    /// P11/SEC-E 按 agent 清场（测试隔离，2026-09-03 彻底化）：该 agent **全部**会话
+    /// 物理删除（pending/processing/done/void 一视同仁，sensitive 原文不留——
+    /// 此前 done 会话残留曾导致敏感原始对话留库）+ 其产出的 active 原子归档（可恢复）。
+    /// 返回 (erased_sessions, archived_atoms)。顺序敏感：先归档原子（JOIN 会话判归属）
+    /// 再删会话——删会话后 JOIN 不可判归属。
     pub async fn purge_agent(&self, agent: &str) -> Result<(i64, i64), MemoryError> {
         let mut tx = self.pool.begin().await.map_err(MemoryError::from)?;
-        let voided = sqlx::query(
-            "UPDATE raw_sessions SET distill_status = 'void' \
-             WHERE agent = $1 AND distill_status IN ('pending', 'processing')",
-        )
-        .bind(agent)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
         let archived = sqlx::query(
             "UPDATE atoms SET status = 'archived', updated_at = now() \
              WHERE status = 'active' AND EXISTS ( \
@@ -1329,8 +1379,13 @@ impl MemoryService {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+        let erased = sqlx::query("DELETE FROM raw_sessions WHERE agent = $1")
+            .bind(agent)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
         tx.commit().await.map_err(MemoryError::from)?;
-        Ok((voided as i64, archived as i64))
+        Ok((erased as i64, archived as i64))
     }
 
     /// F1/F2 deep purge（终极清空测试）：记忆域四层 + 实体链一键清空，单事务，

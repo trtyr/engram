@@ -4,7 +4,8 @@
 pub struct PromptId(pub &'static str, pub u32);
 
 pub const P_WIKI_ANALYSIS: PromptId = PromptId("wiki_analysis", 1);
-pub const P_WIKI_GENERATION: PromptId = PromptId("wiki_generation", 1);
+/// v2（2026-09-03 W-1）：互链 slug 规范约束——防 [[Engram]] 大小写变体死链。
+pub const P_WIKI_GENERATION: PromptId = PromptId("wiki_generation", 2);
 
 /// 第一步：分析 source + 既有 index → 结构化分析。
 pub fn analysis_system() -> String {
@@ -33,6 +34,7 @@ pub fn generation_system() -> String {
 1. 为 analysis.entities / analysis.concepts 中的每个条目生成一个页面：
    - 已在既有页面集合（existing_pages）中的**不要重建**——把更新内容并入该页（version+1 的完整新内容）。
    - 页面格式：第一行 `# 标题`，正文 3~8 句中文描述，相关处用 [[页面名]] 互链。
+   - **互链一律用目标页的 slug 原文**（existing_pages 列出的形式，通常为小写连字符），不要用标题大写原文——大小写变体会被判为断链。
 2. 生成 source 页（page_type=source）：文档摘要（2~4 句）+ 关键要点列表，链接到相关实体/概念页。
 3. **跨源综合**（page_type=synthesis）：当本源与既有页面集合存在多个相关实体/概念时，生成一个综合页——梳理多源观点的共性与分歧，[[互链]] 相关页面。
 4. **对比分析**（page_type=comparison）：当 analysis.conflicts 非空或本源与既有页面存在不同视角时，生成对比页——逐维度对比双方观点，[[互链]] 冲突涉及的页面。

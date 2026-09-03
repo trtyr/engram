@@ -27,6 +27,12 @@ pub async fn lint(pool: &PgPool) -> Result<LintReport, sqlx::Error> {
             .await?;
     let slugs: std::collections::HashSet<String> =
         pages.iter().map(|(_, s, ..)| s.clone()).collect();
+    // W-1（2026-09-03）：小写索引——LLM 生成正文常把链接写成标题原文（[[Engram]]），
+    // 与真实 slug（engram）只差大小写。仅大小写差异不再误判死链，改报 case_mismatch。
+    let lower_slugs: std::collections::HashMap<String, String> = pages
+        .iter()
+        .map(|(_, s, ..)| (s.to_lowercase(), s.clone()))
+        .collect();
     let system = ["index", "log", "overview"];
     let mut issues = Vec::new();
 
@@ -38,14 +44,24 @@ pub async fn lint(pool: &PgPool) -> Result<LintReport, sqlx::Error> {
     let inlink_map: std::collections::HashMap<String, i64> = inlinks.into_iter().collect();
 
     for (_, slug, _page_type, content, fm) in &pages {
-        // 1. 死链
+        // 1. 死链（W-1：精确未中→小写重查，仅大小写差异报 case_mismatch 而非 dead_link）
         for target in extract_wikilinks(content) {
             if !slugs.contains(&target) {
-                issues.push(LintIssue {
-                    rule: "dead_link".into(),
-                    slug: slug.clone(),
-                    detail: format!("[[{target}]] 指向不存在的页面"),
-                });
+                if let Some(real) = lower_slugs.get(&target.to_lowercase()) {
+                    issues.push(LintIssue {
+                        rule: "case_mismatch".into(),
+                        slug: slug.clone(),
+                        detail: format!(
+                            "[[{target}]] 与页面 slug「{real}」仅大小写不同——建议改用 [[{real}]]"
+                        ),
+                    });
+                } else {
+                    issues.push(LintIssue {
+                        rule: "dead_link".into(),
+                        slug: slug.clone(),
+                        detail: format!("[[{target}]] 指向不存在的页面"),
+                    });
+                }
             }
         }
         // 2. 孤儿（系统页豁免）

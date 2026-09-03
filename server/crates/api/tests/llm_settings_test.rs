@@ -68,7 +68,7 @@ fn valid_body(name: &str) -> serde_json::Value {
     serde_json::json!({
         "name": name,
         "base_url": "https://api.example.com/v1",
-        "api_key": "sk-x",
+        "api_key": "sk-test-key-123456",
         "model_id": "m-chat",
         "capability": "chat",
         "is_default": false,
@@ -94,6 +94,10 @@ async fn l1_invalid_provider_inputs_rejected_400() {
     // 空 api_key
     b = valid_body("p3");
     b["api_key"] = "  ".into();
+    assert_eq!(create(&app, &token, &b).await, StatusCode::BAD_REQUEST);
+    // SEC-C：过短 api_key（<8 字符，挡手滑占位串；真实性由 provider-test 判定）
+    b = valid_body("p3b");
+    b["api_key"] = "sk-x".into();
     assert_eq!(create(&app, &token, &b).await, StatusCode::BAD_REQUEST);
     // 非法 capability
     b = valid_body("p4");

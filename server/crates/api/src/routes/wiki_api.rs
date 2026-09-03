@@ -129,6 +129,10 @@ pub struct PutPageRequest {
     /// 目录树文件夹（可选；None = 保持原值，Obsidian 式 / 分隔多级路径）
     #[serde(default)]
     pub folder: Option<String>,
+    /// 执行者标记（S-7）：AI 代用户执行时传 "ai"——落 frontmatter.via 区分真人编辑与 AI 代执行；
+    /// Web 用户编辑不传。
+    #[serde(default)]
+    pub via: Option<String>,
 }
 
 /// 人工编辑（origin=human，版本递增；LLM 后续只提案不覆盖）。
@@ -144,7 +148,13 @@ pub async fn put_page(
     require_wiki(&principal)?;
     Ok(Json(
         svc(&state)
-            .put_page(&slug, &req.title, &req.content, req.folder.as_deref())
+            .put_page(
+                &slug,
+                &req.title,
+                &req.content,
+                req.folder.as_deref(),
+                req.via.as_deref(),
+            )
             .await
             .map_err(we)?,
     ))
@@ -175,6 +185,9 @@ pub struct ApplyProposalRequest {
     pub slug: String,
     pub title: String,
     pub content: String,
+    /// 执行者标记（S-7）：AI 代用户执行时传 "ai"——落 frontmatter.via
+    #[serde(default)]
+    pub via: Option<String>,
 }
 
 /// 人审合入提案。
@@ -189,7 +202,7 @@ pub async fn apply_proposal(
     require_wiki(&principal)?;
     Ok(Json(
         svc(&state)
-            .apply_proposal(&req.slug, &req.content, &req.title)
+            .apply_proposal(&req.slug, &req.content, &req.title, req.via.as_deref())
             .await
             .map_err(we)?,
     ))

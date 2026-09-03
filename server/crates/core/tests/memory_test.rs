@@ -658,8 +658,18 @@ async fn void_session_semantics() {
     let v = svc.void_session(s.id).await.unwrap();
     assert_eq!(v.distill_status, "void");
     // claim 只取 pending → void 会话不会被蒸馏（extract 测试已覆盖 claim 谓词，此处验证状态语义）
+    // M-2：已处理 → BadRequest（400），文案点破当前状态
     let again = svc.void_session(s.id).await;
-    assert!(again.is_err(), "void 不可重复（非 pending）");
+    assert!(
+        matches!(&again, Err(agent_memory_core::memory::MemoryError::BadRequest(m)) if m.contains("已处理")),
+        "void 不可重复（非 pending）且文案分开：{again:?}"
+    );
+    // M-2：不存在 → NotFound（404），不再与「已蒸馏」合并成一句
+    let ghost = svc.void_session(uuid::Uuid::now_v7()).await;
+    assert!(
+        matches!(&ghost, Err(agent_memory_core::memory::MemoryError::NotFound(m)) if m.contains("不存在")),
+        "不存在的会话应 404 NotFound：{ghost:?}"
+    );
 
     let s2 = svc
         .write_session(
@@ -678,7 +688,8 @@ async fn void_session_semantics() {
     assert!(svc.void_session(s2.id).await.is_err(), "已蒸馏不可 void");
 }
 
-/// P11 purge_agent：该 agent 会话置 void + 产出 active 原子归档（可恢复）。
+/// P11/SEC-E purge_agent（2026-09-03 彻底化）：该 agent **全部**会话物理删除
+/// （含 done——sensitive 原文不留）+ 产出 active 原子归档（可恢复）；真数据不动。
 #[tokio::test]
 async fn purge_agent_clears_test_data() {
     let (pool, svc, _container) = setup().await;
@@ -689,6 +700,21 @@ async fn purge_agent_clears_test_data() {
             "off",
             false,
         )
+        .await
+        .unwrap();
+    // SEC-E 场景：done 会话（已蒸馏）也必须清——此前只 void pending，done 残留
+    let s_done = svc
+        .write_session(
+            "test-agent",
+            serde_json::json!([{"speaker":"user","text":"敏感原始对话"}]),
+            "off",
+            false,
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE raw_sessions SET distill_status='done' WHERE id=$1")
+        .bind(s_done.id)
+        .execute(&pool)
         .await
         .unwrap();
     let keep = svc
@@ -716,9 +742,15 @@ async fn purge_agent_clears_test_data() {
         .unwrap();
     }
 
-    let (voided, archived) = svc.purge_agent("test-agent").await.unwrap();
-    assert_eq!(voided, 1, "test-agent 会话置 void");
+    let (erased, archived) = svc.purge_agent("test-agent").await.unwrap();
+    assert_eq!(erased, 2, "pending + done 会话都物理删除");
     assert_eq!(archived, 1, "其产出原子归档");
+    // SEC-E 核心：清场后零残留（含 sensitive 原文所在的 done 会话）
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM raw_sessions WHERE agent='test-agent'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "purge --agent 清场不留垃圾（SEC-E）");
     // 真数据不动
     let st: (String,) = sqlx::query_as("SELECT distill_status FROM raw_sessions WHERE id=$1")
         .bind(keep.id)
@@ -733,6 +765,76 @@ async fn purge_agent_clears_test_data() {
     .await
     .unwrap();
     assert_eq!(n, 1);
+}
+
+/// M-1/SEC-B（2026-09-03）：空 text 轮次 400；纯空白 400；超长 400（文案带上限值）；
+/// 正常轮次照常通过；append 同口径。
+#[tokio::test]
+async fn write_session_validates_turns() {
+    let (_pool, svc, _container) = setup().await;
+    use agent_memory_core::memory::TURN_TEXT_MAX_CHARS;
+
+    // M-1：空 text
+    let empty = svc
+        .write_session(
+            "t",
+            serde_json::json!([{"speaker":"user","text":""}]),
+            "off",
+            false,
+        )
+        .await;
+    assert!(
+        matches!(&empty, Err(agent_memory_core::memory::MemoryError::BadRequest(m)) if m.contains("text 不能为空")),
+        "空 text 轮次应 400：{empty:?}"
+    );
+    // M-1：纯空白 text 同样挡
+    let blank = svc
+        .write_session(
+            "t",
+            serde_json::json!([{"speaker":"assistant","text":"   "}]),
+            "off",
+            false,
+        )
+        .await;
+    assert!(blank.is_err(), "纯空白 text 应 400");
+
+    // SEC-B：超长（上限 + 1 字），文案含上限值
+    let long_text = "长".repeat(TURN_TEXT_MAX_CHARS + 1);
+    let long = svc
+        .write_session(
+            "t",
+            serde_json::json!([{"speaker":"user","text":long_text}]),
+            "off",
+            false,
+        )
+        .await;
+    assert!(
+        matches!(&long, Err(agent_memory_core::memory::MemoryError::BadRequest(m)) if m.contains(&TURN_TEXT_MAX_CHARS.to_string())),
+        "超长 turn 应 400 且文案含上限值：{long:?}"
+    );
+
+    // 正常轮次不受影响
+    let ok = svc
+        .write_session(
+            "t",
+            serde_json::json!([{"speaker":"user","text":"正常一句话"}]),
+            "off",
+            false,
+        )
+        .await;
+    assert!(ok.is_ok(), "正常轮次应通过");
+
+    // append 同口径：空 text 拒绝
+    let sid = ok.unwrap().id;
+    let app = svc
+        .append_session(
+            sid,
+            serde_json::json!([{"speaker":"user","text":""}]),
+            None,
+            "off",
+        )
+        .await;
+    assert!(app.is_err(), "append 空 text 同样应 400");
 }
 
 /// P4 导出：五表齐全 + 计数一致。

@@ -119,6 +119,12 @@ pub async fn create_provider(
     if req.api_key.trim().is_empty() {
         return Err(ApiError::BadRequest("api_key 不能为空".into()));
     }
+    // SEC-C（2026-09-03）：最小长度校验——挡手滑的占位串；真实性由 provider-test 连通探针判定
+    if req.api_key.trim().len() < 8 {
+        return Err(ApiError::BadRequest(
+            "api_key 看起来太短（<8 字符）——请填真实 key，连通性可用 provider-test 验证".into(),
+        ));
+    }
     if req.model_id.trim().is_empty() {
         return Err(ApiError::BadRequest("model_id 不能为空".into()));
     }
@@ -670,11 +676,76 @@ pub async fn suggest_routing(
         .await
         .map_err(|e| ApiError::Unavailable(e.to_string()))?;
 
-    let content = resp.content.trim();
-    let table: RoutingTable = serde_json::from_str(content)
-        .map_err(|e| ApiError::BadRequest(format!("LLM 生成的路由建议无法解析（{e}）")))?;
+    let table: RoutingTable = parse_llm_json(&resp.content).map_err(ApiError::BadRequest)?;
 
     Ok(Json(table))
+}
+
+/// LLM 返回体解析（SEC-A 修复）：容忍三种现实形态——纯 JSON / markdown fence 包裹
+/// （```json … ```）/ 前置说明文字 + JSON。失败时报返回片段（可诊断），不裸 serde 错误。
+fn parse_llm_json<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, String> {
+    let mut s = raw.trim();
+    // 剥 markdown fence：```json\n…\n``` 或 ```\n…\n```
+    if let Some(rest) = s.strip_prefix("```") {
+        let body = rest.split_once('\n').map(|(_, r)| r).unwrap_or(rest);
+        s = body.trim().trim_end_matches("```").trim();
+    }
+    if let Ok(v) = serde_json::from_str(s) {
+        return Ok(v);
+    }
+    // 兜底：截取首个 '{' 到最后一个 '}'（容忍「以下是建议：{…}」之类包裹文字）
+    if let (Some(a), Some(b)) = (s.find('{'), s.rfind('}'))
+        && a < b
+        && let Ok(v) = serde_json::from_str(&s[a..=b])
+    {
+        return Ok(v);
+    }
+    let head: String = s.chars().take(200).collect();
+    Err(format!(
+        "LLM 返回内容不是合法 JSON（返回片段：{head}）——请重试或换 chat 供应商"
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_llm_json;
+
+    #[derive(serde::Deserialize, Debug, PartialEq)]
+    struct T {
+        a: i32,
+    }
+
+    #[test]
+    fn parses_pure_json() {
+        assert_eq!(parse_llm_json::<T>(r#"{"a":1}"#).unwrap(), T { a: 1 });
+    }
+
+    #[test]
+    fn parses_json_in_markdown_fence() {
+        assert_eq!(
+            parse_llm_json::<T>("```json\n{\"a\":2}\n```").unwrap(),
+            T { a: 2 }
+        );
+        assert_eq!(
+            parse_llm_json::<T>("```\n{\"a\":3}\n```").unwrap(),
+            T { a: 3 }
+        );
+    }
+
+    #[test]
+    fn parses_json_with_leading_prose() {
+        assert_eq!(
+            parse_llm_json::<T>("好的，以下是路由建议：\n{\"a\":4}\n希望有帮助"),
+            Ok(T { a: 4 })
+        );
+    }
+
+    #[test]
+    fn rejects_garbage_with_diagnostic_head() {
+        let err = parse_llm_json::<T>("完全不是 JSON").unwrap_err();
+        assert!(err.contains("完全不是 JSON"), "错误应含返回片段：{err}");
+        assert!(err.contains("不是合法 JSON"), "错误应说明原因：{err}");
+    }
 }
 
 /// 保存路由表。L4：落库前全量校验（purpose 枚举 / provider 存在 / model 在册）。

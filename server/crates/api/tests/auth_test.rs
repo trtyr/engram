@@ -393,7 +393,7 @@ async fn llm_scope_key_manages_providers() {
         "/settings/llm/providers",
         key.clone(),
         Some(
-            r#"{"name":"t","base_url":"https://gw.example.com","api_key":"sk-x","model_id":"m","capability":"chat","is_default":false}"#,
+            r#"{"name":"t","base_url":"https://gw.example.com","api_key":"sk-test-key-123456","model_id":"m","capability":"chat","is_default":false}"#,
         ),
     )
     .await
@@ -552,20 +552,38 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
         }
     };
 
-    // 无 erase scope 的 memory key → 403
+    // 无 erase scope 的 memory key → 403（gate 不变）
     let mem_key = create_key(&app, &admin, &["memory"]).await;
     let r = post(&mem_key, r#"{"deep":true,"confirm":"清空记忆库"}"#).await;
     assert_eq!(r.0, StatusCode::FORBIDDEN, "无 erase scope 应 403：{}", r.1);
 
-    // 有 erase scope 但无 confirm → 400
+    // SEC-D 收权（2026-09-03）：erase scope 的 key 打 deep → 403（deep 仅限管理员会话）
     let erase_key = create_key(&app, &admin, &["memory", "erase"]).await;
-    let r = post(&erase_key, r#"{"deep":true}"#).await;
-    assert_eq!(r.0, StatusCode::BAD_REQUEST, "缺确认短语应 400：{}", r.1);
-    assert!(r.1.contains("确认短语"));
+    let r = post(&erase_key, r#"{"deep":true,"confirm":"清空记忆库"}"#).await;
+    assert_eq!(
+        r.0,
+        StatusCode::FORBIDDEN,
+        "AI key 打 deep 应一律 403：{}",
+        r.1
+    );
+    assert!(
+        r.1.contains("仅限管理员"),
+        "文案应指路 Settings 危险区：{}",
+        r.1
+    );
 
-    // P-A：deep + agent 组合 → 400（deep 无 agent 过滤语义，组合即误导）
+    // 收权只收 deep：erase key 的 agent 清场能力保留（AI 清自己的测试数据）
+    let r = post(&erase_key, r#"{"agent":"no-such-agent"}"#).await;
+    assert_eq!(
+        r.0,
+        StatusCode::OK,
+        "agent 清场对 erase key 应保留：{}",
+        r.1
+    );
+
+    // P-A：admin 打 deep + agent 组合 → 400（deep 无 agent 过滤语义，组合即误导）
     let r = post(
-        &erase_key,
+        &admin,
         r#"{"agent":"nonexistent-xyz","deep":true,"confirm":"清空记忆库"}"#,
     )
     .await;
@@ -582,13 +600,16 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
         .unwrap();
     assert!(n >= 1, "被拒的 deep 不得有任何删除副作用");
 
-    // 错短语 → 400
-    let r = post(&erase_key, r#"{"deep":true,"confirm":"随便"}"#).await;
+    // admin 无 confirm → 400；错短语 → 400（短语防误操作，对 admin 同样生效）
+    let r = post(&admin, r#"{"deep":true}"#).await;
+    assert_eq!(r.0, StatusCode::BAD_REQUEST, "缺确认短语应 400：{}", r.1);
+    assert!(r.1.contains("确认短语"));
+    let r = post(&admin, r#"{"deep":true,"confirm":"随便"}"#).await;
     assert_eq!(r.0, StatusCode::BAD_REQUEST, "错短语应 400：{}", r.1);
 
-    // 正确双因子 → 200 armed（P-C 两阶段：5 分钟冷却，非即时执行）
-    let r = post(&erase_key, r#"{"deep":true,"confirm":"清空记忆库"}"#).await;
-    assert_eq!(r.0, StatusCode::OK, "双因子应 200 armed：{}", r.1);
+    // admin 正确短语 → 200 armed（P-C 两阶段：5 分钟冷却，非即时执行）
+    let r = post(&admin, r#"{"deep":true,"confirm":"清空记忆库"}"#).await;
+    assert_eq!(r.0, StatusCode::OK, "admin 双条件应 200 armed：{}", r.1);
     assert!(r.1.contains("armed"), "阶段一响应：{}", r.1);
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM raw_sessions")
         .fetch_one(&state.pool)
@@ -607,11 +628,11 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
         r#"{{"deep":true,"confirm":"清空记忆库","token":"{}"}}"#,
         job_id
     );
-    let r = post(&erase_key, &body).await;
+    let r = post(&admin, &body).await;
     assert_eq!(r.0, StatusCode::OK, "token 执行应 200：{}", r.1);
     assert!(r.1.contains("sessions"), "计数响应：{}", r.1);
     let audit: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM jobs WHERE id = $1 AND status = 'succeeded' AND payload->>'confirm' = '清空记忆库' AND payload->>'executed_by' = 'key:t'",
+        "SELECT count(*) FROM jobs WHERE id = $1 AND status = 'succeeded' AND payload->>'confirm' = '清空记忆库' AND payload->>'executed_by' = 'admin'",
     )
     .bind(job_id)
     .fetch_one(&state.pool)
@@ -1521,7 +1542,27 @@ async fn cron_scope_gates_distill_channel_and_heartbeat() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN, "AI 发心跳应 403");
 
-    // 4. cron key 发 heartbeat → 200
+    // 4. cron key 带 via=cron 发 heartbeat → 200（crontab 命令模板自带 via）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/memory/rhythm/heartbeat?via=cron")
+                .header("authorization", format!("Bearer {cron_key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "cron key + via=cron 心跳应 200"
+    );
+
+    // 4b. cron key 不带 via → 403（R-1 加固：scope 是软挡，via 是显式声明——
+    //     即使管理员误签了含 cron 的 key 给 AI，误调用也过不了）
     let resp = app
         .clone()
         .oneshot(
@@ -1534,7 +1575,11 @@ async fn cron_scope_gates_distill_channel_and_heartbeat() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "cron key 发心跳应 200");
+    assert_eq!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "不带 via=cron 的心跳应 403（防 AI 无声伪造 cron 在役）"
+    );
 
     // 5. memory-only key 读 status → 200（AI 健康观察线保留）
     let resp = app
