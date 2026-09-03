@@ -153,7 +153,7 @@ const WikiMarkdown = memo(function WikiMarkdown({
     nav(`/wiki?page=${encodeURIComponent(slug)}`)
   }
   return (
-    <article className="engram-prose max-w-[70ch]">
+    <article className="engram-prose">
       <ReactMarkdown
         components={{
           code({ className, children, ...props }) {

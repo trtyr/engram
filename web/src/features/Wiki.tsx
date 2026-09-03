@@ -520,7 +520,7 @@ function PageReader({
           </Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable] md:p-6">
-          <div className="mx-auto w-full max-w-[70ch]">
+          <div className="mx-auto w-full max-w-4xl">
             <WikiMarkdown content={page.content} onNavigateSlug={onNavigateSlug} />
           </div>
         </div>
