@@ -41,12 +41,12 @@
 | POST/DELETE | /memory/entities/{id}/atoms/{atom_id} | 挂/摘原子（幂等） |
 | POST | /memory/entities/{id}/merge | 合并（loser 成墓碑释放名字槽，返回 moved 计数） |
 | GET | /memory/timeline | 全局时间轴（原子/场景/实体按时间倒序合并，图谱/时间轴切换） |
-| POST | /memory/entities/batch | 批量删除（**erase scope + confirm="批量删除"** 双因子；forget 级联归档） |
+| POST | /memory/entities/batch | 批量删除（**erase scope + confirm="批量删除"** 短语防误；forget 级联归档） |
 | GET | /memory/entities/export | 圈子导出（实体+关系 JSON，数据主权） |
-| POST | /memory/purge | **一等清空**：按 agent（可逆归档）或 deep（两阶段：arm 5min 冷却→token 执行/cancel 后悔药；**需 erase scope + 确认短语"清空记忆库"**；deep+agent 互斥 400） |
+| POST | /memory/purge | **一等清空**：按 agent（2026-09-03 彻底化：该 agent 全部会话**物理删除**含 done/sensitive，产出原子归档；需 erase scope）或 deep（**仅限管理员会话**，amk_ 一律 403；两阶段 arm 5min 冷却→token 执行/cancel 后悔药 + 确认短语；deep+agent 互斥 400） |
 | GET | /memory/export | 全量导出（数据主权；敏感默认排除，?include_sensitive=true 可选，响应带 sensitive_excluded 口径） |
 | GET/POST | /memory/embeddings/status、/memory/reembed | 向量缺失诊断 / 重嵌修复（202 任务，fail loudly） |
-| POST | /memory/rhythm/heartbeat | **节律心跳**（外部 cron 报到，落 jobs 审计行；**cron scope 专属**——AI 发 403，防伪造「cron 在役」掩盖失联） |
+| POST | /memory/rhythm/heartbeat | **节律心跳**（外部 cron 报到，落 jobs 审计行；**cron scope + via=cron 双条件**，缺任一 403——scope 是软挡（签 key 纪律），via 是显式声明防线） |
 | GET | /memory/rhythm/status | 节律状态：最近心跳 + pending 会话数 + 最老积压年龄（**memory scope 可读**——AI 的健康观察线，积压暴涨=蒸馏链故障） |
 | POST | /memory/distill `{via:"cron"}` | cron 通道（**需 cron scope**，AI 标 cron 403）：consolidate 走 cron-consolidate-{日桶} 幂等（同日只跑一次全量整理），extract 永不去重（扫 pending 兜底） |
 
