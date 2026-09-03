@@ -339,6 +339,56 @@ async fn lint_reports_dead_links_and_orphans() {
     handle.join().await;
 }
 
+/// lint 第 5 步（过时源）：id 曾以 text 形式回查 wiki_sources.id（uuid 列），
+/// 曾因 uuid = text 类型错误 503——回归：带已 ingest 无引用 source 时 lint 正常完成并报 stale_source。
+#[tokio::test]
+async fn lint_with_ingested_source_reports_stale_without_type_error() {
+    let (pool, wiki, handle, _pg) = setup(vec![]).await;
+
+    let sid = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO wiki_sources (id, sha256, raw_path, title, status, last_ingested_at) \
+         VALUES ($1, 'lint-stale-sha', '/tmp/lint-stale.md', 'lint-stale', 'ready', now())",
+    )
+    .bind(sid)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 该 source 无任何页面引用 → 走 cnt 回查分支（修复前此处 uuid = text 直接 503）
+    let report = wiki.lint().await.unwrap();
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| i.rule == "stale_source" && i.slug == sid.to_string()),
+        "已 ingest 无引用的 source 应报 stale_source: {:?}",
+        report.issues
+    );
+
+    handle.shutdown();
+    handle.join().await;
+}
+
+/// review resolve 未命中（不存在或已处理）应按 NotFound 语义返回，
+/// 修复前 JobError::Permanent 被 From 统一映射成 Storage → 接口层 503。
+#[tokio::test]
+async fn review_resolve_miss_returns_not_found() {
+    let (pool, wiki, handle, _pg) = setup(vec![]).await;
+
+    let miss = uuid::Uuid::now_v7();
+    let err = wiki.review_resolve(miss, None, true).await.unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("不存在或已处理"),
+        "未命中应报不存在或已处理: {msg}"
+    );
+
+    handle.shutdown();
+    handle.join().await;
+    let _ = pool;
+}
+
 // ---------- W1：generate 永久失败后重提交自愈（死锁解除） ----------
 
 #[tokio::test]

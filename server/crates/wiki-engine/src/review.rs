@@ -84,13 +84,13 @@ pub async fn list_open(pool: &PgPool) -> Result<Vec<ReviewItem>, JobError> {
     .map_err(|e| JobError::Retryable(e.to_string()))
 }
 
-/// 处理（resolve/dismiss + 动作标签）。
+/// 处理（resolve/dismiss + 动作标签）。返回是否命中（false = 不存在或已处理）。
 pub async fn resolve(
     pool: &PgPool,
     id: Uuid,
     action: Option<&str>,
     dismiss: bool,
-) -> Result<(), JobError> {
+) -> Result<bool, JobError> {
     let status = if dismiss { "dismissed" } else { "resolved" };
     let n = sqlx::query(
         "UPDATE wiki_review_items SET status = $2, action = $3, resolved_at = now() \
@@ -103,10 +103,7 @@ pub async fn resolve(
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?
     .rows_affected();
-    if n == 0 {
-        return Err(JobError::Permanent(format!("review {id} 不存在或已处理")));
-    }
-    Ok(())
+    Ok(n > 0)
 }
 
 #[cfg(test)]

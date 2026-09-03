@@ -103,7 +103,8 @@ pub async fn lint(pool: &PgPool) -> Result<LintReport, sqlx::Error> {
         if !page_source.iter().any(|p| p == sid) {
             // 原料存在但没有页面引用它（从未生成或已删）
             let cnt: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM wiki_sources WHERE id = $1 AND last_ingested_at IS NOT NULL",
+                // $1 是 id::text 查出的字符串，必须显式 cast 回 uuid（uuid = text 会 503）
+                "SELECT count(*) FROM wiki_sources WHERE id = $1::uuid AND last_ingested_at IS NOT NULL",
             )
             .bind(sid)
             .fetch_one(pool)

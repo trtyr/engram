@@ -416,9 +416,16 @@ impl WikiService {
         action: Option<&str>,
         dismiss: bool,
     ) -> Result<(), WikiError> {
-        crate::review::resolve(&self.pool, id, action, dismiss)
+        let hit = crate::review::resolve(&self.pool, id, action, dismiss)
             .await
-            .map_err(WikiError::from)
+            .map_err(WikiError::from)?;
+        if !hit {
+            // 未命中（不存在或已处理）按 404 语义返回，并给下一步指引（错误文案三问）
+            return Err(WikiError::NotFound(format!(
+                "review {id} 不存在或已处理——可 GET /wiki/reviews 查看当前待审列表"
+            )));
+        }
+        Ok(())
     }
 
     // ---------- queries 页型闭环 ----------
