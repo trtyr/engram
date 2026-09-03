@@ -46,10 +46,24 @@ test('Wiki Obsidian IA：目录树 + 阅读 + 图谱 + 收件箱 + 运维', asyn
   await expect(page.getByRole('button', { name: '网络', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '根页面', exact: true })).toBeVisible()
 
-  // 点页面节点 → 阅读区加载 Markdown
+  // 折叠「技术」→ 子树消失 → 刷新后仍折叠（localStorage 持久化）。
+  // 注意：必须在选中页面之前做——一旦 URL 带 ?page=，刷新会触发深链自动展开定位，覆盖折叠态（预期行为）。
+  const techBtn = page.getByRole('button', { name: '技术', exact: true })
+  await techBtn.click()
+  await expect(techBtn).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByRole('button', { name: 'Rust 异步', exact: true })).toHaveCount(0)
+  await page.reload()
+  const techBtn2 = page.getByRole('button', { name: '技术', exact: true })
+  await expect(techBtn2).toBeVisible({ timeout: 10_000 })
+  await expect(techBtn2).toHaveAttribute('aria-expanded', 'false')
+  await techBtn2.click() // 恢复展开
+  await expect(page.getByRole('button', { name: 'Rust 异步', exact: true })).toBeVisible()
+
+  // 点页面节点 → 阅读区加载 Markdown + URL 写回（可刷新/分享）
   await page.getByRole('button', { name: 'Rust 异步', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Rust 异步', level: 2 })).toBeVisible()
   await expect(page.getByText('Tokio 是异步运行时。')).toBeVisible()
+  await expect(page).toHaveURL(/page=rust-async/)
 
   // 树 → 图视图切换 → canvas 渲染 → 切回树
   await page.getByRole('button', { name: '图谱' }).click()
@@ -69,4 +83,8 @@ test('Wiki Obsidian IA：目录树 + 阅读 + 图谱 + 收件箱 + 运维', asyn
   await expect(page.getByRole('button', { name: '提案' })).toBeVisible()
   await expect(page.getByRole('button', { name: '原料' })).toBeVisible()
   await expect(page.getByRole('button', { name: '目标' })).toBeVisible()
+
+  // 深链直达：?page= 免点击打开（wikilink / 分享 / 刷新同路径）
+  await page.goto('/wiki?page=root-page')
+  await expect(page.getByRole('heading', { name: '根页面', level: 2 })).toBeVisible({ timeout: 10_000 })
 })
