@@ -241,7 +241,7 @@ export default function WikiGraph({
     'flex size-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:border-foreground/30 hover:text-foreground'
 
   return (
-    <div className="space-y-3" data-testid="wiki-graph-root">
+    <div className="flex h-full min-h-[520px] flex-col space-y-3" data-testid="wiki-graph-root">
       <div className="flex flex-wrap items-center gap-3">
         <Tabs
           items={[
@@ -257,13 +257,13 @@ export default function WikiGraph({
           </span>
         )}
       </div>
-      <div className="relative">
+      <div className="relative min-h-0 flex-1">
         <div
           ref={ref}
           role="img"
           aria-label="Wiki 知识图谱：节点为互链页面，连线为链接强度（越粗越强）。hover 高亮邻居，按住节点可拖动，滚轮缩放，点击节点跳转页面。"
           tabIndex={0}
-          className="wiki-graph-canvas h-[480px] w-full rounded-lg border border-border bg-card"
+          className="wiki-graph-canvas h-full min-h-[480px] w-full rounded-lg border border-border bg-card"
           data-testid="wiki-graph-canvas"
         />
         {/* 缩放控件 */}
