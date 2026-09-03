@@ -646,11 +646,18 @@ function RhythmPane() {
   const [events, setEvents] = useState<Job[] | null>(null)
   const [err, setErr] = useState('')
   const [copied, setCopied] = useState(false)
-  const [expected, setExpected] = useState('86400')
+  const [expected, setExpected] = useState(() => {
+    // 期望周期持久化在首帧读取（此前 effect 里同步 setState 触发级联渲染告警）
+    try {
+      return localStorage.getItem(EXPECTED_KEY) ?? '86400'
+    } catch {
+      return '86400'
+    }
+  })
+  // 页面加载时刻快照——逾期判定基于它（避免 render 期间调用 Date.now 非纯函数）
+  const [nowTs] = useState(() => Date.now())
 
   useEffect(() => {
-    const saved = localStorage.getItem(EXPECTED_KEY)
-    if (saved) setExpected(saved)
     api
       .get<RhythmStatus>('/memory/rhythm/status')
       .then(setStatus)
@@ -679,7 +686,7 @@ function RhythmPane() {
       ? status === null
         ? null
         : 'never'
-      : Date.now() - new Date(status.last_heartbeat).getTime() > expectedSecs * 1500
+      : nowTs - new Date(status.last_heartbeat).getTime() > expectedSecs * 1500
         ? 'overdue'
         : 'ok'
 

@@ -59,10 +59,7 @@ export default function Galaxy({
   }, [])
   // 语义搜索：停顿 350ms 后打后端 token 检索（名字命中优先，summary 次之）
   useEffect(() => {
-    if (!q.trim()) {
-      setSearchHits(null)
-      return
-    }
+    if (!q.trim()) return
     const t = setTimeout(() => {
       api
         .get<SearchHit[]>(`/memory/entities/search?q=${encodeURIComponent(q)}`)
@@ -171,7 +168,11 @@ export default function Galaxy({
               className="w-32 rounded-md border border-border bg-card py-1 pl-7 pr-2 text-xs outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-foreground/40"
               placeholder="搜索实体…"
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => {
+              setQ(e.target.value)
+              // 清空检索词时立即清结果（此前在 effect 里同步 setState，触发级联渲染告警）
+              if (!e.target.value.trim()) setSearchHits(null)
+            }}
             />
           </div>
         </div>

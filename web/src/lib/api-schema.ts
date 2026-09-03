@@ -1193,6 +1193,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/wiki/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 待审提案聚合——一条 SQL 取回全部 wiki_generate 任务的最新提案事件，
+         *     替代前端 jobs + 逐 job events 的 N+1 请求。
+         */
+        get: operations["list_proposals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wiki/proposals/apply": {
         parameters: {
             query?: never;
@@ -4068,6 +4088,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WikiPageDto"];
+                };
+            };
+        };
+    };
+    list_proposals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobEvent"][];
                 };
             };
         };

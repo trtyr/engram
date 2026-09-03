@@ -324,14 +324,18 @@ function TreePane({
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-2 [scrollbar-gutter:stable]">
           <nav aria-label="Wiki 目录树">
-            <FolderTree
-              node={tree}
-              path=""
-              openId={openId}
-              onSelect={onSelect}
-              collapsed={collapsed}
-              onToggleFolder={onToggleFolder}
-            />
+            {/* WAI-ARIA tree：容器 tree / 行 treeitem+aria-level / 子层级 group */}
+            <div role="tree" aria-label="Wiki 页面目录">
+              <FolderTree
+                node={tree}
+                path=""
+                depth={0}
+                openId={openId}
+                onSelect={onSelect}
+                collapsed={collapsed}
+                onToggleFolder={onToggleFolder}
+              />
+            </div>
           </nav>
           {pages.length >= PAGE_LIMIT && (
             <p className="px-2 py-1.5 text-xs text-muted-foreground/80">已显示前 {PAGE_LIMIT} 条</p>
@@ -345,6 +349,7 @@ function TreePane({
 function FolderTree({
   node,
   path,
+  depth,
   openId,
   onSelect,
   collapsed,
@@ -352,11 +357,13 @@ function FolderTree({
 }: {
   node: FolderNode
   path: string
+  depth: number
   openId: string | null
   onSelect: (slug: string) => void
   collapsed: Set<string>
   onToggleFolder: (p: string) => void
 }) {
+  const level = depth + 1
   return (
     <div>
       {node.folders.map((f) => {
@@ -366,6 +373,8 @@ function FolderTree({
           <div key={fp}>
             <button
               type="button"
+              role="treeitem"
+              aria-level={level}
               onClick={() => onToggleFolder(fp)}
               aria-expanded={!isCollapsed}
               className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -380,10 +389,11 @@ function FolderTree({
               </span>
             </button>
             {!isCollapsed && (
-              <div className="ml-3 border-l border-border/60 pl-2">
+              <div role="group" className="ml-2 border-l border-border/60 pl-2">
                 <FolderTree
                   node={f}
                   path={fp}
+                  depth={level}
                   openId={openId}
                   onSelect={onSelect}
                   collapsed={collapsed}
@@ -398,6 +408,8 @@ function FolderTree({
         <button
           key={p.id}
           type="button"
+          role="treeitem"
+          aria-level={level}
           onClick={() => onSelect(p.slug)}
           aria-current={openId === p.id || undefined}
           className={cn(
@@ -456,7 +468,10 @@ function PageReader({
   if (!page) {
     return (
       <Card className="flex min-h-0 flex-1 flex-col">
-        <div className="m-3 flex min-h-0 flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border px-6 py-14 text-center">
+        <div
+          data-testid="wiki-empty-guide"
+          className="m-3 flex min-h-0 flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border px-6 py-14 text-center"
+        >
           <Inbox className="size-6 text-muted-foreground/40" />
           <p className="text-sm text-muted-foreground">从左侧目录树选一页开始阅读；正文里的 wikilink 可直接跳转</p>
           {hasPages && <p className="text-xs text-muted-foreground/80">织入的页面按文件夹层级自动归档</p>}
@@ -744,20 +759,17 @@ function ProposalsPane() {
     { job_id: string; data: { page_slug: string; proposal_content: string }; ts: string }[] | null
   >(null)
   const load = async () => {
-    const jobs = await api.get<{ id: string }[]>('/jobs?kind=wiki_generate&limit=20')
-    // 并行拉取（原 for-await 串行 N+1 瀑布）
-    const eventLists = await Promise.all(
-      jobs.map((j) =>
-        api
-          .get<{ message: string; data: unknown; ts: string }[]>(`/jobs/${j.id}/events`)
-          .catch(() => [] as { message: string; data: unknown; ts: string }[]),
-      ),
-    )
-    const all = eventLists.flatMap((evs, i) =>
-      evs
-        .filter((ev) => ev.message.includes('提案'))
-        .map((ev) => ({ job_id: jobs[i].id, data: ev.data as { page_slug: string; proposal_content: string }, ts: ev.ts })),
-    )
+    // 服务端聚合（GET /wiki/proposals 一条 SQL 每job取最新提案）——替代 jobs + 逐 job events 的 N+1
+    const rows = await api.get<
+      { job_id: string; data: unknown; ts: string; message: string }[]
+    >('/wiki/proposals')
+    const all = rows
+      .filter((ev) => ev.message.includes('提案'))
+      .map((ev) => ({
+        job_id: ev.job_id,
+        data: ev.data as { page_slug: string; proposal_content: string },
+        ts: ev.ts,
+      }))
     setEvents(all)
   }
   useEffect(() => {
