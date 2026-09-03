@@ -3,7 +3,8 @@
  * - 正文行长 70ch（可读性）；标题/表格/代码/引用走 Engram 发丝线语言
  * - mermaid 主题随当前 light/dark token 注入（theme:'base' + themeVariables），字体统一 Geist
  */
-import { memo, useEffect, useState } from 'react'
+import { Fragment, cloneElement, isValidElement, memo, useEffect, useState } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useThemeTick } from '@/lib/theme'
@@ -76,6 +77,27 @@ function WikilinkText({ text, onNavigate }: { text: string; onNavigate: (slug: s
   )
 }
 
+/**
+ * 递归把 children 树里字符串节点中的 [[wikilink]] 换成可点按钮。
+ * 段落只要混入一点行内格式（`code`、**粗体**、[链接]），react-markdown 就会把
+ * children 拆成「字符串+元素」数组，所以必须递归深入而不是只看顶层是否为 string。
+ * code/pre 内保持字面（代码里的 [[ 不是链接）。
+ */
+function withWikilinks(node: ReactNode, onNavigate: (slug: string) => void): ReactNode {
+  if (typeof node === 'string') return <WikilinkText text={node} onNavigate={onNavigate} />
+  if (Array.isArray(node)) {
+    return node.map((c, i) => (
+      <Fragment key={i}>{withWikilinks(c, onNavigate)}</Fragment>
+    ))
+  }
+  if (isValidElement(node)) {
+    const el = node as ReactElement<{ children?: ReactNode }>
+    if (el.type === 'code' || el.type === 'pre') return node
+    return cloneElement(el, undefined, withWikilinks(el.props.children, onNavigate))
+  }
+  return node
+}
+
 function MermaidBlock({ code }: { code: string }) {
   const [id] = useState(() => `mmd-${Math.random().toString(36).slice(2)}`)
   const [svg, setSvg] = useState('')
@@ -144,11 +166,37 @@ const WikiMarkdown = memo(function WikiMarkdown({
             )
           },
           p({ children, ...props }) {
-            return (
-              <p {...props}>
-                {typeof children === 'string' ? <WikilinkText text={children} onNavigate={goto} /> : children}
-              </p>
-            )
+            return <p {...props}>{withWikilinks(children, goto)}</p>
+          },
+          h1({ children, ...props }) {
+            return <h1 {...props}>{withWikilinks(children, goto)}</h1>
+          },
+          h2({ children, ...props }) {
+            return <h2 {...props}>{withWikilinks(children, goto)}</h2>
+          },
+          h3({ children, ...props }) {
+            return <h3 {...props}>{withWikilinks(children, goto)}</h3>
+          },
+          h4({ children, ...props }) {
+            return <h4 {...props}>{withWikilinks(children, goto)}</h4>
+          },
+          h5({ children, ...props }) {
+            return <h5 {...props}>{withWikilinks(children, goto)}</h5>
+          },
+          h6({ children, ...props }) {
+            return <h6 {...props}>{withWikilinks(children, goto)}</h6>
+          },
+          li({ children, ...props }) {
+            return <li {...props}>{withWikilinks(children, goto)}</li>
+          },
+          blockquote({ children, ...props }) {
+            return <blockquote {...props}>{withWikilinks(children, goto)}</blockquote>
+          },
+          td({ children, ...props }) {
+            return <td {...props}>{withWikilinks(children, goto)}</td>
+          },
+          th({ children, ...props }) {
+            return <th {...props}>{withWikilinks(children, goto)}</th>
           },
         }}
       >
