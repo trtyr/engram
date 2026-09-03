@@ -49,6 +49,7 @@ use utoipa::OpenApi;
         knowledge_api::delete_document, knowledge_api::reembed, knowledge_api::search,
         wiki_api::ingest, wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
+        wiki_api::list_proposals,
         wiki_api::get_purpose, wiki_api::set_purpose,
         wiki_api::list_reviews, wiki_api::resolve_review,
         wiki_api::archive_query, wiki_api::list_sources, wiki_api::delete_source,
@@ -249,6 +250,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/wiki/graph", get(wiki_api::graph))
         .route("/wiki/lint", post(wiki_api::lint))
+        .route("/wiki/proposals", get(wiki_api::list_proposals))
         .route("/wiki/proposals/apply", post(wiki_api::apply_proposal))
         .route("/wiki/search", post(wiki_api::search))
         .route(

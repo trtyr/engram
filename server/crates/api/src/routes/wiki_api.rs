@@ -2,6 +2,7 @@
 
 use agent_memory_core::wiki::{CascadeReport, InsightsReport, Purpose, ReviewItem};
 use agent_memory_core::wiki::{LintReport, WikiError, WikiPageDto, WikiService};
+use agent_memory_jobs::types::JobEvent;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -192,6 +193,28 @@ pub async fn apply_proposal(
             .await
             .map_err(we)?,
     ))
+}
+
+/// 待审提案聚合——一条 SQL 取回全部 wiki_generate 任务的最新提案事件，
+/// 替代前端 jobs + 逐 job events 的 N+1 请求。
+#[utoipa::path(get, path = "/wiki/proposals", responses((status = 200, body = [JobEvent])))]
+pub async fn list_proposals(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<JobEvent>>, ApiError> {
+    require_wiki(&principal)?;
+    let rows = sqlx::query_as::<_, JobEvent>(
+        r#"SELECT t.* FROM (
+             SELECT DISTINCT ON (e.job_id) e.*
+             FROM jobs j JOIN job_events e ON e.job_id = j.id
+             WHERE j.kind = 'wiki_generate' AND e.message LIKE '%提案%'
+             ORDER BY e.job_id, e.id DESC
+           ) t ORDER BY t.id DESC LIMIT 50"#,
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+    Ok(Json(rows))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

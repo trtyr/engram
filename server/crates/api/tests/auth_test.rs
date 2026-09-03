@@ -1316,6 +1316,7 @@ async fn openapi_snapshot() {
             "/wiki/lint",
             "/wiki/pages",
             "/wiki/pages/{slug}",
+            "/wiki/proposals",
             "/wiki/proposals/apply",
             "/wiki/purpose",
             "/wiki/queries/archive",
@@ -1549,4 +1550,89 @@ async fn cron_scope_gates_distill_channel_and_heartbeat() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK, "AI 读 status 应 200");
+}
+
+/// 提案聚合端点：一条 SQL 取每 job 最新一条提案事件（替代前端 N+1）。
+#[tokio::test]
+async fn wiki_proposals_aggregates_latest_per_job() {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    agent_memory_storage::run_migrations(&pool)
+        .await
+        .expect("迁移");
+
+    let state = AppState::new(pool.clone())
+        .with_admin_password(Some("test-admin-pw".into()))
+        .with_master_key(Some("ab".repeat(32)));
+    let app = routes::router(state);
+
+    // 两个 wiki_generate job：j1 两条提案（取最新）+ 一条噪音事件；j2 一条提案
+    let j1: Uuid = Uuid::now_v7();
+    let j2: Uuid = Uuid::now_v7();
+    for (id, key) in [(j1, "k1"), (j2, "k2")] {
+        sqlx::query("INSERT INTO jobs (id, kind, status, idempotency_key) VALUES ($1, 'wiki_generate', 'succeeded', $2)")
+            .bind(id)
+            .bind(key)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    for (job, msg, data) in [
+        (
+            j1,
+            "生成提案：旧版",
+            r#"{"page_slug":"a","proposal_content":"旧"}"#,
+        ),
+        (j1, "记录完成", r#"{}"#),
+        (
+            j1,
+            "生成提案：新版",
+            r#"{"page_slug":"a","proposal_content":"新"}"#,
+        ),
+        (
+            j2,
+            "生成提案：b 页",
+            r#"{"page_slug":"b","proposal_content":"内容b"}"#,
+        ),
+    ] {
+        sqlx::query("INSERT INTO job_events (job_id, message, data) VALUES ($1, $2, $3::jsonb)")
+            .bind(job)
+            .bind(msg)
+            .bind(data)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let token = login_token(&app).await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/wiki/proposals")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "GET /wiki/proposals 应 200");
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = v.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "每 job 聚合一条，共 2 条");
+    let j1_hits: Vec<&serde_json::Value> = arr
+        .iter()
+        .filter(|e| e["job_id"] == j1.to_string())
+        .collect();
+    assert_eq!(j1_hits.len(), 1, "j1 只取最新提案");
+    assert_eq!(j1_hits[0]["message"], "生成提案：新版");
+    assert_eq!(
+        arr.iter().filter(|e| e["job_id"] == j2.to_string()).count(),
+        1
+    );
 }
