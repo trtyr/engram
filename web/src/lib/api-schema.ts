@@ -1401,6 +1401,8 @@ export interface components {
             content: string;
             slug: string;
             title: string;
+            /** @description 执行者标记（S-7）：AI 代用户执行时传 "ai"——落 frontmatter.via */
+            via?: string | null;
         };
         ArchiveQueryRequest: {
             answer: string;
@@ -1890,6 +1892,11 @@ export interface components {
             /** @description 目录树文件夹（可选；None = 保持原值，Obsidian 式 / 分隔多级路径） */
             folder?: string | null;
             title: string;
+            /**
+             * @description 执行者标记（S-7）：AI 代用户执行时传 "ai"——落 frontmatter.via 区分真人编辑与 AI 代执行；
+             *     Web 用户编辑不传。
+             */
+            via?: string | null;
         };
         ReEncryptRequest: {
             /** @description 轮换前的旧主密钥（64 hex；当前密钥来自 env，新密钥下加密） */
@@ -3082,7 +3089,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description agent 清场 {voided_sessions, archived_atoms} 或 deep 清空五计数 */
+            /** @description agent 清场 {erased_sessions, archived_atoms}（SEC-E：全部会话物理删除）或 deep 清空五计数 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3127,7 +3134,10 @@ export interface operations {
     };
     rhythm_heartbeat: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 调用方声明：仅 `cron` 值合法——crontab 命令模板自带，防 AI 误报心跳 */
+                via?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
