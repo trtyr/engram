@@ -17,7 +17,7 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 | web | pnpm run lint / tsc / test / build | 0 警告 / 0 / 42 全过（8 文件）/ exit 0 |
 | web | 入口 bundle | 285.23 kB（gzip 91.70），预算 350 内 |
 | CI | gh run list（f8e1031） | CI + e2e FAIL（GitHub 支出限额，未启动） |
-| 事实 | OpenAPI 活体 / 迁移 / 表 | **88 路径 / 113 方法注册**（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10）/ **28 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
+| 事实 | OpenAPI 活体 / 迁移 / 表 | **88 路径 / 113 方法注册**（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10）/ **29 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
 
 ## 运行环境实况（2026-09-03 实查 + 所有者确认）
 
@@ -51,6 +51,8 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 18. **位置元数据**（0027，2026-09-04）：project_locations 补 ip/os（多主机登记），概览页位置改为元数据卡片。
 19. **项目域唯一约束 + 错误文案三问**（0028，2026-09-04）：projects.name UNIQUE + project_docs(project_id,category,title) UNIQUE，重复 409；401/404 补三问。
 20. **产品更名 Engram**（2026-09-04，goal mtmzv6xt-b6u3ql）：GitHub 仓库 trtyr/engram、10 crate engram-*、品牌面全面 Engram 化、根 README 美化 + MIT LICENSE。
+
+21. **knowledge 彻底并入 wiki**（2026-09-05，goal mtn6mye4-ql1zkm）：删 knowledge scope（八→七）、代码模块/类型归 wiki 命名（KnowledgeService→WikiDocumentService、knowledge_api→wiki_docs_api）、数据表改名（documents/chunks→wiki_documents/wiki_chunks，0029 迁移）、删 /knowledge/* 兼容别名、统一检索 knowledge 域标签并入 wiki。
 
 ## 已知未了项
 

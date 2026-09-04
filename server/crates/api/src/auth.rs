@@ -14,9 +14,8 @@ use uuid::Uuid;
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 
 /// 资产域 scope。
-pub const SCOPES: [&str; 8] = [
+pub const SCOPES: [&str; 7] = [
     "memory",
-    "knowledge",
     "wiki",
     "codegraph",
     "project",

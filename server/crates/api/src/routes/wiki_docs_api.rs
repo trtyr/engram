@@ -1,7 +1,7 @@
-//! 知识域端点（knowledge scope）。
+//! 文档知识端点（wiki scope）。
 
-use engram_core::knowledge::{
-    ChunkHit, DocumentDto, IngestSource, KnowledgeError, KnowledgeService,
+use engram_core::wiki_docs::{
+    ChunkHit, DocumentDto, IngestSource, WikiDocumentError, WikiDocumentService,
 };
 use axum::Json;
 use axum::extract::multipart::Multipart;
@@ -15,20 +15,20 @@ use crate::auth::{Principal, require_scope};
 use crate::error::ApiError;
 use crate::state::AppState;
 
-fn require_knowledge(p: &Principal) -> Result<(), ApiError> {
-    require_scope(p, "knowledge")
+fn require_wiki_docs(p: &Principal) -> Result<(), ApiError> {
+    require_scope(p, "wiki")
 }
 
-fn ke(e: KnowledgeError) -> ApiError {
+fn ke(e: WikiDocumentError) -> ApiError {
     match e {
-        KnowledgeError::NotFound(m) => ApiError::NotFound(m),
-        KnowledgeError::BadRequest(m) => ApiError::BadRequest(m),
-        KnowledgeError::Storage(m) => ApiError::Unavailable(m),
+        WikiDocumentError::NotFound(m) => ApiError::NotFound(m),
+        WikiDocumentError::BadRequest(m) => ApiError::BadRequest(m),
+        WikiDocumentError::Storage(m) => ApiError::Unavailable(m),
     }
 }
 
-fn svc(state: &AppState) -> KnowledgeService {
-    KnowledgeService::new(state.pool.clone(), state.registry(), state.data_dir.clone())
+fn svc(state: &AppState) -> WikiDocumentService {
+    WikiDocumentService::new(state.pool.clone(), state.registry(), state.data_dir.clone())
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -45,7 +45,7 @@ pub async fn submit_url(
     State(state): State<AppState>,
     Json(req): Json<SubmitUrlRequest>,
 ) -> Result<(StatusCode, Json<DocumentDto>), ApiError> {
-    require_knowledge(&principal)?;
+    require_wiki_docs(&principal)?;
     let (id, deduped) = svc(&state)
         .submit(IngestSource::Url(req.url))
         .await
@@ -67,7 +67,7 @@ pub async fn upload(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<DocumentDto>), ApiError> {
-    require_knowledge(&principal)?;
+    require_wiki_docs(&principal)?;
     let mut name = None;
     let mut content = None;
     let mut content_type = None;
@@ -131,7 +131,7 @@ pub async fn list_documents(
     State(state): State<AppState>,
     Query(p): Query<ListDocsParams>,
 ) -> Result<Json<Vec<DocumentDto>>, ApiError> {
-    require_knowledge(&principal)?;
+    require_wiki_docs(&principal)?;
     Ok(Json(
         svc(&state)
             .list_documents(p.status.as_deref(), p.cursor, p.limit.unwrap_or(50))
@@ -147,7 +147,7 @@ pub async fn get_document(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<DocumentDto>, ApiError> {
-    require_knowledge(&principal)?;
+    require_wiki_docs(&principal)?;
     Ok(Json(svc(&state).get_document(id).await.map_err(ke)?))
 }
 
@@ -158,7 +158,7 @@ pub async fn document_chunks(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
-    require_knowledge(&principal)?;
+    require_wiki_docs(&principal)?;
     let chunks = svc(&state).chunks(id, 500).await.map_err(ke)?;
     Ok(Json(
         chunks
@@ -180,7 +180,7 @@ pub async fn delete_document(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    require_knowledge(&principal)?;
+    require_wiki_docs(&principal)?;
     svc(&state).delete(id).await.map_err(ke)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -193,27 +193,27 @@ pub async fn reembed(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    require_knowledge(&principal)?;
+    require_wiki_docs(&principal)?;
     svc(&state).reembed(id).await.map_err(ke)?;
     Ok(StatusCode::ACCEPTED)
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
-pub struct KnowledgeSearchRequest {
+pub struct WikiDocumentSearchRequest {
     pub query: String,
     pub max_items: Option<i64>,
 }
 
 /// 知识混合检索（结果带文档引用 + 高亮片段）。
 #[utoipa::path(post, path = "/wiki/documents/search", operation_id = "knowledge_search",
-    request_body = KnowledgeSearchRequest,
+    request_body = WikiDocumentSearchRequest,
     responses((status = 200, body = [ChunkHit])))]
 pub async fn search(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Json(req): Json<KnowledgeSearchRequest>,
+    Json(req): Json<WikiDocumentSearchRequest>,
 ) -> Result<Json<Vec<ChunkHit>>, ApiError> {
-    require_knowledge(&principal)?;
+    require_wiki_docs(&principal)?;
     // W-3（2026-09-04）：空 query 三问拒绝——与 /search 的 400 口径对齐，不再返回全量
     if req.query.trim().is_empty() {
         return Err(ApiError::BadRequest("query 不能为空".into()));

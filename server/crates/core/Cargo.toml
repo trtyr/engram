@@ -1,6 +1,6 @@
 [package]
 name = "engram-core"
-description = "领域层：memory/knowledge/wiki/codegraph 各域服务与编排"
+description = "领域层：memory/wiki/codegraph 各域服务与编排"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

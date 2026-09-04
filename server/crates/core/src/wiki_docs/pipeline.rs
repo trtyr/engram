@@ -63,7 +63,7 @@ pub async fn enqueue_ingest(
     _registry: &ProviderRegistry,
     data_dir: &std::path::Path,
     source: IngestSource,
-) -> Result<(Uuid, bool), KnowledgeError> {
+) -> Result<(Uuid, bool), WikiDocumentError> {
     // sha256 计算
     let bytes = match &source {
         IngestSource::Bytes {
@@ -98,12 +98,12 @@ pub async fn enqueue_ingest(
             let uploads = data_dir.join("uploads");
             tokio::fs::create_dir_all(&uploads)
                 .await
-                .map_err(|e| KnowledgeError::Storage(format!("创建 uploads 失败: {e}")))?;
+                .map_err(|e| WikiDocumentError::Storage(format!("创建 uploads 失败: {e}")))?;
             let safe_name = name.replace(['/', '\\'], "_");
             let path = uploads.join(format!("{id}_{safe_name}"));
             tokio::fs::write(&path, content)
                 .await
-                .map_err(|e| KnowledgeError::Storage(format!("写文件失败: {e}")))?;
+                .map_err(|e| WikiDocumentError::Storage(format!("写文件失败: {e}")))?;
             (
                 name.clone(),
                 path.to_string_lossy().into_owned(),
@@ -116,7 +116,7 @@ pub async fn enqueue_ingest(
 
     // K6：INSERT ... ON CONFLICT 单往返——并发同 sha 一个赢、一个幂等命中，不再竞态 503
     let inserted = sqlx::query_scalar::<_, Uuid>(
-        "INSERT INTO documents (id, title, source_uri, mime, raw_path, sha256, status) \
+        "INSERT INTO wiki_documents (id, title, source_uri, mime, raw_path, sha256, status) \
          VALUES ($1, $2, $3, $4, NULLIF($5,''), $6, 'pending') \
          ON CONFLICT (sha256) DO NOTHING RETURNING id",
     )
@@ -128,24 +128,24 @@ pub async fn enqueue_ingest(
     .bind(&sha)
     .fetch_optional(queue.pool())
     .await
-    .map_err(|e| KnowledgeError::Storage(e.to_string()))?;
+    .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
 
     let Some(id) = inserted else {
         // 幂等命中：清掉刚写的文件
         if !raw_path.is_empty() {
             let _ = tokio::fs::remove_file(&raw_path).await;
         }
-        let existing: Uuid = sqlx::query_scalar("SELECT id FROM documents WHERE sha256 = $1")
+        let existing: Uuid = sqlx::query_scalar("SELECT id FROM wiki_documents WHERE sha256 = $1")
             .bind(&sha)
             .fetch_one(queue.pool())
             .await
-            .map_err(|e| KnowledgeError::Storage(e.to_string()))?;
+            .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
 
         // K1 自愈：failed 文档 / 非终态卡死（>5 分钟无 pending·running 活 job）→ 原子重置 + 重新入队。
         // 不再让一次网络抖动永久卡死该 sha；ready 或在途文档不受影响。
         // 5 分钟静默期：杜绝「并发重复提交时，先到者尚未入队」毫秒窗口被误判为卡死。
         let healed = sqlx::query_scalar::<_, Uuid>(
-            "UPDATE documents SET status = 'pending', error = NULL, updated_at = now() \
+            "UPDATE wiki_documents SET status = 'pending', error = NULL, updated_at = now() \
              WHERE id = $1 AND ( \
                 status = 'failed' \
                 OR (status <> 'ready' \
@@ -160,7 +160,7 @@ pub async fn enqueue_ingest(
         .bind(existing)
         .fetch_optional(queue.pool())
         .await
-        .map_err(|e| KnowledgeError::Storage(e.to_string()))?;
+        .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
         if healed.is_some() {
             // 新幂等键：旧 ingest-{id} job 已 failed/dead，复用会被幂等墙挡住
             queue
@@ -173,7 +173,7 @@ pub async fn enqueue_ingest(
                         )),
                 )
                 .await
-                .map_err(|e| KnowledgeError::Storage(format!("自愈入队失败: {e}")))?;
+                .map_err(|e| WikiDocumentError::Storage(format!("自愈入队失败: {e}")))?;
         }
         return Ok((existing, true));
     };
@@ -187,14 +187,14 @@ pub async fn enqueue_ingest(
         )
         .await
     {
-        let _ = sqlx::query("DELETE FROM documents WHERE id = $1")
+        let _ = sqlx::query("DELETE FROM wiki_documents WHERE id = $1")
             .bind(id)
             .execute(queue.pool())
             .await;
         if !raw_path.is_empty() {
             let _ = tokio::fs::remove_file(&raw_path).await;
         }
-        return Err(KnowledgeError::Storage(format!("job 入队失败: {e}")));
+        return Err(WikiDocumentError::Storage(format!("job 入队失败: {e}")));
     }
     Ok((id, false))
 }
@@ -210,7 +210,7 @@ pub enum IngestSource {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum KnowledgeError {
+pub enum WikiDocumentError {
     #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
@@ -234,7 +234,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
 
     // 读取文档行（raw_path 可空：URL 文档摄取前无本地文件）
     let row = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
-        "SELECT source_uri, raw_path, mime FROM documents WHERE id = $1",
+        "SELECT source_uri, raw_path, mime FROM wiki_documents WHERE id = $1",
     )
     .bind(doc_id)
     .fetch_optional(pool)
@@ -251,7 +251,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
     // 状态标记为 failed（尽力而为，事件可查）
     async fn mark_failed(ctx: &JobContext, doc_id: Uuid, msg: &str) {
         let _ = sqlx::query(
-            "UPDATE documents SET status = 'failed', error = $2, updated_at = now() WHERE id = $1",
+            "UPDATE wiki_documents SET status = 'failed', error = $2, updated_at = now() WHERE id = $1",
         )
         .bind(doc_id)
         .bind(msg)
@@ -279,7 +279,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
                 let _ = tokio::fs::create_dir_all(&uploads).await;
                 let path = uploads.join(format!("{doc_id}_url.html"));
                 let _ = tokio::fs::write(&path, &page.bytes).await;
-                sqlx::query("UPDATE documents SET raw_path = $2, mime = COALESCE($3, mime), title = COALESCE($4, title), updated_at = now() WHERE id = $1")
+                sqlx::query("UPDATE wiki_documents SET raw_path = $2, mime = COALESCE($3, mime), title = COALESCE($4, title), updated_at = now() WHERE id = $1")
                     .bind(doc_id)
                     .bind(path.to_string_lossy().as_ref())
                     .bind(page.content_type.clone())
@@ -333,7 +333,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
     };
 
     // 状态 → parsing
-    sqlx::query("UPDATE documents SET status = 'parsing', updated_at = now() WHERE id = $1")
+    sqlx::query("UPDATE wiki_documents SET status = 'parsing', updated_at = now() WHERE id = $1")
         .bind(doc_id)
         .execute(pool)
         .await
@@ -399,7 +399,7 @@ pub async fn chunk_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| JobError::Permanent("payload 缺 document_id".into()))?;
 
-    sqlx::query("UPDATE documents SET status = 'chunking', updated_at = now() WHERE id = $1")
+    sqlx::query("UPDATE wiki_documents SET status = 'chunking', updated_at = now() WHERE id = $1")
         .bind(doc_id)
         .execute(pool)
         .await
@@ -412,7 +412,7 @@ pub async fn chunk_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
 
     let chunks = chunk_text(&text);
     if chunks.is_empty() {
-        sqlx::query("UPDATE documents SET status = 'failed', error = '解析后内容为空', updated_at = now() WHERE id = $1")
+        sqlx::query("UPDATE wiki_documents SET status = 'failed', error = '解析后内容为空', updated_at = now() WHERE id = $1")
             .bind(doc_id)
             .execute(pool)
             .await
@@ -422,7 +422,7 @@ pub async fn chunk_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
 
     for c in &chunks {
         sqlx::query(
-            "INSERT INTO chunks (id, document_id, seq, content, tsv) \
+            "INSERT INTO wiki_chunks (id, document_id, seq, content, tsv) \
              VALUES ($1, $2, $3, $4, to_tsvector('simple', $5)) \
              ON CONFLICT (document_id, seq) DO UPDATE SET content = $4, tsv = to_tsvector('simple', $5)",
         )
@@ -462,7 +462,7 @@ pub async fn embed_job(
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| JobError::Permanent("payload 缺 document_id".into()))?;
 
-    sqlx::query("UPDATE documents SET status = 'embedding', updated_at = now() WHERE id = $1")
+    sqlx::query("UPDATE wiki_documents SET status = 'embedding', updated_at = now() WHERE id = $1")
         .bind(doc_id)
         .execute(pool)
         .await
@@ -471,7 +471,7 @@ pub async fn embed_job(
     // K8：只补缺失块（NULL 向量或 embed_failed）——重跑 / re-embed / Transient 重试
     // 的进度天然保留，已嵌入块不重复计费
     let chunks: Vec<(Uuid, String)> = sqlx::query_as(
-        "SELECT id, content FROM chunks \
+        "SELECT id, content FROM wiki_chunks \
          WHERE document_id = $1 AND (embedding IS NULL OR embed_failed) ORDER BY seq",
     )
     .bind(doc_id)
@@ -479,7 +479,7 @@ pub async fn embed_job(
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chunks WHERE document_id = $1")
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM wiki_chunks WHERE document_id = $1")
         .bind(doc_id)
         .fetch_one(pool)
         .await
@@ -508,7 +508,7 @@ pub async fn embed_job(
                             "embed 响应与批次不符，整批降级 FTS"
                         );
                         for (cid, _) in batch {
-                            sqlx::query("UPDATE chunks SET embed_failed = true WHERE id = $1")
+                            sqlx::query("UPDATE wiki_chunks SET embed_failed = true WHERE id = $1")
                                 .bind(cid)
                                 .execute(pool)
                                 .await
@@ -518,7 +518,7 @@ pub async fn embed_job(
                     }
                     for (i, (cid, _)) in batch.iter().enumerate() {
                         sqlx::query(
-                            "UPDATE chunks SET embedding = $2, embed_failed = false WHERE id = $1",
+                            "UPDATE wiki_chunks SET embedding = $2, embed_failed = false WHERE id = $1",
                         )
                         .bind(cid)
                         .bind(pgvector::Vector::from(resp.embeddings[i].clone()))
@@ -542,7 +542,7 @@ pub async fn embed_job(
                     }
                     tracing::warn!(error = %e, "嵌入批次失败，标记 embed_failed");
                     for (cid, _) in batch {
-                        sqlx::query("UPDATE chunks SET embed_failed = true WHERE id = $1")
+                        sqlx::query("UPDATE wiki_chunks SET embed_failed = true WHERE id = $1")
                             .bind(cid)
                             .execute(pool)
                             .await
@@ -554,7 +554,7 @@ pub async fn embed_job(
     }
 
     sqlx::query(
-        "UPDATE documents SET status = 'ready', error = NULL, updated_at = now() WHERE id = $1",
+        "UPDATE wiki_documents SET status = 'ready', error = NULL, updated_at = now() WHERE id = $1",
     )
     .bind(doc_id)
     .execute(pool)

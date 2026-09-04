@@ -78,9 +78,9 @@ Wiki 摄取 ─▶ wiki_sources ─(analyze→generate 任务)─▶ wiki_pages 
 ```text
 /memory/context   画像 + 相关记忆 + 实体透镜 + pending_review 代问 → Agent prompt 注入
 /memory/search    四层检索（l1/l2/l3/entities），RRF 融合，no_feedback 防热度污染
-/knowledge/search 向量 L2 距离 + jieba 关键词融合（敏感原子默认排除，reveal 可见）
+/wiki/documents/search 向量 L2 距离 + jieba 关键词融合（敏感原子默认排除，reveal 可见）
 /wiki/graph       页面+链接 → 前端 sigma 渲染（社区着色）
-/search           跨域统一检索（memory/knowledge/wiki/entity 四域）
+/search           跨域统一检索（memory/wiki/entity 三域）
 /memory/export    全量导出（数据主权；敏感默认排除，include_sensitive 可选）
 ```
 

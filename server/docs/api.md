@@ -3,7 +3,7 @@
 > 2026-09-04 从当日代码 `openapi-dump` 活体导出，共 **88 路径 / 113 方法注册**（GET 46 · POST 47 · PUT 7 · PATCH 3 · DELETE 10）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
-> 八 scope：memory/knowledge/wiki/codegraph/project/llm/erase/cron）。
+> 七 scope：memory/wiki/codegraph/project/llm/erase/cron）。
 > 权威 schema 以 `cargo run -q -p engram-api --bin openapi-dump` 输出为准（前端 CI 有零漂移门禁）。
 
 ## 认证与健康
@@ -52,7 +52,7 @@
 
 ## wiki·文档原料（原 knowledge，已并入 /wiki 前缀）
 
-> 2026-09-02 合并：knowledge 端点并入 /wiki 前缀，前端融合成一个 Wiki 页（文档/页面/图谱/人审/提案/目标）。`/knowledge/*` 仍作兼容别名（过渡期，不进 OpenAPI）。
+> 2026-09-02 合并、2026-09-05 彻底并入：knowledge 端点并入 /wiki 前缀，前端融合成一个 Wiki 页（文档/页面/图谱/人审/提案/目标）。knowledge 概念已消除——scope 并入 wiki、表改名 wiki_documents/wiki_chunks、`/knowledge/*` 别名已删。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

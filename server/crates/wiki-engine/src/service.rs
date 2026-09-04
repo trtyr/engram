@@ -135,7 +135,7 @@ impl WikiService {
     /// --doc-id 手动织入（404）也不会被自动织入静默跳过，两路都收敛到 ingest(title, text)。
     pub async fn ingest_document(&self, doc_id: Uuid) -> Result<bool, WikiError> {
         let row: Option<(String, Option<String>, Option<String>)> =
-            sqlx::query_as("SELECT title, raw_path, mime FROM documents WHERE id = $1")
+            sqlx::query_as("SELECT title, raw_path, mime FROM wiki_documents WHERE id = $1")
                 .bind(doc_id)
                 .fetch_optional(&self.pool)
                 .await?;
@@ -156,7 +156,7 @@ impl WikiService {
         } else {
             // URL 摄取：无本地文件，用 chunks 表已解析文本按序拼接
             let chunks: Vec<String> = sqlx::query_scalar(
-                "SELECT content FROM chunks WHERE document_id = $1 ORDER BY seq",
+                "SELECT content FROM wiki_chunks WHERE document_id = $1 ORDER BY seq",
             )
             .bind(doc_id)
             .fetch_all(&self.pool)

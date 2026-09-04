@@ -53,7 +53,7 @@
 请求 `{title, text?, document_id?}`——`text` 与 `document_id` 二选一：
 
 - `text`：直接文本
-- `document_id`：knowledge 文档 id，服务端读 `documents.raw_path` + 重新 `parsing::parse_bytes` 解析
+- `document_id`：wiki 文档 id，服务端读 `wiki_documents.raw_path` + 重新 `parsing::parse_bytes` 解析
 
 响应 202 `{skipped}`（sha 命中幂等跳过）。
 

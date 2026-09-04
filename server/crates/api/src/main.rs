@@ -69,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(counts)
         }
     });
-    let runner = engram_core::knowledge::register_handlers(
+    let runner = engram_core::wiki_docs::register_handlers(
         runner,
         engram_llm::ProviderRegistry::new(
             pool.clone(),

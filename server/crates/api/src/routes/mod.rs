@@ -4,7 +4,7 @@ pub mod auth_api;
 pub mod codegraph_api;
 pub mod health;
 pub mod jobs_api;
-pub mod knowledge_api;
+pub mod wiki_docs_api;
 pub mod llm_api;
 pub mod memory_api;
 pub mod project_api;
@@ -45,9 +45,9 @@ use utoipa::OpenApi;
         memory_api::attach_atom, memory_api::detach_atom, memory_api::merge_entity, memory_api::entity_revisions,
         memory_api::list_entity_relations, memory_api::create_entity_relation, memory_api::delete_entity_relation,
         search_api::search,
-        knowledge_api::submit_url, knowledge_api::upload, knowledge_api::list_documents,
-        knowledge_api::get_document, knowledge_api::document_chunks,
-        knowledge_api::delete_document, knowledge_api::reembed, knowledge_api::search,
+        wiki_docs_api::submit_url, wiki_docs_api::upload, wiki_docs_api::list_documents,
+        wiki_docs_api::get_document, wiki_docs_api::document_chunks,
+        wiki_docs_api::delete_document, wiki_docs_api::reembed, wiki_docs_api::search,
         wiki_api::ingest, wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
         wiki_api::list_proposals,
@@ -209,44 +209,25 @@ pub fn router(state: AppState) -> Router {
             delete(memory_api::delete_entity_relation),
         )
         .route("/search", post(search_api::search))
-        // 知识域并入 Wiki 前缀（/wiki/documents、/wiki/upload）；/knowledge/* 为兼容别名（过渡期，不进 OpenAPI）
+        // 文档知识并入 Wiki 前缀（/wiki/documents、/wiki/upload）
         .route(
             "/wiki/documents",
-            post(knowledge_api::submit_url).get(knowledge_api::list_documents),
+            post(wiki_docs_api::submit_url).get(wiki_docs_api::list_documents),
         )
-        .route("/wiki/upload", post(knowledge_api::upload))
+        .route("/wiki/upload", post(wiki_docs_api::upload))
         // search 先于 {id}，避免 "search" 被当作 id 解析
-        .route("/wiki/documents/search", post(knowledge_api::search))
+        .route("/wiki/documents/search", post(wiki_docs_api::search))
         .route(
             "/wiki/documents/{id}",
-            get(knowledge_api::get_document).delete(knowledge_api::delete_document),
+            get(wiki_docs_api::get_document).delete(wiki_docs_api::delete_document),
         )
         .route(
             "/wiki/documents/{id}/chunks",
-            get(knowledge_api::document_chunks),
+            get(wiki_docs_api::document_chunks),
         )
         .route(
             "/wiki/documents/{id}/re-embed",
-            post(knowledge_api::reembed),
-        )
-        // 兼容别名
-        .route(
-            "/knowledge/documents",
-            post(knowledge_api::submit_url).get(knowledge_api::list_documents),
-        )
-        .route("/knowledge/upload", post(knowledge_api::upload))
-        .route("/knowledge/search", post(knowledge_api::search))
-        .route(
-            "/knowledge/documents/{id}",
-            get(knowledge_api::get_document).delete(knowledge_api::delete_document),
-        )
-        .route(
-            "/knowledge/documents/{id}/chunks",
-            get(knowledge_api::document_chunks),
-        )
-        .route(
-            "/knowledge/documents/{id}/re-embed",
-            post(knowledge_api::reembed),
+            post(wiki_docs_api::reembed),
         )
         .route("/wiki/ingest", post(wiki_api::ingest))
         .route("/wiki/pages", get(wiki_api::list_pages))

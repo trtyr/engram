@@ -12,11 +12,11 @@ use crate::state::AppState;
 
 /// 统一检索要求至少一个可读域 scope（Admin 恒通过）。
 fn require_search(p: &Principal) -> Result<(), ApiError> {
-    if p.has_scope("memory") || p.has_scope("knowledge") || p.has_scope("wiki") {
+    if p.has_scope("memory") || p.has_scope("wiki") {
         Ok(())
     } else {
         Err(ApiError::Forbidden(
-            "缺少 scope：memory / knowledge / wiki 至少其一".into(),
+            "缺少 scope：memory / wiki 至少其一".into(),
         ))
     }
 }

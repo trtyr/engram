@@ -41,7 +41,7 @@ crates/api/src/
 ├── lib.rs                  # 组装（集成测试入口）
 ├── config.rs               # 环境变量解析（见 run-and-deploy.md）
 ├── state.rs                # AppState { pool }
-├── auth.rs                 # Bearer 中间件：ams_/amk_ 认证（八 scope；删除 key 不留记录（401 走通用文案））；
+├── auth.rs                 # Bearer 中间件：ams_/amk_ 认证（七 scope；删除 key 不留记录（401 走通用文案））；
 │                           #   /jobs + Accept:text/html → SPA 分流（2026-08-30 新增）
 ├── error.rs                # ApiError（code/retryable，统一 JSON 错误体）
 ├── web_assets.rs           # rust-embed 托管 web/dist（编译期要求目录存在）

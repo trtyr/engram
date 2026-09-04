@@ -21,7 +21,7 @@
         │ sqlx                          │ reqwest（任务化异步）
 ┌───────▼──────────┐          ┌────────▼──────────┐
 │ PostgreSQL+pgvector│         │ 外部 LLM API       │
-│ 27 业务表/28 迁移   │         │ （OpenAI 兼容系）   │
+│ 27 业务表/29 迁移   │         │ （OpenAI 兼容系）   │
 └───────────────────┘          └───────────────────┘
                 另：cg-bridge 调用外部 codegraph CLI（Node+git）
 ```

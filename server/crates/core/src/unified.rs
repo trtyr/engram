@@ -9,7 +9,7 @@ use engram_llm::ProviderRegistry;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::knowledge::KnowledgeService;
+use crate::wiki_docs::WikiDocumentService;
 use crate::memory::MemoryService;
 use crate::wiki::WikiService;
 
@@ -71,7 +71,7 @@ impl UnifiedSearch {
         let per_domain = limit.clamp(5, 50);
 
         let mem = MemoryService::new(self.pool.clone(), self.registry.clone());
-        let know = KnowledgeService::new(
+        let know = WikiDocumentService::new(
             self.pool.clone(),
             self.registry.clone(),
             self.data_dir.clone(),
@@ -116,7 +116,7 @@ impl UnifiedSearch {
         if let Ok(res) = know_res {
             for h in res {
                 merged.push(UnifiedHit {
-                    domain: "knowledge".into(),
+                    domain: "wiki".into(),
                     id: h.chunk_id,
                     title: Some(h.document_title),
                     snippet: h.snippet,
@@ -125,7 +125,7 @@ impl UnifiedSearch {
                 });
             }
         } else {
-            tracing::warn!("统一检索：knowledge 域失败，跳过");
+            tracing::warn!("统一检索：wiki 文档域失败，跳过");
         }
 
         // 实体域：主角先行（palette 命中实体 → 直达星系详情）
@@ -204,11 +204,11 @@ mod tests {
 
     #[test]
     fn rrf_rank_normalizes_per_domain_layer() {
-        // 三域混排：memory l1/l2、knowledge、wiki 各两条
+        // 两域混排：memory l1/l2、wiki（文档+页）
         let mut hits = vec![
             hit("memory", Some("l1")),
             hit("wiki", None),
-            hit("knowledge", None),
+            hit("wiki", None),
             hit("memory", Some("l2")),
             hit("memory", Some("l1")),
             hit("wiki", None),
@@ -226,7 +226,7 @@ mod tests {
         assert!((mem_l1[1] - 1.0 / 61.0).abs() < 1e-9);
 
         // 跨域第 0 名分数相等（公平）
-        let first_scores: Vec<f64> = ["memory", "knowledge", "wiki"]
+        let first_scores: Vec<f64> = ["memory", "wiki"]
             .iter()
             .filter_map(|d| {
                 hits.iter()

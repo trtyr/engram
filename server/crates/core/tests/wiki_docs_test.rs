@@ -2,7 +2,7 @@
 
 mod support;
 
-use engram_core::knowledge::ssrf::{FetchError, is_private_ip, safe_fetch, safe_fetch_opts};
+use engram_core::wiki_docs::ssrf::{FetchError, is_private_ip, safe_fetch, safe_fetch_opts};
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -114,10 +114,10 @@ async fn ssrf_proxy_mode_still_rejects_private() {
 
 // ---------- 摄取管道（真 PG + 本地 mock embed 不可行——嵌入降级路径） ----------
 
-use engram_core::knowledge::{IngestSource, KnowledgeService};
+use engram_core::wiki_docs::{IngestSource, WikiDocumentService};
 use engram_llm::{KeyCipher, ProviderRegistry};
 
-async fn setup() -> (sqlx::PgPool, KnowledgeService, support::TestPg) {
+async fn setup() -> (sqlx::PgPool, WikiDocumentService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
@@ -129,7 +129,7 @@ async fn setup() -> (sqlx::PgPool, KnowledgeService, support::TestPg) {
         pool.clone(),
         KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
-    let svc = KnowledgeService::new(pool.clone(), registry, dir.keep());
+    let svc = WikiDocumentService::new(pool.clone(), registry, dir.keep());
     (pool, svc, container)
 }
 
@@ -139,7 +139,7 @@ async fn run_jobs(pool: sqlx::PgPool) -> engram_jobs::RunnerHandle {
         pool.clone(),
         KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
-    let runner = engram_core::knowledge::register_handlers(
+    let runner = engram_core::wiki_docs::register_handlers(
         engram_jobs::Runner::new(
             pool,
             engram_jobs::RunnerConfig {
@@ -156,9 +156,9 @@ async fn run_jobs(pool: sqlx::PgPool) -> engram_jobs::RunnerHandle {
 }
 
 async fn wait_ready(
-    svc: &KnowledgeService,
+    svc: &WikiDocumentService,
     id: uuid::Uuid,
-) -> engram_core::knowledge::DocumentDto {
+) -> engram_core::wiki_docs::DocumentDto {
     for _ in 0..300 {
         if let Ok(doc) = svc.get_document(id).await
             && matches!(doc.status.as_str(), "ready" | "failed")
@@ -298,7 +298,7 @@ async fn concurrent_same_sha_submit_is_idempotent() {
     assert!(dup3);
 
     // documents 只一行；parse job 只一个
-    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM documents")
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM wiki_documents")
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -352,7 +352,7 @@ async fn failed_doc_resubmit_self_heals() {
     std::fs::create_dir_all(svc.data_dir.join("uploads")).unwrap();
     std::fs::write(&path, content.as_bytes()).unwrap();
     sqlx::query(
-        "INSERT INTO documents (id, title, source_uri, mime, raw_path, sha256, status, error) \
+        "INSERT INTO wiki_documents (id, title, source_uri, mime, raw_path, sha256, status, error) \
          VALUES ($1, $2, $2, $3, $4, $5, 'failed', 'URL 抓取失败: 网络抖动')",
     )
     .bind(doc_id)
@@ -428,7 +428,7 @@ async fn ready_doc_resubmit_does_not_reingest() {
 async fn insert_ready_doc_with_chunks(pool: &sqlx::PgPool, with_embedding: bool) -> uuid::Uuid {
     let doc_id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO documents (id, title, source_uri, sha256, status) \
+        "INSERT INTO wiki_documents (id, title, source_uri, sha256, status) \
          VALUES ($1, '补嵌测试', 'reembed.md', $2, 'ready')",
     )
     .bind(doc_id)
@@ -438,7 +438,7 @@ async fn insert_ready_doc_with_chunks(pool: &sqlx::PgPool, with_embedding: bool)
     .unwrap();
     for seq in 0..2 {
         sqlx::query(
-            "INSERT INTO chunks (id, document_id, seq, content, embed_failed, embedding, tsv) \
+            "INSERT INTO wiki_chunks (id, document_id, seq, content, embed_failed, embedding, tsv) \
              VALUES ($1, $2, $3, $4, $5, $6, to_tsvector('simple', $4))",
         )
         .bind(uuid::Uuid::now_v7())
@@ -496,7 +496,7 @@ async fn reembed_only_touches_missing_chunks() {
     assert_eq!(doc.status, "ready");
 
     let rows: Vec<(bool, bool)> = sqlx::query_as(
-        "SELECT embed_failed, (embedding IS NOT NULL) FROM chunks \
+        "SELECT embed_failed, (embedding IS NOT NULL) FROM wiki_chunks \
          WHERE document_id = $1 ORDER BY seq",
     )
     .bind(doc_id)
@@ -510,7 +510,7 @@ async fn reembed_only_touches_missing_chunks() {
     // 非 ready 文档拒绝 re-embed
     let pending_id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO documents (id, title, source_uri, sha256, status) \
+        "INSERT INTO wiki_documents (id, title, source_uri, sha256, status) \
          VALUES ($1, '未就绪', 'x.md', $2, 'pending')",
     )
     .bind(pending_id)
@@ -522,7 +522,7 @@ async fn reembed_only_touches_missing_chunks() {
     assert!(
         matches!(
             err,
-            engram_core::knowledge::KnowledgeError::BadRequest(_)
+            engram_core::wiki_docs::WikiDocumentError::BadRequest(_)
         ),
         "{err:?}"
     );
@@ -531,7 +531,7 @@ async fn reembed_only_touches_missing_chunks() {
     assert!(
         matches!(
             err,
-            engram_core::knowledge::KnowledgeError::NotFound(_)
+            engram_core::wiki_docs::WikiDocumentError::NotFound(_)
         ),
         "{err:?}"
     );
@@ -614,7 +614,7 @@ async fn embed_short_response_marks_batch_failed_not_silent_null() {
     assert_eq!(doc.status, "ready", "短响应降级不阻塞 ready");
 
     let rows: Vec<(bool, bool)> = sqlx::query_as(
-        "SELECT embed_failed, (embedding IS NOT NULL) FROM chunks \
+        "SELECT embed_failed, (embedding IS NOT NULL) FROM wiki_chunks \
          WHERE document_id = $1 ORDER BY seq",
     )
     .bind(doc_id)

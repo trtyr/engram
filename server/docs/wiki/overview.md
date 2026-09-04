@@ -14,7 +14,7 @@ Wiki 是 Engram 平台的四类长期记忆资产之一，实现 **Karpathy LLM-
 
 | 概念 | 说明 |
 |---|---|
-| **source（原料）** | 一篇不可变输入（文本或 knowledge 文档），落盘 + 记 sha256 |
+| **source（原料）** | 一篇不可变输入（文本或 wiki 文档），落盘 + 记 sha256 |
 | **page（页面）** | 由 LLM 生成/维护的 Markdown 页，有 slug、page_type、origin、version |
 | **wikilink** | `[[slug]]` / `[[slug\|显示名]]` 互链语法，是链接图的边来源 |
 | **frontmatter** | 每页的 jsonb 元数据，含 `sources[]`（该页由哪些原料蒸馏而来） |
@@ -42,7 +42,7 @@ Wiki 是 Engram 平台的四类长期记忆资产之一，实现 **Karpathy LLM-
 ## 整体数据流
 
 ```text
-文本 / knowledge 文档
+文本 / wiki 文档
         │
         ▼
 enqueue_ingest ──(sha256 幂等)──► wiki_sources(pending) + 原料落盘

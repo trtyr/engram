@@ -1,6 +1,6 @@
 # 两步 Ingest
 
-Wiki 摄取是核心链路：一篇原料（文本或 knowledge 文档）经「入队 → 分析 → 生成」三步，变成互链的 wiki 页面。所有实现位于 `crates/wiki-engine/src/ingest.rs`。
+Wiki 摄取是核心链路：一篇原料（文本或 wiki 文档）经「入队 → 分析 → 生成」三步，变成互链的 wiki 页面。所有实现位于 `crates/wiki-engine/src/ingest.rs`。
 
 ## 总览
 
@@ -29,7 +29,7 @@ enqueue_ingest ──► wiki_analyze job ──► wiki_generate job
 4. **冲突内容覆盖**：若 `real_id != id`，删掉新落的临时文件，改写到 `{real_id}.md` 并回写 raw_path。
 5. **入队**：`wiki_analyze` job，payload `{"source_id": real_id}`，幂等键 `wiki-analyze-{real_id}`。
 
-> knowledge 文档入口：`WikiService::ingest_knowledge_document` 先 `parsing::parse_bytes` 解出纯文本，再复用 `enqueue_ingest`。
+> wiki 文档入口：`WikiService::ingest_knowledge_document` 先 `parsing::parse_bytes` 解出纯文本，再复用 `enqueue_ingest`。
 
 ## 2. 第一步：wiki_analyze（分析）
 

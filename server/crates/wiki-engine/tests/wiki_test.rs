@@ -296,7 +296,7 @@ async fn ingest_document_url_fallback_uses_chunks() {
     // URL 式文档：raw_path NULL + 已分块文本
     let doc_id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO documents (id, title, source_uri, status) \
+        "INSERT INTO wiki_documents (id, title, source_uri, status) \
          VALUES ($1, 'URL 摄取的文档', 'https://example.com/article', 'ready')",
     )
     .bind(doc_id)
@@ -307,7 +307,7 @@ async fn ingest_document_url_fallback_uses_chunks() {
         (1, "第一段：异步运行时的选型考量。"),
         (2, "第二段：tokio 与 async-std 的取舍。"),
     ] {
-        sqlx::query("INSERT INTO chunks (id, document_id, seq, content) VALUES ($1, $2, $3, $4)")
+        sqlx::query("INSERT INTO wiki_chunks (id, document_id, seq, content) VALUES ($1, $2, $3, $4)")
             .bind(uuid::Uuid::now_v7())
             .bind(doc_id)
             .bind(seq)
@@ -337,7 +337,7 @@ async fn ingest_document_url_fallback_uses_chunks() {
     // 无 raw_path 且无 chunks → 可行动 400
     let empty_doc = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO documents (id, title, source_uri, status) VALUES ($1, '空文档', 'https://x', 'pending')",
+        "INSERT INTO wiki_documents (id, title, source_uri, status) VALUES ($1, '空文档', 'https://x', 'pending')",
     )
     .bind(empty_doc)
     .execute(&pool)

@@ -129,7 +129,7 @@ async fn auth_401_403_matrix() {
     );
 
     // API key：jobs 可读（任意 scope），管理端点 403
-    let key_full = create_key(&app, &admin, &["memory", "knowledge", "wiki", "codegraph"]).await;
+    let key_full = create_key(&app, &admin, &["memory", "wiki", "codegraph"]).await;
     let key_mem = create_key(&app, &admin, &["memory"]).await;
     assert_eq!(
         get_status(&app, Some(&key_full), "/jobs").await,
@@ -262,7 +262,7 @@ async fn api_key_memory_journey() {
     );
 
     // 跨域越权：memory-only key 摸别的域必须 403
-    for uri in ["/knowledge/documents", "/wiki/pages", "/codegraph/projects"] {
+    for uri in ["/wiki/documents", "/wiki/pages", "/codegraph/projects"] {
         let resp = send(&app, "GET", uri, None).await.unwrap();
         assert_eq!(resp.status(), StatusCode::FORBIDDEN, "GET {uri} 应 403");
     }
@@ -1690,7 +1690,7 @@ async fn wiki_proposals_aggregates_latest_per_job() {
 async fn empty_search_query_rejected() {
     let (app, container) = app().await;
     let token = login_token(&app).await;
-    let key = create_key(&app, &token, &["knowledge", "wiki"]).await;
+    let key = create_key(&app, &token, &["wiki"]).await;
 
     for q in ["", "   "] {
         let resp = app

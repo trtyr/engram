@@ -44,7 +44,7 @@ async fn unified_search_fuses_three_domains() {
     // 2. knowledge：document + chunk
     let doc_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO documents (id, title, source_uri, sha256, status) VALUES ($1, 'Rust 文档', 'rust.md', $2, 'ready')",
+        "INSERT INTO wiki_documents (id, title, source_uri, sha256, status) VALUES ($1, 'Rust 文档', 'rust.md', $2, 'ready')",
     )
     .bind(doc_id)
     .bind(format!("sha-{}", Uuid::now_v7()))
@@ -52,7 +52,7 @@ async fn unified_search_fuses_three_domains() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO chunks (id, document_id, seq, content, embed_failed, tsv) \
+        "INSERT INTO wiki_chunks (id, document_id, seq, content, embed_failed, tsv) \
          VALUES ($1, $2, 0, 'Rust 语言的内存安全特性', false, to_tsvector('simple', $3))",
     )
     .bind(Uuid::now_v7())
@@ -89,10 +89,6 @@ async fn unified_search_fuses_three_domains() {
     assert!(
         domains.contains("memory"),
         "应包含 memory 域命中，got: {domains:?}"
-    );
-    assert!(
-        domains.contains("knowledge"),
-        "应包含 knowledge 域命中，got: {domains:?}"
     );
     assert!(
         domains.contains("wiki"),

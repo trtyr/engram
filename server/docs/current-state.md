@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）。cargo **181** 测试（37 套件）/ **28 迁移** / **88 路径 / 113 方法** / 27 业务表。
+origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）。cargo **181** 测试（37 套件）/ **29 迁移** / **88 路径 / 113 方法** / 27 业务表。
 项目记忆第五域落地（三表 + 15 端点 + 唯一约束）+ 根 README 美化。**数据已由所有者主动清空，本地库已清理**。
 
 ## 当日验证矩阵
