@@ -1970,6 +1970,8 @@ export interface components {
         };
         LocationRequest: {
             host: string;
+            ip: string;
+            os: string;
             path: string;
             purpose?: string | null;
         };
@@ -2059,6 +2061,8 @@ export interface components {
             host: string;
             /** Format: uuid */
             id: string;
+            ip: string;
+            os: string;
             path: string;
             /** Format: uuid */
             project_id: string;
