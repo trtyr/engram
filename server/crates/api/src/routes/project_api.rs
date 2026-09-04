@@ -24,6 +24,7 @@ fn require_project(p: &Principal) -> Result<(), ApiError> {
 fn pe(e: ProjectError) -> ApiError {
     match e {
         ProjectError::NotFound(m) => ApiError::NotFound(m),
+        ProjectError::Conflict(m) => ApiError::Conflict(m),
         ProjectError::BadRequest(m) => ApiError::BadRequest(m),
         ProjectError::Storage(m) => ApiError::Unavailable(m),
     }

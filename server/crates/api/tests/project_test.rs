@@ -373,6 +373,83 @@ async fn project_docs_flow() {
 }
 
 #[tokio::test]
+async fn project_name_unique_conflict() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    let (st, _) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"dup","type":"dev"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+
+    // 同名项目 → 409
+    let (st, v) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"dup","type":"research"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT, "{v}");
+    assert!(v["error"]["message"].as_str().unwrap().contains("已存在"));
+}
+
+#[tokio::test]
+async fn project_doc_title_unique_conflict() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    let (_, v) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"docdup","type":"dev"})),
+    )
+    .await;
+    let id = v["id"].as_str().unwrap().to_string();
+
+    let (st, _) = send(
+        &app,
+        "POST",
+        &format!("/projects/{id}/docs"),
+        &admin,
+        Some(serde_json::json!({"category":"后端","title":"api.md","content":"# v1"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+
+    // 同项目同分类重复 title → 409
+    let (st, v) = send(
+        &app,
+        "POST",
+        &format!("/projects/{id}/docs"),
+        &admin,
+        Some(serde_json::json!({"category":"后端","title":"api.md","content":"# v2"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT, "{v}");
+    assert!(v["error"]["message"].as_str().unwrap().contains("已存在"));
+
+    // 跨分类同名 → 允许
+    let (st, _) = send(
+        &app,
+        "POST",
+        &format!("/projects/{id}/docs"),
+        &admin,
+        Some(serde_json::json!({"category":"前端","title":"api.md","content":"# 前端"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+}
+
+#[tokio::test]
 async fn project_scope_required() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;

@@ -159,7 +159,9 @@ pub async fn bearer_auth(
         .and_then(|v| v.strip_prefix("Bearer "));
 
     let Some(token) = header else {
-        return auth_error("缺少 Bearer 凭证");
+        return auth_error(
+            "缺少 Bearer 凭证——请在请求头加 Authorization: Bearer <token>（管理员登录拿 ams_ 会话，AI 客户端用设置页签发的 amk_ key）",
+        );
     };
 
     let principal = authenticate(&state.pool, token).await;

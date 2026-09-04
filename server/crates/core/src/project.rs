@@ -15,6 +15,8 @@ pub enum ProjectError {
     #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
+    Conflict(String),
+    #[error("{0}")]
     BadRequest(String),
     #[error("存储暂时不可用: {0}")]
     Storage(String),
@@ -166,9 +168,10 @@ impl ProjectService {
             ProjectError::BadRequest(format!("未知项目类型: {type_}（支持 dev/research）"))
         })?;
         let id = Uuid::now_v7();
-        sqlx::query(
+        let res = sqlx::query(
             "INSERT INTO projects (id, name, type, status, description, categories) \
-             VALUES ($1, $2, $3, 'active', $4, $5)",
+             VALUES ($1, $2, $3, 'active', $4, $5) \
+             ON CONFLICT (name) DO NOTHING",
         )
         .bind(id)
         .bind(name)
@@ -177,6 +180,11 @@ impl ProjectService {
         .bind(sqlx::types::Json(&categories))
         .execute(&self.pool)
         .await?;
+        if res.rows_affected() == 0 {
+            return Err(ProjectError::Conflict(format!(
+                "项目名「{name}」已存在——项目名唯一，请改名或复用已有项目（先 projects 列表确认）"
+            )));
+        }
         self.get_project_bare(id).await
     }
 
@@ -254,7 +262,9 @@ impl ProjectService {
         .execute(&self.pool)
         .await?;
         if res.rows_affected() == 0 {
-            return Err(ProjectError::NotFound(format!("项目 {id} 不存在")));
+            return Err(ProjectError::NotFound(format!(
+                "项目 {id} 不存在——先跑 projects 列表确认 id（可能已删除或抄错）"
+            )));
         }
         self.get_project_bare(id).await
     }
@@ -265,7 +275,9 @@ impl ProjectService {
             .execute(&self.pool)
             .await?;
         if res.rows_affected() == 0 {
-            return Err(ProjectError::NotFound(format!("项目 {id} 不存在")));
+            return Err(ProjectError::NotFound(format!(
+                "项目 {id} 不存在——先跑 projects 列表确认 id（可能已删除或抄错）"
+            )));
         }
         Ok(true)
     }
@@ -304,7 +316,11 @@ impl ProjectService {
         .bind(id)
         .fetch_optional(&self.pool)
         .await?
-        .ok_or_else(|| ProjectError::NotFound(format!("项目 {id} 不存在")))
+        .ok_or_else(|| {
+            ProjectError::NotFound(format!(
+                "项目 {id} 不存在——先跑 projects 列表确认 id（可能已删除或抄错）"
+            ))
+        })
     }
 
     // ---------- 位置（多主机） ----------
@@ -358,7 +374,9 @@ impl ProjectService {
         .execute(&self.pool)
         .await?;
         if res.rows_affected() == 0 {
-            return Err(ProjectError::NotFound(format!("位置 {id} 不存在")));
+            return Err(ProjectError::NotFound(format!(
+                "位置 {id} 不存在——先 project-get <项目> 看 locations 列表取 id"
+            )));
         }
         self.get_location(id).await
     }
@@ -369,7 +387,9 @@ impl ProjectService {
             .execute(&self.pool)
             .await?;
         if res.rows_affected() == 0 {
-            return Err(ProjectError::NotFound(format!("位置 {id} 不存在")));
+            return Err(ProjectError::NotFound(format!(
+                "位置 {id} 不存在——先 project-get <项目> 看 locations 列表取 id"
+            )));
         }
         Ok(true)
     }
@@ -381,7 +401,11 @@ impl ProjectService {
         .bind(id)
         .fetch_optional(&self.pool)
         .await?
-        .ok_or_else(|| ProjectError::NotFound(format!("位置 {id} 不存在")))
+        .ok_or_else(|| {
+            ProjectError::NotFound(format!(
+                "位置 {id} 不存在——先 project-get <项目> 看 locations 列表取 id"
+            ))
+        })
     }
 
     // ---------- 分类文档 ----------
@@ -395,9 +419,10 @@ impl ProjectService {
     ) -> Result<ProjectDocDto, ProjectError> {
         self.get_project_bare(project_id).await?;
         let id = Uuid::now_v7();
-        sqlx::query(
+        let res = sqlx::query(
             "INSERT INTO project_docs (id, project_id, category, title, content) \
-             VALUES ($1, $2, $3, $4, $5)",
+             VALUES ($1, $2, $3, $4, $5) \
+             ON CONFLICT (project_id, category, title) DO NOTHING",
         )
         .bind(id)
         .bind(project_id)
@@ -406,6 +431,11 @@ impl ProjectService {
         .bind(content)
         .execute(&self.pool)
         .await?;
+        if res.rows_affected() == 0 {
+            return Err(ProjectError::Conflict(format!(
+                "文档「{title}」在分类「{category}」下已存在——同项目同分类 title 唯一，请 doc-update 已有文档或改 title"
+            )));
+        }
         self.get_doc(id).await
     }
 
@@ -427,7 +457,9 @@ impl ProjectService {
         .execute(&self.pool)
         .await?;
         if res.rows_affected() == 0 {
-            return Err(ProjectError::NotFound(format!("文档 {id} 不存在")));
+            return Err(ProjectError::NotFound(format!(
+                "文档 {id} 不存在——先 project-get <项目> 看 docs 列表取 id"
+            )));
         }
         self.get_doc(id).await
     }
@@ -438,7 +470,9 @@ impl ProjectService {
             .execute(&self.pool)
             .await?;
         if res.rows_affected() == 0 {
-            return Err(ProjectError::NotFound(format!("文档 {id} 不存在")));
+            return Err(ProjectError::NotFound(format!(
+                "文档 {id} 不存在——先 project-get <项目> 看 docs 列表取 id"
+            )));
         }
         Ok(true)
     }
@@ -450,6 +484,10 @@ impl ProjectService {
         .bind(id)
         .fetch_optional(&self.pool)
         .await?
-        .ok_or_else(|| ProjectError::NotFound(format!("文档 {id} 不存在")))
+        .ok_or_else(|| {
+            ProjectError::NotFound(format!(
+                "文档 {id} 不存在——先 project-get <项目> 看 docs 列表取 id"
+            ))
+        })
     }
 }

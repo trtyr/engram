@@ -17,7 +17,7 @@ origin/main 项目记忆域落地中。cargo **176** 测试 / vitest 42。
 | web | pnpm run lint / tsc / test / build | 0 警告 / 0 / 42 全过（8 文件）/ exit 0 |
 | web | 入口 bundle | 285.23 kB（gzip 91.70），预算 350 内 |
 | CI | gh run list（f700031） | CI + e2e 双 success（GitHub 实查） |
-| 事实 | OpenAPI 活体 / 迁移 / 表 | **88 路径 / 113 方法注册**（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10）/ **26 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
+| 事实 | OpenAPI 活体 / 迁移 / 表 | **88 路径 / 113 方法注册**（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10）/ **28 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
 
 ## 运行环境实况（2026-09-03 实查 + 所有者确认）
 

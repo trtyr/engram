@@ -37,6 +37,9 @@ pub enum ApiError {
     /// 资源不存在
     #[error("{0}")]
     NotFound(String),
+    /// 资源已存在冲突（409，唯一约束命中）
+    #[error("{0}")]
+    Conflict(String),
     /// 未认证（401）
     #[error("{0}")]
     Unauthorized(String),
@@ -59,6 +62,7 @@ impl ApiError {
         match self {
             ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request", false),
             ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found", false),
+            ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict", false),
             ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized", false),
             ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden", false),
             ApiError::Database(_) => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", true),
@@ -70,7 +74,7 @@ impl ApiError {
     /// 用户可见 message（安全子集）。
     fn safe_message(&self) -> String {
         match self {
-            ApiError::BadRequest(m) | ApiError::NotFound(m) => m.clone(),
+            ApiError::BadRequest(m) | ApiError::NotFound(m) | ApiError::Conflict(m) => m.clone(),
             _ => self.to_string(),
         }
     }

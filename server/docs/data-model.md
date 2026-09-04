@@ -35,7 +35,7 @@
 | LLM | settings | 路由表等 JSONB 配置 |
 | LLM | llm_usage | 用量记账（provider/model/purpose/tokens/latency） |
 
-## 迁移史（26 个）
+## 迁移史（28 个）
 
 | 迁移 | 内容要点 |
 |---|---|
@@ -56,6 +56,8 @@
 | 0024 | atoms 无 source_refs 的 active 残留打标 `origin=direct-write`（溯源断但可审计） |
 | 0025 | wiki_pages.**folder**（Obsidian 式目录树层级，/ 分隔多级路径；蒸馏按 page_type 归文件夹） |
 | 0026 | **projects + project_locations + project_docs**（项目记忆第五域：类型模板分类 + 多主机位置 + 分类文档） |
+| 0027 | project_locations.**ip** + **os**（位置元数据补齐，多主机登记） |
+| 0028 | projects.**name** UNIQUE + project_docs(**project_id, category, title**) UNIQUE（防同名项目/同项目同分类同名文档） |
 
 ## 数据流（写路径）
 

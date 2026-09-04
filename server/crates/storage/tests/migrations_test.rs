@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 27 份迁移：0027 = project location ip/os 元数据）
+    // 版本可查（当前 28 份迁移：0028 = project 唯一约束）
     let version = agent_memory_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(27), "0001-0027 迁移应已应用");
+    assert_eq!(version, Some(28), "0001-0028 迁移应已应用");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")
