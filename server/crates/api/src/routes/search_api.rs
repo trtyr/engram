@@ -1,4 +1,4 @@
-//! 跨域统一检索端点（memory + knowledge + wiki）。
+//! 跨域统一检索端点（memory + wiki）。
 
 use engram_core::unified::{UnifiedError, UnifiedHit, UnifiedSearch};
 use axum::Json;

@@ -1,6 +1,6 @@
 //! 跨域统一检索集成测试（R1）。
 //!
-//! 验证 `/search` 背后的 UnifiedSearch 真的融合 memory + knowledge + wiki 三域：
+//! 验证 `/search` 背后的 UnifiedSearch 真的融合 memory + wiki 两域：
 //! 三域各插一条含关键词的数据，一次查询应返回三域合并命中（带域标签）。
 
 mod support;
@@ -41,7 +41,7 @@ async fn unified_search_fuses_three_domains() {
     .await
     .unwrap();
 
-    // 2. knowledge：document + chunk
+    // 2. wiki：document + chunk
     let doc_id = Uuid::now_v7();
     sqlx::query(
         "INSERT INTO wiki_documents (id, title, source_uri, sha256, status) VALUES ($1, 'Rust 文档', 'rust.md', $2, 'ready')",

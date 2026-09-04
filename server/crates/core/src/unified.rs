@@ -1,8 +1,8 @@
-//! 跨域统一检索：一次查询融合 memory + knowledge + wiki 三域。
+//! 跨域统一检索：一次查询融合 memory + wiki 两域。
 //!
-//! 三域各自的 score 尺度不同（memory/knowledge 是 RRF 分数、wiki 是 ts_rank），
+//! 两域各自的 score 尺度不同（memory 是 RRF 分数、wiki 是 ts_rank），
 //! 直接合并排序会偏向大尺度域。这里统一用「域内 rank 归一化」：每个域（memory 的
-//! l1/l2 各自独立、knowledge、wiki）内按命中顺序赋 RRF 分数 `1/(60 + rank)`，
+//! l1/l2 各自独立、wiki）内按命中顺序赋 RRF 分数 `1/(60 + rank)`，
 //! 使跨域分数可比，融合后按分数降序截断。
 
 use engram_llm::ProviderRegistry;
@@ -16,7 +16,7 @@ use crate::wiki::WikiService;
 /// 统一命中（跨域检索的最小公分母）。
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct UnifiedHit {
-    /// 域标签：memory | knowledge | wiki
+    /// 域标签：memory | wiki
     pub domain: String,
     pub id: Uuid,
     pub title: Option<String>,
@@ -172,7 +172,7 @@ impl UnifiedSearch {
 }
 
 /// 域内 rank 归一化：按 `domain:layer` 分组，组内按命中顺序赋 RRF 分数 `1/(60+rank)`。
-/// memory 的 l1/l2 各自独立 rank；knowledge/wiki 各一组。
+/// memory 的 l1/l2 各自独立 rank；wiki 各一组。
 pub(crate) fn assign_rrf_scores(hits: &mut [UnifiedHit]) {
     use std::collections::HashMap;
     let mut rank: HashMap<String, usize> = HashMap::new();

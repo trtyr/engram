@@ -38,7 +38,7 @@ entities（记忆坐标系）          人物/项目/主题/群组/地点——�
 │  axum Router                                                                │
 │  ├─ 公开: /health /ready /openapi.json /auth/login                          │
 │  ├─ Bearer 认证层（admin 会话 ams_ / api key amk_；/jobs 对 text/html 分流 SPA）│
-│  └─ 9 个域路由: auth / memory / knowledge / wiki / codegraph / jobs /        │
+│  └─ 9 个域路由: auth / memory / wiki / codegraph / project / jobs /         │
 │                llm(settings) / search / health                              │
 │  rust-embed ── web/dist 同源托管（生产单二进制）                              │
 └──────┬───────────────────────────────────────────────────────────────────────┘

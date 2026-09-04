@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::llm_port::LlmRef;
 
-/// 单批嵌入条数（对齐知识域 embed_job 的批次粒度）。
+/// 单批嵌入条数（对齐 wiki 文档域 embed_job 的批次粒度）。
 const BATCH: usize = 64;
 
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {

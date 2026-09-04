@@ -44,7 +44,7 @@ def _psql(sql):
 async def main() -> None:
     e = env.ensure()
     admin = Client.login(e.base_url, e.admin_password)
-    know = admin.with_key(admin.create_api_key("e2e-rt", ["knowledge"]))
+    know = admin.with_key(admin.create_api_key("e2e-rt", ["wiki"]))
 
     has_llm = _embed_ok(e)
     if not has_llm:
@@ -83,19 +83,19 @@ async def main() -> None:
     back = admin.get("/settings/llm/routing")
     eq(back.get("embed", [{}])[0].get("provider"), "ghost-不存在", "幽灵路由已入库（psql 种子）")
 
-    r = know.s.post(f"{know.base}/knowledge/upload",
+    r = know.s.post(f"{know.base}/wiki/upload",
                     files={"file": ("fallback.md", io.BytesIO(DOC), "text/markdown")},
                     timeout=30)
     doc_id = r.json()["id"]
     doc = {}
     deadline = time.time() + 120
     while time.time() < deadline:
-        doc = know.get(f"/knowledge/documents/{doc_id}")
+        doc = know.get(f"/wiki/documents/{doc_id}")
         if doc["status"] in ("ready", "failed"):
             break
         time.sleep(1)
     eq(doc["status"], "ready", "文档 ready（ghost 路由未阻塞摄取）")
-    chunks = know.get(f"/knowledge/documents/{doc_id}/chunks")
+    chunks = know.get(f"/wiki/documents/{doc_id}/chunks")
     ok(all(not c["embed_failed"] for c in chunks),
        "chunks 嵌入成功（回退到默认 provider）")
 

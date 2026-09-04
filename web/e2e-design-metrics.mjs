@@ -11,7 +11,6 @@ const PW = process.env.E2E_ADMIN_PW ?? 'design-audit-pw'
 const pages = [
   { name: 'dashboard', path: '/' },
   { name: 'memory', path: '/memory' },
-  { name: 'knowledge', path: '/knowledge' },
   { name: 'wiki', path: '/wiki' },
   { name: 'wiki-markdown', path: '/wiki?page=markdown-kitchen-sink' },
   { name: 'codegraph', path: '/codegraph' },

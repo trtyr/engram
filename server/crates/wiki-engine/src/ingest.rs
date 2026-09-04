@@ -29,7 +29,7 @@ fn sha256_hex(b: &[u8]) -> String {
     h.finalize().iter().map(|x| format!("{x:02x}")).collect()
 }
 
-/// 入队 ingest：source 内容（复用 knowledge 的解析产物文本或直接文本）。
+/// 入队 ingest：source 内容（复用 wiki 文档的解析产物文本或直接文本）。
 /// sha 命中且已 ingest → 跳过（幂等）。
 pub async fn enqueue_ingest(
     queue: &engram_jobs::JobQueue,

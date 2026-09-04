@@ -1,6 +1,6 @@
-//! 知识域：文档摄取（解析→分块→嵌入）+ 检索。
+//! wiki 文档域：文档摄取（解析→分块→嵌入）+ 检索。
 //!
-//! 设计文档：docs/plantree/plans/engram-platform/topics/knowledge-ingest.md
+//! 设计文档：server/docs/wiki/ingest.md
 
 pub mod chunking;
 pub mod pipeline;

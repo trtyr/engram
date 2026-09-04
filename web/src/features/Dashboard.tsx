@@ -161,7 +161,7 @@ export default function Dashboard() {
       api.get<Atom[]>('/memory/atoms?limit=500'),
       api.get<Session[]>('/memory/sessions?limit=500'),
       api.get<Scenario[]>('/memory/scenarios?limit=500'),
-      api.get<Document[]>('/knowledge/documents?limit=200'),
+      api.get<Document[]>('/wiki/documents?limit=200'),
       api.get<WikiPage[]>('/wiki/pages?limit=300'),
     ])
       .then(([atoms, sessions, scenarios, docs, pages]) => setCore({ atoms, sessions, scenarios, docs, pages }))
@@ -231,7 +231,7 @@ export default function Dashboard() {
 
       {emptyWorld && (
         <p className="text-sm text-muted-foreground">
-          还没有任何记忆资产——去<a className="underline underline-offset-4" href="#/knowledge">知识</a>
+          还没有任何记忆资产——去<a className="underline underline-offset-4" href="#/wiki">知识</a>
           上传第一份文档，或在<a className="underline underline-offset-4" href="#/memory">记忆</a>写入第一条会话。
         </p>
       )}

@@ -76,7 +76,7 @@ rand = "0.9"
 jieba-rs = "0.4"
 pgvector = { version = "0.4", features = ["sqlx"] }
 
-# 文档解析（知识域）
+# 文档解析（wiki 文档域）
 pdf-extract = "0.12"          # 内部 lopdf ≥0.42（RUSTSEC-2026-0187 修复）
 docx-rs = "0.4"
 scraper = "0.23"

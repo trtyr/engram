@@ -50,7 +50,7 @@ crates/api/src/
     ├── auth_api.rs         #   新端点必须 .route() + paths() 双注册，漏一半快照测试红）
     ├── memory_api.rs       # 会话/原子/场景/画像/蒸馏 + 实体 9 端点 + purge/export/reembed
     │                       #   （编辑分权：Principal 二次校验，403 文案指路 correction）
-    ├── knowledge_api.rs    # 文档上传/状态/重嵌入/分块检索
+    ├── wiki_docs_api.rs    # 文档上传/状态/重嵌入/分块检索
     ├── wiki_api.rs         # 页面/图谱/lint/洞察/提案/源数据/目的/摄取/搜索
     ├── codegraph_api.rs    # 项目注册/索引/查询
     ├── jobs_api.rs         # 任务列表/详情/事件/revive

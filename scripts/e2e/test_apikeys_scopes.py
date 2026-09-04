@@ -24,7 +24,7 @@ async def main() -> None:
     ok(isinstance(mem.get("/memory/sessions"), list), "memory key → GET /memory/sessions 200")
 
     section("scope 外 → 403")
-    for path in ("/wiki/pages", "/knowledge/documents", "/codegraph/projects"):
+    for path in ("/wiki/pages", "/wiki/documents", "/codegraph/projects"):
         try:
             mem.get(path)
             raise AssertionError(f"{path} 应 403")

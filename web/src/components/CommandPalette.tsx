@@ -13,14 +13,12 @@ import { inputCls } from '@/lib/ui'
 const DOMAIN_LABEL: Record<string, string> = {
   entity: '实体',
   memory: '记忆',
-  knowledge: '知识',
   wiki: 'Wiki',
 }
 
 function domainRoute(domain: string, id?: string): string {
   if (domain === 'entity') return id ? `/circle?entity=${id}` : '/circle'
   if (domain === 'memory') return '/memory?tab=atoms'
-  if (domain === 'knowledge') return '/knowledge'
   if (domain === 'wiki') return '/wiki'
   return '/'
 }

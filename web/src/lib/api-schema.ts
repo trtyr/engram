@@ -1146,7 +1146,7 @@ export interface paths {
         get?: never;
         put?: never;
         /** 知识混合检索（结果带文档引用 + 高亮片段）。 */
-        post: operations["knowledge_search"];
+        post: operations["wiki_docs_search"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1885,10 +1885,10 @@ export interface components {
         IngestRequest: {
             /**
              * Format: uuid
-             * @description knowledge 文档 ID（二选一）
+             * @description wiki 文档 ID（二选一）
              */
             document_id?: string | null;
-            /** @description 源文本（也可通过 knowledge 文档 ID） */
+            /** @description 源文本（也可通过 wiki 文档 ID） */
             text?: string | null;
             title: string;
         };
@@ -1956,11 +1956,6 @@ export interface components {
          * @enum {string}
          */
         JobStatus: "pending" | "running" | "succeeded" | "failed" | "dead" | "cancelled";
-        KnowledgeSearchRequest: {
-            /** Format: int64 */
-            max_items?: number | null;
-            query: string;
-        };
         LintIssue: {
             detail: string;
             rule: string;
@@ -2254,7 +2249,7 @@ export interface components {
         };
         /** @description 统一命中（跨域检索的最小公分母）。 */
         UnifiedHit: {
-            /** @description 域标签：memory | knowledge | wiki */
+            /** @description 域标签：memory | wiki */
             domain: string;
             /** @description 域特有字段（layer/kind/slug/page_type/document_id/seq 等） */
             extra: Record<string, never>;
@@ -2330,6 +2325,11 @@ export interface components {
             purpose: string;
             /** Format: date-time */
             ts: string;
+        };
+        WikiDocumentSearchRequest: {
+            /** Format: int64 */
+            max_items?: number | null;
+            query: string;
         };
         WikiPageDto: {
             content: string;
@@ -4391,7 +4391,7 @@ export interface operations {
             };
         };
     };
-    knowledge_search: {
+    wiki_docs_search: {
         parameters: {
             query?: never;
             header?: never;
@@ -4400,7 +4400,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["KnowledgeSearchRequest"];
+                "application/json": components["schemas"]["WikiDocumentSearchRequest"];
             };
         };
         responses: {

@@ -16,7 +16,6 @@ const shots = [
   { name: '02-dashboard', path: '/', settle: 1200 },
   { name: '03-memory-sessions', path: '/memory', settle: 1200 },
   { name: '04-memory-persona', path: '/memory', click: 'text=画像', settle: 1000 },
-  { name: '05-knowledge', path: '/knowledge', settle: 1200 },
   { name: '06-wiki-pages', path: '/wiki', settle: 1200 },
   { name: '07-wiki-markdown-full', path: '/wiki?page=markdown-kitchen-sink', settle: 3500 },
   { name: '08-wiki-graph', path: '/wiki', click: 'text=图谱', settle: 2500 },

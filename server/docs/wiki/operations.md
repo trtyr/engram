@@ -78,4 +78,4 @@ ingest 时 LLM 在分析阶段 flag 出待人审项（`analyze` 的 `reviews[]` 
 - `PUT /wiki/pages/{slug}` — 人工编辑页面（origin=human，version+1，重算 tsv）
 - `POST /wiki/proposals/apply` — 人审通过后合入 LLM 提案（复用 `put_page`，保持 human 语义）
 - `POST /wiki/queries/archive` — 问答/检索结果存档为 queries 页，并自动再 ingest 吸收实体概念
-- `POST /wiki/ingest` — 手动触发 ingest（text 或 knowledge document_id）
+- `POST /wiki/ingest` — 手动触发 ingest（text 或 wiki 文档 document_id）

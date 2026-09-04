@@ -32,9 +32,9 @@ fn svc(state: &AppState) -> WikiService {
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct IngestRequest {
     pub title: String,
-    /// 源文本（也可通过 knowledge 文档 ID）
+    /// 源文本（也可通过 wiki 文档 ID）
     pub text: Option<String>,
-    /// knowledge 文档 ID（二选一）
+    /// wiki 文档 ID（二选一）
     pub document_id: Option<uuid::Uuid>,
 }
 

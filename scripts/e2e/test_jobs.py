@@ -17,10 +17,10 @@ from _lib.client import ApiError, Client
 async def main() -> None:
     e = env.ensure()
     admin = Client.login(e.base_url, e.admin_password)
-    know = admin.with_key(admin.create_api_key("e2e-jobs", ["knowledge"]))
+    know = admin.with_key(admin.create_api_key("e2e-jobs", ["wiki"]))
 
     section("制造永久失败任务：SSRF 拒绝的 URL 摄取")
-    doc = know.post("/knowledge/documents", json={"url": "http://127.0.0.1:9/never"})
+    doc = know.post("/wiki/documents", json={"url": "http://127.0.0.1:9/never"})
     doc_id = doc["id"]
 
     def _failed_job():
@@ -70,7 +70,7 @@ async def main() -> None:
             break
         time.sleep(1)
     eq(final["status"], "failed", "重跑后再次 failed（同一永久错误）")
-    doc_after = know.get(f"/knowledge/documents/{doc_id}")
+    doc_after = know.get(f"/wiki/documents/{doc_id}")
     eq(doc_after["status"], "failed", "文档状态 failed（错误可见）")
     ok(doc_after.get("error"), "文档行带错误信息")
 

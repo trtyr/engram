@@ -246,7 +246,7 @@ pub struct MemoryService {
 pub const PURGE_CONFIRM_PHRASE: &str = "清空记忆库";
 
 /// 单轮 text 上限（SEC-B，2026-09-03）：防超长文本整轮灌进会话爆蒸馏 token；
-/// 长文档应走知识域 /wiki/upload 分块摄取。
+/// 长文档应走 wiki 文档域 /wiki/upload 分块摄取。
 pub const TURN_TEXT_MAX_CHARS: usize = 50_000;
 
 /// M-1/SEC-B（2026-09-03）：轮次逐条校验——speaker 合法、text 非空且有上限。

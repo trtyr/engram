@@ -36,7 +36,7 @@ else
 fi
 KEY=$(curl -fsS -X POST "$API/settings/api-keys" -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
-  -d '{"name":"ai-loop","scopes":["memory","knowledge","wiki","codegraph"]}' | jq -r .key)
+  -d '{"name":"ai-loop","scopes":["memory","wiki","codegraph"]}' | jq -r .key)
 echo "   key 已签发（模拟交给 AI 客户端）"
 AUTH="authorization: Bearer $KEY"
 
@@ -74,16 +74,16 @@ echo "== 5. 二次上下文（画像应含新信息）"
 curl -fsS "$API/memory/context?query=生产环境" -H "$AUTH" | jq -c '{l3: (.persona | map({aspect, has_content: (.content|length>0)}))}'
 
 echo "== 6. 知识摄取（URL）+ 检索"
-curl -fsS -X POST "$API/knowledge/documents" -H "$AUTH" -H 'content-type: application/json' \
+curl -fsS -X POST "$API/wiki/documents" -H "$AUTH" -H 'content-type: application/json' \
   -d '{"url":"https://mirrors.tuna.tsinghua.edu.cn/"}' >/dev/null
 for _ in $(seq 1 90); do
-  DS=$(curl -fsS "$API/knowledge/documents?limit=5" -H "$AUTH" | jq -r '[.[] | select(.source_uri | contains("tuna"))][0].status // "none"')
+  DS=$(curl -fsS "$API/wiki/documents?limit=5" -H "$AUTH" | jq -r '[.[] | select(.source_uri | contains("tuna"))][0].status // "none"')
   [ "$DS" = "ready" ] && break
   if [ "$DS" = "failed" ]; then echo "   URL 摄取 failed"; exit 1; fi
   sleep 1
 done
 echo "   摄取状态: $DS"
-KS=$(curl -fsS -X POST "$API/knowledge/search" -H "$AUTH" -H 'content-type: application/json' -d '{"query":"镜像站 开源软件","max_items":3}')
+KS=$(curl -fsS -X POST "$API/wiki/search" -H "$AUTH" -H 'content-type: application/json' -d '{"query":"镜像站 开源软件","max_items":3}')
 echo "$KS" | jq -c '{doc_hits: [.[] | .document_title][0:2]}'
 KSN=$(echo "$KS" | jq 'length')
 [ "$KSN" -ge 1 ] || { echo "   知识检索未命中"; exit 1; }

@@ -16,7 +16,7 @@
 | EntityRelation | from_id/to_id、rel_type（5 类：member_of/located_in/works_on/part_of/related_to）、weight、source（distill/manual） | 圈子关系 |
 | EntityGraph | nodes + edges（共现权重）+ relations（类型化有向关系） | 圈子图谱 |
 | Job / JobEvent | kind、status（含 **cancelled**）、attempts、error / level、message | Jobs、壳徽章 |
-| Document / ChunkHit | status（pending→parsing→chunking→embedding→ready/failed）/ score | Wiki 文档（原 Knowledge） |
+| Document / ChunkHit | status（pending→parsing→chunking→embedding→ready/failed）/ score | Wiki 文档 |
 | WikiPage | slug、page_type、folder、frontmatter、origin、version | Wiki |
 | GraphDto | nodes/edges/communities（社区发现） | Wiki 图谱 |
 | Provider / UsageRow / ApiKey | model_id、capability、is_default、warning / tokens、latency / scopes | Settings |

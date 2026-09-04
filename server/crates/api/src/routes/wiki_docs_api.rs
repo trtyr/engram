@@ -205,7 +205,7 @@ pub struct WikiDocumentSearchRequest {
 }
 
 /// 知识混合检索（结果带文档引用 + 高亮片段）。
-#[utoipa::path(post, path = "/wiki/documents/search", operation_id = "knowledge_search",
+#[utoipa::path(post, path = "/wiki/documents/search", operation_id = "wiki_docs_search",
     request_body = WikiDocumentSearchRequest,
     responses((status = 200, body = [ChunkHit])))]
 pub async fn search(

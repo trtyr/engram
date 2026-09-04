@@ -32,7 +32,7 @@ test('真全旅程：上传->ready、会话->蒸馏->原子、wiki->页面+图�
   // ---------- 0. 管理员准备（API 签发 e2e key） ----------
   const login = await api('POST', '/auth/login', { password: ADMIN_PW })
   const adminToken: string = login.token
-  const keyResp = await api('POST', '/settings/api-keys', { name: `e2e-${Date.now()}`, scopes: ['memory', 'knowledge', 'wiki', 'codegraph'] }, adminToken)
+  const keyResp = await api('POST', '/settings/api-keys', { name: `e2e-${Date.now()}`, scopes: ['memory', 'wiki', 'codegraph'] }, adminToken)
   const aiKey: string = keyResp.key
 
   // 探测栈有无可用 LLM provider：没有则跳过依赖 LLM 的断言（蒸馏链 / Wiki 生成），

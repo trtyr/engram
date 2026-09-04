@@ -129,7 +129,7 @@ impl WikiService {
         Ok(skipped)
     }
 
-    /// 从 knowledge 文档触发织入（upload 与 URL 通用，2026-09-04 补 URL 兜底）：
+    /// 从 wiki 文档触发织入（upload 与 URL 通用，2026-09-04 补 URL 兜底）：
     /// raw_path 有 → 重新读取原文件并解析（保留原行为）；
     /// raw_path 空（URL 摄取）→ 用已分块文本按 seq 拼接——此前 URL 文档既不能
     /// --doc-id 手动织入（404）也不会被自动织入静默跳过，两路都收敛到 ingest(title, text)。
@@ -353,7 +353,7 @@ impl WikiService {
             .and_then(|r| r.embeddings.first().cloned());
 
         if let Some(qv) = qv {
-            // FTS + ANN 双候选 + RRF 融合（与 knowledge 同款模式）
+            // FTS + ANN 双候选 + RRF 融合（与 wiki 文档同款模式）
             let rows: Vec<WikiPageDto> = sqlx::query_as(
                 "WITH fts AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
                  FROM wiki_pages, to_tsquery('simple', $1) q WHERE tsv @@ q LIMIT 100), \

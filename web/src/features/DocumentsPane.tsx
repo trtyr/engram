@@ -1,4 +1,4 @@
-/** Knowledge 域：左目录右阅读的主从版式 + 摄取/URL + 知识块检索。 */
+/** Wiki 文档面板：左目录右阅读的主从版式 + 摄取/URL + 文档检索。 */
 import { useEffect, useRef, useState } from 'react'
 import { Link2, Search, Upload } from 'lucide-react'
 import { api, type ChunkHit, type Document } from '@/lib/api'

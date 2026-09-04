@@ -418,7 +418,7 @@ impl ProviderRegistry {
     }
 
     /// L6：嵌入记账门面——resolve + embed + record_usage 一体。调用方不再持有
-    /// 裸 provider，记账从「约定」变「结构保证」（此前 knowledge 批量嵌入与
+    /// 裸 provider，记账从「约定」变「结构保证」（此前 wiki 文档批量嵌入与
     /// 三域检索的查询嵌入全部绕过记账，用量面板系统性低估）。
     pub async fn embed_for(
         &self,

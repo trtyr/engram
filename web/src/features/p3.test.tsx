@@ -20,7 +20,7 @@ describe('Settings 危险区：清空记忆库确认短语门禁', () => {
 
 /**
  * P3 功能测试：跨域 /search、provider 编辑/删除、re-embed。
- * 以 Dashboard GlobalSearch、Settings Providers、Knowledge ChunksPanel 的行为面为对象。
+ * 以 Dashboard GlobalSearch、Settings Providers、Wiki 文档 ChunksPanel 的行为面为对象。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -123,7 +123,7 @@ const mockState = (api as unknown as { __state: MockState }).__state
 import Dashboard from '@/features/Dashboard'
 import Memory from '@/features/Memory'
 import Settings from '@/features/Settings'
-import { DocumentsPane } from '@/features/Knowledge'
+import { DocumentsPane } from '@/features/DocumentsPane'
 import Wiki from '@/features/Wiki'
 
 const wrap = (ui: React.ReactElement) => <MemoryRouter initialEntries={['/']}>{ui}</MemoryRouter>
@@ -344,7 +344,7 @@ describe('AI 功能页全景', () => {
   })
 })
 
-describe('Knowledge re-embed', () => {
+describe('Wiki 文档 re-embed', () => {
   it('有嵌入失败块时显示重嵌按钮并 POST re-embed', async () => {
     mockState.docs = [
       { id: 'd1', title: 'doc', source_uri: '', mime: null, status: 'ready', error: null, created_at: '2026-08-20T00:00:00Z' },

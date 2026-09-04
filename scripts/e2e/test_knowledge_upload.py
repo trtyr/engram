@@ -53,11 +53,11 @@ async def main() -> None:
             "name": "e2e-know", "base_url": e.llm_base_url, "api_key": e.llm_api_key,
             "model_id": e.llm_embed_model, "capability": "embedding", "is_default": True,
         })
-    know = admin.with_key(admin.create_api_key("e2e-know", ["knowledge"]))
+    know = admin.with_key(admin.create_api_key("e2e-know", ["wiki"]))
     print(f"[info] LLM embedding: {'真网关' if has_llm else '无（验证降级路径）'}")
 
     section("上传 markdown")
-    r = know.s.post(f"{know.base}/knowledge/upload",
+    r = know.s.post(f"{know.base}/wiki/upload",
                     files={"file": ("pgvector-guide.md", io.BytesIO(DOC), "text/markdown")},
                     timeout=30)
     eq(r.status_code, 201, "首次上传 201")
@@ -68,14 +68,14 @@ async def main() -> None:
     section("等状态机走到 ready")
     deadline = time.time() + 120
     while time.time() < deadline:
-        doc = know.get(f"/knowledge/documents/{doc_id}")
+        doc = know.get(f"/wiki/documents/{doc_id}")
         if doc["status"] in ("ready", "failed"):
             break
         time.sleep(1)
     eq(doc["status"], "ready", f"终态 ready（{doc.get('error') or '无错误'}）")
 
     section("chunks 采样")
-    chunks = know.get(f"/knowledge/documents/{doc_id}/chunks")
+    chunks = know.get(f"/wiki/documents/{doc_id}/chunks")
     ok(len(chunks) >= 1, f"chunk 数 ≥1（实际 {len(chunks)}）")
     joined = " ".join(c["content"] for c in chunks)
     ok("pgvector" in joined, "chunk 内容含关键主题")
@@ -85,21 +85,21 @@ async def main() -> None:
         ok(all(c["embed_failed"] for c in chunks), "无 provider 时全部降级 embed_failed（不阻塞 ready）")
 
     section("检索命中（带文档引用）")
-    hits = know.post("/knowledge/search", json={"query": "pgvector 向量检索"})
+    hits = know.post("/wiki/search", json={"query": "pgvector 向量检索"})
     ok(len(hits) >= 1, f"检索命中（{len(hits)}）")
     ok(any(h["document_title"] == "pgvector-guide.md" for h in hits), "命中带文档标题引用")
 
     section("幂等：重复上传同内容 → 200 复用同一文档")
-    r2 = know.s.post(f"{know.base}/knowledge/upload",
+    r2 = know.s.post(f"{know.base}/wiki/upload",
                      files={"file": ("pgvector-guide.md", io.BytesIO(DOC), "text/markdown")},
                      timeout=30)
     eq(r2.status_code, 200, "重复上传 200（dedup）")
     eq(r2.json()["id"], doc_id, "返回同一文档 id")
 
     section("删除级联")
-    know.delete(f"/knowledge/documents/{doc_id}")
+    know.delete(f"/wiki/documents/{doc_id}")
     try:
-        know.get(f"/knowledge/documents/{doc_id}")
+        know.get(f"/wiki/documents/{doc_id}")
         raise check.Fail("应 404")
     except ApiError as err:
         eq(err.status, 404, "删除后 GET 404")

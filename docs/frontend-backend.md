@@ -6,7 +6,7 @@
 
 | 形态 | 前端 | 后端 | 说明 |
 |---|---|---|---|
-| 开发 | Vite :5173 | cargo run :8080 | Vite 代理九前缀（/api /auth /jobs /memory /knowledge /wiki /codegraph /settings /llm）→ VITE_PROXY_TARGET |
+| 开发 | Vite :5173 | cargo run :8080 | Vite 代理八前缀（/api /auth /jobs /memory /wiki /codegraph /settings /llm）→ VITE_PROXY_TARGET |
 | 本地整栈 | 构建 dist 后 rust-embed（debug 直读磁盘） | 同端口 | 改前端无需重编 server |
 | 生产 | web/dist 编进二进制 | 单端口同源 | 零 CORS（tower-http cors feature 在 Cargo.toml 但未挂中间件——不需要） |
 

@@ -581,7 +581,7 @@ pub async fn embed_job(
     Ok(json!({"document_id": doc_id, "embedded": embedded, "missing": missing, "total": total}))
 }
 
-/// 注册知识域 handlers（main 装配用）。
+/// 注册 wiki 文档域 handlers（main 装配用）。
 pub fn register_handlers(
     runner: engram_jobs::Runner,
     registry: ProviderRegistry,
