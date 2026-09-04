@@ -85,7 +85,7 @@ async def main() -> None:
         ok(all(c["embed_failed"] for c in chunks), "无 provider 时全部降级 embed_failed（不阻塞 ready）")
 
     section("检索命中（带文档引用）")
-    hits = know.post("/wiki/search", json={"query": "pgvector 向量检索"})
+    hits = know.post("/wiki/documents/search", json={"query": "pgvector 向量检索"})
     ok(len(hits) >= 1, f"检索命中（{len(hits)}）")
     ok(any(h["document_title"] == "pgvector-guide.md" for h in hits), "命中带文档标题引用")
 

@@ -83,7 +83,7 @@ for _ in $(seq 1 90); do
   sleep 1
 done
 echo "   摄取状态: $DS"
-KS=$(curl -fsS -X POST "$API/wiki/search" -H "$AUTH" -H 'content-type: application/json' -d '{"query":"镜像站 开源软件","max_items":3}')
+KS=$(curl -fsS -X POST "$API/wiki/documents/search" -H "$AUTH" -H 'content-type: application/json' -d '{"query":"镜像站 开源软件","max_items":3}')
 echo "$KS" | jq -c '{doc_hits: [.[] | .document_title][0:2]}'
 KSN=$(echo "$KS" | jq 'length')
 [ "$KSN" -ge 1 ] || { echo "   知识检索未命中"; exit 1; }
@@ -106,11 +106,11 @@ echo "   wiki_generate: $W"
 WSN=0
 for _try in 1 2 3 4 5 6 7 8 9 10; do
 WS=$(curl -fsS -X POST "$API/wiki/search" -H "$AUTH" -H 'content-type: application/json' -d '{"query":"蒸馏","max_items":5}')
-WSN=$(echo "$WS" | jq 'length')
+WSN=$(echo "$WS" | jq '.pages | length')
 [ "$WSN" -ge 1 ] && break
 sleep 2
 done
-echo "$WS" | jq -c '{wiki_hits: [.[] | .slug]}'
+echo "$WS" | jq -c '{wiki_hits: [.pages[] | .slug]}'
 [ "$WSN" -ge 1 ] || { echo "   wiki 检索未命中（重试 10 次）"; exit 1; }
 echo "   wiki 检索命中"
 
