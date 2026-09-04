@@ -8,7 +8,7 @@ agent-memory 第五域：围绕长期任务的跨会话工作上下文。本根�
 
 - **三表模型**：0026 迁移 projects / project_locations / project_docs（0005 落地）
 - **类型模板**：开发四分类「后端/前端/测试/规划」、调研六分类「待查/线索/资料/结论/疑点/证伪」（代码常量 + projects.categories 项目级可增删）
-- **API**：16 endpoint（project scope 第八域，88 路径）
+- **API**：15 endpoint（project scope 第八域，88 路径）
 - **Web**：列表页（CRUD/多选批量删除/类型筛选）+ 详情页（Wiki 式左树右内容树状图）
 - 验证：cargo 176/0、vitest 42/42、端到端 + 截图、docs 三层落档
 

@@ -5,7 +5,7 @@
 ## 一句话状态
 
 origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）。cargo **181** 测试（37 套件）/ **28 迁移** / **88 路径 / 113 方法** / 27 业务表。
-项目记忆第五域落地（三表 + 16 端点 + 唯一约束）+ 根 README 美化。**数据已由所有者主动清空，本地库已清理**。
+项目记忆第五域落地（三表 + 15 端点 + 唯一约束）+ 根 README 美化。**数据已由所有者主动清空，本地库已清理**。
 
 ## 当日验证矩阵
 
@@ -39,7 +39,7 @@ origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）
 | 二期三项 | 过期降权/过滤 + 文件批量导入（source=import）+ 检索时间范围过滤 | d9316b1/1f082e7/9c45889 |
 | **Wiki 目录树** | **0025 wiki_pages.folder**（/ 分隔层级，蒸馏按 page_type 归文件夹，PUT 可改）+ **GET /wiki/proposals** 聚合端点（修 N+1）+ wiki lint uuid cast/review 404 + 0022 测试拆分（PgPool 42P01） | e568732/adbc57e/952035f/a1aea80 |
 | 双链健壮性 | 取页 slug 宽容重查（标题原文双链不再 404） | 6d1fadc |
-| 项目记忆第五域 | 0026 三表（projects/locations/docs）+ 类型模板 + 16 端点 + Web 列表/详情 | 2661272/cdc27e1 |
+| 项目记忆第五域 | 0026 三表（projects/locations/docs）+ 类型模板 + 15 端点 + Web 列表/详情 | 2661272/cdc27e1 |
 | 位置元数据 | 0027 project_locations.ip/os（多主机登记） | 270faab |
 | 项目域唯一约束 | 0028 name/doc title UNIQUE + Conflict 409 + 错误文案三问 | dffdd9a |
 | 产品更名 Engram | 仓库 trtyr/engram + 10 crate engram-* + 品牌面 + 根 README | 23cbdbb |
