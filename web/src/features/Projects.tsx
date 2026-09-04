@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type ProjectDto, type ProjectTypeDto } from '@/lib/api'
-import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
+import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
@@ -153,43 +153,54 @@ export default function Projects() {
         </select>
       </PageHeader>
 
-      {/* 新建 */}
+      {/* 新建 + 全选（同一行） */}
       <Card className="p-3">
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            doCreate()
-          }}
-        >
-          <input
-            className={`${inputCls} w-52`}
-            placeholder="项目名"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <select className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>
-            {types.map((t) => (
-              <option key={t.type} value={t.type}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-          <input
-            className={`${inputCls} flex-1`}
-            placeholder="描述（可选）"
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-          />
-          <Button size="sm" type="submit" disabled={busy || !name.trim()}>
-            新建
-          </Button>
-        </form>
+        <div className="flex flex-wrap items-center gap-3">
+          {rows.length > 1 && (
+            <Checkbox
+              checked={selected.size === rows.length && rows.length > 0}
+              onChange={() => toggleAll()}
+              label="全选"
+            >
+              {selected.size === rows.length ? '取消全选' : '全选'}
+            </Checkbox>
+          )}
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              doCreate()
+            }}
+          >
+            <input
+              className={`${inputCls} w-52`}
+              placeholder="项目名"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <select className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>
+              {types.map((t) => (
+                <option key={t.type} value={t.type}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <input
+              className={`${inputCls} flex-1`}
+              placeholder="描述（可选）"
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+            />
+            <Button size="sm" type="submit" disabled={busy || !name.trim()}>
+              新建
+            </Button>
+          </form>
+        </div>
       </Card>
 
       {err && <ErrorBox msg={err} />}
 
-      {/* 批量操作条 */}
+      {/* 批量操作条（选中时出现） */}
       {selected.size > 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
           <span className="text-sm text-muted-foreground">已选 {selected.size} 项</span>
@@ -209,11 +220,11 @@ export default function Projects() {
           {rows.map((p) => (
             <Card key={p.id} className="p-4">
               <div className="flex items-start gap-3">
-                <input
-                  type="checkbox"
+                <Checkbox
                   className="mt-1"
                   checked={selected.has(p.id)}
                   onChange={() => toggle(p.id)}
+                  label={`选择 ${p.name}`}
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -295,22 +306,6 @@ export default function Projects() {
               )}
             </Card>
           ))}
-
-          {/* 全选（放最后一行底部） */}
-          {rows.length > 1 && (
-            <button
-              type="button"
-              className="flex items-center gap-2 self-start text-xs text-muted-foreground hover:text-foreground"
-              onClick={toggleAll}
-            >
-              <input
-                type="checkbox"
-                readOnly
-                checked={selected.size === rows.length && rows.length > 0}
-              />
-              {selected.size === rows.length ? '取消全选' : '全选'}
-            </button>
-          )}
         </div>
       )}
     </div>
