@@ -18,7 +18,7 @@ Login 页 ──POST /auth/login（管理员密码）──▶ ams_ token
 挂载探活：GET /jobs?limit=1（复用碰撞路径做探针）
   仅 401（凭证失效）→ 回登录页；5xx（服务抖动/部署窗口）保持会话不误杀
 中途失效：任何 401 ─▶ clearToken + engram-auth-expired 事件 ─▶ App 回 /login
-Agent 侧：settings 页签发 amk_ API Key（七 scope：memory/knowledge/wiki/codegraph/llm/erase/cron）
+Agent 侧：settings 页签发 amk_ API Key（八 scope：memory/knowledge/wiki/codegraph/project/llm/erase/cron）
 ```
 
 ## /jobs 路由冲突（2026-08-30 定稿）

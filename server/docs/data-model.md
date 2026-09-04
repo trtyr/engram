@@ -1,9 +1,9 @@
 # 数据模型
 
-> 2026-09-02 实查：迁移目录 24 个 SQL；运行库 public schema 业务表 24 张（另有 `_sqlx_migrations` 簿记表）。
+> 2026-09-04 实查：迁移目录 26 个 SQL；运行库 public schema 业务表 27 张（另有 `_sqlx_migrations` 簿记表）。
 > 权威 schema 以 `server/migrations/` 为准。
 
-## 表清单（24 张业务表）
+## 表清单（27 张业务表）
 
 | 域 | 表 | 说明 |
 |---|---|---|
@@ -26,13 +26,16 @@
 | wiki | wiki_review_items | 人审队列 |
 | wiki | wiki_insight_dismissals | 洞察卡片 dismissing 记录 |
 | codegraph | cg_projects | 注册的代码库（path/source_uri/status/stats） |
+| 项目 | projects | 项目本体（name/type[dev·research]/status/categories JSONB 分类列表可增删/frontmatter） |
+| 项目 | project_locations | 多主机位置（host/path/purpose，登记制纯元数据） |
+| 项目 | project_docs | 分类文档（category/title/content markdown/frontmatter） |
 | 任务 | jobs | 任务队列（kind/status[attempts/error/progress]；status 含 **cancelled**——deep purge 后悔药态；审计行 kind=edit_*/purge_memory） |
 | 任务 | job_events | 事件流水（level/message/data） |
 | LLM | llm_providers | provider（base_url 不带 /v1、models、api_key_encrypted bytea、is_default） |
 | LLM | settings | 路由表等 JSONB 配置 |
 | LLM | llm_usage | 用量记账（provider/model/purpose/tokens/latency） |
 
-## 迁移史（25 个）
+## 迁移史（26 个）
 
 | 迁移 | 内容要点 |
 |---|---|
@@ -52,6 +55,7 @@
 | 0023 | raw_sessions.**sensitive**（会话级敏感标记，蒸馏产物自动继承） |
 | 0024 | atoms 无 source_refs 的 active 残留打标 `origin=direct-write`（溯源断但可审计） |
 | 0025 | wiki_pages.**folder**（Obsidian 式目录树层级，/ 分隔多级路径；蒸馏按 page_type 归文件夹） |
+| 0026 | **projects + project_locations + project_docs**（项目记忆第五域：类型模板分类 + 多主机位置 + 分类文档） |
 
 ## 数据流（写路径）
 

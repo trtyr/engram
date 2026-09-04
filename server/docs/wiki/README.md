@@ -23,4 +23,4 @@ Wiki 是四类长期记忆资产之一，采用 **Karpathy LLM-wiki 模式**：�
 
 - 顶层 [architecture.md](../architecture.md)：wiki-engine 在 workspace 中的位置与依赖方向
 - 顶层 [api.md](../api.md)：wiki 与其他域的接口总览
-- 顶层 [data-model.md](../data-model.md)：全部 24 张业务表的全局视角
+- 顶层 [data-model.md](../data-model.md)：全部 27 张业务表的全局视角

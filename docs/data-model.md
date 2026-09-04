@@ -1,6 +1,6 @@
 # 数据模型（集成索引）
 
-数据库 24 张业务表 + 25 迁移（2026-09-03 运行库实查；0025 = wiki_pages.folder 目录树）。表清单、迁移史、约束陷阱在
+数据库 27 张业务表 + 26 迁移（2026-09-04 运行库实查；0026 = projects/project_locations/project_docs 项目记忆第五域）。表清单、迁移史、约束陷阱在
 [server/docs/data-model.md](../server/docs/data-model.md)；前端消费形状在
 [web/docs/data-model.md](../web/docs/data-model.md)。
 

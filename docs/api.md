@@ -1,6 +1,6 @@
 # API（集成索引）
 
-全栈共一个 HTTP API，**80 路径 / 98 方法注册**（GET 41 · POST 43 · PUT 4 · PATCH 3 · DELETE 7，2026-09-03
+全栈共一个 HTTP API，**88 路径 / 112 方法注册**（GET 41 · POST 43 · PUT 4 · PATCH 3 · DELETE 7，2026-09-03
 openapi-dump 活体导出）。权威全表在 [server/docs/api.md](../server/docs/api.md)；
 前端消费约定（认证、类型双轨、/jobs 分流）在 [web/docs/api.md](../web/docs/api.md)。
 

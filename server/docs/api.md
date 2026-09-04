@@ -1,9 +1,9 @@
 # API
 
-> 2026-09-03 从当日代码 `openapi-dump` 活体导出，共 **80 路径 / 98 方法注册**（GET 41 · POST 43 · PUT 4 · PATCH 3 · DELETE 7）。
+> 2026-09-03 从当日代码 `openapi-dump` 活体导出，共 **88 路径 / 112 方法注册**（GET 41 · POST 43 · PUT 4 · PATCH 3 · DELETE 7）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
-> 七 scope：memory/knowledge/wiki/codegraph/llm/erase/cron）。
+> 八 scope：memory/knowledge/wiki/codegraph/project/llm/erase/cron）。
 > 权威 schema 以 `cargo run -q -p agent-memory-api --bin openapi-dump` 输出为准（前端 CI 有零漂移门禁）。
 
 ## 认证与健康
@@ -88,6 +88,19 @@
 | GET | /codegraph/projects/{id} | 项目详情与统计 |
 | POST | /codegraph/projects/{id}/index、/sync | 触发 codegraph CLI 索引（异步）/ 增量同步 |
 | POST | /codegraph/projects/{id}/query | 结构化查询（符号/调用关系） |
+
+## project（项目记忆域，第五域）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /projects/types | 类型模板（开发四分类/调研六分类预设） |
+| GET/POST | /projects | 项目列表（?type= 筛选）/ 新建（type 决定初始分类） |
+| GET/PUT/DELETE | /projects/{id} | 项目详情（本体+位置+文档）/ 编辑 / 删除（级联） |
+| POST | /projects/batch-delete | 批量删除（列表多选） |
+| POST | /projects/{id}/locations | 登记位置（多主机 host/path/purpose） |
+| PUT/DELETE | /projects/{id}/locations/{loc_id} | 编辑 / 删除位置 |
+| POST | /projects/{id}/docs | 新增分类文档（markdown） |
+| GET/PUT/DELETE | /projects/{id}/docs/{doc_id} | 读 / 编辑 / 删除文档 |
 
 ## jobs（任务域）
 

@@ -10,6 +10,8 @@
 
 **项目记忆长在 agent-memory 里，做第五个域**（projects + 项目条目 + 类型骨架），与 memory / knowledge / wiki / codegraph 并列。
 
+> **操作方式 = skill（无「集成」概念）**：project 域跟现有四域一样，通过 skill（memory.py 的 project 子命令 + SKILL.md）读写。agent 跑任何流程——code flow 也好、其他 workflow 也好——都是 agent 自己调 skill 操作 project 域；这些流程本质上是 agent 在执行，不是需要对接的外部系统，所以不存在独立的「集成层」。
+
 ## 理由
 
 1. **内容大头本来就在这**：一个项目的记忆 = 资料（knowledge documents）+ 知识点（wiki pages）+ 事实与决策（memory atoms）。项目是把这些点串成线的壳；单独建系统则每次挂资料都要跨系统引用，最贵且易漂移。
