@@ -389,7 +389,7 @@ function Keys() {
       )}
       {rows === null ? (
         <Spinner />
-      ) : rows.length === 0 ? (
+      ) : active.length === 0 ? (
         <Empty text="无 API key" />
       ) : (
         <Card className="overflow-hidden">
@@ -400,13 +400,13 @@ function Keys() {
                 variant="destructive"
                 size="sm"
                 onClick={async () => {
-                  if (!confirm(`批量吊销 ${selected.size} 把 key？使用它们的 AI 将立即失权。`)) return
+                  if (!confirm(`批量删除 ${selected.size} 把 key？使用它们的 AI 将立即失权。`)) return
                   await api.post('/settings/api-keys/batch-revoke', { ids: [...selected] })
                   setSelected(new Set())
                   load()
                 }}
               >
-                批量吊销
+                批量删除
               </Button>
             </div>
           )}
@@ -425,10 +425,10 @@ function Keys() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((k) => (
+                {active.map((k) => (
                   <tr key={k.id} className={tableCls.row}>
                     <td className={tableCls.td}>
-                      {!k.revoked_at && <Checkbox checked={selected.has(k.id)} onChange={() => toggle(k.id)} label={`选择 ${k.name}`} />}
+                      <Checkbox checked={selected.has(k.id)} onChange={() => toggle(k.id)} label={`选择 ${k.name}`} />
                     </td>
                     <td className={`${tableCls.td} font-medium`}>{k.name}</td>
                     <td className={`${tableCls.td} font-mono`}>{k.key_prefix}…</td>
@@ -437,21 +437,17 @@ function Keys() {
                       {k.last_used_at ? fmtTime(k.last_used_at) : '—'}
                     </td>
                     <td className={`${tableCls.td} text-right`}>
-                      {k.revoked_at ? (
-                        <span className="text-xs text-destructive">已吊销</span>
-                      ) : (
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={async () => {
-                            if (!confirm(`吊销 key「${k.name}」？使用它的 AI 将立即失权。`)) return
-                            await api.post(`/settings/api-keys/${k.id}/revoke`)
-                            load()
-                          }}
-                        >
-                          吊销
-                        </Button>
-                      )}
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={async () => {
+                          if (!confirm(`删除 key「${k.name}」？使用它的 AI 将立即失权。`)) return
+                          await api.post(`/settings/api-keys/${k.id}/revoke`)
+                          load()
+                        }}
+                      >
+                        删除
+                      </Button>
                     </td>
                   </tr>
                 ))}

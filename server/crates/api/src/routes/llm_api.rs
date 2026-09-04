@@ -933,7 +933,7 @@ pub async fn list_api_keys(
     ))
 }
 
-/// 吊销 API key。
+/// 删除 API key（物理删除，不留记录）。
 #[utoipa::path(post, path = "/settings/api-keys/{id}/revoke", responses((status = 204)))]
 pub async fn revoke_api_key(
     principal: axum::Extension<Principal>,
@@ -941,13 +941,12 @@ pub async fn revoke_api_key(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     require_admin(&principal)?;
-    let result =
-        sqlx::query("UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL")
-            .bind(id)
-            .execute(&state.pool)
-            .await?;
+    let result = sqlx::query("DELETE FROM api_keys WHERE id = $1")
+        .bind(id)
+        .execute(&state.pool)
+        .await?;
     if result.rows_affected() == 0 {
-        return Err(ApiError::NotFound(format!("API key {id} 不存在或已吊销")));
+        return Err(ApiError::NotFound(format!("API key {id} 不存在")));
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -962,7 +961,7 @@ pub struct BatchRevokeResult {
     pub revoked: usize,
 }
 
-/// 批量吊销 API key（幂等：已吊销的忽略，返回实际吊销数）。
+/// 批量删除 API key（物理删除，返回实际删除数）。
 #[utoipa::path(post, path = "/settings/api-keys/batch-revoke",
     request_body = BatchRevokeRequest,
     responses((status = 200, body = BatchRevokeResult)))]
@@ -975,12 +974,10 @@ pub async fn batch_revoke_api_keys(
     if req.ids.is_empty() {
         return Err(ApiError::BadRequest("ids 不能为空".into()));
     }
-    let result = sqlx::query(
-        "UPDATE api_keys SET revoked_at = now() WHERE id = ANY($1) AND revoked_at IS NULL",
-    )
-    .bind(&req.ids)
-    .execute(&state.pool)
-    .await?;
+    let result = sqlx::query("DELETE FROM api_keys WHERE id = ANY($1)")
+        .bind(&req.ids)
+        .execute(&state.pool)
+        .await?;
     Ok(Json(BatchRevokeResult {
         revoked: result.rows_affected() as usize,
     }))

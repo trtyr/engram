@@ -205,20 +205,6 @@ async fn authenticate(pool: &PgPool, token: &str) -> Result<Option<Principal>, A
                 scopes: scopes.0,
             }));
         }
-        // 区分「已撤销」与「不存在」：只有持完整 key 才能触发此查询，不额外泄露信息；
-        // 运维排查时能一眼看出是 key 被撤销而非抄错（2026-08-31 测试方实测痛点）。
-        let revoked: Option<(Uuid,)> = sqlx::query_as(
-            "SELECT id FROM api_keys WHERE key_hash = $1 AND revoked_at IS NOT NULL",
-        )
-        .bind(&hash)
-        .fetch_optional(pool)
-        .await
-        .map_err(ApiError::from)?;
-        if revoked.is_some() {
-            return Err(ApiError::Unauthorized(
-                "API key 已被撤销（revoked）——请在 设置→API 密钥 重新签发".into(),
-            ));
-        }
     }
     Ok(None)
 }

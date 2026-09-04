@@ -268,10 +268,9 @@ async fn api_key_memory_journey() {
     }
 }
 
-/// 已撤销的 amk_ key → 401 文案区分「已撤销」与「不存在」（2026-08-31 测试方实测痛点：
-/// 被误撤销的 key 与抄错的 key 报同一种错，排查靠猜）。
+/// 删除的 amk_ key → 401 通用文案（物理删除不留记录，与「不存在」同路径）。
 #[tokio::test]
-async fn revoked_api_key_gets_distinct_401() {
+async fn deleted_api_key_gets_generic_401() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
@@ -313,7 +312,7 @@ async fn revoked_api_key_gets_distinct_401() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
-    // 撤销 key → 401 且文案含「撤销」
+    // 删除的 key → 401 通用文案（物理删除后与「不存在」同路径，不再区分）
     let resp = app
         .clone()
         .oneshot(
@@ -333,8 +332,8 @@ async fn revoked_api_key_gets_distinct_401() {
     )
     .to_string();
     assert!(
-        text.contains("撤销"),
-        "撤销 key 的 401 应有区分文案，实得 {text}"
+        !text.contains("撤销"),
+        "删除的 key 应走通用文案，实得 {text}"
     );
 
     // 不存在的 key → 401 通用文案（不含「撤销」）
@@ -1413,7 +1412,7 @@ async fn batch_revoke_api_keys_revokes_selected_only() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["revoked"], 2, "应吊销 2 把: {v:?}");
 
-    // 列表验证：前 2 把 revoked_at 已置，第 3 把未吊销
+    // 列表验证：前 2 把已物理删除，只剩第 3 把
     let resp = app
         .clone()
         .oneshot(
@@ -1436,12 +1435,7 @@ async fn batch_revoke_api_keys_revokes_selected_only() {
         .iter()
         .filter(|k| k["name"].as_str().unwrap_or("").starts_with("batch-"))
         .collect();
-    assert_eq!(batch_keys.len(), 3, "应建 3 把 batch- key");
-    let revoked = batch_keys
-        .iter()
-        .filter(|k| !k["revoked_at"].is_null())
-        .count();
-    assert_eq!(revoked, 2, "前 2 把应吊销，第 3 把未吊销");
+    assert_eq!(batch_keys.len(), 1, "前 2 把应物理删除，只剩第 3 把");
 
     // 空数组 → 400
     let resp = app
