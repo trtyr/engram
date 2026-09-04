@@ -98,6 +98,15 @@ function withWikilinks(node: ReactNode, onNavigate: (slug: string) => void): Rea
   return node
 }
 
+/** 从 react-markdown 10 的 Hast node 提取纯文本（text 节点的 value 拼接）。 */
+function hastText(node: unknown): string {
+  if (!node || typeof node !== 'object') return ''
+  const n = node as { value?: unknown; children?: unknown[] }
+  if (typeof n.value === 'string') return n.value
+  if (Array.isArray(n.children)) return n.children.map(hastText).join('')
+  return ''
+}
+
 function MermaidBlock({ code }: { code: string }) {
   const [id] = useState(() => `mmd-${Math.random().toString(36).slice(2)}`)
   const [svg, setSvg] = useState('')
@@ -156,8 +165,8 @@ const WikiMarkdown = memo(function WikiMarkdown({
     <article className="engram-prose">
       <ReactMarkdown
         components={{
-          code({ className, children, ...props }) {
-            const txt = String(children ?? '')
+          code({ className, node, ...props }) {
+            const txt = hastText(node)
             if (/language-mermaid/.test(className ?? '')) return <MermaidBlock code={txt} />
             return (
               <code className={className} {...props}>
@@ -165,37 +174,37 @@ const WikiMarkdown = memo(function WikiMarkdown({
               </code>
             )
           },
-          p({ children, ...props }) {
+          p({ children, node, ...props }) {
             return <p {...props}>{withWikilinks(children, goto)}</p>
           },
-          h1({ children, ...props }) {
+          h1({ children, node, ...props }) {
             return <h1 {...props}>{withWikilinks(children, goto)}</h1>
           },
-          h2({ children, ...props }) {
+          h2({ children, node, ...props }) {
             return <h2 {...props}>{withWikilinks(children, goto)}</h2>
           },
-          h3({ children, ...props }) {
+          h3({ children, node, ...props }) {
             return <h3 {...props}>{withWikilinks(children, goto)}</h3>
           },
-          h4({ children, ...props }) {
+          h4({ children, node, ...props }) {
             return <h4 {...props}>{withWikilinks(children, goto)}</h4>
           },
-          h5({ children, ...props }) {
+          h5({ children, node, ...props }) {
             return <h5 {...props}>{withWikilinks(children, goto)}</h5>
           },
-          h6({ children, ...props }) {
+          h6({ children, node, ...props }) {
             return <h6 {...props}>{withWikilinks(children, goto)}</h6>
           },
-          li({ children, ...props }) {
+          li({ children, node, ...props }) {
             return <li {...props}>{withWikilinks(children, goto)}</li>
           },
-          blockquote({ children, ...props }) {
+          blockquote({ children, node, ...props }) {
             return <blockquote {...props}>{withWikilinks(children, goto)}</blockquote>
           },
-          td({ children, ...props }) {
+          td({ children, node, ...props }) {
             return <td {...props}>{withWikilinks(children, goto)}</td>
           },
-          th({ children, ...props }) {
+          th({ children, node, ...props }) {
             return <th {...props}>{withWikilinks(children, goto)}</th>
           },
         }}
