@@ -16,7 +16,7 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 | server | cargo test --workspace | 181 passed（37 套件） |
 | web | pnpm run lint / tsc / test / build | 0 警告 / 0 / 42 全过（8 文件）/ exit 0 |
 | web | 入口 bundle | 285.23 kB（gzip 91.70），预算 350 内 |
-| CI | gh run list（f700031） | CI + e2e 双 success（GitHub 实查） |
+| CI | gh run list（8af183e） | CI + e2e 双 success（GitHub 实查） |
 | 事实 | OpenAPI 活体 / 迁移 / 表 | **88 路径 / 113 方法注册**（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10）/ **28 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
 
 ## 运行环境实况（2026-09-03 实查 + 所有者确认）
@@ -42,7 +42,7 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 10. **圈子强化 + 关系回溯**（0020/0021 迁移）：13 项强化——详情邻居/语义检索/社区聚类/实体历史/关系升级 A（entity_relations 类型化有向关系 + 蒸馏抽取）/全局时间轴/批量删除/实体导出；关系回溯：consolidate 对存量实体直接抽关系（无 session 重放兜底），常识关系 + 记忆明确关系
 11. **权限收窄 + 二期三项**（2026-09-02）：AI 只写会话（收回直写 atom/entity/relation/attach），删实体/摘原子/删关系收进 erase scope；会话级敏感标记；文件批量导入（source=import + 蒸馏过滤对方观点）；过期自动降权/过滤（检索 ×0.5 + 注入硬过滤，归档先不做）；检索时间范围过滤（from/to，occurred_at 优先 NULL fallback created_at）
 12. **Wiki+Knowledge 合并**（2026-09-02）：/knowledge 端点并入 /wiki 前缀（保留 /knowledge 兼容别名）；上传文档 ready 后自动织入 Wiki；前端融合成一个 Wiki 页（文档/页面/图谱/人审/提案/目标 tabs，删侧栏「知识库」项；DocumentsPane 仍住 Knowledge.tsx）；图谱 Obsidian 化（hover 邻居高亮/拖拽/缩放控件/边按权重编码/位置缓存）
-13. **Wiki Obsidian IA / 目录树重做**（2026-09-03，roadmap 0w）：0026 迁移 wiki_pages.**folder**（/ 分隔多级路径，蒸馏按 page_type 归文件夹，PUT /wiki/pages/{slug} 可改）；新增 **GET /wiki/proposals** 聚合端点（修前端 N+1 串行拉取）；前端 Wiki 页重做——目录树（折叠 localStorage 持久化 / 分割线拖拽 220-480px / role=tree 语义）+ 树/图双视图 + 收件箱/运维二级面板 + ?page= 深链自动展开所在 folder；新增 e2e wiki-ia.spec.ts；双链渲染三连修（递归 withWikilinks 深入行内 children / 取页 slug 宽容重查 / 404 显性提示）；阅读区排版 70ch→4xl 放宽
+13. **Wiki Obsidian IA / 目录树重做**（2026-09-03，roadmap 0w）：0025 迁移 wiki_pages.**folder**（/ 分隔多级路径，蒸馏按 page_type 归文件夹，PUT /wiki/pages/{slug} 可改）；新增 **GET /wiki/proposals** 聚合端点（修前端 N+1 串行拉取）；前端 Wiki 页重做——目录树（折叠 localStorage 持久化 / 分割线拖拽 220-480px / role=tree 语义）+ 树/图双视图 + 收件箱/运维二级面板 + ?page= 深链自动展开所在 folder；新增 e2e wiki-ia.spec.ts；双链渲染三连修（递归 withWikilinks 深入行内 children / 取页 slug 宽容重查 / 404 显性提示）；阅读区排版 70ch→4xl 放宽
 14. **配套修缮**（同期）：wiki lint 过时源 uuid cast + review resolve 未命中按 404；0022 迁移测试拆分（PgPool 跨连接 42P01 必挂修复）；Tabs 脏竖线改发丝网格
 15. **级联删除审计凭证**（2026-09-03 收尾）：`WikiService::audit()` 接线 `delete_source_cascade`——破坏性操作落 jobs succeeded 行（kind=wiki_source_cascade_delete，payload 含 source_id + CascadeReport，best-effort 不阻断），与 memory 域「job 行即审计链」同哲学；cascade_test 补审计断言
 16. **极端测试报告 25 项全修**（2026-09-03 晚，报告：/tmp/agent-memory-skill-test-report-2026-09-03.md，测试方独立 session 实测产出 3 P1/9 P2/13 P3）：① 安全收权——deep 全库清空仅限管理员会话（amk_ 一律 403，短语是公开常量防误不防蓄意）、heartbeat 加固 cron scope+via=cron 双条件、purge --agent 彻底清场（全部会话物理删除含 done/sensitive，先归档原子再删会话）；② 服务端修复——routing-suggest 解析鲁棒化（剥 fence/截 JSON 子串/诊断性错误）、会话轮次校验（speaker/非空/≤50000 字三入口同口径）、provider key ≥8、void 文案拆分 404/400、PUT/apply via 字段落 frontmatter、lint 大小写分级 case_mismatch + generation prompt v2；③ skill 侧批修（~/.pi，非 git）——rhythm-status/heartbeat CLI 入口、call/upload 去重+HTML 撞挡、防呆补齐、testing.md 全流程改会话路径、默认地址 8090、文档口径（去「双因子」、heartbeat 条件表述）；W-2 判定为审计链设计不改（文档写明语义）。验证：cargo 163（+5 新测试）、活体六项实测、CI+e2e 双绿（ce2d116）、独立 auditor 验收批准 + 测试方消费者复测 8 项全绿。

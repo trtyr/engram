@@ -1,11 +1,11 @@
-# 当前状态（2026-09-03 验证基线）
+# 当前状态（2026-09-04 验证基线）
 
-> 2026-08-30 初始化，09-01/09-03 两次全面更新。
+> 2026-08-30 初始化，09-01/09-03/09-04 多次全面更新。
 
 ## 一句话状态
 
-vitest **37**（6 文件）/ oxlint 0 警告 / tsc 0 / build 0 / 入口 bundle **285.23 kB**（gzip 91.43，预算 350 内）。
-origin/main a3b6a2d CI + e2e 双绿。Wiki 页 09-03 完成 Obsidian IA 重做（roadmap 0w，28 项审计全修）。
+vitest **42**（8 文件）/ oxlint 0 警告 / tsc 0 / build 0 / 入口 bundle **285.23 kB**（gzip 91.43，预算 350 内）。
+origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian IA 重做（roadmap 0w，28 项审计全修）。
 
 ## 2026-08-30 基线以来的前端大事记
 
@@ -30,9 +30,9 @@ origin/main a3b6a2d CI + e2e 双绿。Wiki 页 09-03 完成 Obsidian IA 重做�
 |---|---|
 | pnpm run lint（oxlint） | 0 警告 |
 | pnpm exec tsc --noEmit | exit 0 |
-| pnpm test | 37 passed / 6 文件 |
+| pnpm test | 42 passed / 8 文件 |
 | pnpm run build | exit 0；入口 285.23 kB（gzip 91.43） |
-| CI（a3b6a2d） | e2e + CI 双 success |
+| CI（8af183e） | e2e + CI 双 success |
 
 ## 已知前端未了项
 
