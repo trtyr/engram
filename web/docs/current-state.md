@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-vitest **42**（8 文件）/ oxlint 0 警告 / tsc 0 / build 0 / 入口 bundle **285.23 kB**（gzip 90.59，预算 350 内）。
+vitest **42**（8 文件）/ oxlint 0 警告 / tsc 0 / build 0 / 入口 bundle **285.23 kB**（gzip 91.70，预算 350 内）。
 origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian IA 重做（roadmap 0w，28 项审计全修）。
 
 ## 2026-08-30 基线以来的前端大事记
@@ -31,7 +31,7 @@ origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian 
 | pnpm run lint（oxlint） | 0 警告 |
 | pnpm exec tsc --noEmit | exit 0 |
 | pnpm test | 42 passed / 8 文件 |
-| pnpm run build | exit 0；入口 285.23 kB（gzip 90.59） |
+| pnpm run build | exit 0；入口 285.23 kB（gzip 91.70） |
 | CI（f8e1031） | e2e + CI FAIL（支出限额，未启动） |
 
 ## 已知前端未了项

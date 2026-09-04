@@ -15,7 +15,7 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 | server | cargo fmt --check / clippy -D warnings | exit 0 / 0 errors |
 | server | cargo test --workspace | 181 passed（37 套件） |
 | web | pnpm run lint / tsc / test / build | 0 警告 / 0 / 42 全过（8 文件）/ exit 0 |
-| web | 入口 bundle | 285.23 kB（gzip 90.59），预算 350 内 |
+| web | 入口 bundle | 285.23 kB（gzip 91.70），预算 350 内 |
 | CI | gh run list（f8e1031） | CI + e2e FAIL（GitHub 支出限额，未启动） |
 | 事实 | OpenAPI 活体 / 迁移 / 表 | **88 路径 / 113 方法注册**（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10）/ **28 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
 
