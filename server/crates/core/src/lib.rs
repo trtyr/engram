@@ -6,6 +6,7 @@
 pub mod codegraph;
 pub mod knowledge;
 pub mod memory;
+pub mod project;
 pub mod unified;
 pub mod wiki;
 
@@ -14,6 +15,10 @@ pub use knowledge::{ChunkHit, DocumentDto, KnowledgeService};
 pub use memory::{
     AtomRevision, EntityRelationDto, EntityRevision, MemoryService, SearchResponse, TimelineEvent,
     purge_deep_pool,
+};
+pub use project::{
+    ProjectDetailDto, ProjectDocDto, ProjectError, ProjectLocationDto, ProjectService, ProjectTypeDto,
+    PROJECT_STATUSES, PROJECT_TYPES, type_label,
 };
 pub use unified::{UnifiedError, UnifiedHit, UnifiedSearch};
 pub use wiki::{LintReport, WikiError, WikiPageDto, WikiService};

@@ -7,6 +7,7 @@ pub mod jobs_api;
 pub mod knowledge_api;
 pub mod llm_api;
 pub mod memory_api;
+pub mod project_api;
 pub mod search_api;
 pub mod wiki_api;
 
@@ -57,6 +58,11 @@ use utoipa::OpenApi;
         codegraph_api::register_project, codegraph_api::list_projects,
         codegraph_api::get_project, codegraph_api::index_project,
         codegraph_api::sync_project, codegraph_api::query,
+        project_api::list_types, project_api::create_project, project_api::list_projects,
+        project_api::get_project, project_api::update_project, project_api::delete_project,
+        project_api::batch_delete_projects,
+        project_api::add_location, project_api::update_location, project_api::delete_location,
+        project_api::add_doc, project_api::get_doc, project_api::update_doc, project_api::delete_doc,
     ),
 )]
 pub(crate) struct ApiDoc;
@@ -281,7 +287,36 @@ pub fn router(state: AppState) -> Router {
             "/codegraph/projects/{id}/sync",
             post(codegraph_api::sync_project),
         )
-        .route("/codegraph/projects/{id}/query", post(codegraph_api::query));
+        .route("/codegraph/projects/{id}/query", post(codegraph_api::query))
+        // 项目记忆域：types 与 batch-delete 先于 {id}，避免被当作 id 解析
+        .route("/projects/types", get(project_api::list_types))
+        .route("/projects/batch-delete", post(project_api::batch_delete_projects))
+        .route(
+            "/projects",
+            post(project_api::create_project).get(project_api::list_projects),
+        )
+        .route(
+            "/projects/{id}",
+            get(project_api::get_project)
+                .put(project_api::update_project)
+                .delete(project_api::delete_project),
+        )
+        .route(
+            "/projects/{id}/locations",
+            post(project_api::add_location),
+        )
+        .route(
+            "/projects/{id}/locations/{loc_id}",
+            put(project_api::update_location).delete(project_api::delete_location),
+        )
+        .route(
+            "/projects/{id}/docs",
+            post(project_api::add_doc),
+        )
+        .route(
+            "/projects/{id}/docs/{doc_id}",
+            get(project_api::get_doc).put(project_api::update_doc).delete(project_api::delete_doc),
+        );
 
     Router::new()
         .merge(public)
