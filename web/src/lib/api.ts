@@ -346,7 +346,9 @@ export interface ProjectDto {
 export interface ProjectLocationDto {
   id: string
   project_id: string
+  ip: string
   host: string
+  os: string
   path: string
   purpose: string | null
   sort_order: number

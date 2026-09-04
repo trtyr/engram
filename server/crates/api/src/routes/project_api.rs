@@ -59,7 +59,9 @@ pub struct BatchDeleteRequest {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct LocationRequest {
+    pub ip: String,
     pub host: String,
+    pub os: String,
     pub path: String,
     pub purpose: Option<String>,
 }
@@ -210,7 +212,7 @@ pub async fn add_location(
 ) -> Result<(StatusCode, Json<ProjectLocationDto>), ApiError> {
     require_project(&principal)?;
     let loc = svc(&state)
-        .add_location(id, &req.host, &req.path, req.purpose.as_deref())
+        .add_location(id, &req.ip, &req.host, &req.os, &req.path, req.purpose.as_deref())
         .await
         .map_err(pe)?;
     Ok((StatusCode::CREATED, Json(loc)))
@@ -229,7 +231,7 @@ pub async fn update_location(
     require_project(&principal)?;
     Ok(Json(
         svc(&state)
-            .update_location(loc_id, &req.host, &req.path, req.purpose.as_deref())
+            .update_location(loc_id, &req.ip, &req.host, &req.os, &req.path, req.purpose.as_deref())
             .await
             .map_err(pe)?,
     ))

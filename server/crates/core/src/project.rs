@@ -76,7 +76,9 @@ pub struct ProjectDto {
 pub struct ProjectLocationDto {
     pub id: Uuid,
     pub project_id: Uuid,
+    pub ip: String,
     pub host: String,
+    pub os: String,
     pub path: String,
     pub purpose: Option<String>,
     pub sort_order: i32,
@@ -123,7 +125,7 @@ pub struct ProjectService {
 const PROJECT_COLS: &str =
     "id, name, type, status, description, categories, frontmatter, created_at, updated_at";
 const LOCATION_COLS: &str =
-    "id, project_id, host, path, purpose, sort_order, created_at, updated_at";
+    "id, project_id, ip, host, os, path, purpose, sort_order, created_at, updated_at";
 const DOC_COLS: &str =
     "id, project_id, category, title, content, frontmatter, created_at, updated_at";
 
@@ -292,19 +294,23 @@ impl ProjectService {
     pub async fn add_location(
         &self,
         project_id: Uuid,
+        ip: &str,
         host: &str,
+        os: &str,
         path: &str,
         purpose: Option<&str>,
     ) -> Result<ProjectLocationDto, ProjectError> {
         self.get_project_bare(project_id).await?;
         let id = Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO project_locations (id, project_id, host, path, purpose) \
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO project_locations (id, project_id, ip, host, os, path, purpose) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(id)
         .bind(project_id)
+        .bind(ip)
         .bind(host)
+        .bind(os)
         .bind(path)
         .bind(purpose)
         .execute(&self.pool)
@@ -315,16 +321,20 @@ impl ProjectService {
     pub async fn update_location(
         &self,
         id: Uuid,
+        ip: &str,
         host: &str,
+        os: &str,
         path: &str,
         purpose: Option<&str>,
     ) -> Result<ProjectLocationDto, ProjectError> {
         let res = sqlx::query(
-            "UPDATE project_locations SET host = $2, path = $3, purpose = $4, updated_at = now() \
+            "UPDATE project_locations SET ip = $2, host = $3, os = $4, path = $5, purpose = $6, updated_at = now() \
              WHERE id = $1",
         )
         .bind(id)
+        .bind(ip)
         .bind(host)
+        .bind(os)
         .bind(path)
         .bind(purpose)
         .execute(&self.pool)

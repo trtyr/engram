@@ -242,12 +242,14 @@ async fn project_locations_flow() {
         "POST",
         &format!("/projects/{id}/locations"),
         &admin,
-        Some(serde_json::json!({"host":"MacBook Pro","path":"~/Documents/Code/Rust/agent-memory","purpose":"开发"})),
+        Some(serde_json::json!({"ip":"192.168.1.5","host":"MacBook Pro","os":"macOS 15","path":"~/Documents/Code/Rust/agent-memory","purpose":"开发"})),
     )
     .await;
     assert_eq!(st, StatusCode::CREATED, "{v}");
     let loc_id = v["id"].as_str().unwrap().to_string();
+    assert_eq!(v["ip"], "192.168.1.5");
     assert_eq!(v["host"], "MacBook Pro");
+    assert_eq!(v["os"], "macOS 15");
 
     // 详情里可见位置
     let (_, v) = send(&app, "GET", &format!("/projects/{id}"), &admin, None).await;
@@ -259,11 +261,13 @@ async fn project_locations_flow() {
         "PUT",
         &format!("/projects/{id}/locations/{loc_id}"),
         &admin,
-        Some(serde_json::json!({"host":"tencent-beijing","path":"/srv/am","purpose":"部署"})),
+        Some(serde_json::json!({"ip":"82.157.147.224","host":"tencent-beijing","os":"Ubuntu 22.04","path":"/srv/am","purpose":"部署"})),
     )
     .await;
     assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["ip"], "82.157.147.224");
     assert_eq!(v["host"], "tencent-beijing");
+    assert_eq!(v["os"], "Ubuntu 22.04");
 
     // 删位置
     let (st, _) = send(
