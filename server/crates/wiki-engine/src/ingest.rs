@@ -6,9 +6,12 @@ use serde_json::json;
 use sha2::Digest;
 use uuid::Uuid;
 
-use crate::markup::{extract_wikilinks, is_valid_slug};
+use crate::markup::{extract_wikilinks, is_valid_slug, normalize_wikilinks};
 use crate::prompts;
 use crate::service::folder_for_type;
+
+/// 单次织入建页量软上限（测试方 W-7③漂移校准）：超限截断+告警，防 llm 页自我漂移。
+const MAX_PAGES_PER_GENERATE: usize = 20;
 
 fn data_dir() -> std::path::PathBuf {
     std::env::var("AGENT_MEMORY_DATA_DIR")
@@ -310,15 +313,42 @@ pub async fn generate_job(
     )
     .await?;
 
-    let pages = out
+    let mut pages = out
         .get("pages")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    // 漂移校准（测试方 W-7③）：单次织入建页量软上限——超限截断 + 告警，不中断织入。
+    // 防 LLM 幻觉/暴走批量建页导致 llm 页自我漂移；正常多主题文档（<20 页）不受影响。
+    if pages.len() > MAX_PAGES_PER_GENERATE {
+        let dropped = pages.len() - MAX_PAGES_PER_GENERATE;
+        pages.truncate(MAX_PAGES_PER_GENERATE);
+        ctx.emit(
+            "建页量超软上限，已截断",
+            Some(json!({
+                "max_pages": MAX_PAGES_PER_GENERATE,
+                "dropped_pages": dropped,
+                "hint": "源可能过广或 purpose 需收紧——考虑拆分源或人工 review",
+            })),
+        )
+        .await
+        .ok();
+    }
     let mut created = 0usize;
     let mut updated = 0usize;
     let mut proposals = 0usize;
     let mut all_slugs: Vec<String> = Vec::new();
+
+    // 链接规范化：查全库 slug 建 lowercase → real 映射，生成时对齐大小写变体
+    // （防 case_mismatch 落到事后 lint；只修大小写，不补死链）
+    let existing_slugs: Vec<String> = sqlx::query_scalar("SELECT slug FROM wiki_pages")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let lower_slug_map: std::collections::HashMap<String, String> = existing_slugs
+        .into_iter()
+        .map(|s| (s.to_lowercase(), s))
+        .collect();
 
     for p in &pages {
         let slug = p
@@ -343,6 +373,7 @@ pub async fn generate_job(
             .unwrap_or("")
             .trim()
             .to_string();
+        let content = normalize_wikilinks(&content, &lower_slug_map);
         if !is_valid_slug(&slug) || content.is_empty() {
             continue;
         }

@@ -906,3 +906,49 @@ async fn archive_query_is_idempotent_by_title() {
     handle.shutdown();
     handle.join().await;
 }
+
+/// W-7③（2026-09-04）：单次织入建页量软上限——generate 返回 21 页，截断到 20 + 告警事件。
+#[tokio::test]
+async fn generate_page_cap_truncates_and_warns() {
+    let pages: Vec<serde_json::Value> = (0..21)
+        .map(|i| {
+            serde_json::json!({
+                "slug": format!("页{i}"),
+                "page_type": "concept",
+                "title": format!("页{i}"),
+                "content": format!("# 页{i}\n\n第 {i} 页内容。"),
+            })
+        })
+        .collect();
+    let (pool, wiki, handle, _pg) = setup(vec![
+        serde_json::json!({"entities": [], "concepts": [], "links": [], "conflicts": [], "source_title": "批量源"}),
+        serde_json::json!({"pages": pages}),
+    ])
+    .await;
+
+    let skipped = wiki
+        .ingest("批量源", "一篇覆盖大量主题的文档。")
+        .await
+        .unwrap();
+    assert!(!skipped);
+    wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
+
+    // 截断到 20（21 页 concept 只建 20）
+    let cnt: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wiki_pages WHERE page_type = 'concept'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(cnt, 20, "建页量应被软上限截断到 20");
+
+    // 告警事件落 job_events
+    let warned: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM job_events WHERE message LIKE '%建页量超软上限%'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(warned, 1, "应有告警事件标记截断");
+
+    handle.shutdown();
+    handle.join().await;
+}

@@ -87,6 +87,53 @@ pub fn remove_wikilinks(content: &str, slug: &str) -> String {
     out
 }
 
+/// 生成阶段链接规范化：把 [[Target]] 的大小写变体对齐成真实 slug（lower_slug_map: 小写 → 真实 slug）。
+/// 只修 case_mismatch（大小写差异），不补死链（无匹配原样保留）；[[slug|别名]] 只对齐 slug 保留别名。
+pub fn normalize_wikilinks(
+    content: &str,
+    lower_slug_map: &std::collections::HashMap<String, String>,
+) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut i = 0;
+    while i < content.len() {
+        if content[i..].starts_with("[[")
+            && let Some(end_rel) = content[i + 2..].find("]]")
+        {
+            let inner = &content[i + 2..i + 2 + end_rel];
+            match inner.split_once('|') {
+                Some((slug, alias)) => {
+                    let slug = slug.trim();
+                    let real = lower_slug_map
+                        .get(&slug.to_lowercase())
+                        .cloned()
+                        .unwrap_or_else(|| slug.to_string());
+                    out.push_str("[[");
+                    out.push_str(&real);
+                    out.push('|');
+                    out.push_str(alias);
+                    out.push_str("]]");
+                }
+                None => {
+                    let slug = inner.trim();
+                    let real = lower_slug_map
+                        .get(&slug.to_lowercase())
+                        .cloned()
+                        .unwrap_or_else(|| slug.to_string());
+                    out.push_str("[[");
+                    out.push_str(&real);
+                    out.push_str("]]");
+                }
+            }
+            i += 2 + end_rel + 2;
+            continue;
+        }
+        let ch = content[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,5 +180,21 @@ mod tests {
         // 无关内容原样保留（含多字节字符边界）
         let md3 = "# 标题\n\n普通文字 🎉 保留。";
         assert_eq!(remove_wikilinks(md3, "ghost"), md3);
+    }
+
+    #[test]
+    fn normalize_wikilinks_aligns_case_variants() {
+        use std::collections::HashMap;
+        let map: HashMap<String, String> = [
+            ("engram".to_string(), "engram".to_string()),
+            ("rust异步".to_string(), "rust异步".to_string()),
+        ]
+        .into();
+        let md = "参见 [[Engram]] 与 [[ENGRAM|向量库]]，还有 [[不存在页]] 与 [[rust异步]]。";
+        let out = normalize_wikilinks(md, &map);
+        assert_eq!(
+            out,
+            "参见 [[engram]] 与 [[engram|向量库]]，还有 [[不存在页]] 与 [[rust异步]]。"
+        );
     }
 }
