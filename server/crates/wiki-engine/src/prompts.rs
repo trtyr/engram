@@ -22,7 +22,7 @@ pub fn analysis_system() -> String {
 
 输出严格 JSON：
 {\"entities\":[\"...\"],\"concepts\":[\"...\"],\"links\":[{\"slug\":\"既有页\",\"reason\":\"为何相关\"}],\"conflicts\":[{\"slug\":\"既有页\",\"issue\":\"矛盾点\"}],\"source_title\":\"建议的源摘要页标题\",\"reviews\":[{\"kind\":\"create_page|deep_research|skip|flag\",\"title\":\"...\",\"reason\":\"为何需要人审\",\"suggested_slug\":\"建议页名（可空）\",\"search_queries\":[\"预生成检索词\"]}]}
-reviews 说明：kind 只能是 create_page（值得为它建独立页）/deep_research（知识缺口需检索补充）/skip（内容存疑建议跳过）/flag（其他需人判断）；没有则空数组。
+reviews 说明：kind 只能是 create_page（值得为它建独立页）/deep_research（知识缺口需检索补充）/skip（内容存疑建议跳过）/flag（其他需人判断）；没有则空数组。每条必填 reason（一句话说明为何需要人审，人审者据此判断处理方式）；create_page 必填 title（建议页面名）与 suggested_slug（建议 slug，可空则系统生成）。
 purpose_suggestion 说明：若本源内容提示知识库的 purpose 应调整（如新的研究方向/新关键问题），输出 {\"goals\": [...], \"key_questions\": [...], \"reason\": \"...\"}；无需调整则 null。".into()
 }
 

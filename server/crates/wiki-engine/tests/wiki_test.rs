@@ -882,3 +882,27 @@ async fn graph_community_sparse_flag_matches_insights_threshold() {
     }
     drop(env);
 }
+
+/// W-13（2026-09-04）：query-archive 重复存档同 title → 幂等 skipped，
+/// 不再落页 version+1 + 再摄取烧 LLM。
+#[tokio::test]
+async fn archive_query_is_idempotent_by_title() {
+    let (pool, wiki, handle, _pg) = setup(vec![]).await;
+
+    let first = wiki.archive_query("幂等存档", "问", "答").await.unwrap();
+    assert!(!first, "首次存档 skipped=false");
+    let second = wiki.archive_query("幂等存档", "问", "答").await.unwrap();
+    assert!(second, "重复存档应 skipped=true");
+
+    let (n, ver): (i64, i32) = sqlx::query_as(
+        "SELECT count(*), COALESCE(max(version), 0) FROM wiki_pages WHERE slug = 'query-幂等存档'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 1, "同 title 只落一条 queries 页");
+    assert_eq!(ver, 1, "重复存档不应 version+1");
+
+    handle.shutdown();
+    handle.join().await;
+}

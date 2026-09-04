@@ -12,6 +12,48 @@ use uuid::Uuid;
 
 use super::chunking::chunk_text;
 
+/// W-4（2026-09-04）：按扩展名推断标准 MIME，优先于客户端 content_type——
+/// txt 应为 text/plain、html 应为 text/html，不再被客户端传的 content_type 带偏。
+fn mime_from_name(name: &str) -> Option<String> {
+    let lower = name.to_lowercase();
+    let mime = if lower.ends_with(".pdf") {
+        "application/pdf"
+    } else if lower.ends_with(".docx") {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    } else if lower.ends_with(".html") || lower.ends_with(".htm") {
+        "text/html"
+    } else if lower.ends_with(".txt") {
+        "text/plain"
+    } else if lower.ends_with(".md") || lower.ends_with(".markdown") {
+        "text/markdown"
+    } else {
+        return None; // 无已知扩展名 → fallback 客户端 content_type
+    };
+    Some(mime.to_string())
+}
+
+/// G-1（2026-09-04）：URL 归一化——去 fragment 与 utm_* tracking 参数，
+/// 避免同内容因 ?utm_source=... 差异被当独立文档重复入库。解析失败时原样返回。
+fn normalize_url(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(mut u) => {
+            u.set_fragment(None);
+            let kept: Vec<(String, String)> = u
+                .query_pairs()
+                .filter(|(k, _)| !k.starts_with("utm_"))
+                .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                .collect();
+            if kept.is_empty() {
+                u.set_query(None);
+            } else {
+                u.query_pairs_mut().clear().extend_pairs(kept);
+            }
+            u.to_string()
+        }
+        Err(_) => url.to_string(),
+    }
+}
+
 /// 并发说明：管道并发由 RunnerConfig.concurrency（默认 4）全局约束，
 /// 不在 job 内做 per-kind 限流（单用户规模下解析快，避免互相挤死的重试风暴）。
 ///
@@ -39,7 +81,7 @@ pub async fn enqueue_ingest(
         IngestSource::Url(url) => {
             use sha2::Digest;
             let mut h = sha2::Sha256::new();
-            h.update(url.as_bytes());
+            h.update(normalize_url(url).as_bytes());
             h.finalize().to_vec()
         }
     };
@@ -65,11 +107,11 @@ pub async fn enqueue_ingest(
             (
                 name.clone(),
                 path.to_string_lossy().into_owned(),
-                content_type.clone(),
+                mime_from_name(name).or_else(|| content_type.clone()),
                 name.clone(),
             )
         }
-        IngestSource::Url(url) => (url.clone(), String::new(), None, url.clone()),
+        IngestSource::Url(url) => (normalize_url(url), String::new(), None, normalize_url(url)),
     };
 
     // K6：INSERT ... ON CONFLICT 单往返——并发同 sha 一个赢、一个幂等命中，不再竞态 503
@@ -556,4 +598,47 @@ pub fn register_handlers(
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mime_from_extension() {
+        assert_eq!(mime_from_name("a.txt"), Some("text/plain".into()));
+        assert_eq!(mime_from_name("a.md"), Some("text/markdown".into()));
+        assert_eq!(mime_from_name("a.MARKDOWN"), Some("text/markdown".into()));
+        assert_eq!(mime_from_name("a.html"), Some("text/html".into()));
+        assert_eq!(mime_from_name("a.htm"), Some("text/html".into()));
+        assert_eq!(mime_from_name("a.pdf"), Some("application/pdf".into()));
+        assert_eq!(
+            mime_from_name("a.docx"),
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document".into())
+        );
+        assert_eq!(mime_from_name("a.unknown"), None);
+        assert_eq!(mime_from_name("noext"), None);
+    }
+
+    #[test]
+    fn url_normalization_strips_tracking_and_fragment() {
+        assert_eq!(
+            normalize_url("https://a.com/x?utm_source=s&id=1#sec"),
+            "https://a.com/x?id=1"
+        );
+        // 只去 utm_*，保留其他 query（内容相关参数不动）
+        assert_eq!(
+            normalize_url("https://a.com/x?q=rust&utm_medium=m"),
+            "https://a.com/x?q=rust"
+        );
+        // 纯 tracking → query 全清
+        assert_eq!(
+            normalize_url("https://a.com/x?utm_source=s&utm_campaign=c"),
+            "https://a.com/x"
+        );
+        // 无 query 不变
+        assert_eq!(normalize_url("https://a.com/x"), "https://a.com/x");
+        // 非法 URL 原样返回（不 panic）
+        assert_eq!(normalize_url("not a url"), "not a url");
+    }
 }

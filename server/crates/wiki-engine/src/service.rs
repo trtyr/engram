@@ -417,7 +417,9 @@ impl WikiService {
         limit: i64,
     ) -> Result<serde_json::Value, WikiError> {
         let pages = self.search(query, limit).await?;
-        let purpose = crate::purpose::purpose_context(&self.pool).await;
+        // W-10（2026-09-04）：未设 purpose 时返回 null，与 GET /wiki/purpose 一致；
+        // 不再用 purpose_context 的默认模板——「读当前设置」与「注入 LLM」语义分开。
+        let purpose = crate::purpose::get_purpose(&self.pool).await.ok().flatten();
         Ok(serde_json::json!({
             "purpose": purpose,
             "pages": pages,
@@ -484,13 +486,22 @@ impl WikiService {
         question: &str,
         answer: &str,
     ) -> Result<bool, WikiError> {
+        // W-13（2026-09-04）：同 title 已存档 → 幂等跳过（契约「重复→skipped」），
+        // 不再落页 version+1 + 再摄取烧 LLM。
+        let slug = format!("query-{title}");
+        let exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM wiki_pages WHERE slug = $1")
+            .bind(&slug)
+            .fetch_optional(&self.pool)
+            .await?;
+        if exists.is_some() {
+            return Ok(true);
+        }
         let ts = chrono::Utc::now().format("%Y-%m-%d");
         let content = format!(
             "# {title}\n\n**问**：{question}\n\n**答**：{answer}\n\n（来源：检索存档 {ts}）"
         );
 
         // 1) 直接落 queries 页（page_type=queries，origin=human——人触发的存档）
-        let slug = format!("query-{title}");
         let fm = serde_json::json!({"title": title, "page_type": "queries", "sources": []});
         sqlx::query(
             "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
