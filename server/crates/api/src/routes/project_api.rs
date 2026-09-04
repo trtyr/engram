@@ -116,7 +116,10 @@ pub async fn list_projects(
 ) -> Result<Json<Vec<ProjectDto>>, ApiError> {
     require_project(&principal)?;
     Ok(Json(
-        svc(&state).list_projects(p.type_.as_deref()).await.map_err(pe)?,
+        svc(&state)
+            .list_projects(p.type_.as_deref())
+            .await
+            .map_err(pe)?,
     ))
 }
 
@@ -146,7 +149,13 @@ pub async fn update_project(
     require_project(&principal)?;
     Ok(Json(
         svc(&state)
-            .update_project(id, &req.name, &req.status, req.description.as_deref(), &req.categories)
+            .update_project(
+                id,
+                &req.name,
+                &req.status,
+                req.description.as_deref(),
+                &req.categories,
+            )
             .await
             .map_err(pe)?,
     ))
@@ -175,7 +184,10 @@ pub async fn batch_delete_projects(
     Json(req): Json<BatchDeleteRequest>,
 ) -> Result<Json<BatchDeleteResult>, ApiError> {
     require_project(&principal)?;
-    let deleted = svc(&state).batch_delete_projects(&req.ids).await.map_err(pe)?;
+    let deleted = svc(&state)
+        .batch_delete_projects(&req.ids)
+        .await
+        .map_err(pe)?;
     Ok(Json(BatchDeleteResult { deleted }))
 }
 

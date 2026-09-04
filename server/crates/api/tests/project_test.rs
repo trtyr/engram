@@ -36,7 +36,9 @@ async fn login_token(app: &Router) -> String {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     v["token"].as_str().unwrap().to_string()
 }
@@ -66,7 +68,9 @@ async fn send(
         .await
         .unwrap();
     let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json = if bytes.is_empty() {
         serde_json::Value::Null
     } else {
@@ -155,8 +159,22 @@ async fn project_type_template_and_filter() {
     assert_eq!(research["default_categories"].as_array().unwrap().len(), 6);
 
     // 建 dev + research 各一
-    send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"p-dev","type":"dev"}))).await;
-    send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"p-res","type":"research"}))).await;
+    send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"p-dev","type":"dev"})),
+    )
+    .await;
+    send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"p-res","type":"research"})),
+    )
+    .await;
 
     // 类型筛选
     let (_, v) = send(&app, "GET", "/projects?type=dev", &admin, None).await;
@@ -177,7 +195,14 @@ async fn project_batch_delete() {
 
     let mut ids = vec![];
     for i in 0..3 {
-        let (_, v) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":format!("p{i}"),"type":"dev"}))).await;
+        let (_, v) = send(
+            &app,
+            "POST",
+            "/projects",
+            &admin,
+            Some(serde_json::json!({"name":format!("p{i}"),"type":"dev"})),
+        )
+        .await;
         ids.push(v["id"].as_str().unwrap().to_string());
     }
 
@@ -201,7 +226,14 @@ async fn project_locations_flow() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    let (_, v) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"am","type":"dev"}))).await;
+    let (_, v) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"am","type":"dev"})),
+    )
+    .await;
     let id = v["id"].as_str().unwrap().to_string();
 
     // 加位置（多主机登记）
@@ -234,7 +266,14 @@ async fn project_locations_flow() {
     assert_eq!(v["host"], "tencent-beijing");
 
     // 删位置
-    let (st, _) = send(&app, "DELETE", &format!("/projects/{id}/locations/{loc_id}"), &admin, None).await;
+    let (st, _) = send(
+        &app,
+        "DELETE",
+        &format!("/projects/{id}/locations/{loc_id}"),
+        &admin,
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::NO_CONTENT);
 }
 
@@ -243,7 +282,14 @@ async fn project_docs_flow() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    let (_, v) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"am","type":"dev"}))).await;
+    let (_, v) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"am","type":"dev"})),
+    )
+    .await;
     let id = v["id"].as_str().unwrap().to_string();
 
     // 加文档（分类）
@@ -260,7 +306,14 @@ async fn project_docs_flow() {
     assert_eq!(v["category"], "后端");
 
     // 读单个文档
-    let (st, v) = send(&app, "GET", &format!("/projects/{id}/docs/{doc_id}"), &admin, None).await;
+    let (st, v) = send(
+        &app,
+        "GET",
+        &format!("/projects/{id}/docs/{doc_id}"),
+        &admin,
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(v["content"], "# API 设计");
 
@@ -277,7 +330,14 @@ async fn project_docs_flow() {
     assert_eq!(v["content"], "# API 设计 v2");
 
     // 删文档
-    let (st, _) = send(&app, "DELETE", &format!("/projects/{id}/docs/{doc_id}"), &admin, None).await;
+    let (st, _) = send(
+        &app,
+        "DELETE",
+        &format!("/projects/{id}/docs/{doc_id}"),
+        &admin,
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::NO_CONTENT);
 }
 
@@ -302,7 +362,9 @@ async fn project_scope_required() {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::CREATED);
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         v["key"].as_str().unwrap().to_string()
     };
@@ -319,12 +381,16 @@ async fn project_scope_required() {
                 .uri("/settings/api-keys")
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {admin}"))
-                .body(Body::from(r#"{"name":"with-project","scopes":["project"]}"#))
+                .body(Body::from(
+                    r#"{"name":"with-project","scopes":["project"]}"#,
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let pkey = v["key"].as_str().unwrap().to_string();
 

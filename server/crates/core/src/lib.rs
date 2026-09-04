@@ -17,8 +17,8 @@ pub use memory::{
     purge_deep_pool,
 };
 pub use project::{
-    ProjectDetailDto, ProjectDocDto, ProjectError, ProjectLocationDto, ProjectService, ProjectTypeDto,
-    PROJECT_STATUSES, PROJECT_TYPES, type_label,
+    PROJECT_STATUSES, PROJECT_TYPES, ProjectDetailDto, ProjectDocDto, ProjectError,
+    ProjectLocationDto, ProjectService, ProjectTypeDto, type_label,
 };
 pub use unified::{UnifiedError, UnifiedHit, UnifiedSearch};
 pub use wiki::{LintReport, WikiError, WikiPageDto, WikiService};

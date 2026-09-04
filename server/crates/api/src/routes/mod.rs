@@ -290,7 +290,10 @@ pub fn router(state: AppState) -> Router {
         .route("/codegraph/projects/{id}/query", post(codegraph_api::query))
         // 项目记忆域：types 与 batch-delete 先于 {id}，避免被当作 id 解析
         .route("/projects/types", get(project_api::list_types))
-        .route("/projects/batch-delete", post(project_api::batch_delete_projects))
+        .route(
+            "/projects/batch-delete",
+            post(project_api::batch_delete_projects),
+        )
         .route(
             "/projects",
             post(project_api::create_project).get(project_api::list_projects),
@@ -301,21 +304,17 @@ pub fn router(state: AppState) -> Router {
                 .put(project_api::update_project)
                 .delete(project_api::delete_project),
         )
-        .route(
-            "/projects/{id}/locations",
-            post(project_api::add_location),
-        )
+        .route("/projects/{id}/locations", post(project_api::add_location))
         .route(
             "/projects/{id}/locations/{loc_id}",
             put(project_api::update_location).delete(project_api::delete_location),
         )
-        .route(
-            "/projects/{id}/docs",
-            post(project_api::add_doc),
-        )
+        .route("/projects/{id}/docs", post(project_api::add_doc))
         .route(
             "/projects/{id}/docs/{doc_id}",
-            get(project_api::get_doc).put(project_api::update_doc).delete(project_api::delete_doc),
+            get(project_api::get_doc)
+                .put(project_api::update_doc)
+                .delete(project_api::delete_doc),
         );
 
     Router::new()

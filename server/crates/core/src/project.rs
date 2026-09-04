@@ -29,7 +29,10 @@ impl From<sqlx::Error> for ProjectError {
 /// 类型模板：type → 预设分类列表（0005：开发四分类 / 调研六分类）。
 pub const PROJECT_TYPES: &[(&str, &[&str])] = &[
     ("dev", &["后端", "前端", "测试", "规划"]),
-    ("research", &["待查", "线索", "资料", "结论", "疑点", "证伪"]),
+    (
+        "research",
+        &["待查", "线索", "资料", "结论", "疑点", "证伪"],
+    ),
 ];
 
 /// 项目状态枚举（英文存库，Web 层映射中文）：active/paused/done/abandoned。
@@ -121,7 +124,8 @@ const PROJECT_COLS: &str =
     "id, name, type, status, description, categories, frontmatter, created_at, updated_at";
 const LOCATION_COLS: &str =
     "id, project_id, host, path, purpose, sort_order, created_at, updated_at";
-const DOC_COLS: &str = "id, project_id, category, title, content, frontmatter, created_at, updated_at";
+const DOC_COLS: &str =
+    "id, project_id, category, title, content, frontmatter, created_at, updated_at";
 
 impl ProjectService {
     pub fn new(pool: PgPool) -> Self {
@@ -185,11 +189,13 @@ impl ProjectService {
             .bind(t)
             .fetch_all(&self.pool)
             .await?,
-            None => sqlx::query_as::<_, ProjectDto>(&format!(
-                "SELECT {PROJECT_COLS} FROM projects ORDER BY created_at DESC, name"
-            ))
-            .fetch_all(&self.pool)
-            .await?,
+            None => {
+                sqlx::query_as::<_, ProjectDto>(&format!(
+                    "SELECT {PROJECT_COLS} FROM projects ORDER BY created_at DESC, name"
+                ))
+                .fetch_all(&self.pool)
+                .await?
+            }
         };
         Ok(rows)
     }
