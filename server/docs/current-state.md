@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-origin/main a3b6a2d 双 workflow 绿。cargo **158** 测试 / **26 迁移** / **88 路径 / 112 方法** / 27 业务表。
+origin/main a3b6a2d 双 workflow 绿。cargo **158** 测试 / **26 迁移** / **88 路径 / 113 方法** / 27 业务表。
 级联删除补审计凭证（audit() 接线，cascade_test 断言）。**数据已由所有者主动清空，本地库已清理**。
 
 ## 当日验证矩阵
@@ -14,7 +14,7 @@ origin/main a3b6a2d 双 workflow 绿。cargo **158** 测试 / **26 迁移** / **
 | cargo fmt --check | exit 0 |
 | cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
 | cargo test --workspace | 176 passed / 0 failed（37 套件） |
-| cargo run -q -p agent-memory-api --bin openapi-dump | 88 路径 / 112 方法（GET 45/POST 47/PUT 7/PATCH 3/DELETE 10） |
+| cargo run -q -p agent-memory-api --bin openapi-dump | 88 路径 / 113 方法（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10） |
 
 ## 2026-08-30 基线以来的落地（按主题）
 

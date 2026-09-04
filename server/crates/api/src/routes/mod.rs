@@ -307,7 +307,9 @@ pub fn router(state: AppState) -> Router {
         .route("/projects/{id}/locations", post(project_api::add_location))
         .route(
             "/projects/{id}/locations/{loc_id}",
-            put(project_api::update_location).delete(project_api::delete_location),
+            get(project_api::get_location)
+                .put(project_api::update_location)
+                .delete(project_api::delete_location),
         )
         .route("/projects/{id}/docs", post(project_api::add_doc))
         .route(

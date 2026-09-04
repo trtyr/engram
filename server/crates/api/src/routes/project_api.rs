@@ -186,16 +186,17 @@ pub async fn batch_delete_projects(
     Json(req): Json<BatchDeleteRequest>,
 ) -> Result<Json<BatchDeleteResult>, ApiError> {
     require_project(&principal)?;
-    let deleted = svc(&state)
+    let (deleted, failed) = svc(&state)
         .batch_delete_projects(&req.ids)
         .await
         .map_err(pe)?;
-    Ok(Json(BatchDeleteResult { deleted }))
+    Ok(Json(BatchDeleteResult { deleted, failed }))
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct BatchDeleteResult {
     pub deleted: usize,
+    pub failed: Vec<Uuid>,
 }
 
 // ---------- 位置（多主机） ----------
@@ -212,10 +213,29 @@ pub async fn add_location(
 ) -> Result<(StatusCode, Json<ProjectLocationDto>), ApiError> {
     require_project(&principal)?;
     let loc = svc(&state)
-        .add_location(id, &req.ip, &req.host, &req.os, &req.path, req.purpose.as_deref())
+        .add_location(
+            id,
+            &req.ip,
+            &req.host,
+            &req.os,
+            &req.path,
+            req.purpose.as_deref(),
+        )
         .await
         .map_err(pe)?;
     Ok((StatusCode::CREATED, Json(loc)))
+}
+
+/// 读单个位置（详情页/CLI 部分更新前取原值用）。
+#[utoipa::path(get, path = "/projects/{id}/locations/{loc_id}",
+    responses((status = 200, body = ProjectLocationDto)))]
+pub async fn get_location(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((_id, loc_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<ProjectLocationDto>, ApiError> {
+    require_project(&principal)?;
+    Ok(Json(svc(&state).get_location(loc_id).await.map_err(pe)?))
 }
 
 /// 编辑位置。
@@ -231,7 +251,14 @@ pub async fn update_location(
     require_project(&principal)?;
     Ok(Json(
         svc(&state)
-            .update_location(loc_id, &req.ip, &req.host, &req.os, &req.path, req.purpose.as_deref())
+            .update_location(
+                loc_id,
+                &req.ip,
+                &req.host,
+                &req.os,
+                &req.path,
+                req.purpose.as_deref(),
+            )
             .await
             .map_err(pe)?,
     ))

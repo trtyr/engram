@@ -216,9 +216,24 @@ async fn project_batch_delete() {
     .await;
     assert_eq!(st, StatusCode::OK, "{v}");
     assert_eq!(v["deleted"], 3);
+    assert_eq!(v["failed"].as_array().unwrap().len(), 0);
 
     let (_, v) = send(&app, "GET", "/projects", &admin, None).await;
     assert!(v.as_array().unwrap().is_empty());
+
+    // 含不存在 id → 报 failed
+    let bogus = uuid::Uuid::now_v7().to_string();
+    let (st, v) = send(
+        &app,
+        "POST",
+        "/projects/batch-delete",
+        &admin,
+        Some(serde_json::json!({"ids": [bogus]})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert_eq!(v["deleted"], 0);
+    assert_eq!(v["failed"].as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -254,6 +269,18 @@ async fn project_locations_flow() {
     // 详情里可见位置
     let (_, v) = send(&app, "GET", &format!("/projects/{id}"), &admin, None).await;
     assert_eq!(v["locations"].as_array().unwrap().len(), 1);
+
+    // 位置单读
+    let (st, v) = send(
+        &app,
+        "GET",
+        &format!("/projects/{id}/locations/{loc_id}"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["host"], "MacBook Pro");
 
     // 改位置
     let (st, v) = send(

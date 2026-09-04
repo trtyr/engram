@@ -270,13 +270,31 @@ impl ProjectService {
         Ok(true)
     }
 
-    /// 批量删除（列表多选），返回删除条数。
-    pub async fn batch_delete_projects(&self, ids: &[Uuid]) -> Result<usize, ProjectError> {
+    /// 批量删除（列表多选），返回（删除条数, 不存在的 id）。
+    pub async fn batch_delete_projects(
+        &self,
+        ids: &[Uuid],
+    ) -> Result<(usize, Vec<Uuid>), ProjectError> {
+        // 先查存在集合，用于区分「删掉」与「本就不存在」
+        let existing: std::collections::HashSet<Uuid> =
+            sqlx::query_as::<_, (Uuid,)>("SELECT id FROM projects WHERE id = ANY($1)")
+                .bind(ids)
+                .fetch_all(&self.pool)
+                .await?
+                .into_iter()
+                .map(|(id,)| id)
+                .collect();
         let res = sqlx::query("DELETE FROM projects WHERE id = ANY($1)")
             .bind(ids)
             .execute(&self.pool)
             .await?;
-        Ok(res.rows_affected() as usize)
+        let deleted = res.rows_affected() as usize;
+        let failed: Vec<Uuid> = ids
+            .iter()
+            .copied()
+            .filter(|id| !existing.contains(id))
+            .collect();
+        Ok((deleted, failed))
     }
 
     async fn get_project_bare(&self, id: Uuid) -> Result<ProjectDto, ProjectError> {
@@ -356,7 +374,7 @@ impl ProjectService {
         Ok(true)
     }
 
-    async fn get_location(&self, id: Uuid) -> Result<ProjectLocationDto, ProjectError> {
+    pub async fn get_location(&self, id: Uuid) -> Result<ProjectLocationDto, ProjectError> {
         sqlx::query_as::<_, ProjectLocationDto>(&format!(
             "SELECT {LOCATION_COLS} FROM project_locations WHERE id = $1"
         ))

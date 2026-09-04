@@ -985,7 +985,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 批量吊销 API key（幂等：已吊销的忽略，返回实际吊销数）。 */
+        /** 批量删除 API key（物理删除，返回实际删除数）。 */
         post: operations["batch_revoke_api_keys"];
         delete?: never;
         options?: never;
@@ -1002,7 +1002,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 吊销 API key。 */
+        /** 删除 API key（物理删除，不留记录）。 */
         post: operations["revoke_api_key"];
         delete?: never;
         options?: never;
@@ -1603,6 +1603,7 @@ export interface components {
         };
         BatchDeleteResult: {
             deleted: number;
+            failed: string[];
         };
         BatchEntitiesRequest: {
             /** @description 破坏性批量操作确认短语："批量删除" */
