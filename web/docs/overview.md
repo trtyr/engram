@@ -8,7 +8,7 @@ Engram 控制台：把八页能力（一架梯子 + 一坐标系 + 五资产域 
 （success/warning/destructive/info）与数据编码；亮暗双主题为同一世界的两种表达。
 完整规范见根 [DESIGN.md](../../DESIGN.md)。
 
-## 页面地图（7 页，2026-09-02 Wiki+Knowledge 合并）
+## 页面地图（8 页，2026-09-02 Wiki+Knowledge 合并，2026-09-04 加项目）
 
 | 路由 | 页面 | 核心内容 |
 |---|---|---|
@@ -17,6 +17,7 @@ Engram 控制台：把八页能力（一架梯子 + 一坐标系 + 五资产域 
 | /circle | **圈子** | 记忆坐标系独立页（2026-09-01 从 Memory tab 拆出）：左实体列表（搜索/类型过滤/密度排序/新建/合并）+ 右 sigma 共现图谱 + 实体档案（摘要可编/挂摘原子/时间线） |
 | /wiki | Wiki | **目录树**（folder 层级，Obsidian 式）+ Markdown 阅读/编辑 + 图谱独立视图（树/图切换）；文档=收件箱入口，洞察/Lint/提案/原料/目标=运维二级入口 |
 | /codegraph | CodeGraph | 项目注册→索引→结构化查询（面板化结果） |
+| /projects | 项目 | 项目记忆第五域：列表（CRUD/多选/类型筛选）+ 详情（Wiki 式左树右内容：位置多主机 + 分类文档） |
 | /jobs | Jobs | 任务表、事件流水展开、死信 revive |
 | /settings | Settings | Provider 管理（真 label 表单）、路由表、API Key、危险区（重加密 + **deep 清空两阶段**） |
 

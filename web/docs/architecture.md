@@ -31,7 +31,7 @@ web/src/
 └── features/                   # 八页（路由级 lazy）
     ├── Login.tsx  Dashboard.tsx  Memory.tsx  Circle.tsx（圈子薄壳：PageHeader + Galaxy）
     ├── Galaxy.tsx（圈子主体：实体列表+图谱+档案，被 Circle 挂载）
-    ├── Knowledge.tsx（DocumentsPane，被 Wiki 挂载）  Wiki.tsx（30k：目录树/树图双视图/收件箱/运维）  CodeGraph.tsx  Jobs.tsx  Settings.tsx
+    ├── Knowledge.tsx（DocumentsPane，被 Wiki 挂载）  Wiki.tsx（30k：目录树/树图双视图/收件箱/运维）  CodeGraph.tsx  Projects.tsx  ProjectDetail.tsx  Jobs.tsx  Settings.tsx
     └── *.test.tsx + components/CommandPalette.test.tsx
 ```
 
@@ -64,7 +64,7 @@ lib/api.ts（唯一出站点）──► 后端 HTTP
 
 ## 路由与代码分割
 
-- react-router-dom 7；7 页全部 `React.lazy` 路由级分割（/circle 薄壳 + Galaxy 主体）。
+- react-router-dom 7；8 页全部 `React.lazy` 路由级分割（/circle 薄壳 + Galaxy 主体）。
 - 旧深链兼容：`/memory?tab=galaxy` → `/Navigate to="/circle" replace />`（MemoryRoute 顶部守卫）；
   `/knowledge` → `/wiki`（2026-09-02 合并后的重定向，App.tsx 路由表）。
 - 重组件二级 lazy：sigma（EntityGalaxy）、mermaid（WikiMarkdown 内动态 import）、cytoscape（CodeGraph 内）；

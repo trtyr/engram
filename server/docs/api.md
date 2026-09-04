@@ -1,6 +1,6 @@
 # API
 
-> 2026-09-03 从当日代码 `openapi-dump` 活体导出，共 **88 路径 / 113 方法注册**（GET 46 · POST 47 · PUT 7 · PATCH 3 · DELETE 10）。
+> 2026-09-04 从当日代码 `openapi-dump` 活体导出，共 **88 路径 / 113 方法注册**（GET 46 · POST 47 · PUT 7 · PATCH 3 · DELETE 10）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 八 scope：memory/knowledge/wiki/codegraph/project/llm/erase/cron）。

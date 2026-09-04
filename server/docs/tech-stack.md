@@ -44,7 +44,7 @@
 |---|---|---|
 | rustfmt | 格式 | `cargo fmt --check` |
 | clippy | 静态检查（-D warnings） | `cargo clippy --workspace --all-targets -- -D warnings` |
-| cargo test | 单元+集成（141 用例，本机 PG） | `cargo test --workspace` |
+| cargo test | 单元+集成（181 用例，本机 PG） | `cargo test --workspace` |
 | cargo audit | 依赖漏洞（1 接受项见 current-state） | `cargo audit` |
 | cargo-chef | Docker 层缓存 | deploy/Dockerfile |
 | openapi-dump | OpenAPI 导出 | `cargo run -q -p engram-api --bin openapi-dump` |

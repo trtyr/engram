@@ -32,7 +32,7 @@
 | 工具 | 版本 | 命令 |
 |---|---|---|
 | oxlint | 1.80.0 | `pnpm run lint`（⚠️ 裸 `pnpm lint` 会误报 eslint 缺失——必须 `run`） |
-| vitest | 4.1.11（jsdom） | `pnpm test`（35 用例） |
+| vitest | 4.1.11（jsdom） | `pnpm test`（42 用例） |
 | @playwright/test | 1.62.1 | `pnpm exec playwright test`（journey，SwiftShader WebGL） |
 | openapi-typescript | 7.13.0 | `pnpm run gen:api` → api-schema.ts |
 
