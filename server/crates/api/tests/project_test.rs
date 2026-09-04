@@ -331,3 +331,42 @@ async fn project_scope_required() {
     let (st, _) = send(&app, "GET", "/projects", &pkey, None).await;
     assert_eq!(st, StatusCode::OK, "有 project scope 应 200");
 }
+
+/// 审计发现：浏览器硬刷新 /projects（Accept: text/html）曾命中 API 处理器返回 401 JSON。
+/// 修复后走 SPA 分流（回 index.html），不再是认证墙。
+#[tokio::test]
+async fn projects_spa_navigation_bypasses_auth() {
+    let (app, _pg) = app().await;
+    // 浏览器导航（Accept: text/html）→ 回 SPA（200 若 web/dist 嵌入，404 若未构建），绝不应 401
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/projects")
+                .header("accept", "text/html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "SPA 导航不应命中 401 认证墙"
+    );
+    // 详情页深链同理
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/projects/00000000-0000-0000-0000-000000000000")
+                .header("accept", "text/html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
+}

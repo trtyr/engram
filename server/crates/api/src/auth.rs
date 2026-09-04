@@ -145,7 +145,10 @@ pub async fn bearer_auth(
         .get(axum::http::header::ACCEPT)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|a| a.starts_with("text/html"));
-    if accept_html && req.uri().path() == "/jobs" {
+    // SPA 导航分流（D-001）：/jobs、/projects 及子路径与前端路由同路径——
+    // 浏览器硬刷新（Accept: text/html*）直接回 SPA 页，不要求 Bearer；
+    // API 客户端（JSON Accept）照常走认证。
+    if accept_html && is_spa_nav_path(req.uri().path()) {
         return crate::web_assets::static_handler(req.uri().clone()).await;
     }
 
@@ -227,6 +230,11 @@ pub fn require_scope(principal: &Principal, scope: &str) -> Result<(), ApiError>
     } else {
         Err(ApiError::Forbidden(format!("缺少 scope: {scope}")))
     }
+}
+
+/// SPA 页面路由（与 API 端点同路径，浏览器导航时靠 Accept: text/html 区分）。
+fn is_spa_nav_path(path: &str) -> bool {
+    path == "/jobs" || path == "/projects" || path.starts_with("/projects/")
 }
 
 fn auth_error(message: &str) -> Response {
