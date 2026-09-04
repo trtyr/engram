@@ -330,3 +330,45 @@ export interface WikiSearchResponse {
   purpose: Purpose
   pages: WikiPage[]
 }
+
+// ---- 项目记忆域（第五域） ----
+export interface ProjectDto {
+  id: string
+  name: string
+  type: string
+  status: string
+  description: string | null
+  categories: string[]
+  frontmatter: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+export interface ProjectLocationDto {
+  id: string
+  project_id: string
+  host: string
+  path: string
+  purpose: string | null
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+export interface ProjectDocDto {
+  id: string
+  project_id: string
+  category: string
+  title: string
+  content: string
+  frontmatter: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+export interface ProjectDetailDto extends ProjectDto {
+  locations: ProjectLocationDto[]
+  docs: ProjectDocDto[]
+}
+export interface ProjectTypeDto {
+  type: string
+  label: string
+  default_categories: string[]
+}

@@ -782,6 +782,148 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 项目列表（可选 ?type=dev 筛选）。 */
+        get: operations["projects_list"];
+        put?: never;
+        /** 新建项目（type 决定初始分类，categories 从类型模板复制）。 */
+        post: operations["create_project"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/batch-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量删除（列表多选）。 */
+        post: operations["batch_delete_projects"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 类型模板（Web 建项目时选择类型）。 */
+        get: operations["list_types"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 项目详情（本体 + 位置 + 文档）。 */
+        get: operations["projects_get"];
+        /** 编辑项目（改名/状态/描述/分类列表）。 */
+        put: operations["update_project"];
+        post?: never;
+        /** 删除项目（级联删位置与文档）。 */
+        delete: operations["delete_project"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}/docs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 项目下新增文档（分类 + markdown）。 */
+        post: operations["add_doc"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}/docs/{doc_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读单个文档（详情页右侧编辑用）。 */
+        get: operations["get_doc"];
+        /** 编辑文档。 */
+        put: operations["update_doc"];
+        post?: never;
+        /** 删除文档。 */
+        delete: operations["delete_doc"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}/locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 登记项目位置（多主机）。 */
+        post: operations["add_location"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}/locations/{loc_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 编辑位置。 */
+        put: operations["update_location"];
+        post?: never;
+        /** 删除位置。 */
+        delete: operations["delete_location"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ready": {
         parameters: {
             query?: never;
@@ -1456,6 +1598,12 @@ export interface components {
             old_content: string;
             old_kind: string;
         };
+        BatchDeleteRequest: {
+            ids: string[];
+        };
+        BatchDeleteResult: {
+            deleted: number;
+        };
         BatchEntitiesRequest: {
             /** @description 破坏性批量操作确认短语："批量删除" */
             confirm: string;
@@ -1573,6 +1721,12 @@ export interface components {
             /** @description 画像摘要（关系行文，可后补） */
             summary?: string;
         };
+        CreateProjectRequest: {
+            description?: string | null;
+            name: string;
+            /** @description dev / research */
+            type: string;
+        };
         CreateProviderRequest: {
             /** @description 明文 API key（只在请求中出现，落库前加密） */
             api_key: string;
@@ -1601,6 +1755,11 @@ export interface components {
              *     cron 通道的 consolidate 走日桶幂等——同日重复调用只跑一次全量整理。
              */
             via?: string | null;
+        };
+        DocRequest: {
+            category: string;
+            content: string;
+            title: string;
         };
         DocumentDto: {
             /** Format: date-time */
@@ -1809,6 +1968,11 @@ export interface components {
             checked_pages: number;
             issues: components["schemas"]["LintIssue"][];
         };
+        LocationRequest: {
+            host: string;
+            path: string;
+            purpose?: string | null;
+        };
         LoginRequest: {
             password: string;
         };
@@ -1843,6 +2007,72 @@ export interface components {
             prompt_version?: string | null;
             /** Format: int32 */
             version: number;
+        };
+        /** @description 项目详情（本体 + 位置 + 文档），Web 详情页左树右内容用。 */
+        ProjectDetailDto: {
+            categories: string[];
+            /** Format: date-time */
+            created_at: string;
+            description?: string | null;
+            docs: components["schemas"]["ProjectDocDto"][];
+            frontmatter: Record<string, never>;
+            /** Format: uuid */
+            id: string;
+            locations: components["schemas"]["ProjectLocationDto"][];
+            name: string;
+            status: string;
+            type: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ProjectDocDto: {
+            category: string;
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+            frontmatter: Record<string, never>;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ProjectDto: {
+            categories: string[];
+            /** Format: date-time */
+            created_at: string;
+            description?: string | null;
+            frontmatter: Record<string, never>;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            status: string;
+            type: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ProjectLocationDto: {
+            /** Format: date-time */
+            created_at: string;
+            host: string;
+            /** Format: uuid */
+            id: string;
+            path: string;
+            /** Format: uuid */
+            project_id: string;
+            purpose?: string | null;
+            /** Format: int32 */
+            sort_order: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description 类型模板项（Web 建项目时选择类型用）。 */
+        ProjectTypeDto: {
+            default_categories: string[];
+            label: string;
+            type: string;
         };
         ProviderDto: {
             base_url: string;
@@ -2057,6 +2287,13 @@ export interface components {
         UpdateEntityRequest: {
             name?: string | null;
             summary?: string | null;
+        };
+        UpdateProjectRequest: {
+            categories: string[];
+            description?: string | null;
+            name: string;
+            /** @description active / paused / done / abandoned */
+            status: string;
         };
         UpdateProviderRequest: {
             /** @description 新明文 key（可选；提供则重新加密） */
@@ -3432,6 +3669,324 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TimelineEvent"][];
                 };
+            };
+        };
+    };
+    projects_list: {
+        parameters: {
+            query?: {
+                type?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDto"][];
+                };
+            };
+        };
+    };
+    create_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProjectRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDto"];
+                };
+            };
+        };
+    };
+    batch_delete_projects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchDeleteRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchDeleteResult"];
+                };
+            };
+        };
+    };
+    list_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectTypeDto"][];
+                };
+            };
+        };
+    };
+    projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDetailDto"];
+                };
+            };
+        };
+    };
+    update_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDto"];
+                };
+            };
+        };
+    };
+    delete_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_doc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDocDto"];
+                };
+            };
+        };
+    };
+    get_doc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDocDto"];
+                };
+            };
+        };
+    };
+    update_doc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectDocDto"];
+                };
+            };
+        };
+    };
+    delete_doc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                doc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_location: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocationRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectLocationDto"];
+                };
+            };
+        };
+    };
+    update_location: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                loc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocationRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectLocationDto"];
+                };
+            };
+        };
+    };
+    delete_location: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                loc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -7,6 +7,7 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import {
   Brain,
+  FolderKanban,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -31,6 +32,8 @@ const Memory = lazy(() => import('@/features/Memory'))
 const Circle = lazy(() => import('@/features/Circle'))
 const Wiki = lazy(() => import('@/features/Wiki'))
 const CodeGraph = lazy(() => import('@/features/CodeGraph'))
+const Projects = lazy(() => import('@/features/Projects'))
+const ProjectDetail = lazy(() => import('@/features/ProjectDetail'))
 const Jobs = lazy(() => import('@/features/Jobs'))
 const Settings = lazy(() => import('@/features/Settings'))
 
@@ -55,6 +58,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
       { to: '/circle', label: '圈子', icon: Users },
       { to: '/wiki', label: 'Wiki', icon: Network },
       { to: '/codegraph', label: '代码图谱', icon: Waypoints },
+      { to: '/projects', label: '项目', icon: FolderKanban },
     ],
   },
   {
@@ -305,6 +309,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/knowledge" element={<Navigate to="/wiki" replace />} />
               <Route path="/wiki" element={<Wiki />} />
               <Route path="/codegraph" element={<CodeGraph />} />
+              <Route path="/projects" element={<Projects />} />
+              <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/jobs" element={<Jobs />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
