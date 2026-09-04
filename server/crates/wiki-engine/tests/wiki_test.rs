@@ -287,6 +287,79 @@ async fn human_page_produces_proposal_not_overwrite() {
     handle.join().await;
 }
 
+/// 文档织入双路（2026-09-04）：upload 文档（raw_path）走原文件；URL 文档
+/// （raw_path=NULL）用 chunks 拼接兜底——此前 URL 文档 --doc-id 会 404 且自动织入静默跳过。
+#[tokio::test]
+async fn ingest_document_url_fallback_uses_chunks() {
+    let (pool, wiki, handle, _pg) = setup(vec![]).await;
+
+    // URL 式文档：raw_path NULL + 已分块文本
+    let doc_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO documents (id, title, source_uri, status) \
+         VALUES ($1, 'URL 摄取的文档', 'https://example.com/article', 'ready')",
+    )
+    .bind(doc_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    for (seq, content) in [
+        (1, "第一段：异步运行时的选型考量。"),
+        (2, "第二段：tokio 与 async-std 的取舍。"),
+    ] {
+        sqlx::query("INSERT INTO chunks (id, document_id, seq, content) VALUES ($1, $2, $3, $4)")
+            .bind(uuid::Uuid::now_v7())
+            .bind(doc_id)
+            .bind(seq)
+            .bind(content)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let skipped = wiki.ingest_document(doc_id).await.unwrap();
+    assert!(!skipped, "首次织入不应跳过");
+    // wiki_sources 已入队（sha 按 title+拼接文本计算，两段都进文本）
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM wiki_sources")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 1, "URL 文档应织入 wiki_sources");
+    // 幂等（pending 语义）：无 LLM 跑完 analysis 前，源停在 pending——重复织入
+    // 不新建源（sha 去重，重置重跑），sources 仍 1 条；skipped=true 要等源 ready 才成立
+    let _ = wiki.ingest_document(doc_id).await.unwrap();
+    let n2: i64 = sqlx::query_scalar("SELECT count(*) FROM wiki_sources")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n2, 1, "重复织入不得新建源（sha 去重）");
+
+    // 无 raw_path 且无 chunks → 可行动 400
+    let empty_doc = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO documents (id, title, source_uri, status) VALUES ($1, '空文档', 'https://x', 'pending')",
+    )
+    .bind(empty_doc)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let err = wiki.ingest_document(empty_doc).await;
+    assert!(
+        matches!(&err, Err(agent_memory_wiki_engine::WikiError::BadRequest(m)) if m.contains("无可织入的分块")),
+        "无文件无分块应 400 且文案可行动：{err:?}"
+    );
+
+    // 不存在 → 404
+    let ghost = wiki.ingest_document(uuid::Uuid::now_v7()).await;
+    assert!(matches!(
+        &ghost,
+        Err(agent_memory_wiki_engine::WikiError::NotFound(_))
+    ));
+
+    handle.shutdown();
+    handle.join().await;
+}
+
 /// S-7：via 执行者标记落 frontmatter——AI 代执行（"ai"）与真人编辑可区分；
 /// 后续不带 via 的更新不清除已有标记（merge 块为空对象时保持原值）。
 #[tokio::test]

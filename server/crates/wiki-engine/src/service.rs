@@ -129,22 +129,46 @@ impl WikiService {
         Ok(skipped)
     }
 
-    /// 从 knowledge 文档触发（读取已解析文本：重新读取原文并解析）。
-    pub async fn ingest_knowledge_document(
-        &self,
-        doc_id: Uuid,
-        raw: &[u8],
-        name: &str,
-        content_type: Option<&str>,
-    ) -> Result<bool, WikiError> {
-        let text = agent_memory_parsing::parse_bytes(name, content_type, raw)
-            .map_err(|e| WikiError::BadRequest(e.to_string()))?;
-        let title: Option<String> = sqlx::query_scalar("SELECT title FROM documents WHERE id = $1")
+    /// 从 knowledge 文档触发织入（upload 与 URL 通用，2026-09-04 补 URL 兜底）：
+    /// raw_path 有 → 重新读取原文件并解析（保留原行为）；
+    /// raw_path 空（URL 摄取）→ 用已分块文本按 seq 拼接——此前 URL 文档既不能
+    /// --doc-id 手动织入（404）也不会被自动织入静默跳过，两路都收敛到 ingest(title, text)。
+    pub async fn ingest_document(&self, doc_id: Uuid) -> Result<bool, WikiError> {
+        let row: Option<(String, Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT title, raw_path, mime FROM documents WHERE id = $1")
+                .bind(doc_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        let Some((title, raw_path, mime)) = row else {
+            return Err(WikiError::NotFound(format!("文档 {doc_id} 不存在")));
+        };
+        let text = if raw_path.as_deref().is_some_and(|p| !p.is_empty()) {
+            let path = raw_path.unwrap_or_default();
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let bytes = tokio::fs::read(&path)
+                .await
+                .map_err(|e| WikiError::BadRequest(format!("读文件失败: {e}")))?;
+            agent_memory_parsing::parse_bytes(&name, mime.as_deref(), &bytes)
+                .map_err(|e| WikiError::BadRequest(e.to_string()))?
+        } else {
+            // URL 摄取：无本地文件，用 chunks 表已解析文本按序拼接
+            let chunks: Vec<String> = sqlx::query_scalar(
+                "SELECT content FROM chunks WHERE document_id = $1 ORDER BY seq",
+            )
             .bind(doc_id)
-            .fetch_optional(&self.pool)
-            .await?
-            .flatten();
-        self.ingest(title.as_deref().unwrap_or(name), &text).await
+            .fetch_all(&self.pool)
+            .await?;
+            if chunks.is_empty() {
+                return Err(WikiError::BadRequest(format!(
+                    "文档 {doc_id} 无本地文件且无可织入的分块（可能尚未解析完成）"
+                )));
+            }
+            chunks.join("\n\n")
+        };
+        self.ingest(&title, &text).await
     }
 
     pub async fn list_pages(

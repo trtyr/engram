@@ -50,31 +50,7 @@ pub async fn ingest(
     require_wiki(&principal)?;
     let skipped = match (req.text, req.document_id) {
         (Some(text), _) => svc(&state).ingest(&req.title, &text).await.map_err(we)?,
-        (None, Some(doc_id)) => {
-            // 读 knowledge 原文件并解析
-            let row: Option<(Option<String>, Option<String>)> =
-                sqlx::query_as("SELECT raw_path, mime FROM documents WHERE id = $1")
-                    .bind(doc_id)
-                    .fetch_optional(&state.pool)
-                    .await
-                    .map_err(ApiError::from)?;
-            let Some((Some(raw_path), mime)) = row else {
-                return Err(ApiError::NotFound(format!(
-                    "文档 {doc_id} 不存在或无本地文件"
-                )));
-            };
-            let name = std::path::Path::new(&raw_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let bytes = tokio::fs::read(&raw_path)
-                .await
-                .map_err(|e| ApiError::BadRequest(format!("读文件失败: {e}")))?;
-            svc(&state)
-                .ingest_knowledge_document(doc_id, &bytes, &name, mime.as_deref())
-                .await
-                .map_err(we)?
-        }
+        (None, Some(doc_id)) => svc(&state).ingest_document(doc_id).await.map_err(we)?,
         (None, None) => {
             return Err(ApiError::BadRequest(
                 "text 与 document_id 必须提供其一".into(),
