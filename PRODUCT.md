@@ -13,7 +13,7 @@ web
 
 ## Product Purpose
 
-单用户 AI 长期记忆平台。核心理念「平台即工具」：平台对外暴露 HTTP API，AI（或人）拿着 API 操纵平台；人通过 Web UI 管理浏览。四类长期记忆资产：Chat Memory（L0→L3 分层蒸馏，全程可溯源）、Knowledge（文档/URL 摄取→混合检索）、Wiki（LLM 增量维护的互链知识库）、CodeGraph（代码知识图谱）。成功 = 所有者与其 AI 能长期信赖的、可溯源的记忆系统。
+单用户 AI 长期记忆平台。核心理念「平台即工具」：平台对外暴露 HTTP API，AI（或人）拿着 API 操纵平台；人通过 Web UI 管理浏览。四类长期记忆资产：Chat Memory（L0→L3 分层蒸馏，全程可溯源）、Wiki（含 Knowledge 文档知识：文档/URL 摄取→混合检索 + LLM 增量维护的互链知识库）、CodeGraph（代码知识图谱）、项目记忆（跨会话工作线）。成功 = 所有者与其 AI 能长期信赖的、可溯源的记忆系统。
 
 ## Positioning
 
@@ -25,8 +25,8 @@ web
 
 ## Capabilities and Constraints
 
-- 七个域页：Dashboard / Memory / Knowledge / Wiki / CodeGraph / Jobs / Settings + 登录。
-- 后端 HTTP API（55 paths，OpenAPI 权威）已定型；本次重设计**后端零改动**。
+- 八个页面：Dashboard / Memory / Circle / Wiki / CodeGraph / Projects / Jobs / Settings + 登录。
+- 后端 HTTP API（88 路径，OpenAPI 权威）已定型；本次重设计**后端零改动**。
 - 技术栈保持：React 19 + TypeScript + Vite 8 + Tailwind 4 + pnpm（radix/shadcn 基件可用可弃）。
 - e2e（Playwright journey）断言语义保持，选择器允许随新 DOM 同步更新。
 - 无营销面：纯控制台（Operate 模式），无注册/计费/多语言诉求；界面语言中文。
