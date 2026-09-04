@@ -20,6 +20,9 @@ pub enum FetchError {
     TooManyRedirects,
     #[error("拒绝：响应超过大小上限")]
     TooLarge,
+    /// HTTP 状态非 2xx（W-1/W-2 2026-09-04：4xx 与 429/5xx 在管道侧分类处理）。
+    #[error("HTTP {0}")]
+    Status(u16),
     #[error("抓取失败：{0}")]
     Network(String),
     #[error("DNS 解析失败：{0}")]
@@ -159,7 +162,7 @@ pub async fn safe_fetch_opts(
         }
 
         if !resp.status().is_success() {
-            return Err(FetchError::Network(format!("HTTP {}", resp.status())));
+            return Err(FetchError::Status(resp.status().as_u16()));
         }
 
         // 大小限制（Content-Length 预检 + 流式读封顶）

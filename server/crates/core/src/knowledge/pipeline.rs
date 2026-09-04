@@ -249,14 +249,28 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
             }
             Err(e) => {
                 let m = format!("URL 抓取失败: {e}");
-                // K9：瞬态网络错误（含超时）→ Retryable，交给队列退避重试，不 mark_failed；
-                // SSRF 判定/协议/大小/DNS 类保持 Permanent，防恶意 URL 反复探测
-                if matches!(e, super::ssrf::FetchError::Network(_)) {
-                    ctx.emit(&m, None).await.ok();
-                    return Err(JobError::Retryable(m));
+                // W-1/W-2（2026-09-04）：按错误类分治——
+                // · HTTP 4xx（除 429）重试无意义 → Permanent + mark_failed（404 文档
+                //   直接 failed，不再退避重试到 job dead 而文档永久卡 pending）；
+                // · 429/5xx 瞬态 → Retryable 退避重试；
+                // · 网络错误（连接/超时/流中断）保持 Retryable；
+                // · Retryable 最后一试也 mark_failed——重试耗尽 job dead 前文档必须
+                //   落终态，杜绝「job dead + 文档 pending」孤儿态。
+                // SSRF 判定/协议/大小/DNS 类保持 Permanent，防恶意 URL 反复探测。
+                let permanent = match &e {
+                    super::ssrf::FetchError::Status(c) => !matches!(c, 429) && *c < 500,
+                    super::ssrf::FetchError::Network(_) => false,
+                    _ => true,
+                };
+                let last_attempt = ctx.job.attempts >= ctx.job.max_attempts;
+                if permanent || last_attempt {
+                    mark_failed(&ctx, doc_id, &m).await;
                 }
-                mark_failed(&ctx, doc_id, &m).await;
-                return Err(fail(m));
+                if permanent {
+                    return Err(fail(m));
+                }
+                ctx.emit(&m, None).await.ok();
+                return Err(JobError::Retryable(m));
             }
         }
     } else {

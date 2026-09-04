@@ -517,6 +517,19 @@ impl WikiService {
         &self,
         source_id: Uuid,
     ) -> Result<crate::cascade::CascadeReport, WikiError> {
+        // W-16（2026-09-04）：先取消该源在途的织入任务——否则级联删完，
+        // 队列里 analyze/generate 继续跑，边删边产页（测试实测页面 81→84）。
+        // running 中的任务若已过写库点仍可能落页，残留由 stale_source lint 报出。
+        sqlx::query(
+            "UPDATE jobs SET status = 'cancelled', error = '源已删除——织入任务随级联取消', \
+             locked_by = NULL, locked_at = NULL \
+             WHERE kind IN ('wiki_analyze','wiki_generate') \
+             AND status IN ('pending','running') \
+             AND payload->>'source_id' = $1::text",
+        )
+        .bind(source_id)
+        .execute(&self.pool)
+        .await?;
         let report = crate::cascade::cascade_delete_source(&self.pool, source_id)
             .await
             .map_err(WikiError::from)?;

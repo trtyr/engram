@@ -202,3 +202,67 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
     .unwrap();
     assert_eq!(baseless, 0, "摘源后无据边应被回收");
 }
+
+/// W-16（2026-09-04）：级联删除先取消该源在途织入任务——
+/// 不取消的话队列里的 analyze/generate 继续跑，边删边产页（实测 81→84）。
+#[tokio::test]
+async fn cascade_delete_cancels_inflight_weave_jobs() {
+    let (pool, svc, _container) = setup().await;
+
+    let source_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO wiki_sources (id, sha256, raw_path, title, status) \
+         VALUES ($1, $2, '/tmp/w16.md', '在途源', 'ready')",
+    )
+    .bind(source_id)
+    .bind(format!("sha-{}", Uuid::now_v7()))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 两个在途织入任务：一个 pending 一个 running，payload 都挂该源
+    let job_pending = Uuid::now_v7();
+    let job_running = Uuid::now_v7();
+    for (jid, status) in [(job_pending, "pending"), (job_running, "running")] {
+        sqlx::query(
+            "INSERT INTO jobs (id, kind, payload, status, max_attempts) \
+             VALUES ($1, 'wiki_generate', $2::jsonb, $3, 3)",
+        )
+        .bind(jid)
+        .bind(format!(r#"{{"source_id":"{source_id}"}}"#))
+        .bind(status)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // 无关任务（别的源）——不应被误伤
+    let job_other = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO jobs (id, kind, payload, status, max_attempts) \
+         VALUES ($1, 'wiki_generate', $2::jsonb, 'pending', 3)",
+    )
+    .bind(job_other)
+    .bind(format!(r#"{{"source_id":"{}"}}"#, Uuid::now_v7()))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    svc.delete_source_cascade(source_id)
+        .await
+        .expect("级联删除");
+
+    for (jid, label) in [(job_pending, "pending"), (job_running, "running")] {
+        let st: String = sqlx::query_scalar("SELECT status FROM jobs WHERE id = $1")
+            .bind(jid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(st, "cancelled", "该源在途任务（{label}）应随级联取消");
+    }
+    let other_st: String = sqlx::query_scalar("SELECT status FROM jobs WHERE id = $1")
+        .bind(job_other)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(other_st, "pending", "其他源的任务不受影响");
+}

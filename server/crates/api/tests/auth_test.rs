@@ -1681,3 +1681,45 @@ async fn wiki_proposals_aggregates_latest_per_job() {
         1
     );
 }
+
+/// W-3（2026-09-04）：doc-search 空 query 三问 400——与 /search 空查询口径对齐，
+/// 不再放行返回全量命中。纯空白（空格）同样拒绝。
+#[tokio::test]
+async fn empty_search_query_rejected() {
+    let (app, container) = app().await;
+    let token = login_token(&app).await;
+    let key = create_key(&app, &token, &["knowledge", "wiki"]).await;
+
+    for q in ["", "   "] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/wiki/documents/search")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {key}"))
+                    .body(Body::from(serde_json::json!({"query": q}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "空 query（{q:?}）应 400，不再返回全量"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            v["error"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("query 不能为空"),
+            "错误文案应三问指路：{v}"
+        );
+    }
+    drop(container);
+}

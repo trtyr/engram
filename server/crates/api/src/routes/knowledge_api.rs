@@ -214,6 +214,10 @@ pub async fn search(
     Json(req): Json<KnowledgeSearchRequest>,
 ) -> Result<Json<Vec<ChunkHit>>, ApiError> {
     require_knowledge(&principal)?;
+    // W-3（2026-09-04）：空 query 三问拒绝——与 /search 的 400 口径对齐，不再返回全量
+    if req.query.trim().is_empty() {
+        return Err(ApiError::BadRequest("query 不能为空".into()));
+    }
     Ok(Json(
         svc(&state)
             .search(&req.query, req.max_items.unwrap_or(20).min(100))
