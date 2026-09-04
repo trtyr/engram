@@ -1,16 +1,16 @@
 //! 知识域：文档摄取（解析→分块→嵌入）+ 检索。
 //!
-//! 设计文档：docs/plantree/plans/agent-memory-platform/topics/knowledge-ingest.md
+//! 设计文档：docs/plantree/plans/engram-platform/topics/knowledge-ingest.md
 
 pub mod chunking;
 pub mod pipeline;
 pub mod ssrf;
 
-use agent_memory_jobs::JobQueue;
-use agent_memory_jobs::types::JobTemplate;
-use agent_memory_llm::ProviderRegistry;
-use agent_memory_llm::types::Purpose;
-use agent_memory_search::tokenize::{has_query_tokens, tsv_query_smart};
+use engram_jobs::JobQueue;
+use engram_jobs::types::JobTemplate;
+use engram_llm::ProviderRegistry;
+use engram_llm::types::Purpose;
+use engram_search::tokenize::{has_query_tokens, tsv_query_smart};
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, QueryBuilder, Row};
 use uuid::Uuid;

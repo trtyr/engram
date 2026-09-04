@@ -1,5 +1,5 @@
 [package]
-name = "agent-memory-jobs"
+name = "engram-jobs"
 description = "任务系统：PG-backed 队列、worker、调度、事件"
 version.workspace = true
 edition.workspace = true
@@ -18,4 +18,4 @@ utoipa.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
-agent-memory-storage = { path = "../storage" }
+engram-storage = { path = "../storage" }

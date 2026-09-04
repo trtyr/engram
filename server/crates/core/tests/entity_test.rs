@@ -2,9 +2,9 @@
 
 mod support;
 
-use agent_memory_core::memory::MemoryService;
-use agent_memory_llm::{KeyCipher, ProviderRegistry};
-use agent_memory_search::tokenize::tsv_text;
+use engram_core::memory::MemoryService;
+use engram_llm::{KeyCipher, ProviderRegistry};
+use engram_search::tokenize::tsv_text;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -12,7 +12,7 @@ async fn setup() -> (PgPool, MemoryService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
     let registry = ProviderRegistry::new(

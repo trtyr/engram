@@ -26,7 +26,7 @@ vi.mock('@/lib/api', () => {
     rows: [
       {
         id: 'p1',
-        name: 'agent-memory',
+        name: 'engram',
         type: 'dev',
         status: 'active',
         description: null,
@@ -89,7 +89,7 @@ describe('Projects 列表页', () => {
   it('渲染项目列表与类型徽章', async () => {
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('agent-memory')).toBeTruthy()
+      expect(screen.getByText('engram')).toBeTruthy()
     })
     expect(screen.getAllByText('开发').length).toBeGreaterThan(0)
     expect(screen.getByText('后端')).toBeTruthy()
@@ -97,7 +97,7 @@ describe('Projects 列表页', () => {
 
   it('新建项目调用 POST /projects', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText('agent-memory')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('engram')).toBeTruthy())
 
     fireEvent.change(screen.getByPlaceholderText('项目名'), { target: { value: '新项目' } })
     fireEvent.click(screen.getByRole('button', { name: '新建' }))
@@ -112,7 +112,7 @@ describe('Projects 列表页', () => {
 
   it('类型筛选触发带 ?type= 的请求', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText('agent-memory')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('engram')).toBeTruthy())
 
     const filter = screen.getAllByRole('combobox')[0]
     fireEvent.change(filter, { target: { value: 'dev' } })

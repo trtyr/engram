@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use agent_memory_jobs::types::JobError;
-use agent_memory_llm::provider::LlmProvider as _;
-use agent_memory_llm::types::{ChatMessage, ChatRequest, EmbedRequest, LlmError, Purpose};
-use agent_memory_llm::{KeyCipher, ProviderRegistry};
+use engram_jobs::types::JobError;
+use engram_llm::provider::LlmProvider as _;
+use engram_llm::types::{ChatMessage, ChatRequest, EmbedRequest, LlmError, Purpose};
+use engram_llm::{KeyCipher, ProviderRegistry};
 use uuid::Uuid;
 
 /// 蒸馏用 LLM 能力（chat JSON + embedding）。
@@ -58,7 +58,7 @@ pub fn parse_json_lenient(text: &str) -> Result<serde_json::Value, String> {
 /// 统一入口：chat 一次 → 解析失败带追加指令重试一次（所有实现共用）。
 /// 每次调用（含重试）的完整 I/O 记入 job_events，可归因可回放。
 pub async fn chat_json_retrying(
-    ctx: &agent_memory_jobs::JobContext,
+    ctx: &engram_jobs::JobContext,
     llm: &dyn DistillLlm,
     purpose: Purpose,
     system: &str,
@@ -173,7 +173,7 @@ impl GatewayLlm {
             .map_err(to_job_err)?;
         let total = resp.input_tokens + resp.output_tokens;
         self.registry
-            .record_usage(&agent_memory_llm::types::UsageMeta {
+            .record_usage(&engram_llm::types::UsageMeta {
                 provider: provider.name().to_string(),
                 model,
                 purpose: purpose.as_str().to_string(),
@@ -225,7 +225,7 @@ impl DistillLlm for GatewayLlm {
                 .await
                 .map_err(to_job_err)?;
             self.registry
-                .record_usage(&agent_memory_llm::types::UsageMeta {
+                .record_usage(&engram_llm::types::UsageMeta {
                     provider: provider.name().to_string(),
                     model,
                     purpose: Purpose::Embed.as_str().to_string(),

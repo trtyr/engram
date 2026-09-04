@@ -1,5 +1,5 @@
 [package]
-name = "agent-memory-parsing"
+name = "engram-parsing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

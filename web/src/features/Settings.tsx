@@ -688,7 +688,7 @@ function RhythmPane() {
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:19180'
   const crontab = [
-    '# agent-memory 记忆节律（外部 cron）——AM 换成本站地址，KEY 换成专用 amk_（设置→API 密钥，memory scope）',
+    '# Engram 记忆节律（外部 cron）——AM 换成本站地址，KEY 换成专用 amk_（设置→API 密钥，memory scope）',
     `AM=${origin}`,
     'KEY="amk_专用密钥"',
     '# 心跳：每次运行报到（设置页据此判定逾期）——via=cron 是防 AI 伪造的显式声明',

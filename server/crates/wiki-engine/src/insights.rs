@@ -1,7 +1,7 @@
 //! 图洞察（llm_wiki 对齐）：意外连接 / 知识缺口（孤立页/稀疏社区/桥节点）
 //! + dismiss 持久化（wiki_insight_dismissals）。
 
-use agent_memory_jobs::types::JobError;
+use engram_jobs::types::JobError;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;

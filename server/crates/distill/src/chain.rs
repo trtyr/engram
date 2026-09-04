@@ -1,8 +1,8 @@
 //! 蒸馏链装配：handler 注册 + 防抖触发。
 
-use agent_memory_jobs::types::{JobError, JobTemplate};
-use agent_memory_jobs::{JobQueue, Runner};
-use agent_memory_llm::KeyCipher;
+use engram_jobs::types::{JobError, JobTemplate};
+use engram_jobs::{JobQueue, Runner};
+use engram_llm::KeyCipher;
 use sqlx::PgPool;
 use std::sync::Arc;
 
@@ -53,7 +53,7 @@ pub fn gateway_llm(pool: PgPool, cipher: KeyCipher) -> LlmRef {
 pub async fn trigger_auto_extract(
     queue: &JobQueue,
     window_secs: i64,
-) -> Result<agent_memory_jobs::Job, JobError> {
+) -> Result<engram_jobs::Job, JobError> {
     let now = chrono::Utc::now();
     let bucket = now.timestamp() / window_secs;
     queue
@@ -70,7 +70,7 @@ pub async fn trigger_auto_extract(
 pub async fn trigger_manual(
     queue: &JobQueue,
     with_consolidate: bool,
-) -> Result<Vec<agent_memory_jobs::Job>, JobError> {
+) -> Result<Vec<engram_jobs::Job>, JobError> {
     trigger(queue, with_consolidate, "manual", "").await
 }
 
@@ -84,7 +84,7 @@ pub async fn trigger(
     with_consolidate: bool,
     via: &str,
     by: &str,
-) -> Result<Vec<agent_memory_jobs::Job>, JobError> {
+) -> Result<Vec<engram_jobs::Job>, JobError> {
     let is_cron = via == "cron";
     let payload = serde_json::json!({"reason": via, "triggered_by": by});
     let mut out = vec![

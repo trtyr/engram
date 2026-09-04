@@ -1,10 +1,10 @@
 //! 记忆域端点（memory scope）。
 
-use agent_memory_core::memory::{
+use engram_core::memory::{
     AtomDto, ContextPack, EmbeddingStatus, EntityDetail, EntityDto, EntityGraph, MemoryError,
     MemoryService, PersonaVersion, ScenarioDto, SearchResponse, SessionDto,
 };
-use agent_memory_search::{SearchHit, search_entities};
+use engram_search::{SearchHit, search_entities};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -194,12 +194,12 @@ pub struct DistillRequest {
 /// 手动触发蒸馏链。
 #[utoipa::path(post, path = "/memory/distill",
     request_body = DistillRequest,
-    responses((status = 202, body = [agent_memory_jobs::Job])))]
+    responses((status = 202, body = [engram_jobs::Job])))]
 pub async fn trigger_distill(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Json(req): Json<DistillRequest>,
-) -> Result<(StatusCode, Json<Vec<agent_memory_jobs::Job>>), ApiError> {
+) -> Result<(StatusCode, Json<Vec<engram_jobs::Job>>), ApiError> {
     require_memory(&principal)?;
     let by = actor_of(&principal);
     let via = if req.via.as_deref() == Some("cron") {
@@ -369,7 +369,7 @@ pub struct PurgeRequest {
 }
 
 /// deep purge 的确认短语（用户亲口授权的载体——AI 复述破坏半径后由用户给出）
-pub use agent_memory_core::memory::PURGE_CONFIRM_PHRASE;
+pub use engram_core::memory::PURGE_CONFIRM_PHRASE;
 
 #[utoipa::path(post, path = "/memory/purge",
     request_body = PurgeRequest,
@@ -653,24 +653,24 @@ pub async fn update_atom(
 
 /// 原子改写历史（新→旧；编辑留痕）。
 #[utoipa::path(get, path = "/memory/atoms/{id}/revisions",
-    responses((status = 200, body = [agent_memory_core::AtomRevision])))]
+    responses((status = 200, body = [engram_core::AtomRevision])))]
 pub async fn atom_revisions(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Vec<agent_memory_core::AtomRevision>>, ApiError> {
+) -> Result<Json<Vec<engram_core::AtomRevision>>, ApiError> {
     require_memory(&principal)?;
     Ok(Json(svc(&state).atom_revisions(id).await.map_err(me)?))
 }
 
 /// 实体摘要版本链（手编档案历史，最近在前）。
 #[utoipa::path(get, path = "/memory/entities/{id}/revisions",
-    responses((status = 200, body = [agent_memory_core::EntityRevision])))]
+    responses((status = 200, body = [engram_core::EntityRevision])))]
 pub async fn entity_revisions(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Vec<agent_memory_core::EntityRevision>>, ApiError> {
+) -> Result<Json<Vec<engram_core::EntityRevision>>, ApiError> {
     require_memory(&principal)?;
     Ok(Json(svc(&state).entity_revisions(id).await.map_err(me)?))
 }
@@ -684,12 +684,12 @@ pub struct CreateRelationRequest {
 
 /// 实体关系列表（有向：本实体作为 from 或 to）。
 #[utoipa::path(get, path = "/memory/entities/{id}/relations",
-    responses((status = 200, body = [agent_memory_core::EntityRelationDto])))]
+    responses((status = 200, body = [engram_core::EntityRelationDto])))]
 pub async fn list_entity_relations(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Vec<agent_memory_core::EntityRelationDto>>, ApiError> {
+) -> Result<Json<Vec<engram_core::EntityRelationDto>>, ApiError> {
     require_memory(&principal)?;
     Ok(Json(
         svc(&state).list_relations(Some(id)).await.map_err(me)?,
@@ -698,13 +698,13 @@ pub async fn list_entity_relations(
 
 /// 建关系（有向：本实体 --rel_type--> to；同向同类型 upsert）。
 #[utoipa::path(post, path = "/memory/entities/{id}/relations", request_body = CreateRelationRequest,
-    responses((status = 201, body = agent_memory_core::EntityRelationDto)))]
+    responses((status = 201, body = engram_core::EntityRelationDto)))]
 pub async fn create_entity_relation(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(req): Json<CreateRelationRequest>,
-) -> Result<(StatusCode, Json<agent_memory_core::EntityRelationDto>), ApiError> {
+) -> Result<(StatusCode, Json<engram_core::EntityRelationDto>), ApiError> {
     require_memory(&principal)?;
     // 权限收窄：关系由蒸馏抽取（source=distill），AI 写会话即可
     if !matches!(&*principal, Principal::Admin) {
@@ -741,12 +741,12 @@ pub struct TimelineParams {
 
 /// 全局记忆时间轴：原子（occurred_at 优先）/场景/实体按时间倒序合并。
 #[utoipa::path(get, path = "/memory/timeline", params(TimelineParams),
-    responses((status = 200, body = [agent_memory_core::TimelineEvent])))]
+    responses((status = 200, body = [engram_core::TimelineEvent])))]
 pub async fn timeline(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Query(p): Query<TimelineParams>,
-) -> Result<Json<Vec<agent_memory_core::TimelineEvent>>, ApiError> {
+) -> Result<Json<Vec<engram_core::TimelineEvent>>, ApiError> {
     require_memory(&principal)?;
     Ok(Json(
         svc(&state)

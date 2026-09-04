@@ -29,9 +29,9 @@ import requests
 # server/ 与 scripts/ 的相对位置：scripts/e2e/_lib/env.py → 上三级是仓库根
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SERVER_DIR = REPO_ROOT / "server"
-BIN = SERVER_DIR / "target" / "debug" / "agent-memory-server"
+BIN = SERVER_DIR / "target" / "debug" / "engram-server"
 
-E2E_DB = "agent_memory_e2e"
+E2E_DB = "engram_e2e"
 PG_HOST = "127.0.0.1"
 PG_PORT = 5432
 PG_USER = os.environ.get("USER") or "postgres"
@@ -123,7 +123,7 @@ def ensure() -> E2EEnv:
 
     log("cargo build（增量）")
     subprocess.run(
-        ["cargo", "build", "-p", "agent-memory-api"],
+        ["cargo", "build", "-p", "engram-api"],
         cwd=SERVER_DIR, check=True, capture_output=True,
     )
     if not BIN.exists():

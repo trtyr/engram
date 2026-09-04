@@ -1,6 +1,6 @@
 //! 知识域端点（knowledge scope）。
 
-use agent_memory_core::knowledge::{
+use engram_core::knowledge::{
     ChunkHit, DocumentDto, IngestSource, KnowledgeError, KnowledgeService,
 };
 use axum::Json;

@@ -23,7 +23,7 @@ origin/main 项目记忆域落地中。cargo **176** 测试 / vitest 42。
 
 - **数据已由所有者主动清空**（非事故、无需恢复）：09-01 档案所述「用户真实记忆 + pi-xiamu key 在役」
   的运行态已终止。当前系统无生产数据在跑。
-- 本地 PG 已清理：仅存 `postgres`（系统）与 `project_manage`（其他项目）；agent-memory 相关的
+- 本地 PG 已清理：仅存 `postgres`（系统）与 `project_manage`（其他项目）；Engram 相关的
   11 个库（agent_memory 老库 / am_design_audit 审计库 / 8 个一次性栈残留）已全部删除。
 - :19180 design-audit 栈进程已停（审计证据落档 docs/design/）。需要本地栈时：
   `CREATE DATABASE` + `cargo run`（迁移自动跑，见 run-and-deploy.md）。

@@ -1,7 +1,7 @@
 //! arbitrate：候选 × 既有相似 → 新增 / 去重 / 矛盾取代。
 
-use agent_memory_jobs::JobContext;
-use agent_memory_jobs::types::{JobError, JobTemplate};
+use engram_jobs::JobContext;
+use engram_jobs::types::{JobError, JobTemplate};
 use serde_json::json;
 use std::fmt::Write as _;
 use uuid::Uuid;
@@ -83,14 +83,14 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             .map_err(|e| JobError::Retryable(e.to_string()))?;
             similar.extend(ann);
         }
-        if agent_memory_search::tokenize::has_query_tokens(&c.content) {
+        if engram_search::tokenize::has_query_tokens(&c.content) {
             // FTS 补位：写入与查询同源 jieba 分词——无嵌入原子（种子/历史直插）由此可达
             let fts: Vec<(Uuid, String)> = sqlx::query_as(
                 "SELECT id, content FROM atoms, to_tsquery('simple', $1) q \
                  WHERE status = 'active' AND tsv @@ q \
                  ORDER BY ts_rank(tsv, q) DESC LIMIT 5",
             )
-            .bind(agent_memory_search::tokenize::tsv_query_smart(
+            .bind(engram_search::tokenize::tsv_query_smart(
                 &c.content, 3,
             ))
             .fetch_all(pool)
@@ -131,7 +131,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         let out = crate::llm_port::chat_json_retrying(
             &ctx,
             llm.as_ref(),
-            agent_memory_llm::types::Purpose::Arbitrate,
+            engram_llm::types::Purpose::Arbitrate,
             &prompts::arbitrate_system(),
             &user,
             ctx.job.id,

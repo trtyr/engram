@@ -3,10 +3,10 @@
 
 mod support;
 
-use agent_memory_distill::llm_port::MockLlm;
-use agent_memory_distill::register_handlers;
-use agent_memory_jobs::types::{JobStatus, JobTemplate};
-use agent_memory_jobs::{JobQueue, Runner, RunnerConfig};
+use engram_distill::llm_port::MockLlm;
+use engram_distill::register_handlers;
+use engram_jobs::types::{JobStatus, JobTemplate};
+use engram_jobs::{JobQueue, Runner, RunnerConfig};
 use pgvector::Vector;
 use serde_json::json;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use uuid::Uuid;
 struct Env {
     pool: sqlx::PgPool,
     queue: JobQueue,
-    handle: agent_memory_jobs::RunnerHandle,
+    handle: engram_jobs::RunnerHandle,
     llm: std::sync::Arc<MockLlm>,
     _pg: support::TestPg,
 }
@@ -25,7 +25,7 @@ async fn setup(chats: Vec<serde_json::Value>) -> Env {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
 
@@ -61,7 +61,7 @@ async fn setup(chats: Vec<serde_json::Value>) -> Env {
     }
 }
 
-async fn wait_done(queue: &JobQueue, kind: &str) -> agent_memory_jobs::Job {
+async fn wait_done(queue: &JobQueue, kind: &str) -> engram_jobs::Job {
     for _ in 0..300 {
         let jobs = queue
             .list(&[kind.to_string()], &[], None, 50)
@@ -220,7 +220,7 @@ async fn arbitrate_branches_organize_and_persona_history() {
         .bind(id)
         .bind(content)
         .bind(emb(seed))
-        .bind(agent_memory_search::tokenize::tsv_text(content))
+        .bind(engram_search::tokenize::tsv_text(content))
         .execute(&env.pool)
         .await
         .unwrap();
@@ -234,7 +234,7 @@ async fn arbitrate_branches_organize_and_persona_history() {
         .bind(id)
         .bind(content)
         .bind(emb(seed))
-        .bind(agent_memory_search::tokenize::tsv_text(content))
+        .bind(engram_search::tokenize::tsv_text(content))
         .execute(&env.pool)
         .await
         .unwrap();
@@ -359,10 +359,10 @@ async fn debounce_bucket_shares_job() {
     ])
     .await;
 
-    let j1 = agent_memory_distill::trigger_auto_extract(&env.queue, 30)
+    let j1 = engram_distill::trigger_auto_extract(&env.queue, 30)
         .await
         .unwrap();
-    let j2 = agent_memory_distill::trigger_auto_extract(&env.queue, 30)
+    let j2 = engram_distill::trigger_auto_extract(&env.queue, 30)
         .await
         .unwrap();
     assert_eq!(j1.id, j2.id, "同 30s 窗口应复用任务");
@@ -517,7 +517,7 @@ async fn arbitrate_null_embedding_falls_back_to_fts() {
          VALUES ($1, 'fact', '用户喜欢简洁的中文回复', 'candidate', 0.9, NULL, to_tsvector('simple', $2))",
     )
     .bind(c_no_emb)
-    .bind(agent_memory_search::tokenize::tsv_text("用户喜欢简洁的中文回复"))
+    .bind(engram_search::tokenize::tsv_text("用户喜欢简洁的中文回复"))
     .execute(&env.pool)
     .await
     .unwrap();
@@ -529,7 +529,7 @@ async fn arbitrate_null_embedding_falls_back_to_fts() {
     )
     .bind(target)
     .bind(emb(9))
-    .bind(agent_memory_search::tokenize::tsv_text("用户喜欢简洁中文回答"))
+    .bind(engram_search::tokenize::tsv_text("用户喜欢简洁中文回答"))
     .execute(&env.pool)
     .await
     .unwrap();
@@ -1076,7 +1076,7 @@ async fn arbitrate_similar_pool_reaches_embeddingless_seed() {
          VALUES ($1, 'preference', '周日晚上不安排长任务', 0.75, 'active', '[]'::jsonb, false, NULL, to_tsvector('simple', $2))",
     )
     .bind(seed)
-    .bind(agent_memory_search::tokenize::tsv_text("周日晚上不安排长任务"))
+    .bind(engram_search::tokenize::tsv_text("周日晚上不安排长任务"))
     .execute(&env.pool)
     .await
     .unwrap();
@@ -1575,10 +1575,10 @@ async fn persona_stale_facet_forces_refresh() {
 #[tokio::test]
 async fn cron_full_consolidate_daily_idempotent() {
     let env = setup(vec![]).await;
-    let c1 = agent_memory_distill::chain::trigger(&env.queue, true, "cron", "key:cron")
+    let c1 = engram_distill::chain::trigger(&env.queue, true, "cron", "key:cron")
         .await
         .unwrap();
-    let c2 = agent_memory_distill::chain::trigger(&env.queue, true, "cron", "key:cron")
+    let c2 = engram_distill::chain::trigger(&env.queue, true, "cron", "key:cron")
         .await
         .unwrap();
 
@@ -1602,10 +1602,10 @@ async fn cron_full_consolidate_daily_idempotent() {
     assert_eq!(ext1.payload.get("reason"), Some(&json!("cron")));
 
     // manual 通道：无键，随时重触发都是新 job
-    let m1 = agent_memory_distill::chain::trigger(&env.queue, true, "manual", "admin")
+    let m1 = engram_distill::chain::trigger(&env.queue, true, "manual", "admin")
         .await
         .unwrap();
-    let m2 = agent_memory_distill::chain::trigger(&env.queue, true, "manual", "admin")
+    let m2 = engram_distill::chain::trigger(&env.queue, true, "manual", "admin")
         .await
         .unwrap();
     let mc1 = m1.iter().find(|j| j.kind == "consolidate").unwrap();

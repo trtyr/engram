@@ -1,8 +1,8 @@
 //! Wiki 域端点（wiki scope）。
 
-use agent_memory_core::wiki::{CascadeReport, InsightsReport, Purpose, ReviewItem};
-use agent_memory_core::wiki::{LintReport, WikiError, WikiPageDto, WikiService};
-use agent_memory_jobs::types::JobEvent;
+use engram_core::wiki::{CascadeReport, InsightsReport, Purpose, ReviewItem};
+use engram_core::wiki::{LintReport, WikiError, WikiPageDto, WikiService};
+use engram_jobs::types::JobEvent;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -137,11 +137,11 @@ pub async fn put_page(
 }
 
 #[utoipa::path(get, path = "/wiki/graph",
-    responses((status = 200, body = agent_memory_core::wiki::GraphDto)))]
+    responses((status = 200, body = engram_core::wiki::GraphDto)))]
 pub async fn graph(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-) -> Result<Json<agent_memory_core::wiki::GraphDto>, ApiError> {
+) -> Result<Json<engram_core::wiki::GraphDto>, ApiError> {
     require_wiki(&principal)?;
     Ok(Json(svc(&state).graph().await.map_err(we)?))
 }

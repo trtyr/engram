@@ -30,7 +30,7 @@ openapi-dump 活体导出）。权威全表在 [server/docs/api.md](../server/do
 
 ## 契约管理
 
-- schema 权威源：`cargo run -q -p agent-memory-api --bin openapi-dump`
+- schema 权威源：`cargo run -q -p engram-api --bin openapi-dump`
 - 前端类型：`pnpm run gen:api`（openapi-typescript）
 - CI api-types job 对生成物做零漂移 diff——后端改端点不重生成即红。
 - **utoipa 双注册**：新端点必须同 commit 加 `.route()` 与 `mod.rs` 的 `paths()` 列表，漏一半 CI 不报但快照测试红。

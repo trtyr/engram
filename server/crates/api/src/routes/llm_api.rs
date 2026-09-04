@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use agent_memory_llm::crypto::KeyCipher;
-use agent_memory_llm::provider::{LlmProvider, OpenAiCompatProvider, ProviderRegistry};
-use agent_memory_llm::router::{PurposeRouter, RoutingTable};
-use agent_memory_llm::types::{ChatMessage, ChatRequest, Purpose, UsageRecord};
+use engram_llm::crypto::KeyCipher;
+use engram_llm::provider::{LlmProvider, OpenAiCompatProvider, ProviderRegistry};
+use engram_llm::router::{PurposeRouter, RoutingTable};
+use engram_llm::types::{ChatMessage, ChatRequest, Purpose, UsageRecord};
 
 use crate::auth::{Principal, create_api_key};
 use crate::error::ApiError;
@@ -544,7 +544,7 @@ pub async fn test_provider(
     if let Some(em) = embed_model {
         embed_result = Some(
             provider
-                .embed(agent_memory_llm::types::EmbedRequest {
+                .embed(engram_llm::types::EmbedRequest {
                     model: em,
                     inputs: vec!["连通探测".into()],
                     dimensions: Some(1024),
@@ -560,7 +560,7 @@ pub async fn test_provider(
             let mut parts = Vec::new();
             if let Some(Ok(r)) = c {
                 registry
-                    .record_usage(&agent_memory_llm::types::UsageMeta {
+                    .record_usage(&engram_llm::types::UsageMeta {
                         provider: name.clone(),
                         model: r.model.clone(),
                         purpose: "test".into(),
@@ -574,7 +574,7 @@ pub async fn test_provider(
             }
             if let Some(Ok(r)) = e {
                 registry
-                    .record_usage(&agent_memory_llm::types::UsageMeta {
+                    .record_usage(&engram_llm::types::UsageMeta {
                         provider: name.clone(),
                         model: r.model.clone(),
                         purpose: "test".into(),

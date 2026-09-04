@@ -14,7 +14,7 @@ origin/main a3b6a2d 双 workflow 绿。cargo **158** 测试 / **28 迁移** / **
 | cargo fmt --check | exit 0 |
 | cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
 | cargo test --workspace | 176 passed / 0 failed（37 套件） |
-| cargo run -q -p agent-memory-api --bin openapi-dump | 88 路径 / 113 方法（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10） |
+| cargo run -q -p engram-api --bin openapi-dump | 88 路径 / 113 方法（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10） |
 
 ## 2026-08-30 基线以来的落地（按主题）
 
@@ -49,7 +49,7 @@ origin/main a3b6a2d 双 workflow 绿。cargo **158** 测试 / **28 迁移** / **
 ## 运行环境实况
 
 - **数据已由所有者主动清空**（2026-09-03 确认，非事故）：无生产数据在跑。
-- 本地 PG 已清理：仅存 postgres / project_manage；agent-memory 相关 11 库（含 agent_memory 老库、
+- 本地 PG 已清理：仅存 postgres / project_manage；Engram 相关 11 库（含 agent_memory 老库、
   am_design_audit 审计库）已删。:19180 审计栈进程已停。重建本地栈：
   `psql -c "CREATE DATABASE am_dev"` + `AGENT_MEMORY_DATABASE_URL=… cargo run`（迁移自动跑）。
 

@@ -1,6 +1,6 @@
 # Plan Tree
 
-agent-memory 仓库的规划树根。项目级基线由 [baseline/](baseline/README.md) 承担；完整项目档案在 [docs/](../README.md)（project-init 全栈归档 + 设计审计与 Engram 重设计证据）。
+Engram 仓库的规划树根。项目级基线由 [baseline/](baseline/README.md) 承担；完整项目档案在 [docs/](../README.md)（project-init 全栈归档 + 设计审计与 Engram 重设计证据）。
 
 ## Active Plans
 

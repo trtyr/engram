@@ -8,7 +8,7 @@
 Karpathy《llm-wiki.md》(2026)
    ├── TencentDB-Agent-Memory  —— 团队级记忆中枢（本项目前身/同源）
    ├── nashsu/llm_wiki          —— 个人级桌面应用
-   └── agent-memory（本项目）    —— 团队级思路的 Rust 重写，定位单用户平台
+   └── Engram（本项目）    —— 团队级思路的 Rust 重写，定位单用户平台
 ```
 
 理论来源（用户知识库 `~/Documents/Knowledge Base/01 技术类/05 大模型与 AI/Agent/Wiki 设计/` 下 4 篇 + 原文）：

@@ -1,5 +1,5 @@
 [package]
-name = "agent-memory-llm"
+name = "engram-llm"
 description = "LLM 客户端：provider 抽象、模型路由、用量记账、密钥加密"
 version.workspace = true
 edition.workspace = true
@@ -22,5 +22,5 @@ utoipa.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
-agent-memory-storage = { path = "../storage" }
+engram-storage = { path = "../storage" }
 axum.workspace = true

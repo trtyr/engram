@@ -35,7 +35,7 @@ AGENT_MEMORY_ADMIN_PASSWORD='dev-pw' \
 AGENT_MEMORY_MASTER_KEY="$(printf 'ab%.0s' {1..32})" \
 AGENT_MEMORY_DATA_DIR=/tmp/am-data \
 RUST_LOG=info \
-cargo run -q -p agent-memory-api --bin agent-memory-server
+cargo run -q -p engram-api --bin engram-server
 # 就绪探针：curl :8080/ready（首次含编译 + 迁移）
 ```
 
@@ -53,7 +53,7 @@ cd server && cargo test --workspace   # 176 passed / 0 failed
 ## OpenAPI 导出
 
 ```bash
-cargo run -q -p agent-memory-api --bin openapi-dump > openapi.json
+cargo run -q -p engram-api --bin openapi-dump > openapi.json
 ```
 
 ## 部署（Docker，当前未启用）

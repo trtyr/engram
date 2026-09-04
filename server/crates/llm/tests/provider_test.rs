@@ -3,10 +3,10 @@
 
 mod support;
 
-use agent_memory_llm::KeyCipher;
-use agent_memory_llm::provider::{LlmProvider, OpenAiCompatProvider, ProviderRegistry};
-use agent_memory_llm::router::{PurposeRouter, RouteRule, RoutingTable};
-use agent_memory_llm::types::{EmbedRequest, Purpose};
+use engram_llm::KeyCipher;
+use engram_llm::provider::{LlmProvider, OpenAiCompatProvider, ProviderRegistry};
+use engram_llm::router::{PurposeRouter, RouteRule, RoutingTable};
+use engram_llm::types::{EmbedRequest, Purpose};
 use axum::Json;
 use axum::routing::post;
 
@@ -49,7 +49,7 @@ async fn setup() -> (support::TestPg, ProviderRegistry, PurposeRouter) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
     let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
@@ -109,7 +109,7 @@ async fn provider_roundtrip_and_usage_accounting() {
 
     // 记账
     registry
-        .record_usage(&agent_memory_llm::types::UsageMeta {
+        .record_usage(&engram_llm::types::UsageMeta {
             provider: "mock".into(),
             model: "bge-m3".into(),
             purpose: Purpose::Embed.as_str().into(),
@@ -176,7 +176,7 @@ async fn http_error_classification() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, agent_memory_llm::types::LlmError::Transient(_)),
+        matches!(err, engram_llm::types::LlmError::Transient(_)),
         "连接拒绝应归类瞬态: {err}"
     );
 }
@@ -217,7 +217,7 @@ async fn l1_capability_mismatch_reports_not_configured() {
         Ok(_) => panic!("embedding-only 默认 provider 不应解析出 chat 模型"),
     };
     match err {
-        agent_memory_llm::types::LlmError::NotConfigured(msg) => {
+        engram_llm::types::LlmError::NotConfigured(msg) => {
             assert!(msg.contains("chat"), "报错应指向能力缺失: {msg}");
         }
         other => panic!("应为 NotConfigured，实际 {other}"),

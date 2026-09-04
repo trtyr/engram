@@ -1,18 +1,18 @@
 [package]
-name = "agent-memory-core"
+name = "engram-core"
 description = "领域层：memory/knowledge/wiki/codegraph 各域服务与编排"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-agent-memory-jobs = { path = "../jobs" }
-agent-memory-llm = { path = "../llm" }
-agent-memory-search = { path = "../search" }
-agent-memory-distill = { path = "../distill" }
-agent-memory-parsing = { path = "../parsing" }
-agent-memory-wiki-engine = { path = "../wiki-engine" }
-agent-memory-cg-bridge = { path = "../cg-bridge" }
+engram-jobs = { path = "../jobs" }
+engram-llm = { path = "../llm" }
+engram-search = { path = "../search" }
+engram-distill = { path = "../distill" }
+engram-parsing = { path = "../parsing" }
+engram-wiki-engine = { path = "../wiki-engine" }
+engram-cg-bridge = { path = "../cg-bridge" }
 
 sqlx.workspace = true
 tokio.workspace = true
@@ -30,5 +30,5 @@ scraper.workspace = true   # URL 摄取提取 <title>（正文解析在 parsing 
 
 [dev-dependencies]
 anyhow.workspace = true
-agent-memory-storage = { path = "../storage" }
+engram-storage = { path = "../storage" }
 tempfile = "3"

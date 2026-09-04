@@ -1,7 +1,7 @@
 //! organize：未归组 L1 → 新建/更新 L2 场景块。
 
-use agent_memory_jobs::JobContext;
-use agent_memory_jobs::types::{JobError, JobTemplate};
+use engram_jobs::JobContext;
+use engram_jobs::types::{JobError, JobTemplate};
 use serde_json::json;
 use std::fmt::Write as _;
 use uuid::Uuid;
@@ -101,7 +101,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         let out = match crate::llm_port::chat_json_retrying(
             &ctx,
             llm.as_ref(),
-            agent_memory_llm::types::Purpose::Organize,
+            engram_llm::types::Purpose::Organize,
             &prompts::scenario_refresh_system(),
             &user,
             ctx.job.id,
@@ -135,7 +135,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                 .cloned()
                 .unwrap_or_default(),
         ))
-        .bind(agent_memory_search::tokenize::tsv_text(&text))
+        .bind(engram_search::tokenize::tsv_text(&text))
         .execute(pool)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -234,7 +234,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     let out = crate::llm_port::chat_json_retrying(
         &ctx,
         llm.as_ref(),
-        agent_memory_llm::types::Purpose::Organize,
+        engram_llm::types::Purpose::Organize,
         &prompts::organize_system(),
         &user,
         ctx.job.id,
@@ -357,7 +357,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             )
             .bind(sid)
             .bind(pgvector::Vector::from(embeddings.get(i).cloned().unwrap_or_default()))
-            .bind(agent_memory_search::tokenize::tsv_text(&texts[i]))
+            .bind(engram_search::tokenize::tsv_text(&texts[i]))
             .execute(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;

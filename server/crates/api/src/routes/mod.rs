@@ -19,7 +19,7 @@ use utoipa::OpenApi;
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "agent-memory API", version = env!("CARGO_PKG_VERSION"),
+    info(title = "engram API", version = env!("CARGO_PKG_VERSION"),
         description = "单用户 AI 长期记忆平台。平台即工具：AI 通过本 API 操纵记忆。"),
     paths(
         health::health, health::ready,

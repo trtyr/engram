@@ -1,24 +1,24 @@
 [package]
-name = "agent-memory-api"
+name = "engram-api"
 description = "HTTP 层：路由、handler、DTO、OpenAPI、中间件"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "agent-memory-server"
+name = "engram-server"
 path = "src/main.rs"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-agent-memory-storage.workspace = true
-agent-memory-jobs.workspace = true
-agent-memory-llm.workspace = true
-agent-memory-core.workspace = true
-agent-memory-distill.workspace = true
-agent-memory-search.workspace = true
+engram-storage.workspace = true
+engram-jobs.workspace = true
+engram-llm.workspace = true
+engram-core.workspace = true
+engram-distill.workspace = true
+engram-search.workspace = true
 
 sqlx.workspace = true
 axum.workspace = true

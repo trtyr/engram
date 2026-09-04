@@ -1,9 +1,9 @@
 //! Wiki 服务层：页面 CRUD、图数据、ingest 入口、lint 调用。
 
-use agent_memory_jobs::{JobQueue, JobTemplate};
-use agent_memory_llm::ProviderRegistry;
-use agent_memory_llm::types::Purpose;
-use agent_memory_search::tokenize::tsv_text;
+use engram_jobs::{JobQueue, JobTemplate};
+use engram_llm::ProviderRegistry;
+use engram_llm::types::Purpose;
+use engram_search::tokenize::tsv_text;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -11,7 +11,7 @@ use crate::ingest;
 use crate::lint;
 
 /// LLM 引用（ingest job 注入）。
-pub type LlmRef = std::sync::Arc<dyn agent_memory_distill::llm_port::DistillLlm>;
+pub type LlmRef = std::sync::Arc<dyn engram_distill::llm_port::DistillLlm>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WikiError {
@@ -29,8 +29,8 @@ impl From<sqlx::Error> for WikiError {
     }
 }
 
-impl From<agent_memory_jobs::types::JobError> for WikiError {
-    fn from(e: agent_memory_jobs::types::JobError) -> Self {
+impl From<engram_jobs::types::JobError> for WikiError {
+    fn from(e: engram_jobs::types::JobError) -> Self {
         WikiError::Storage(e.to_string())
     }
 }
@@ -151,7 +151,7 @@ impl WikiService {
             let bytes = tokio::fs::read(&path)
                 .await
                 .map_err(|e| WikiError::BadRequest(format!("读文件失败: {e}")))?;
-            agent_memory_parsing::parse_bytes(&name, mime.as_deref(), &bytes)
+            engram_parsing::parse_bytes(&name, mime.as_deref(), &bytes)
                 .map_err(|e| WikiError::BadRequest(e.to_string()))?
         } else {
             // URL 摄取：无本地文件，用 chunks 表已解析文本按序拼接
@@ -338,10 +338,10 @@ impl WikiService {
     /// purpose 注入：检索走 LLM 时（AI 客户端读 query_context.purpose）提供方向意图——对齐 llm_wiki 的 query 注入。
     pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<WikiPageDto>, WikiError> {
         // K7：单字/纯标点无 token → 短路空结果（不再空跑 to_tsquery）
-        if !agent_memory_search::tokenize::has_query_tokens(query) {
+        if !engram_search::tokenize::has_query_tokens(query) {
             return Ok(vec![]);
         }
-        let tsq = agent_memory_search::tokenize::tsv_query_smart(query, 3);
+        let tsq = engram_search::tokenize::tsv_query_smart(query, 3);
         let limit = limit.min(50);
 
         // W2：查询向量（无 provider / 嵌入失败 → None → 纯 FTS）；L6：经记账门面
@@ -401,7 +401,7 @@ impl WikiService {
                  WHERE slug = $1 AND tsv IS DISTINCT FROM to_tsvector('simple', $2)",
             )
             .bind(slug)
-            .bind(agent_memory_search::tokenize::tsv_text(&text))
+            .bind(engram_search::tokenize::tsv_text(&text))
             .execute(&self.pool)
             .await?;
             n += r.rows_affected();
@@ -513,7 +513,7 @@ impl WikiService {
         .bind(title)
         .bind(&content)
         .bind(sqlx::types::Json(&fm))
-        .bind(agent_memory_search::tokenize::tsv_text(&content))
+        .bind(engram_search::tokenize::tsv_text(&content))
         .execute(&self.pool)
         .await?;
 

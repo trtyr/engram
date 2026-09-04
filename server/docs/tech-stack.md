@@ -47,7 +47,7 @@
 | cargo test | 单元+集成（141 用例，本机 PG） | `cargo test --workspace` |
 | cargo audit | 依赖漏洞（1 接受项见 current-state） | `cargo audit` |
 | cargo-chef | Docker 层缓存 | deploy/Dockerfile |
-| openapi-dump | OpenAPI 导出 | `cargo run -q -p agent-memory-api --bin openapi-dump` |
+| openapi-dump | OpenAPI 导出 | `cargo run -q -p engram-api --bin openapi-dump` |
 
 ## 已接受的依赖风险（2026-08-30 cargo audit）
 

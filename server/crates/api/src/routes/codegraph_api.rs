@@ -1,6 +1,6 @@
 //! CodeGraph 域端点（codegraph scope）。
 
-use agent_memory_core::codegraph::{CgBridge, CgError, CgProjectDto, QueryKind};
+use engram_core::codegraph::{CgBridge, CgError, CgProjectDto, QueryKind};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;

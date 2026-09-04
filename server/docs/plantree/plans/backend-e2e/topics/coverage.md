@@ -19,7 +19,7 @@ scripts/e2e/
 - **PG**：本机 Homebrew PostgreSQL（127.0.0.1:5432，已确认 pgvector 0.8.6 可用）。
   E2E 用独立库 `agent_memory_e2e`（每次跑前 DROP+CREATE，与用户的 `agent_memory` 库完全隔离）；
   迁移由服务启动自动执行（0001 自带 `CREATE EXTENSION IF NOT EXISTS vector`）。
-- **服务**：脚本 `cargo build -p agent-memory-api` 后拉起二进制（随机空闲端口），
+- **服务**：脚本 `cargo build -p engram-api` 后拉起二进制（随机空闲端口），
   `AGENT_MEMORY_DATABASE_URL` 指向 E2E 库；跑完杀进程。
 - **codegraph**：本机有 node + CLI 才跑，否则 skip（不打 fail）。
 

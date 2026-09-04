@@ -95,7 +95,7 @@ jobs:
         working-directory: server
         run: |
           mkdir -p ../web/dist
-          cargo run -q -p agent-memory-api --bin openapi-dump > /tmp/openapi.json
+          cargo run -q -p engram-api --bin openapi-dump > /tmp/openapi.json
           python3 -c "import json; d=json.load(open('/tmp/openapi.json')); print('paths:', len(d['paths']))"
       - name: generate types + drift check
         working-directory: web

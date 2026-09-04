@@ -1,7 +1,7 @@
 //! LLM 客户端：provider 抽象（OpenAI 兼容）、purpose 路由、用量记账、密钥加密。
 //! 平台所有 LLM 调用的唯一出口。
 //!
-//! 设计文档：docs/plantree/plans/agent-memory-platform/topics/llm-providers.md
+//! 设计文档：docs/plantree/plans/engram-platform/topics/llm-providers.md
 
 pub mod crypto;
 pub mod provider;

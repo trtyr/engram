@@ -5,9 +5,9 @@
 
 mod support;
 
-use agent_memory_core::memory::{MemoryError, MemoryService};
-use agent_memory_llm::{KeyCipher, ProviderRegistry};
-use agent_memory_search::tokenize::tsv_text;
+use engram_core::memory::{MemoryError, MemoryService};
+use engram_llm::{KeyCipher, ProviderRegistry};
+use engram_search::tokenize::tsv_text;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -15,7 +15,7 @@ async fn setup() -> (PgPool, MemoryService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
     let registry = ProviderRegistry::new(
@@ -87,7 +87,7 @@ async fn search_hits_bump_hit_count() {
          ($1, '开发环境', '用户偏好 Rust', '完整描述', to_tsvector('simple', $2))",
     )
     .bind(sid)
-    .bind(agent_memory_search::tokenize::tsv_text(
+    .bind(engram_search::tokenize::tsv_text(
         "开发环境 用户偏好 Rust",
     ))
     .execute(&pool)
@@ -661,13 +661,13 @@ async fn void_session_semantics() {
     // M-2：已处理 → BadRequest（400），文案点破当前状态
     let again = svc.void_session(s.id).await;
     assert!(
-        matches!(&again, Err(agent_memory_core::memory::MemoryError::BadRequest(m)) if m.contains("已处理")),
+        matches!(&again, Err(engram_core::memory::MemoryError::BadRequest(m)) if m.contains("已处理")),
         "void 不可重复（非 pending）且文案分开：{again:?}"
     );
     // M-2：不存在 → NotFound（404），不再与「已蒸馏」合并成一句
     let ghost = svc.void_session(uuid::Uuid::now_v7()).await;
     assert!(
-        matches!(&ghost, Err(agent_memory_core::memory::MemoryError::NotFound(m)) if m.contains("不存在")),
+        matches!(&ghost, Err(engram_core::memory::MemoryError::NotFound(m)) if m.contains("不存在")),
         "不存在的会话应 404 NotFound：{ghost:?}"
     );
 
@@ -736,7 +736,7 @@ async fn purge_agent_clears_test_data() {
         .bind(id)
         .bind(content)
         .bind(serde_json::json!([{"session_id": sid}]).to_string())
-        .bind(agent_memory_search::tokenize::tsv_text(content))
+        .bind(engram_search::tokenize::tsv_text(content))
         .execute(&pool)
         .await
         .unwrap();
@@ -772,7 +772,7 @@ async fn purge_agent_clears_test_data() {
 #[tokio::test]
 async fn write_session_validates_turns() {
     let (_pool, svc, _container) = setup().await;
-    use agent_memory_core::memory::TURN_TEXT_MAX_CHARS;
+    use engram_core::memory::TURN_TEXT_MAX_CHARS;
 
     // M-1：空 text
     let empty = svc
@@ -784,7 +784,7 @@ async fn write_session_validates_turns() {
         )
         .await;
     assert!(
-        matches!(&empty, Err(agent_memory_core::memory::MemoryError::BadRequest(m)) if m.contains("text 不能为空")),
+        matches!(&empty, Err(engram_core::memory::MemoryError::BadRequest(m)) if m.contains("text 不能为空")),
         "空 text 轮次应 400：{empty:?}"
     );
     // M-1：纯空白 text 同样挡
@@ -809,7 +809,7 @@ async fn write_session_validates_turns() {
         )
         .await;
     assert!(
-        matches!(&long, Err(agent_memory_core::memory::MemoryError::BadRequest(m)) if m.contains(&TURN_TEXT_MAX_CHARS.to_string())),
+        matches!(&long, Err(engram_core::memory::MemoryError::BadRequest(m)) if m.contains(&TURN_TEXT_MAX_CHARS.to_string())),
         "超长 turn 应 400 且文案含上限值：{long:?}"
     );
 
@@ -932,7 +932,7 @@ async fn context_pack_prefers_recent() {
              VALUES ($1, 'preference', '用户喜欢深色主题的新说法', 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $2), now() - interval '1 hour')",
         )
         .bind(id)
-        .bind(agent_memory_search::tokenize::tsv_text("用户喜欢深色主题的新说法"))
+        .bind(engram_search::tokenize::tsv_text("用户喜欢深色主题的新说法"))
         .execute(&pool)
         .await
         .unwrap();

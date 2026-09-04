@@ -339,7 +339,7 @@ function LocationPane({
       <input className={`${inputCls} w-full`} placeholder="IP（内网/公网/IPv6，如 192.168.1.5 / 82.157.147.224）" value={ip} onChange={(e) => setIp(e.target.value)} />
       <input className={`${inputCls} w-full`} placeholder="主机名（如 tencent-beijing / MacBook Pro）" value={host} onChange={(e) => setHost(e.target.value)} />
       <input className={`${inputCls} w-full`} placeholder="操作系统（macOS / Ubuntu / Windows…）" value={os} onChange={(e) => setOs(e.target.value)} />
-      <input className={`${inputCls} w-full`} placeholder="路径（如 ~/Documents/Code/Rust/agent-memory）" value={path} onChange={(e) => setPath(e.target.value)} />
+      <input className={`${inputCls} w-full`} placeholder="路径（如 ~/Documents/Code/Rust/engram）" value={path} onChange={(e) => setPath(e.target.value)} />
       <input className={`${inputCls} w-full`} placeholder="用途（开发 / 部署 / …，可选）" value={purpose} onChange={(e) => setPurpose(e.target.value)} />
       {err && <ErrorBox msg={err} />}
       <div className="flex gap-2">

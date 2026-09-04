@@ -1,7 +1,7 @@
 //! extract：L0 会话 → 候选 L1 原子。
 
-use agent_memory_jobs::JobContext;
-use agent_memory_jobs::types::{JobError, JobTemplate};
+use engram_jobs::JobContext;
+use engram_jobs::types::{JobError, JobTemplate};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -184,7 +184,7 @@ async fn run_claimed(
         let out = crate::llm_port::chat_json_retrying(
             &ctx,
             llm.as_ref(),
-            agent_memory_llm::types::Purpose::Extract,
+            engram_llm::types::Purpose::Extract,
             &prompts::extract_system(),
             &user,
             ctx.job.id,
@@ -371,7 +371,7 @@ async fn run_claimed(
                     .filter(|v| v.iter().any(|&x| x != 0.0))
                     .map(|v| pgvector::Vector::from(v.clone())),
             )
-            .bind(agent_memory_search::tokenize::tsv_text(&content))
+            .bind(engram_search::tokenize::tsv_text(&content))
             .execute(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;

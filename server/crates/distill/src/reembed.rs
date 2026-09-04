@@ -3,8 +3,8 @@
 //! atoms（active）+ scenarios 的 NULL embedding 批量补算。这是用户显式触发的
 //! 修复动作——无 provider 时明确失败（与蒸馏链 best-effort 跳过语义相反）。
 
-use agent_memory_jobs::JobContext;
-use agent_memory_jobs::types::JobError;
+use engram_jobs::JobContext;
+use engram_jobs::types::JobError;
 use uuid::Uuid;
 
 use crate::llm_port::LlmRef;

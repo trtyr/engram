@@ -2,19 +2,19 @@
 
 mod support;
 
-use agent_memory_wiki_engine::WikiService;
+use engram_wiki_engine::WikiService;
 use uuid::Uuid;
 
 async fn setup() -> (sqlx::PgPool, WikiService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    let registry = agent_memory_llm::ProviderRegistry::new(
+    let registry = engram_llm::ProviderRegistry::new(
         pool.clone(),
-        agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+        engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
     (pool.clone(), WikiService::new(pool, registry), container)
 }
@@ -167,7 +167,7 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
     .await;
 
     // 源重叠边生成（三页两两无向双插，与真实 ingest 相同路径）
-    agent_memory_wiki_engine::relevance::rebuild_weights(&pool)
+    engram_wiki_engine::relevance::rebuild_weights(&pool)
         .await
         .unwrap();
     let edges_before: i64 = sqlx::query_scalar(

@@ -4,7 +4,7 @@
 
 use sqlx::PgPool;
 
-use agent_memory_jobs::types::JobError;
+use engram_jobs::types::JobError;
 
 pub const W_DIRECT: f64 = 3.0;
 pub const W_SOURCE_OVERLAP: f64 = 4.0;

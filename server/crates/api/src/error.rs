@@ -1,6 +1,6 @@
 //! 统一错误体。所有 handler 的错误出口。
 //!
-//! 契约（docs/plantree/plans/agent-memory-platform/topics/api-design.md）：
+//! 契约（docs/plantree/plans/engram-platform/topics/api-design.md）：
 //! `{"error": {"code", "message", "retryable", "details?"}}`
 //! - code 稳定可编程判断；message 是人话且不泄漏内部细节。
 //! - 内部细节只进日志，不进响应。
@@ -102,16 +102,16 @@ impl IntoResponse for ApiError {
     }
 }
 
-impl From<agent_memory_jobs::types::JobError> for ApiError {
-    fn from(e: agent_memory_jobs::types::JobError) -> Self {
+impl From<engram_jobs::types::JobError> for ApiError {
+    fn from(e: engram_jobs::types::JobError) -> Self {
         ApiError::Unavailable(e.to_string())
     }
 }
 
-impl From<agent_memory_llm::types::LlmError> for ApiError {
-    fn from(e: agent_memory_llm::types::LlmError) -> Self {
+impl From<engram_llm::types::LlmError> for ApiError {
+    fn from(e: engram_llm::types::LlmError) -> Self {
         match e {
-            agent_memory_llm::types::LlmError::NotConfigured(m) => ApiError::Unavailable(m),
+            engram_llm::types::LlmError::NotConfigured(m) => ApiError::Unavailable(m),
             other => ApiError::Unavailable(other.to_string()),
         }
     }

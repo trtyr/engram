@@ -17,20 +17,20 @@ members = [
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/trtyr/agent-memory"
+repository = "https://github.com/trtyr/engram"
 
 [workspace.dependencies]
 # 内部 crates
-agent-memory-api = { path = "crates/api" }
-agent-memory-core = { path = "crates/core" }
-agent-memory-storage = { path = "crates/storage" }
-agent-memory-llm = { path = "crates/llm" }
-agent-memory-jobs = { path = "crates/jobs" }
-agent-memory-distill = { path = "crates/distill" }
-agent-memory-wiki-engine = { path = "crates/wiki-engine" }
-agent-memory-cg-bridge = { path = "crates/cg-bridge" }
-agent-memory-search = { path = "crates/search" }
-agent-memory-parsing = { path = "crates/parsing" }
+engram-api = { path = "crates/api" }
+engram-core = { path = "crates/core" }
+engram-storage = { path = "crates/storage" }
+engram-llm = { path = "crates/llm" }
+engram-jobs = { path = "crates/jobs" }
+engram-distill = { path = "crates/distill" }
+engram-wiki-engine = { path = "crates/wiki-engine" }
+engram-cg-bridge = { path = "crates/cg-bridge" }
+engram-search = { path = "crates/search" }
+engram-parsing = { path = "crates/parsing" }
 
 # 异步运行时与 HTTP
 tokio = { version = "1", features = ["full"] }

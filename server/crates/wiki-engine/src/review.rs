@@ -2,7 +2,7 @@
 //! 预定义动作（create_page / deep_research / skip / flag）+ 预生成检索词，
 //! 异步处理不阻塞 ingest。
 
-use agent_memory_jobs::types::JobError;
+use engram_jobs::types::JobError;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;

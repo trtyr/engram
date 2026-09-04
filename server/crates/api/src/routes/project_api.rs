@@ -2,7 +2,7 @@
 //!
 //! 设计：docs/plantree/plans/project-memory/（0005 三表模型，双入口平等）。
 
-use agent_memory_core::project::{
+use engram_core::project::{
     ProjectDetailDto, ProjectDocDto, ProjectDto, ProjectError, ProjectLocationDto, ProjectService,
     ProjectTypeDto,
 };

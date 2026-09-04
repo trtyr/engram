@@ -31,7 +31,7 @@ pub struct ReadyBody {
         (status = 503, body = crate::error::ErrorEnvelope),
     ))]
 pub async fn ready(State(state): State<AppState>) -> Result<Json<ReadyBody>, ApiError> {
-    let version = agent_memory_storage::current_version(&state.pool).await?;
+    let version = engram_storage::current_version(&state.pool).await?;
     if version.is_none() {
         return Err(ApiError::Unavailable("迁移尚未应用".into()));
     }

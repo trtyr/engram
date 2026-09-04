@@ -1,6 +1,6 @@
 # 概览
 
-**agent-memory server** 是单用户 AI 长期记忆平台的后端。前端（Engram 控制台）与第三方 AI Agent
+**Engram server** 是单用户 AI 长期记忆平台的后端。前端（Engram 控制台）与第三方 AI Agent
 都通过它的 HTTP API 工作。
 
 ## 解决什么问题
@@ -34,7 +34,7 @@ entities（记忆坐标系）          人物/项目/主题/群组/地点——�
 ## 整体形状
 
 ```
-┌─────────────────────────── agent-memory-api (bin) ───────────────────────────┐
+┌─────────────────────────── engram-api (bin) ───────────────────────────┐
 │  axum Router                                                                │
 │  ├─ 公开: /health /ready /openapi.json /auth/login                          │
 │  ├─ Bearer 认证层（admin 会话 ams_ / api key amk_；/jobs 对 text/html 分流 SPA）│

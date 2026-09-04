@@ -9,7 +9,7 @@
 //! 所有写操作包进一个事务（R4）：删页/摘源/清 dead link/删 source 原子提交，
 //! 失败整体回滚；index.md 重建是派生数据，放在事务外幂等重算。
 
-use agent_memory_jobs::types::JobError;
+use engram_jobs::types::JobError;
 use sqlx::PgPool;
 use uuid::Uuid;
 

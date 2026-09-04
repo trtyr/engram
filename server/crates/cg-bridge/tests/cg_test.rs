@@ -2,13 +2,13 @@
 
 mod support;
 
-use agent_memory_cg_bridge::{CgBridge, CgError, QueryKind};
+use engram_cg_bridge::{CgBridge, CgError, QueryKind};
 
 async fn setup() -> (sqlx::PgPool, CgBridge, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
     let dir = tempfile::tempdir().unwrap();

@@ -1,14 +1,14 @@
 [package]
-name = "agent-memory-distill"
+name = "engram-distill"
 description = "蒸馏管道：L0→L1→L2→L3 编排、版本化提示词"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-agent-memory-jobs = { path = "../jobs" }
-agent-memory-llm = { path = "../llm" }
-agent-memory-search = { path = "../search" }
+engram-jobs = { path = "../jobs" }
+engram-llm = { path = "../llm" }
+engram-search = { path = "../search" }
 
 sqlx.workspace = true
 tokio.workspace = true
@@ -22,4 +22,4 @@ pgvector.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
-agent-memory-storage = { path = "../storage" }
+engram-storage = { path = "../storage" }

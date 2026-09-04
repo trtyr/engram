@@ -1,7 +1,7 @@
 //! 两步 ingest job handlers：wiki_analyze → wiki_generate。
 
-use agent_memory_jobs::JobContext;
-use agent_memory_jobs::types::{JobError, JobTemplate};
+use engram_jobs::JobContext;
+use engram_jobs::types::{JobError, JobTemplate};
 use serde_json::json;
 use sha2::Digest;
 use uuid::Uuid;
@@ -32,7 +32,7 @@ fn sha256_hex(b: &[u8]) -> String {
 /// 入队 ingest：source 内容（复用 knowledge 的解析产物文本或直接文本）。
 /// sha 命中且已 ingest → 跳过（幂等）。
 pub async fn enqueue_ingest(
-    queue: &agent_memory_jobs::JobQueue,
+    queue: &engram_jobs::JobQueue,
     title: &str,
     text: &str,
 ) -> Result<(Uuid, bool), JobError> {
@@ -209,10 +209,10 @@ pub async fn analyze_job(
     let user = format!(
         "== 知识库 Purpose（方向意图，分析时纳入考量）==\n{purpose}\n\n== 现有页面目录 ==\n{index}\n\n== 源文档 ==\n{text}"
     );
-    let out = agent_memory_distill::llm_port::chat_json_retrying(
+    let out = engram_distill::llm_port::chat_json_retrying(
         &ctx,
         llm.as_ref(),
-        agent_memory_llm::types::Purpose::WikiAnalysis,
+        engram_llm::types::Purpose::WikiAnalysis,
         &prompts::analysis_system(),
         &user,
         ctx.job.id,
@@ -303,10 +303,10 @@ pub async fn generate_job(
         text,
         existing_pages
     );
-    let out = agent_memory_distill::llm_port::chat_json_retrying(
+    let out = engram_distill::llm_port::chat_json_retrying(
         &ctx,
         llm.as_ref(),
-        agent_memory_llm::types::Purpose::WikiGeneration,
+        engram_llm::types::Purpose::WikiGeneration,
         &prompts::generation_system(),
         &user,
         ctx.job.id,
@@ -457,7 +457,7 @@ pub async fn generate_job(
         let text = format!("{title}\n{content}");
         sqlx::query("UPDATE wiki_pages SET tsv = to_tsvector('simple', $2) WHERE slug = $1")
             .bind(slug)
-            .bind(agent_memory_search::tokenize::tsv_text(&text))
+            .bind(engram_search::tokenize::tsv_text(&text))
             .execute(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -727,7 +727,7 @@ async fn upsert_system_page(
 /// W4：Permanent 失败 → wiki_sources 标 failed + error 落列（此前 'failed' 态全代码无人写）。
 async fn mark_source_failed(
     pool: &sqlx::PgPool,
-    ctx_job: &agent_memory_jobs::types::Job,
+    ctx_job: &engram_jobs::types::Job,
     msg: &str,
 ) {
     let Some(sid) = ctx_job
@@ -748,9 +748,9 @@ async fn mark_source_failed(
 
 /// 注册 Wiki handler。
 pub fn register_handlers(
-    runner: agent_memory_jobs::Runner,
+    runner: engram_jobs::Runner,
     llm: crate::service::LlmRef,
-) -> agent_memory_jobs::Runner {
+) -> engram_jobs::Runner {
     let l1 = llm.clone();
     let l2 = llm.clone();
     runner
@@ -760,7 +760,7 @@ pub fn register_handlers(
                 let pool = ctx.pool().clone();
                 let job = ctx.job.clone();
                 let r = analyze_job(ctx, llm).await;
-                if let Err(agent_memory_jobs::types::JobError::Permanent(msg)) = &r {
+                if let Err(engram_jobs::types::JobError::Permanent(msg)) = &r {
                     mark_source_failed(&pool, &job, msg).await;
                 }
                 r
@@ -772,7 +772,7 @@ pub fn register_handlers(
                 let pool = ctx.pool().clone();
                 let job = ctx.job.clone();
                 let r = generate_job(ctx, llm).await;
-                if let Err(agent_memory_jobs::types::JobError::Permanent(msg)) = &r {
+                if let Err(engram_jobs::types::JobError::Permanent(msg)) = &r {
                     mark_source_failed(&pool, &job, msg).await;
                 }
                 r

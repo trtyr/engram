@@ -1,7 +1,7 @@
 //! consolidate：近重复合并 + stale 降权（每周定时 + 手动）。
 
-use agent_memory_jobs::JobContext;
-use agent_memory_jobs::types::{JobError, JobTemplate};
+use engram_jobs::JobContext;
+use engram_jobs::types::{JobError, JobTemplate};
 use serde_json::json;
 use sqlx::Row as _;
 use uuid::Uuid;
@@ -60,7 +60,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         let out = crate::llm_port::chat_json_retrying(
             &ctx,
             llm.as_ref(),
-            agent_memory_llm::types::Purpose::Consolidate,
+            engram_llm::types::Purpose::Consolidate,
             &prompts::consolidate_system(),
             &user,
             ctx.job.id,
@@ -162,7 +162,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             let out = crate::llm_port::chat_json_retrying(
                 &ctx,
                 llm.as_ref(),
-                agent_memory_llm::types::Purpose::Consolidate,
+                engram_llm::types::Purpose::Consolidate,
                 &prompts::entity_portrait_system(),
                 &user,
                 ctx.job.id,
@@ -226,7 +226,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         match crate::llm_port::chat_json_retrying(
             &ctx,
             llm.as_ref(),
-            agent_memory_llm::types::Purpose::Consolidate,
+            engram_llm::types::Purpose::Consolidate,
             &prompts::relation_backfill_system(),
             &user,
             ctx.job.id,

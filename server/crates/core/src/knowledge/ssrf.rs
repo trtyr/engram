@@ -129,7 +129,7 @@ pub async fn safe_fetch_opts(
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(timeout)
-            .user_agent("agent-memory/1.0");
+            .user_agent("engram/1.0");
         if !via_proxy {
             for a in &addrs {
                 builder = builder.resolve(&host, *a);

@@ -1,6 +1,6 @@
 # 概览
 
-**agent-memory（产品名 Engram）**——单用户 AI 长期记忆平台。
+**Engram（产品名 Engram）**——单用户 AI 长期记忆平台。
 一个仓库、两个 workspace、三层档案：本目录是全栈集成视角，细节下沉到
 [server/docs/](../server/docs/README.md)（后端项目）与 [web/docs/](../web/docs/README.md)（前端项目）。
 
@@ -34,7 +34,7 @@ L0 会话 ──蒸馏──▶ L1 原子 ──组织──▶ L2 场景 ──
 ## 仓库形状
 
 ```text
-agent-memory/
+Engram/
 ├── server/          # Rust workspace（10 crates，axum+sqlx+pgvector，rust-embed 托管前端）
 │   └── docs/        # ← 后端项目档案
 ├── web/             # React 19 SPA（Engram 控制台）

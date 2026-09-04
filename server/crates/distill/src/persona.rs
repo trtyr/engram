@@ -1,7 +1,7 @@
 //! persona：变动 L2 → L3 画像分面新版本（版本化 + 证据链）。
 
-use agent_memory_jobs::JobContext;
-use agent_memory_jobs::types::JobError;
+use engram_jobs::JobContext;
+use engram_jobs::types::JobError;
 use serde_json::json;
 use std::fmt::Write as _;
 use uuid::Uuid;
@@ -124,7 +124,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
         let removed_tokens: std::collections::HashSet<String> =
-            agent_memory_search::tokenize::tokenize(&removed_all)
+            engram_search::tokenize::tokenize(&removed_all)
                 .into_iter()
                 .collect();
         let mut retired: Vec<String> = Vec::new();
@@ -132,7 +132,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             if content.trim().is_empty() {
                 continue;
             }
-            let overlap = agent_memory_search::tokenize::tokenize(content)
+            let overlap = engram_search::tokenize::tokenize(content)
                 .into_iter()
                 .filter(|t| removed_tokens.contains(t))
                 .count();
@@ -219,7 +219,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     let out = crate::llm_port::chat_json_retrying(
         &ctx,
         llm.as_ref(),
-        agent_memory_llm::types::Purpose::Persona,
+        engram_llm::types::Purpose::Persona,
         &prompts::persona_system(),
         &user,
         ctx.job.id,

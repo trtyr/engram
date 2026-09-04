@@ -5,8 +5,8 @@
 
 mod support;
 
-use agent_memory_api::routes;
-use agent_memory_api::state::AppState;
+use engram_api::routes;
+use engram_api::state::AppState;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -16,7 +16,7 @@ async fn app() -> (Router, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
     let state = AppState::new(pool)
@@ -466,13 +466,13 @@ async fn l3_resolve_hot_path_deterministic_default() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
 
-    use agent_memory_llm::KeyCipher;
-    use agent_memory_llm::provider::ProviderRegistry;
-    use agent_memory_llm::types::Purpose;
+    use engram_llm::KeyCipher;
+    use engram_llm::provider::ProviderRegistry;
+    use engram_llm::types::Purpose;
     let registry = ProviderRegistry::new(
         pool.clone(),
         KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
@@ -499,7 +499,7 @@ async fn l3_resolve_hot_path_deterministic_default() {
     }
 
     // resolve 热路径必须稳定选最早创建的 older（旧实现 LIMIT 1 无 ORDER 依赖物理顺序）
-    use agent_memory_llm::provider::LlmProvider as _;
+    use engram_llm::provider::LlmProvider as _;
     let (provider, model) = registry.resolve(Purpose::Extract).await.unwrap();
     assert_eq!(
         provider.name(),
@@ -517,7 +517,7 @@ async fn l10_placeholder_create_response_carries_warning() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
 

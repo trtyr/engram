@@ -4,15 +4,15 @@
 // 复用 storage crate 的测试基建（容器启动逻辑一致）
 mod support;
 
-use agent_memory_jobs::types::{FailOutcome, JobError, JobStatus, JobTemplate};
-use agent_memory_jobs::{JobQueue, Runner, RunnerConfig};
+use engram_jobs::types::{FailOutcome, JobError, JobStatus, JobTemplate};
+use engram_jobs::{JobQueue, Runner, RunnerConfig};
 use std::time::Duration;
 
 async fn setup() -> (support::TestPg, JobQueue, sqlx::PgPool, String) {
     let container = support::start_pgvector().await.expect("启动容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
     (container, JobQueue::new(pool.clone()), pool, url)

@@ -30,7 +30,7 @@ AGENT_MEMORY_ADMIN_PASSWORD=$PW \
 AGENT_MEMORY_MASTER_KEY="$(printf 'ab%.0s' {1..32})" \
 AGENT_MEMORY_DATA_DIR="$(mktemp -d)" \
 RUST_LOG=info \
-  nohup cargo run -q -p agent-memory-api --bin agent-memory-server > "$LOG" 2>&1 &
+  nohup cargo run -q -p engram-api --bin engram-server > "$LOG" 2>&1 &
 
 R=""
 for i in $(seq 1 90); do

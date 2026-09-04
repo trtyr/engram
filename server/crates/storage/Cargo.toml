@@ -1,5 +1,5 @@
 [package]
-name = "agent-memory-storage"
+name = "engram-storage"
 description = "持久化：sqlx 仓储层、迁移、事务边界"
 version.workspace = true
 edition.workspace = true

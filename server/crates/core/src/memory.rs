@@ -1,11 +1,11 @@
 //! 记忆域服务：L0 写入/触发、检索、上下文包、L1 治理、L3 画像视图。
 
-use agent_memory_jobs::types::Job;
-use agent_memory_jobs::{JobQueue, JobTemplate};
-use agent_memory_llm::ProviderRegistry;
-use agent_memory_llm::types::Purpose;
-use agent_memory_search::tokenize::tokenize;
-use agent_memory_search::{SearchHit, search_atoms, search_scenarios};
+use engram_jobs::types::Job;
+use engram_jobs::{JobQueue, JobTemplate};
+use engram_llm::ProviderRegistry;
+use engram_llm::types::Purpose;
+use engram_search::tokenize::tokenize;
+use engram_search::{SearchHit, search_atoms, search_scenarios};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::json;
@@ -343,7 +343,7 @@ impl MemoryService {
 
         match distill {
             "auto" => {
-                agent_memory_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
+                engram_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
                     .await
                     .ok();
             }
@@ -386,7 +386,7 @@ impl MemoryService {
         .await?;
         match distill {
             "auto" => {
-                agent_memory_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
+                engram_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
                     .await
                     .ok();
             }
@@ -504,7 +504,7 @@ impl MemoryService {
         .await?;
         // 追加同样走防抖：同窗口的追加与首写共用一个 extract 任务
         if distill == "auto" {
-            agent_memory_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
+            engram_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
                 .await
                 .ok();
         }
@@ -570,7 +570,7 @@ impl MemoryService {
         via: &str,
         by: &str,
     ) -> Result<Vec<Job>, MemoryError> {
-        agent_memory_distill::chain::trigger(&self.queue, full, via, by)
+        engram_distill::chain::trigger(&self.queue, full, via, by)
             .await
             .map_err(|e| MemoryError::Storage(e.to_string()))
     }
@@ -679,7 +679,7 @@ impl MemoryService {
         .bind(occurred_at)
         .bind(valid_until)
         .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
-        .bind(agent_memory_search::tokenize::tsv_text(text))
+        .bind(engram_search::tokenize::tsv_text(text))
         .fetch_one(&self.pool)
         .await?;
         Ok(row)
@@ -779,7 +779,7 @@ impl MemoryService {
         .bind(valid_until)
         .bind(sensitive)
         .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
-        .bind(agent_memory_search::tokenize::tsv_text(&new_content))
+        .bind(engram_search::tokenize::tsv_text(&new_content))
         .bind(new_kind)
         .fetch_one(&self.pool)
         .await?;
@@ -1666,7 +1666,7 @@ impl MemoryService {
 
         // 实体：token 命中（名字加权）——主角先行
         let entities = if want_e {
-            agent_memory_search::search_entities(&self.pool, query, max_items).await?
+            engram_search::search_entities(&self.pool, query, max_items).await?
         } else {
             vec![]
         };
@@ -1798,7 +1798,7 @@ impl MemoryService {
         // 有 query 走 token 相关（纯 jieba，不依赖向量）；无 query 按密度头部。best-effort。
         let ent_budget = (budget_items / 5).max(2);
         let entity_ids: Vec<Uuid> = match query {
-            Some(q) => agent_memory_search::search_entities(&self.pool, q, ent_budget as i64)
+            Some(q) => engram_search::search_entities(&self.pool, q, ent_budget as i64)
                 .await
                 .unwrap_or_default()
                 .into_iter()

@@ -5,7 +5,7 @@
 //! l1/l2 各自独立、knowledge、wiki）内按命中顺序赋 RRF 分数 `1/(60 + rank)`，
 //! 使跨域分数可比，融合后按分数降序截断。
 
-use agent_memory_llm::ProviderRegistry;
+use engram_llm::ProviderRegistry;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -83,7 +83,7 @@ impl UnifiedSearch {
             mem.search(query, &["l1", "l2"], per_domain, true, false, None, None),
             know.search(query, per_domain),
             wiki.search(query, per_domain),
-            agent_memory_search::search_entities(&self.pool, query, per_domain),
+            engram_search::search_entities(&self.pool, query, per_domain),
         );
 
         let mut merged: Vec<UnifiedHit> = Vec::new();

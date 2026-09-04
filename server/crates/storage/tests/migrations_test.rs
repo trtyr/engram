@@ -9,12 +9,12 @@ async fn migrations_apply_on_clean_pgvector() {
     let pool = support::connect_with_retry(&url).await.expect("连接容器");
 
     // 干净库跑迁移
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移执行");
 
     // 版本可查（当前 28 份迁移：0028 = project 唯一约束）
-    let version = agent_memory_storage::current_version(&pool).await.unwrap();
+    let version = engram_storage::current_version(&pool).await.unwrap();
     assert_eq!(version, Some(28), "0001-0028 迁移应已应用");
 
     // pgvector 扩展真实可用
@@ -25,7 +25,7 @@ async fn migrations_apply_on_clean_pgvector() {
     assert_eq!(v, "[1,2,3]");
 
     // 幂等：重复执行不报错
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移幂等重放");
 }
@@ -35,7 +35,7 @@ async fn all_domain_tables_exist_with_columns() {
     let container = support::start_pgvector().await.expect("启动 pgvector 容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接容器");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移执行");
 

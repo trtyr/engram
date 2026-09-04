@@ -1,11 +1,11 @@
-//! agent-memory 服务入口（薄壳：配置 → 池 → 迁移 → 路由 → 监听）。
+//! engram 服务入口（薄壳：配置 → 池 → 迁移 → 路由 → 监听）。
 
 use std::net::SocketAddr;
 
-use agent_memory_api::config::Config;
-use agent_memory_api::routes;
-use agent_memory_api::state::AppState;
-use agent_memory_storage::PoolConfig;
+use engram_api::config::Config;
+use engram_api::routes;
+use engram_api::state::AppState;
+use engram_storage::PoolConfig;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -24,12 +24,12 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), "agent-memory 启动");
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "engram 启动");
 
     // 3. 数据库连接 + 迁移（启动即跑，失败快速退出）
-    let pool = agent_memory_storage::connect_pool(&PoolConfig::new(&cfg.database_url)).await?;
-    agent_memory_storage::run_migrations(&pool).await?;
-    let version = agent_memory_storage::current_version(&pool).await?;
+    let pool = engram_storage::connect_pool(&PoolConfig::new(&cfg.database_url)).await?;
+    engram_storage::run_migrations(&pool).await?;
+    let version = engram_storage::current_version(&pool).await?;
     tracing::info!(migration_version = ?version, "迁移就绪");
 
     // P2：进程崩溃自愈——上次运行中被认领（processing）的会话此刻不可能有
@@ -50,11 +50,11 @@ async fn main() -> anyhow::Result<()> {
     // 4. 任务 runner：注册蒸馏链 + 知识摄取 handler
     // P-C：deep purge 定时执行器——armed 的 job 到期（5 分钟冷却后）真清库。
     let pool_for_purge = pool.clone();
-    let runner = agent_memory_distill::register_handlers(
-        agent_memory_jobs::Runner::new(pool.clone(), agent_memory_jobs::RunnerConfig::default()),
-        agent_memory_distill::gateway_llm(
+    let runner = engram_distill::register_handlers(
+        engram_jobs::Runner::new(pool.clone(), engram_jobs::RunnerConfig::default()),
+        engram_distill::gateway_llm(
             pool.clone(),
-            agent_memory_llm::KeyCipher::from_hex_master(
+            engram_llm::KeyCipher::from_hex_master(
                 &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
             )
             .expect("主密钥格式恒合法"),
@@ -63,27 +63,27 @@ async fn main() -> anyhow::Result<()> {
     .register("deep_purge", move |_ctx| {
         let pool = pool_for_purge.clone();
         async move {
-            let counts = agent_memory_core::purge_deep_pool(&pool)
+            let counts = engram_core::purge_deep_pool(&pool)
                 .await
-                .map_err(|e| agent_memory_jobs::types::JobError::Retryable(e.to_string()))?;
+                .map_err(|e| engram_jobs::types::JobError::Retryable(e.to_string()))?;
             Ok(counts)
         }
     });
-    let runner = agent_memory_core::knowledge::register_handlers(
+    let runner = engram_core::knowledge::register_handlers(
         runner,
-        agent_memory_llm::ProviderRegistry::new(
+        engram_llm::ProviderRegistry::new(
             pool.clone(),
-            agent_memory_llm::KeyCipher::from_hex_master(
+            engram_llm::KeyCipher::from_hex_master(
                 &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
             )
             .expect("主密钥格式恒合法"),
         ),
     );
-    let runner = agent_memory_core::wiki::ingest::register_handlers(
+    let runner = engram_core::wiki::ingest::register_handlers(
         runner,
-        agent_memory_distill::gateway_llm(
+        engram_distill::gateway_llm(
             pool.clone(),
-            agent_memory_llm::KeyCipher::from_hex_master(
+            engram_llm::KeyCipher::from_hex_master(
                 &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
             )
             .expect("主密钥格式恒合法"),
@@ -103,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
         let st = state.clone();
         tokio::spawn(async move {
             let registry = st.registry();
-            let wiki = agent_memory_core::wiki::WikiService::new(st.pool.clone(), registry);
+            let wiki = engram_core::wiki::WikiService::new(st.pool.clone(), registry);
             match wiki.backfill_tsv().await {
                 Ok(n) if n > 0 => tracing::info!("wiki tsv 存量补数完成：{n} 页"),
                 Ok(_) => {}

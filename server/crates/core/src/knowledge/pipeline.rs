@@ -1,11 +1,11 @@
 //! 摄取管道 job handlers：parse → chunk → embed 三步链。
 
-use agent_memory_jobs::JobContext;
-use agent_memory_jobs::types::{JobError, JobTemplate};
-use agent_memory_llm::ProviderRegistry;
-use agent_memory_llm::types::Purpose;
-use agent_memory_parsing::parse_bytes;
-use agent_memory_search::tokenize::tsv_text;
+use engram_jobs::JobContext;
+use engram_jobs::types::{JobError, JobTemplate};
+use engram_llm::ProviderRegistry;
+use engram_llm::types::Purpose;
+use engram_parsing::parse_bytes;
+use engram_search::tokenize::tsv_text;
 use serde_json::json;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -59,7 +59,7 @@ fn normalize_url(url: &str) -> String {
 ///
 /// 入队摄取（幂等：sha 命中返回既有文档；K6 并发同 sha 无竞态、K2 入队失败回滚）。
 pub async fn enqueue_ingest(
-    queue: &agent_memory_jobs::JobQueue,
+    queue: &engram_jobs::JobQueue,
     _registry: &ProviderRegistry,
     data_dir: &std::path::Path,
     source: IngestSource,
@@ -537,7 +537,7 @@ pub async fn embed_job(
                 Err(e) => {
                     // K8：瞬态失败（429/5xx/超时）→ 整体重试，只补缺失保证进度不丢；
                     // 永久失败才降级 FTS（不阻塞 ready，可事后 re-embed 恢复）
-                    if matches!(e, agent_memory_llm::types::LlmError::Transient(_)) {
+                    if matches!(e, engram_llm::types::LlmError::Transient(_)) {
                         return Err(JobError::Retryable(format!("嵌入瞬态失败: {e}")));
                     }
                     tracing::warn!(error = %e, "嵌入批次失败，标记 embed_failed");
@@ -583,9 +583,9 @@ pub async fn embed_job(
 
 /// 注册知识域 handlers（main 装配用）。
 pub fn register_handlers(
-    runner: agent_memory_jobs::Runner,
+    runner: engram_jobs::Runner,
     registry: ProviderRegistry,
-) -> agent_memory_jobs::Runner {
+) -> engram_jobs::Runner {
     let r1 = registry.clone();
     runner
         .register("parse_document", |ctx| async move { parse_job(ctx).await })

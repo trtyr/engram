@@ -6,8 +6,8 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use agent_memory_jobs::JobQueue;
-use agent_memory_jobs::types::{Job, JobEvent, JobStatus};
+use engram_jobs::JobQueue;
+use engram_jobs::types::{Job, JobEvent, JobStatus};
 use utoipa::IntoParams;
 
 use crate::auth::{Principal, require_scope};

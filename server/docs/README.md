@@ -1,4 +1,4 @@
-# agent-memory server — 项目档案
+# Engram server — 项目档案
 
 > 后端 Rust workspace 的完整书面档案。2026-08-30 全新初始化（此前版本已过期，全部按当日源码与命令输出重写）。
 > 上层集成视角见[仓库根 docs/](../../docs/README.md)；前端项目档案见 [web/docs/](../../web/docs/README.md)。
@@ -34,5 +34,5 @@ HTTP API（axum）+ PostgreSQL(pgvector)，SPA 静态资源经 rust-embed 同源
 cd server
 cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings   # 均 exit 0
 cargo test --workspace        # 176 passed / 0 failed（36 个套件）
-cargo run -q -p agent-memory-api --bin openapi-dump   # OpenAPI 导出：88 路径 / 113 方法
+cargo run -q -p engram-api --bin openapi-dump   # OpenAPI 导出：88 路径 / 113 方法
 ```

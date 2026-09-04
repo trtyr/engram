@@ -1,6 +1,6 @@
 //! 跨域统一检索端点（memory + knowledge + wiki）。
 
-use agent_memory_core::unified::{UnifiedError, UnifiedHit, UnifiedSearch};
+use engram_core::unified::{UnifiedError, UnifiedHit, UnifiedSearch};
 use axum::Json;
 use axum::extract::State;
 use serde::Deserialize;

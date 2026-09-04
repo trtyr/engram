@@ -91,7 +91,7 @@ echo "   知识检索命中"
 
 echo "== 7. Wiki ingest + 查询"
 curl -fsS -X POST "$API/wiki/ingest" -H "$AUTH" -H 'content-type: application/json' \
-  -d '{"title":"AI 记忆系统","text":"agent-memory 平台通过分层蒸馏维护用户画像。蒸馏管道由 extract、arbitrate、organize、persona 四阶段组成。画像按分面版本化存储在 PostgreSQL 中。"}' >/dev/null
+  -d '{"title":"AI 记忆系统","text":"engram 平台通过分层蒸馏维护用户画像。蒸馏管道由 extract、arbitrate、organize、persona 四阶段组成。画像按分面版本化存储在 PostgreSQL 中。"}' >/dev/null
 for _ in $(seq 1 180); do
   W=$(curl -fsS "$API/jobs?kind=wiki_generate&limit=1" -H "$AUTH" | jq -r '.[0].status // "none"')
   [ "$W" = "succeeded" ] && break

@@ -2,9 +2,9 @@
 
 mod support;
 
-use agent_memory_distill::llm_port::MockLlm;
-use agent_memory_jobs::{Runner, RunnerConfig};
-use agent_memory_wiki_engine::{LlmRef, WikiService};
+use engram_distill::llm_port::MockLlm;
+use engram_jobs::{Runner, RunnerConfig};
+use engram_wiki_engine::{LlmRef, WikiService};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,7 +14,7 @@ async fn setup(
 ) -> (
     sqlx::PgPool,
     WikiService,
-    agent_memory_jobs::RunnerHandle,
+    engram_jobs::RunnerHandle,
     support::TestPg,
 ) {
     let llm: LlmRef = Arc::new(MockLlm::with_raw_chats(
@@ -35,18 +35,18 @@ async fn setup_llm(
 ) -> (
     sqlx::PgPool,
     WikiService,
-    agent_memory_jobs::RunnerHandle,
+    engram_jobs::RunnerHandle,
     support::TestPg,
 ) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
 
     let l1 = llm.clone();
-    let runner = agent_memory_wiki_engine::ingest::register_handlers(
+    let runner = engram_wiki_engine::ingest::register_handlers(
         Runner::new(
             pool.clone(),
             RunnerConfig {
@@ -61,9 +61,9 @@ async fn setup_llm(
     );
     // embed 也需要 handler 之外的 Llm —— WikiService 不直接调 LLM（嵌入在 job 内）
     let handle = runner.start();
-    let registry = agent_memory_llm::ProviderRegistry::new(
+    let registry = engram_llm::ProviderRegistry::new(
         pool.clone(),
-        agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+        engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
     (
         pool.clone(),
@@ -345,7 +345,7 @@ async fn ingest_document_url_fallback_uses_chunks() {
     .unwrap();
     let err = wiki.ingest_document(empty_doc).await;
     assert!(
-        matches!(&err, Err(agent_memory_wiki_engine::WikiError::BadRequest(m)) if m.contains("无可织入的分块")),
+        matches!(&err, Err(engram_wiki_engine::WikiError::BadRequest(m)) if m.contains("无可织入的分块")),
         "无文件无分块应 400 且文案可行动：{err:?}"
     );
 
@@ -353,7 +353,7 @@ async fn ingest_document_url_fallback_uses_chunks() {
     let ghost = wiki.ingest_document(uuid::Uuid::now_v7()).await;
     assert!(matches!(
         &ghost,
-        Err(agent_memory_wiki_engine::WikiError::NotFound(_))
+        Err(engram_wiki_engine::WikiError::NotFound(_))
     ));
 
     handle.shutdown();
@@ -839,14 +839,14 @@ async fn graph_community_sparse_flag_matches_insights_threshold() {
     let env = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&env).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    let registry = agent_memory_llm::ProviderRegistry::new(
+    let registry = engram_llm::ProviderRegistry::new(
         pool.clone(),
-        agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+        engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
-    let svc = agent_memory_wiki_engine::WikiService::new(pool.clone(), registry);
+    let svc = engram_wiki_engine::WikiService::new(pool.clone(), registry);
 
     // 3 页同一社区：仅靠下限权重边（无 wikilink、无共享 source）→ 应判稀疏
     for slug in ["sp-a", "sp-b", "sp-c"] {

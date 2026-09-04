@@ -9,7 +9,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 vi.mock('@/lib/api', () => {
   const detail = {
     id: 'p1',
-    name: 'agent-memory',
+    name: 'engram',
     type: 'dev',
     status: 'active',
     description: null,
@@ -22,7 +22,7 @@ vi.mock('@/lib/api', () => {
         id: 'l1',
         project_id: 'p1',
         host: 'MacBook Pro',
-        path: '~/Documents/Code/Rust/agent-memory',
+        path: '~/Documents/Code/Rust/engram',
         purpose: '开发',
         sort_order: 0,
         created_at: '2026-09-04T00:00:00Z',
@@ -82,7 +82,7 @@ describe('ProjectDetail 详情页', () => {
   it('左树渲染位置主机与分类文档', async () => {
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('agent-memory')).toBeTruthy()
+      expect(screen.getByText('engram')).toBeTruthy()
     })
     // 位置主机（左树 + 概览各一处）
     expect(screen.getAllByText('MacBook Pro').length).toBeGreaterThan(0)

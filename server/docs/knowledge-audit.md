@@ -70,7 +70,7 @@ POST /knowledge/documents（URL）、POST /knowledge/upload（multipart，50MB �
 
 **K3 · SSRF 代理旁路——设了 HTTPS_PROXY 私网校验全跳过**
 - 位置：ssrf.rs:92-96（via_proxy 检测）+ ssrf.rs:110-114（代理模式 `addrs=vec![]`，跳过 DNS 校验与 pinning）。
-- 影响：本机代理（如 Clash 127.0.0.1:12543）本身能直连私网——服务进程若带代理环境变量运行（上海网络环境很常见），任何持有 knowledge scope 的 API key 持有者可提交 `http://127.0.0.1:8080/...`（agent-memory 自己的管理面）、`http://169.254.169.254/`（云元数据）等 URL，响应体经代理原样返回。整套私网黑名单形同虚设。
+- 影响：本机代理（如 Clash 127.0.0.1:12543）本身能直连私网——服务进程若带代理环境变量运行（上海网络环境很常见），任何持有 knowledge scope 的 API key 持有者可提交 `http://127.0.0.1:8080/...`（Engram 自己的管理面）、`http://169.254.169.254/`（云元数据）等 URL，响应体经代理原样返回。整套私网黑名单形同虚设。
 - 修法：代理模式下仍应对原始 URL 做本地解析 + 私网校验（拦字面量与常规解析结果；代理端 DNS rebinding 是残余风险，需文档声明）；或提供 `AGENT_MEMORY_FETCH_*` 独立代理配置与 `ALLOW_PRIVATE_FETCH` 显式开关，默认拒绝。
 
 **K4 · embed 响应短于批次 → NULL 向量 + `embed_failed=false` 双重静默**

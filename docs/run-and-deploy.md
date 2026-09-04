@@ -15,14 +15,14 @@ AGENT_MEMORY_DATABASE_URL='postgres://127.0.0.1:5432/am_dev' \
 AGENT_MEMORY_ADMIN_PASSWORD='dev-pw' \
 AGENT_MEMORY_MASTER_KEY="$(printf 'ab%.0s' {1..32})" \
 AGENT_MEMORY_DATA_DIR=/tmp/am-data \
-cargo run -q -p agent-memory-api --bin agent-memory-server
+cargo run -q -p engram-api --bin engram-server
 
 # 3) 前端二选一
 cd web && pnpm dev                 # 开发模式（代理到 :8080）
 pnpm run build                     # 或构建 dist 让 rust-embed 托管（同端口直出）
 ```
 
-踩坑提示：`--bin agent-memory-server` 不能省（api crate 双二进制）；
+踩坑提示：`--bin engram-server` 不能省（api crate 双二进制）；
 MASTER_KEY 必须 64 位 hex；开发期不碰 docker（用户既定方针，CI 负责镜像验证）。
 
 ## 全量验证（当日全绿）

@@ -1,5 +1,5 @@
 [package]
-name = "agent-memory-cg-bridge"
+name = "engram-cg-bridge"
 description = "CodeGraph 桥：CLI 子进程包装、JSON 解析、项目生命周期"
 version.workspace = true
 edition.workspace = true
@@ -18,5 +18,5 @@ utoipa.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
-agent-memory-storage = { path = "../storage" }
+engram-storage = { path = "../storage" }
 tempfile = "3"

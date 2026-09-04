@@ -3,8 +3,8 @@
 
 mod support;
 
-use agent_memory_api::routes;
-use agent_memory_api::state::AppState;
+use engram_api::routes;
+use engram_api::state::AppState;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -15,7 +15,7 @@ async fn app() -> (Router, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
 
@@ -500,7 +500,7 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
     let state = AppState::new(pool.clone())
@@ -510,11 +510,11 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
     let admin = login_token(&app).await;
 
     // 造数据：会话（经服务层）
-    let svc = agent_memory_core::MemoryService::new(
+    let svc = engram_core::MemoryService::new(
         state.pool.clone(),
-        agent_memory_llm::ProviderRegistry::new(
+        engram_llm::ProviderRegistry::new(
             state.pool.clone(),
-            agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+            engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
         ),
     );
     svc.write_session(
@@ -658,20 +658,20 @@ async fn edit_split_atom_rewrite_user_only() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    let state = agent_memory_api::state::AppState::new(pool.clone())
+    let state = engram_api::state::AppState::new(pool.clone())
         .with_admin_password(Some("test-admin-pw".into()))
         .with_master_key(Some("ab".repeat(32)));
-    let app = agent_memory_api::routes::router(state.clone());
+    let app = engram_api::routes::router(state.clone());
     let admin = login_token(&app).await;
 
-    let svc = agent_memory_core::MemoryService::new(
+    let svc = engram_core::MemoryService::new(
         pool.clone(),
-        agent_memory_llm::ProviderRegistry::new(
+        engram_llm::ProviderRegistry::new(
             pool.clone(),
-            agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+            engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
         ),
     );
     let atom = svc
@@ -748,20 +748,20 @@ async fn ai_direct_write_revoked() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    let state = agent_memory_api::state::AppState::new(pool.clone())
+    let state = engram_api::state::AppState::new(pool.clone())
         .with_admin_password(Some("test-admin-pw".into()))
         .with_master_key(Some("ab".repeat(32)));
-    let app = agent_memory_api::routes::router(state.clone());
+    let app = engram_api::routes::router(state.clone());
     let admin = login_token(&app).await;
 
-    let svc = agent_memory_core::MemoryService::new(
+    let svc = engram_core::MemoryService::new(
         pool.clone(),
-        agent_memory_llm::ProviderRegistry::new(
+        engram_llm::ProviderRegistry::new(
             pool.clone(),
-            agent_memory_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+            engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
         ),
     );
     // 预置数据：一个原子 + 两个实体（走 svc 直造，绕过 handler 的收窄检查）
@@ -901,13 +901,13 @@ async fn edit_split_persona_and_entity_user_only() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
-    let state = agent_memory_api::state::AppState::new(pool.clone())
+    let state = engram_api::state::AppState::new(pool.clone())
         .with_admin_password(Some("test-admin-pw".into()))
         .with_master_key(Some("ab".repeat(32)));
-    let app = agent_memory_api::routes::router(state);
+    let app = engram_api::routes::router(state);
     let admin = login_token(&app).await;
     let mem_key = create_key(&app, &admin, &["memory"]).await;
 
@@ -1605,7 +1605,7 @@ async fn wiki_proposals_aggregates_latest_per_job() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
 

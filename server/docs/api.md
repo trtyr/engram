@@ -4,7 +4,7 @@
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 八 scope：memory/knowledge/wiki/codegraph/project/llm/erase/cron）。
-> 权威 schema 以 `cargo run -q -p agent-memory-api --bin openapi-dump` 输出为准（前端 CI 有零漂移门禁）。
+> 权威 schema 以 `cargo run -q -p engram-api --bin openapi-dump` 输出为准（前端 CI 有零漂移门禁）。
 
 ## 认证与健康
 

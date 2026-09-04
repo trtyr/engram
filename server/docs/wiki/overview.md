@@ -2,7 +2,7 @@
 
 ## 是什么
 
-Wiki 是 agent-memory 平台的四类长期记忆资产之一，实现 **Karpathy LLM-wiki** 模式：
+Wiki 是 Engram 平台的四类长期记忆资产之一，实现 **Karpathy LLM-wiki** 模式：
 
 - **原料不可变**：每一篇喂进来的源文档（source）先落一份只读副本（`AGENT_MEMORY_DATA_DIR/wiki-sources/{id}.md`），内容永不回改。
 - **LLM 增量维护**：LLM 读原料 + 既有页面目录，增量产出/更新互链的 wiki 页面，而不是每次全量重写。

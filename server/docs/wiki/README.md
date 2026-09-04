@@ -1,6 +1,6 @@
 # Wiki 模块文档
 
-这是 `agent-memory` 后端 **Wiki 功能模块** 的深度文档，覆盖实现细节、数据模型、运行链路与操作面。范围：backend-only，对应 `crates/wiki-engine` + `crates/core/src/wiki.rs`（门面）+ `crates/api/src/routes/wiki_api.rs`（HTTP 层）。
+这是 `Engram` 后端 **Wiki 功能模块** 的深度文档，覆盖实现细节、数据模型、运行链路与操作面。范围：backend-only，对应 `crates/wiki-engine` + `crates/core/src/wiki.rs`（门面）+ `crates/api/src/routes/wiki_api.rs`（HTTP 层）。
 
 ## 一句话定位
 

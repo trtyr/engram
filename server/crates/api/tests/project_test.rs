@@ -2,8 +2,8 @@
 
 mod support;
 
-use agent_memory_api::routes;
-use agent_memory_api::state::AppState;
+use engram_api::routes;
+use engram_api::state::AppState;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -13,7 +13,7 @@ async fn app() -> (Router, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
     let state = AppState::new(pool)
@@ -90,7 +90,7 @@ async fn project_crud_flow() {
         "POST",
         "/projects",
         &admin,
-        Some(serde_json::json!({"name":"agent-memory","type":"dev"})),
+        Some(serde_json::json!({"name":"engram","type":"dev"})),
     )
     .await;
     assert_eq!(st, StatusCode::CREATED, "{v}");
@@ -110,7 +110,7 @@ async fn project_crud_flow() {
     // 详情
     let (st, v) = send(&app, "GET", &format!("/projects/{id}"), &admin, None).await;
     assert_eq!(st, StatusCode::OK);
-    assert_eq!(v["name"], "agent-memory");
+    assert_eq!(v["name"], "engram");
     assert!(v["locations"].as_array().unwrap().is_empty());
     assert!(v["docs"].as_array().unwrap().is_empty());
 
@@ -121,7 +121,7 @@ async fn project_crud_flow() {
         &format!("/projects/{id}"),
         &admin,
         Some(serde_json::json!({
-            "name":"agent-memory",
+            "name":"engram",
             "status":"done",
             "description":"改过的描述",
             "categories":["后端","前端","运维"]
@@ -257,7 +257,7 @@ async fn project_locations_flow() {
         "POST",
         &format!("/projects/{id}/locations"),
         &admin,
-        Some(serde_json::json!({"ip":"192.168.1.5","host":"MacBook Pro","os":"macOS 15","path":"~/Documents/Code/Rust/agent-memory","purpose":"开发"})),
+        Some(serde_json::json!({"ip":"192.168.1.5","host":"MacBook Pro","os":"macOS 15","path":"~/Documents/Code/Rust/engram","purpose":"开发"})),
     )
     .await;
     assert_eq!(st, StatusCode::CREATED, "{v}");

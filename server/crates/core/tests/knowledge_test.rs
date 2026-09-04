@@ -2,7 +2,7 @@
 
 mod support;
 
-use agent_memory_core::knowledge::ssrf::{FetchError, is_private_ip, safe_fetch, safe_fetch_opts};
+use engram_core::knowledge::ssrf::{FetchError, is_private_ip, safe_fetch, safe_fetch_opts};
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -114,14 +114,14 @@ async fn ssrf_proxy_mode_still_rejects_private() {
 
 // ---------- 摄取管道（真 PG + 本地 mock embed 不可行——嵌入降级路径） ----------
 
-use agent_memory_core::knowledge::{IngestSource, KnowledgeService};
-use agent_memory_llm::{KeyCipher, ProviderRegistry};
+use engram_core::knowledge::{IngestSource, KnowledgeService};
+use engram_llm::{KeyCipher, ProviderRegistry};
 
 async fn setup() -> (sqlx::PgPool, KnowledgeService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    agent_memory_storage::run_migrations(&pool)
+    engram_storage::run_migrations(&pool)
         .await
         .expect("迁移");
     let dir = tempfile::tempdir().unwrap();
@@ -134,15 +134,15 @@ async fn setup() -> (sqlx::PgPool, KnowledgeService, support::TestPg) {
 }
 
 /// 起 Runner 跑知识管道（无 LLM provider → embedding 全降级 FTS，仍 ready）。
-async fn run_jobs(pool: sqlx::PgPool) -> agent_memory_jobs::RunnerHandle {
+async fn run_jobs(pool: sqlx::PgPool) -> engram_jobs::RunnerHandle {
     let registry = ProviderRegistry::new(
         pool.clone(),
         KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
-    let runner = agent_memory_core::knowledge::register_handlers(
-        agent_memory_jobs::Runner::new(
+    let runner = engram_core::knowledge::register_handlers(
+        engram_jobs::Runner::new(
             pool,
-            agent_memory_jobs::RunnerConfig {
+            engram_jobs::RunnerConfig {
                 worker_id: "test".into(),
                 concurrency: 2,
                 poll_interval: Duration::from_millis(20),
@@ -158,7 +158,7 @@ async fn run_jobs(pool: sqlx::PgPool) -> agent_memory_jobs::RunnerHandle {
 async fn wait_ready(
     svc: &KnowledgeService,
     id: uuid::Uuid,
-) -> agent_memory_core::knowledge::DocumentDto {
+) -> engram_core::knowledge::DocumentDto {
     for _ in 0..300 {
         if let Ok(doc) = svc.get_document(id).await
             && matches!(doc.status.as_str(), "ready" | "failed")
@@ -176,7 +176,7 @@ async fn md_ingest_to_ready_and_chinese_fts_search() {
     let handle = run_jobs(pool.clone()).await;
 
     let md = format!(
-        "# Rust 记忆系统\n\nagent-memory 是一个用 Rust 编写的长期记忆平台。\n\n# 部署方式\n\n通过 Docker Compose 一键部署，PostgreSQL 搭配 pgvector 扩展。\n\n{}",
+        "# Rust 记忆系统\n\nengram 是一个用 Rust 编写的长期记忆平台。\n\n# 部署方式\n\n通过 Docker Compose 一键部署，PostgreSQL 搭配 pgvector 扩展。\n\n{}",
         "补充细节。".repeat(200)
     );
     let md_bytes = md.into_bytes();
@@ -522,7 +522,7 @@ async fn reembed_only_touches_missing_chunks() {
     assert!(
         matches!(
             err,
-            agent_memory_core::knowledge::KnowledgeError::BadRequest(_)
+            engram_core::knowledge::KnowledgeError::BadRequest(_)
         ),
         "{err:?}"
     );
@@ -531,7 +531,7 @@ async fn reembed_only_touches_missing_chunks() {
     assert!(
         matches!(
             err,
-            agent_memory_core::knowledge::KnowledgeError::NotFound(_)
+            engram_core::knowledge::KnowledgeError::NotFound(_)
         ),
         "{err:?}"
     );

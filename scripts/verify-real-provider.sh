@@ -34,7 +34,7 @@ AGENT_MEMORY_DATABASE_URL="postgres://postgres:verify@127.0.0.1:$PG_PORT/am" \
 AGENT_MEMORY_PORT=$PORT \
 AGENT_MEMORY_ADMIN_PASSWORD=verify-admin \
 AGENT_MEMORY_MASTER_KEY="$MASTER_KEY" \
-  "$SERVER_DIR/target/debug/agent-memory-server" >"$WORKDIR/server.log" 2>&1 &
+  "$SERVER_DIR/target/debug/engram-server" >"$WORKDIR/server.log" 2>&1 &
 SRV_PID=$!
 for i in $(seq 1 30); do
   curl -fsS "http://127.0.0.1:$PORT/ready" >/dev/null 2>&1 && break

@@ -22,7 +22,7 @@ FROM chef AS builder
 # rust-embed 需要编译期可见 web/dist（哪怕占位）
 COPY --from=web-build /build/web/dist /web/dist
 COPY server/ .
-RUN cargo build --release -p agent-memory-api
+RUN cargo build --release -p engram-api
 
 ########## Stage 3: 运行时 ##########
 # debian trixie：glibc 2.41 ≥ builder（cargo-chef rust 1.97 基于 trixie），
@@ -37,7 +37,7 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.li
 # codegraph CLI pin 版本（D0005；升级需重新验证 JSON 输出格式）
 RUN npm install -g @colbymchenry/codegraph@1.5.0 && codegraph version
 WORKDIR /app
-COPY --from=builder /build/target/release/agent-memory-server /usr/local/bin/agent-memory-server
+COPY --from=builder /build/target/release/engram-server /usr/local/bin/engram-server
 
 # 运行时数据卷（uploads / wiki-sources / codegraph）
 RUN mkdir -p /app/data
@@ -49,4 +49,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
     CMD curl -fsS http://127.0.0.1:${AGENT_MEMORY_PORT}/ready || exit 1
 
-ENTRYPOINT ["agent-memory-server"]
+ENTRYPOINT ["engram-server"]

@@ -1,6 +1,6 @@
 # Plan Tree
 
-`agent-memory` 后端（`server/`）的规划树根。规划状态、决策、开放问题、证据归这里；**项目级基线由现有 `docs/` 承担**（`architecture.md` / `overview.md` / `data-model.md` / `tech-stack.md` / `conventions.md`），不重复建 baseline 文件。
+`Engram` 后端（`server/`）的规划树根。规划状态、决策、开放问题、证据归这里；**项目级基线由现有 `docs/` 承担**（`architecture.md` / `overview.md` / `data-model.md` / `tech-stack.md` / `conventions.md`），不重复建 baseline 文件。
 
 ## Active Plans
 

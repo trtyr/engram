@@ -33,7 +33,7 @@ web
 
 ## Brand Commitments
 
-- 命名：**Engram**（2026-08-30 定）——engram＝记忆痕迹，神经科学中记忆在脑中留下的物理印记。UI/标题/品牌位用 Engram；仓库名 agent-memory 不动（基础设施）。
+- 命名：**Engram**（2026-08-30 定）——engram＝记忆痕迹，神经科学中记忆在脑中留下的物理印记。UI/标题/品牌位用 Engram；仓库随品牌改名为 trtyr/engram（2026-09-04，原 agent-memory），crate/二进制 engram-*。
 - 视觉世界：墨白正统（Vercel/Geist 系，见 DESIGN.md）。旧视觉（Geist+蓝+shadcn 默认）为反参照，已整体替换。
 
 ## Evidence on Hand

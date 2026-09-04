@@ -1,16 +1,16 @@
 [package]
-name = "agent-memory-wiki-engine"
+name = "engram-wiki-engine"
 description = "Wiki 引擎：两步 ingest、wikilink、lint、图数据"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-agent-memory-jobs = { path = "../jobs" }
-agent-memory-llm = { path = "../llm" }
-agent-memory-search = { path = "../search" }
-agent-memory-distill = { path = "../distill" }
-agent-memory-parsing = { path = "../parsing" }
+engram-jobs = { path = "../jobs" }
+engram-llm = { path = "../llm" }
+engram-search = { path = "../search" }
+engram-distill = { path = "../distill" }
+engram-parsing = { path = "../parsing" }
 
 sqlx.workspace = true
 tokio.workspace = true
@@ -26,5 +26,5 @@ sha2.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
-agent-memory-storage = { path = "../storage" }
-agent-memory-distill = { path = "../distill" }
+engram-storage = { path = "../storage" }
+engram-distill = { path = "../distill" }

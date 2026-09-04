@@ -1,7 +1,7 @@
 //! purpose.md（wiki 灵魂）：方向意图，ingest/query 注入，LLM 可建议更新。
 //! 存 settings 表（key=wiki_purpose），API 走系统页语义。
 
-use agent_memory_jobs::types::JobError;
+use engram_jobs::types::JobError;
 use sqlx::PgPool;
 
 const PURPOSE_KEY: &str = "wiki_purpose";

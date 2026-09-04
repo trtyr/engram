@@ -26,12 +26,12 @@ echo "== 1. 基础设施"
 docker run -d --name am-e2e-pg -e POSTGRES_PASSWORD=e2e -e POSTGRES_DB=am \
   -p "$PG_PORT:5432" pgvector/pgvector:pg17 >/dev/null
 for i in $(seq 1 30); do docker exec am-e2e-pg pg_isready -U postgres -d am >/dev/null 2>&1 && break; sleep 1; done
-(cargo build -p agent-memory-api --manifest-path "$SERVER_DIR/Cargo.toml" 2>/dev/null || true) >/dev/null
+(cargo build -p engram-api --manifest-path "$SERVER_DIR/Cargo.toml" 2>/dev/null || true) >/dev/null
 AGENT_MEMORY_DATABASE_URL="postgres://postgres:e2e@127.0.0.1:$PG_PORT/am" \
 AGENT_MEMORY_PORT=$PORT \
 AGENT_MEMORY_ADMIN_PASSWORD=e2e-admin \
 AGENT_MEMORY_MASTER_KEY="$(openssl rand -hex 32)" \
-  "$SERVER_DIR/target/debug/agent-memory-server" >"$WORKDIR/server.log" 2>&1 &
+  "$SERVER_DIR/target/debug/engram-server" >"$WORKDIR/server.log" 2>&1 &
 SRV_PID=$!
 for i in $(seq 1 30); do curl -fsS "$API/ready" >/dev/null 2>&1 && break; sleep 1; done
 echo "   ready ✓"

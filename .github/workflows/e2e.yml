@@ -29,7 +29,7 @@ jobs:
       - name: build web + openapi
         run: |
           cd web && pnpm install --frozen-lockfile && pnpm run build
-          cd ../server && mkdir -p ../web/dist && cargo run -q -p agent-memory-api --bin openapi-dump > /tmp/openapi.json
+          cd ../server && mkdir -p ../web/dist && cargo run -q -p engram-api --bin openapi-dump > /tmp/openapi.json
 
       # 干净栈
       - name: compose up

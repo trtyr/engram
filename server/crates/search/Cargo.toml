@@ -1,5 +1,5 @@
 [package]
-name = "agent-memory-search"
+name = "engram-search"
 description = "混合检索：FTS + 向量 + RRF 融合、预算控制"
 version.workspace = true
 edition.workspace = true
@@ -18,5 +18,5 @@ utoipa.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
-agent-memory-storage = { path = "../storage" }
+engram-storage = { path = "../storage" }
 tokio.workspace = true
