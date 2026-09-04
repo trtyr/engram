@@ -913,7 +913,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** 读单个位置（详情页/CLI 部分更新前取原值用）。 */
+        get: operations["get_location"];
         /** 编辑位置。 */
         put: operations["update_location"];
         post?: never;
@@ -3939,6 +3940,28 @@ export interface operations {
         };
         responses: {
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectLocationDto"];
+                };
+            };
+        };
+    };
+    get_location: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                loc_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

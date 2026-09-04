@@ -22,7 +22,7 @@ pnpm dev            # Vite :5173，/api /auth /jobs /memory … 代理到 VITE_P
 ```bash
 pnpm run lint       # oxlint；⚠️ 必须带 run（裸 pnpm lint 误报 eslint 缺失）
 pnpm exec tsc --noEmit
-pnpm test           # vitest 37/37（jsdom）
+pnpm test           # vitest 42/42（jsdom）
 pnpm run build      # tsc -b && vite build → dist/
 ```
 

@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-origin/main 项目记忆域落地中。cargo **176** 测试 / vitest 42。
+origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vitest 42。
 **项目记忆第五域已实现**：三表（projects / project_locations / project_docs）+ 类型模板（开发四分类/调研六分类）+ 完整 API（88 路径）+ Web（列表 CRUD/多选/类型筛选 + 详情页 Wiki 式左树右内容树状图）。
 :8090 开发栈在跑（am_dev 库，数据由所有者主动清空后重建）。
 
@@ -13,7 +13,7 @@ origin/main 项目记忆域落地中。cargo **176** 测试 / vitest 42。
 | 栈 | 命令 | 结果 |
 |---|---|---|
 | server | cargo fmt --check / clippy -D warnings | exit 0 / 0 errors |
-| server | cargo test --workspace | 176 passed（37 套件） |
+| server | cargo test --workspace | 181 passed（37 套件） |
 | web | pnpm run lint / tsc / test / build | 0 警告 / 0 / 42 全过（8 文件）/ exit 0 |
 | web | 入口 bundle | 285.23 kB（gzip 91.70），预算 350 内 |
 | CI | gh run list（f700031） | CI + e2e 双 success（GitHub 实查） |
@@ -47,6 +47,10 @@ origin/main 项目记忆域落地中。cargo **176** 测试 / vitest 42。
 15. **级联删除审计凭证**（2026-09-03 收尾）：`WikiService::audit()` 接线 `delete_source_cascade`——破坏性操作落 jobs succeeded 行（kind=wiki_source_cascade_delete，payload 含 source_id + CascadeReport，best-effort 不阻断），与 memory 域「job 行即审计链」同哲学；cascade_test 补审计断言
 16. **极端测试报告 25 项全修**（2026-09-03 晚，报告：/tmp/agent-memory-skill-test-report-2026-09-03.md，测试方独立 session 实测产出 3 P1/9 P2/13 P3）：① 安全收权——deep 全库清空仅限管理员会话（amk_ 一律 403，短语是公开常量防误不防蓄意）、heartbeat 加固 cron scope+via=cron 双条件、purge --agent 彻底清场（全部会话物理删除含 done/sensitive，先归档原子再删会话）；② 服务端修复——routing-suggest 解析鲁棒化（剥 fence/截 JSON 子串/诊断性错误）、会话轮次校验（speaker/非空/≤50000 字三入口同口径）、provider key ≥8、void 文案拆分 404/400、PUT/apply via 字段落 frontmatter、lint 大小写分级 case_mismatch + generation prompt v2；③ skill 侧批修（~/.pi，非 git）——rhythm-status/heartbeat CLI 入口、call/upload 去重+HTML 撞挡、防呆补齐、testing.md 全流程改会话路径、默认地址 8090、文档口径（去「双因子」、heartbeat 条件表述）；W-2 判定为审计链设计不改（文档写明语义）。验证：cargo 163（+5 新测试）、活体六项实测、CI+e2e 双绿（ce2d116）、独立 auditor 验收批准 + 测试方消费者复测 8 项全绿。
 17. **项目记忆第五域落地**（2026-09-04，goal mtmmgwuu-d6g4rc）：0026 迁移建三表（projects / project_locations / project_docs）+ 类型模板（开发四分类「后端/前端/测试/规划」、调研六分类「待查/线索/资料/结论/疑点/证伪」，代码常量 + projects.categories 项目级可增删）+ 完整 API（16 endpoint、project scope 第八域、88 路径）+ Web（列表页 CRUD/多选批量删除/类型筛选 + 详情页 Wiki 式左树右内容：📍位置多主机 + 📄分类文档树 + 规划分类 + markdown 阅读编辑）。设计对齐见 docs/plantree/plans/project-memory/（0001-0005 五决策：第五域不单独建系统 / 类型驱动 / plan-tree 消融为规划分类 / 三表模型 / 记忆单一源 via skill）。验证：cargo 176（+6 集成测试）+ vitest 42（+5）+ 端到端（建项目→2 主机→2 分类文档→详情）+ 截图（project-list/detail-light.png）。
+
+18. **位置元数据**（0027，2026-09-04）：project_locations 补 ip/os（多主机登记），概览页位置改为元数据卡片。
+19. **项目域唯一约束 + 错误文案三问**（0028，2026-09-04）：projects.name UNIQUE + project_docs(project_id,category,title) UNIQUE，重复 409；401/404 补三问。
+20. **产品更名 Engram**（2026-09-04，goal mtmzv6xt-b6u3ql）：GitHub 仓库 trtyr/engram、10 crate engram-*、品牌面全面 Engram 化、根 README 美化 + MIT LICENSE。
 
 ## 已知未了项
 

@@ -1,6 +1,6 @@
 # 数据模型
 
-> 2026-09-04 实查：迁移目录 26 个 SQL；运行库 public schema 业务表 27 张（另有 `_sqlx_migrations` 簿记表）。
+> 2026-09-04 实查：迁移目录 28 个 SQL；运行库 public schema 业务表 27 张（另有 `_sqlx_migrations` 簿记表）。
 > 权威 schema 以 `server/migrations/` 为准。
 
 ## 表清单（27 张业务表）
@@ -8,7 +8,7 @@
 | 域 | 表 | 说明 |
 |---|---|---|
 | 认证 | admin_sessions | 管理员会话（ams_ token，7 天 TTL） |
-| 认证 | api_keys | API Key（amk_ 前缀、scope、吊销时间；撤销后 401 文案区分"已撤销"） |
+| 认证 | api_keys | API Key（amk_ 前缀、scope、sha256 落库；删除即物理删除不留记录） |
 | 记忆 | raw_sessions | L0 会话原文（content JSONB 轮次数组、distill_status 含 void、agent 维度） |
 | 记忆 | atoms | L1 原子（kind/content/confidence/status/needs_review/superseded_by/sensitive/occurred_at/valid_until、source_refs 溯源） |
 | 记忆 | scenarios | L2 场景（topic/summary/atom_refs/version/hit_count；快照收敛语义：成员非 active 则重算/解散） |

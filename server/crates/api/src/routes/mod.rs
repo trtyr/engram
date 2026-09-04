@@ -61,7 +61,7 @@ use utoipa::OpenApi;
         project_api::list_types, project_api::create_project, project_api::list_projects,
         project_api::get_project, project_api::update_project, project_api::delete_project,
         project_api::batch_delete_projects,
-        project_api::add_location, project_api::update_location, project_api::delete_location,
+        project_api::add_location, project_api::get_location, project_api::update_location, project_api::delete_location,
         project_api::add_doc, project_api::get_doc, project_api::update_doc, project_api::delete_doc,
     ),
 )]

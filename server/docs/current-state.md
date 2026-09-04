@@ -1,11 +1,11 @@
-# 当前状态（2026-09-03 验证基线）
+# 当前状态（2026-09-04 验证基线）
 
-> 2026-08-30 初始化，09-01/09-03 两次全面更新。历史（CI 修复、Engram 重设计）见 git log 与根 docs/plantree/。
+> 2026-08-30 初始化，09-01/09-03/09-04 多次全面更新。历史（CI 修复、Engram 重设计）见 git log 与根 docs/plantree/。
 
 ## 一句话状态
 
-origin/main a3b6a2d 双 workflow 绿。cargo **158** 测试 / **28 迁移** / **88 路径 / 113 方法** / 27 业务表。
-级联删除补审计凭证（audit() 接线，cascade_test 断言）。**数据已由所有者主动清空，本地库已清理**。
+origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）。cargo **181** 测试（37 套件）/ **28 迁移** / **88 路径 / 113 方法** / 27 业务表。
+项目记忆第五域落地（三表 + 16 端点 + 唯一约束）+ 根 README 美化。**数据已由所有者主动清空，本地库已清理**。
 
 ## 当日验证矩阵
 
@@ -13,7 +13,7 @@ origin/main a3b6a2d 双 workflow 绿。cargo **158** 测试 / **28 迁移** / **
 |---|---|
 | cargo fmt --check | exit 0 |
 | cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
-| cargo test --workspace | 176 passed / 0 failed（37 套件） |
+| cargo test --workspace | 181 passed / 0 failed（37 套件） |
 | cargo run -q -p engram-api --bin openapi-dump | 88 路径 / 113 方法（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10） |
 
 ## 2026-08-30 基线以来的落地（按主题）
@@ -34,11 +34,15 @@ origin/main a3b6a2d 双 workflow 绿。cargo **158** 测试 / **28 迁移** / **
 | 双节律 | cron 兜底 + 心跳/status + cron scope 分权 | 775aea2/c1f877f/d7a8345 |
 | 会话敏感 + 直写残留 | raw_sessions.sensitive 蒸馏继承 + 无溯源原子打标 origin（0023/0024 迁移） | f6fca87/73d0d65 |
 | Wiki+Knowledge 合并 | 端点并入 /wiki（兼容别名）+ 上传自动织入 + 前端融合一个 Wiki 页 + 图谱 Obsidian 化 | bb98d07/c37ede3/a69fcb3/c1b5804 |
-| 供应商单模型 | llm_providers models→model_id+capability（0022）+ AI 路由建议 + 批量吊销 | 50dc2d4 |
+| 供应商单模型 | llm_providers models→model_id+capability（0022）+ AI 路由建议 + 批量删除 | 50dc2d4 |
 | 权限收窄 | AI 直写加工权收回（atom/entity/relation/attach 403）+ erase 分权 + atom 输入校验 | 176b070/fa88777/e48cdc5 |
 | 二期三项 | 过期降权/过滤 + 文件批量导入（source=import）+ 检索时间范围过滤 | d9316b1/1f082e7/9c45889 |
 | **Wiki 目录树** | **0025 wiki_pages.folder**（/ 分隔层级，蒸馏按 page_type 归文件夹，PUT 可改）+ **GET /wiki/proposals** 聚合端点（修 N+1）+ wiki lint uuid cast/review 404 + 0022 测试拆分（PgPool 42P01） | e568732/adbc57e/952035f/a1aea80 |
 | 双链健壮性 | 取页 slug 宽容重查（标题原文双链不再 404） | 6d1fadc |
+| 项目记忆第五域 | 0026 三表（projects/locations/docs）+ 类型模板 + 16 端点 + Web 列表/详情 | 2661272/cdc27e1 |
+| 位置元数据 | 0027 project_locations.ip/os（多主机登记） | 270faab |
+| 项目域唯一约束 | 0028 name/doc title UNIQUE + Conflict 409 + 错误文案三问 | dffdd9a |
+| 产品更名 Engram | 仓库 trtyr/engram + 10 crate engram-* + 品牌面 + 根 README | 23cbdbb |
 
 ## 当日落地：级联删除审计凭证
 

@@ -96,9 +96,9 @@
 | GET | /projects/types | 类型模板（开发四分类/调研六分类预设） |
 | GET/POST | /projects | 项目列表（?type= 筛选）/ 新建（type 决定初始分类） |
 | GET/PUT/DELETE | /projects/{id} | 项目详情（本体+位置+文档）/ 编辑 / 删除（级联） |
-| POST | /projects/batch-delete | 批量删除（列表多选） |
-| POST | /projects/{id}/locations | 登记位置（多主机 host/path/purpose） |
-| PUT/DELETE | /projects/{id}/locations/{loc_id} | 编辑 / 删除位置 |
+| POST | /projects/batch-delete | 批量删除（返回 {deleted, failed}，failed=不存在的 id） |
+| POST | /projects/{id}/locations | 登记位置（多主机 ip/host/os/path/purpose） |
+| GET/PUT/DELETE | /projects/{id}/locations/{loc_id} | 读 / 编辑 / 删除位置 |
 | POST | /projects/{id}/docs | 新增分类文档（markdown） |
 | GET/PUT/DELETE | /projects/{id}/docs/{doc_id} | 读 / 编辑 / 删除文档 |
 
@@ -122,11 +122,11 @@
 | POST | /settings/llm/routing/suggest | AI 路由建议（读供应商 + 8 用途调 LLM 生成建议，不落库） |
 | GET | /llm/usage | 用量记账（token/延迟/用途） |
 | GET/POST | /settings/api-keys | API Key 列表 / 签发（scope；明文只在创建时返回一次）——admin-only |
-| POST | /settings/api-keys/{id}/revoke | 吊销（admin-only；吊销后 401 文案区分"已撤销"） |
-| POST | /settings/api-keys/batch-revoke | 批量吊销（{ids}；幂等，返回实际吊销数） |
+| POST | /settings/api-keys/{id}/revoke | 删除（admin-only；物理删除不留记录，删除后 401 走通用文案） |
+| POST | /settings/api-keys/batch-revoke | 批量删除（{ids}；物理删除，返回 {revoked}） |
 
 ## 错误文案三问规范（2026-08-31 起）
 
 每个 4xx 回答三问：发生了什么（具体）/ 为什么（原因类别）/ 下一步（可执行指引）。
-六处先例：撤销 key 区分、ISO8601 时间格式、purge 确认短语、content 编辑 403 指路 correction、
+六处先例：删除 key（物理删除不留记录，401 走通用文案）、ISO8601 时间格式、purge 确认短语、content 编辑 403 指路 correction、
 画像/实体 403 指路"由蒸馏维护"、UUID 解析。422 是 axum 纯文本（Json 提取先于鉴权）。

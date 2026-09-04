@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-vitest **37**（6 文件）/ oxlint 0 警告 / tsc 0 / build 0 / 入口 bundle **284.43 kB**（gzip 91.43，预算 350 内）。
+vitest **37**（6 文件）/ oxlint 0 警告 / tsc 0 / build 0 / 入口 bundle **285.23 kB**（gzip 91.43，预算 350 内）。
 origin/main a3b6a2d CI + e2e 双绿。Wiki 页 09-03 完成 Obsidian IA 重做（roadmap 0w，28 项审计全修）。
 
 ## 2026-08-30 基线以来的前端大事记
@@ -31,9 +31,9 @@ origin/main a3b6a2d CI + e2e 双绿。Wiki 页 09-03 完成 Obsidian IA 重做�
 | pnpm run lint（oxlint） | 0 警告 |
 | pnpm exec tsc --noEmit | exit 0 |
 | pnpm test | 37 passed / 6 文件 |
-| pnpm run build | exit 0；入口 284.43 kB（gzip 91.43） |
+| pnpm run build | exit 0；入口 285.23 kB（gzip 91.43） |
 | CI（a3b6a2d） | e2e + CI 双 success |
 
 ## 已知前端未了项
 
-- bundle 预算 350kB 内（当前 284.43，sigma/mermaid/cytoscape 均在 lazy chunk）——持续达标
+- bundle 预算 350kB 内（当前 285.23，sigma/mermaid/cytoscape 均在 lazy chunk）——持续达标
