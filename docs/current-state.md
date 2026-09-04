@@ -17,7 +17,7 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 | web | pnpm run lint / tsc / test / build | 0 警告 / 0 / 42 全过（8 文件）/ exit 0 |
 | web | 入口 bundle | 285.23 kB（gzip 91.70），预算 350 内 |
 | CI | gh run list（f8e1031） | CI + e2e FAIL（GitHub 支出限额，未启动） |
-| 事实 | OpenAPI 活体 / 迁移 / 表 | **88 路径 / 113 方法注册**（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10）/ **29 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
+| 事实 | OpenAPI 活体 / 迁移 / 表 | **88 路径 / 113 方法注册**（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10）/ **30 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
 
 ## 运行环境实况（2026-09-03 实查 + 所有者确认）
 
@@ -41,7 +41,7 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 9. **测试隔离提级**（P11）：E2E_BASE 必填拒跑 + 一次性栈脚本 + journey 快照差分自清
 10. **圈子强化 + 关系回溯**（0020/0021 迁移）：13 项强化——详情邻居/语义检索/社区聚类/实体历史/关系升级 A（entity_relations 类型化有向关系 + 蒸馏抽取）/全局时间轴/批量删除/实体导出；关系回溯：consolidate 对存量实体直接抽关系（无 session 重放兜底），常识关系 + 记忆明确关系
 11. **权限收窄 + 二期三项**（2026-09-02）：AI 只写会话（收回直写 atom/entity/relation/attach），删实体/摘原子/删关系收进 erase scope；会话级敏感标记；文件批量导入（source=import + 蒸馏过滤对方观点）；过期自动降权/过滤（检索 ×0.5 + 注入硬过滤，归档先不做）；检索时间范围过滤（from/to，occurred_at 优先 NULL fallback created_at）
-12. **Wiki+Knowledge 合并**（2026-09-02）：/knowledge 端点并入 /wiki 前缀（保留 /knowledge 兼容别名）；上传文档 ready 后自动织入 Wiki；前端融合成一个 Wiki 页（文档/页面/图谱/人审/提案/目标 tabs，删侧栏「知识库」项；DocumentsPane 仍住 Knowledge.tsx）；图谱 Obsidian 化（hover 邻居高亮/拖拽/缩放控件/边按权重编码/位置缓存）
+12. **Wiki+Knowledge 合并**（2026-09-02）：/knowledge 端点并入 /wiki 前缀（保留 /knowledge 兼容别名）；上传文档 ready 后自动织入 Wiki；前端融合成一个 Wiki 页（文档/页面/图谱/人审/提案/目标 tabs，删侧栏「知识库」项；DocumentsPane 组件被 Wiki 挂载）；图谱 Obsidian 化（hover 邻居高亮/拖拽/缩放控件/边按权重编码/位置缓存）
 13. **Wiki Obsidian IA / 目录树重做**（2026-09-03，roadmap 0w）：0025 迁移 wiki_pages.**folder**（/ 分隔多级路径，蒸馏按 page_type 归文件夹，PUT /wiki/pages/{slug} 可改）；新增 **GET /wiki/proposals** 聚合端点（修前端 N+1 串行拉取）；前端 Wiki 页重做——目录树（折叠 localStorage 持久化 / 分割线拖拽 220-480px / role=tree 语义）+ 树/图双视图 + 收件箱/运维二级面板 + ?page= 深链自动展开所在 folder；新增 e2e wiki-ia.spec.ts；双链渲染三连修（递归 withWikilinks 深入行内 children / 取页 slug 宽容重查 / 404 显性提示）；阅读区排版 70ch→4xl 放宽
 14. **配套修缮**（同期）：wiki lint 过时源 uuid cast + review resolve 未命中按 404；0022 迁移测试拆分（PgPool 跨连接 42P01 必挂修复）；Tabs 脏竖线改发丝网格
 15. **级联删除审计凭证**（2026-09-03 收尾）：`WikiService::audit()` 接线 `delete_source_cascade`——破坏性操作落 jobs succeeded 行（kind=wiki_source_cascade_delete，payload 含 source_id + CascadeReport，best-effort 不阻断），与 memory 域「job 行即审计链」同哲学；cascade_test 补审计断言
@@ -52,7 +52,7 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 19. **项目域唯一约束 + 错误文案三问**（0028，2026-09-04）：projects.name UNIQUE + project_docs(project_id,category,title) UNIQUE，重复 409；401/404 补三问。
 20. **产品更名 Engram**（2026-09-04，goal mtmzv6xt-b6u3ql）：GitHub 仓库 trtyr/engram、10 crate engram-*、品牌面全面 Engram 化、根 README 美化 + MIT LICENSE。
 
-21. **knowledge 彻底并入 wiki**（2026-09-05，goal mtn6mye4-ql1zkm）：删 knowledge scope（八→七）、代码模块/类型归 wiki 命名（KnowledgeService→WikiDocumentService、knowledge_api→wiki_docs_api）、数据表改名（documents/chunks→wiki_documents/wiki_chunks，0029 迁移）、删 /knowledge/* 兼容别名、统一检索 knowledge 域标签并入 wiki。
+21. **knowledge 彻底并入 wiki**（2026-09-05，goal mtn6mye4-ql1zkm）：删 knowledge scope（八→七）、代码模块/类型归 wiki 命名（KnowledgeService→WikiDocumentService、knowledge_api→wiki_docs_api）、数据表改名（documents/chunks→wiki_documents/wiki_chunks，0029 迁移）、删 /knowledge/* 兼容别名、统一检索 knowledge 域标签并入 wiki；0030 迁移收尾——约束名归位（documents_pkey→wiki_documents_pkey 等 6 个）+ api_keys 默认 scopes 去 knowledge。
 
 ## 已知未了项
 

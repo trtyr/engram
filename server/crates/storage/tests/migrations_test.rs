@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 29 份迁移：0029 = wiki 文档表改名）
+    // 版本可查（当前 30 份迁移：0030 = 约束名归 wiki + api_keys 默认 scopes 去 knowledge）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(29), "0001-0029 迁移应已应用");
+    assert_eq!(version, Some(30), "0001-0030 迁移应已应用");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")

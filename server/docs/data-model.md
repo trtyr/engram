@@ -1,6 +1,6 @@
 # 数据模型
 
-> 2026-09-04 实查：迁移目录 28 个 SQL；运行库 public schema 业务表 27 张（另有 `_sqlx_migrations` 簿记表）。
+> 2026-09-05 实查：迁移目录 30 个 SQL；运行库 public schema 业务表 27 张（另有 `_sqlx_migrations` 簿记表）。
 > 权威 schema 以 `server/migrations/` 为准。
 
 ## 表清单（27 张业务表）
@@ -18,8 +18,8 @@
 | 记忆 | **atom_entities** | 原子↔实体挂链（复合主键，双向 CASCADE） |
 | 记忆 | **entity_revisions** | 实体摘要编辑留痕（old_summary/edited_by、append-only） |
 | 记忆 | **entity_relations** | 实体关系（from/to/rel_type 5 类、weight、source distill/manual、方向唯一索引） |
-| 知识 | documents | 上传文档（title/mime/status/error、sha256 UNIQUE） |
-| 知识 | chunks | 分块（seq/snippet、embed pgvector 向量列、embed_failed） |
+| wiki | wiki_documents | 上传文档（title/mime/status/error、sha256 UNIQUE） |
+| wiki | wiki_chunks | 分块（seq/snippet、embed pgvector 向量列、embed_failed） |
 | wiki | wiki_sources | 摄取源（sha256 UNIQUE、error） |
 | wiki | wiki_pages | 页面（slug/page_type/folder/content/frontmatter/origin/version） |
 | wiki | wiki_links | 页面间链接（from/to/weight） |
@@ -35,7 +35,7 @@
 | LLM | settings | 路由表等 JSONB 配置 |
 | LLM | llm_usage | 用量记账（provider/model/purpose/tokens/latency） |
 
-## 迁移史（28 个）
+## 迁移史（30 个）
 
 | 迁移 | 内容要点 |
 |---|---|
@@ -58,6 +58,8 @@
 | 0026 | **projects + project_locations + project_docs**（项目记忆第五域：类型模板分类 + 多主机位置 + 分类文档） |
 | 0027 | project_locations.**ip** + **os**（位置元数据补齐，多主机登记） |
 | 0028 | projects.**name** UNIQUE + project_docs(**project_id, category, title**) UNIQUE（防同名项目/同项目同分类同名文档） |
+| 0029 | knowledge 并入 wiki——`documents`/`chunks` 改名 `wiki_documents`/`wiki_chunks`（+4 索引改名） |
+| 0030 | knowledge 残留清理——表约束名归 wiki 命名（documents_pkey→wiki_documents_pkey 等 6 个）+ api_keys 默认 scopes 去 knowledge |
 
 ## 数据流（写路径）
 
@@ -68,7 +70,7 @@
 直写原子（scenario_id NULL）──(下次 full distill)──▶ organize 自然拾起聚类
 敏感归档 ─(防抖 30s)─▶ organize 快照收敛 ─▶ persona 清退（removed_texts）──快照层与源同生共死
 原子/画像/实体编辑 ─▶ atom_revisions 留痕 + manually_edited 钉住 + jobs 审计行
-文档上传 ─▶ documents ─(parse→chunk→embed 任务)─▶ chunks(向量)
+文档上传 ─▶ wiki_documents ─(parse→chunk→embed 任务)─▶ wiki_chunks(向量)
 Wiki 摄取 ─▶ wiki_sources ─(analyze→generate 任务)─▶ wiki_pages ─▶ wiki_links
 以上任务全部落 jobs + job_events；LLM 调用逐条落 llm_usage
 ```
@@ -88,7 +90,7 @@ Wiki 摄取 ─▶ wiki_sources ─(analyze→generate 任务)─▶ wiki_pages 
 
 - llm_providers.api_key_encrypted 是 **bytea**（`decode(repeat('ab',40),'hex')` 而非字符串拼接）
 - persona_aspects.aspect 有 CHECK 约束（7 分面：identity/preferences/skills/constraints/communication_style/goals/routines）
-- documents.sha256 / wiki_sources.sha256 UNIQUE——随机数据用 `md5(random()::text)` 防撞
+- wiki_documents.sha256 / wiki_sources.sha256 UNIQUE——随机数据用 `md5(random()::text)` 防撞
 - 本环境 PG 无 `gen_random_bytes()`，用 `decode(repeat(...),'hex')` 或 md5 替代
 - 聚合投影布尔列用 **bool_or** 不是 max（PostgreSQL 无 max(boolean)，先例 fce571f）
 - scenarios.body NOT NULL——测试 fixture 必须 `body='正文'`

@@ -31,7 +31,7 @@ web/src/
 └── features/                   # 八页（路由级 lazy）
     ├── Login.tsx  Dashboard.tsx  Memory.tsx  Circle.tsx（圈子薄壳：PageHeader + Galaxy）
     ├── Galaxy.tsx（圈子主体：实体列表+图谱+档案，被 Circle 挂载）
-    ├── Knowledge.tsx（DocumentsPane，被 Wiki 挂载）  Wiki.tsx（30k：目录树/树图双视图/收件箱/运维）  CodeGraph.tsx  Projects.tsx  ProjectDetail.tsx  Jobs.tsx  Settings.tsx
+    ├── DocumentsPane.tsx（被 Wiki 挂载）  Wiki.tsx（30k：目录树/树图双视图/收件箱/运维）  CodeGraph.tsx  Projects.tsx  ProjectDetail.tsx  Jobs.tsx  Settings.tsx
     └── *.test.tsx + components/CommandPalette.test.tsx
 ```
 

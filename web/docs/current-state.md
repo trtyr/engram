@@ -20,7 +20,7 @@ origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian 
 8. **e2e 自清**（a7ae4f4）：journey 收尾清 agent/实体/key
 9. **测试隔离**（399deab）：E2E_BASE 必填拒跑 + 一次性栈脚本 + 快照差分自清
 10. **设置节律 tab**（c1f877f）：cron 心跳三态 / 积压年龄 / crontab 安装向导 / 节律事件流
-11. **Wiki+Knowledge 合并**（2026-09-02）：/knowledge 并入 /wiki 前缀，前端融合一个 Wiki 页（文档 tab 默认，接管上传/URL/阅读/检索），删侧栏「知识库」项（DocumentsPane 仍住 Knowledge.tsx 被 Wiki 挂载）；图谱 Obsidian 化（hover 邻居高亮/拖拽/缩放/边权重/位置缓存）
+11. **Wiki+Knowledge 合并**（2026-09-02）：/knowledge 并入 /wiki 前缀，前端融合一个 Wiki 页（文档 tab 默认，接管上传/URL/阅读/检索），删侧栏「知识库」项（DocumentsPane 组件被 Wiki 挂载）；图谱 Obsidian 化（hover 邻居高亮/拖拽/缩放/边权重/位置缓存）
 12. **设置页 AI 配置体系重构**（2026-09-02，ac55a6d..2397d53 八连提交）：先看功能再配 API（AI 功能页纯选）、供应商真 label 表单 + 类型下拉、批量吊销、全站下拉框美化（去原生箭头 + 自定义 chevron）
 13. **Wiki Obsidian IA 重做**（2026-09-03，1edff15..a3b6a2d，roadmap 0w 28 项审计全修）：目录树（folder 层级，折叠 localStorage 持久化，role=tree 语义）+ 树/图双视图切换 + 收件箱/运维二级面板；布局骨架重做（视口实算/状态提升切视图不丢/分割线拖拽 220-480px/?page= 深链自动展开 folder）；双链渲染三连修（递归 withWikilinks 深入行内 children 覆盖标题/列表/表格 / 404 显性提示不再静默刷树）；阅读区排版 70ch→4xl 放宽；Tabs 脏竖线改发丝网格；新增 e2e wiki-ia.spec.ts（折叠持久化/URL 写回/深链断言）
 
