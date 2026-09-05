@@ -56,6 +56,8 @@ origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具�
 
 23. **MCP 管理面 + 密钥管理归位**（2026-09-05）：MCP 配置入 settings KV（key=`mcp`：enabled + disabled_tools，缺省全开无迁移）；`/mcp` 前置 gate 中间件——服务关闭对已认证客户端也 503（Bearer 之内、MCP 之前）；覆写 rmcp `list_tools`/`call_tool`——停用工具对 AI 隐身且调用被拒（管理端点仍展示全量）；`GET/PUT /settings/mcp`（PUT 校验未知工具名 400）；前端 MCP 页重排为管理台（状态条 + 域 Tabs 逐域工具开关列表，域归属后端同源 domain 字段），密钥管理收敛回设置页 Keys tab（签发表单补七 scope 选择器 + 表格 scopes 列）。验证：cargo 189（+2 toggle 用例）+ vitest 45（mcp.test 重写 3 用例）+ 真机冒烟（关服务 503 / 停用工具隐身+拒绝 / 恢复全开）。
 
+24. **项目记忆 MCP 落地**（2026-09-05）：14 个 project_* 工具并入 `/mcp`（types/list/get/create/update/delete/batch_delete + location add/update/delete + doc add/get/update/delete），进程内直调 ProjectService，`project` scope 分权；tools/list 按 key scope 过滤（memory-only key 不见 project 工具，反之亦然——AI 看到的工具面与可调用集一致）；update 三件套（project/location/doc）MCP 层补丁式语义（不传不改，categories 替换式带提示）；doc add/update 前置分类校验（防笔误造出树上看不见的孤儿分类）；项目寻址支持 id 或 name（project_id_by_name）。顺修 core 两缺陷：改名撞名 409（原冒 500）、空/空白项目名 400（create/update 同口径）。验证：cargo 198（+9：project_mcp_test 八用例全旅程/改名冲突/批量级联/scope 分权/管理台开关 + project_test 改名回归）+ vitest 45 + 真机 E2E（curl JSON-RPC 建项目→登记→写文档→分类校验→补丁改状态→管理台域分组 9+14）。
+
 ## 已知未了项
 
 - e2e key 表历史积压（journey 现已自撤新 key；历史 revoked 行留存无害）

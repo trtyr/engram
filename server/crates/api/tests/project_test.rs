@@ -544,3 +544,64 @@ async fn projects_spa_navigation_bypasses_auth() {
         .unwrap();
     assert_ne!(resp.status(), StatusCode::UNAUTHORIZED);
 }
+
+/// 改名撞名 → 409（修复前会冒成 500 存储错误）；空名 → 400。
+#[tokio::test]
+async fn project_rename_conflict_and_empty_name() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    let (st, a) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"改名-甲","type":"dev"}))).await;
+    assert_eq!(st, StatusCode::CREATED, "{a}");
+    let (st, b) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"改名-乙","type":"dev"}))).await;
+    assert_eq!(st, StatusCode::CREATED, "{b}");
+    let b_id = b["id"].as_str().unwrap();
+
+    // 改成已有项目名 → 409，不是 500
+    let (st, v) = send(
+        &app,
+        "PUT",
+        &format!("/projects/{b_id}"),
+        &admin,
+        Some(serde_json::json!({
+            "name":"改名-甲","status":"active","description":null,
+            "categories":["后端","前端","测试","规划"]
+        })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT, "改名撞名应 409：{v}");
+    assert!(v["error"]["message"].as_str().unwrap().contains("已被项目"));
+
+    // 空名 / 纯空白名 → 400
+    for bad in ["", "   "] {
+        let (st, v) = send(
+            &app,
+            "PUT",
+            &format!("/projects/{b_id}"),
+            &admin,
+            Some(serde_json::json!({
+                "name":bad,"status":"active","description":null,
+                "categories":["后端"]
+            })),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "空名应 400：{v}");
+        let (st, _) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":bad,"type":"dev"}))).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "空名建项目应 400");
+    }
+
+    // 改回自己原名（id 相同）不算撞名
+    let (st, v) = send(
+        &app,
+        "PUT",
+        &format!("/projects/{b_id}"),
+        &admin,
+        Some(serde_json::json!({
+            "name":"改名-乙","status":"paused","description":"ok",
+            "categories":["后端","前端","测试","规划"]
+        })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "原名写回不应 409：{v}");
+    assert_eq!(v["status"], "paused");
+}
