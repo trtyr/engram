@@ -1,12 +1,12 @@
 //! 记忆域服务：L0 写入/触发、检索、上下文包、L1 治理、L3 画像视图。
 
+use chrono::{DateTime, Utc};
 use engram_jobs::types::Job;
 use engram_jobs::{JobQueue, JobTemplate};
 use engram_llm::ProviderRegistry;
 use engram_llm::types::Purpose;
 use engram_search::tokenize::tokenize;
 use engram_search::{SearchHit, search_atoms, search_scenarios};
-use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::json;
 use sqlx::PgPool;

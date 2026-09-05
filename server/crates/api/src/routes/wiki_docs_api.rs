@@ -1,12 +1,12 @@
 //! 文档知识端点（wiki scope）。
 
-use engram_core::wiki_docs::{
-    ChunkHit, DocumentDto, IngestSource, WikiDocumentError, WikiDocumentService,
-};
 use axum::Json;
 use axum::extract::multipart::Multipart;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use engram_core::wiki_docs::{
+    ChunkHit, DocumentDto, IngestSource, WikiDocumentError, WikiDocumentService,
+};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;

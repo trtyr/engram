@@ -1,4 +1,4 @@
-//! MCP（Model Context Protocol）服务端：用户记忆域工具面。
+//! MCP（Model Context Protocol）服务端：多域工具面（用户记忆 / 技能，逐域扩展）。
 //!
 //! 官方 Rust SDK（rmcp）Streamable HTTP 传输，宿主于 engram-server 的 `/mcp` 端点。
 //! 鉴权复用 Bearer 中间件（amk_ key / ams_ 会话）：每个工具调用请求都过 `bearer_auth`，
@@ -64,6 +64,28 @@ fn require_erase(principal: &Principal) -> Result<(), rmcp::ErrorData> {
             ErrorCode::INVALID_REQUEST,
             "擦除需要 erase scope（不可逆操作，与读写分权）——void 模式无需 erase",
         ))
+    }
+}
+
+fn require_skills(principal: &Principal) -> Result<(), rmcp::ErrorData> {
+    if principal.has_scope("skills") {
+        Ok(())
+    } else {
+        Err(mcp_err(
+            ErrorCode::INVALID_REQUEST,
+            "缺少 skills scope——请用带 skills scope 的 amk_ key 连接 MCP",
+        ))
+    }
+}
+
+/// SkillsError → MCP 错误码（与 HTTP API 的 se() 同语义）。
+fn from_skills(e: engram_core::skills::SkillsError) -> rmcp::ErrorData {
+    use engram_core::skills::SkillsError;
+    match e {
+        SkillsError::NotFound(m) => rmcp::ErrorData::resource_not_found(m, None),
+        SkillsError::Conflict(m) => rmcp::ErrorData::invalid_params(m, None),
+        SkillsError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
+        SkillsError::Storage(m) => rmcp::ErrorData::internal_error(m, None),
     }
 }
 
@@ -263,6 +285,98 @@ pub struct EntitiesParams {
     pub limit: Option<i64>,
 }
 
+// ---------- 技能域工具参数 ----------
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsListParams {
+    /// 可选关键词（搜名称与描述）
+    #[schemars(description = "可选：关键词，模糊匹配技能名称与描述。")]
+    pub q: Option<String>,
+    /// 可选标签过滤
+    #[schemars(description = "可选：按标签过滤（含该标签即命中）。")]
+    pub tag: Option<String>,
+    /// 可选启用过滤：true=只看启用 / false=只看停用 / 缺省=全部
+    #[schemars(description = "可选：true 只看启用，false 只看停用，缺省全部。")]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsGetParams {
+    /// 技能 slug（kebab-case 标识）
+    #[schemars(description = "技能 slug（来自 skills_list 的返回，如 review-pr）。")]
+    pub slug: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsCreateParams {
+    /// 技能名
+    #[schemars(description = "技能名（简短、可辨认，如「PR 审查」）。")]
+    pub name: String,
+    /// markdown 正文（技能指令本体）
+    #[schemars(description = "技能正文，markdown。写清这个技能做什么、怎么做、何时用。")]
+    pub content: String,
+    /// 可选 slug（缺省从 name 推导；中文/非 ASCII 名必须显式给）
+    #[schemars(
+        description = "可选：slug（kebab-case 标识，如 review-pr）。缺省从 name 推导；name 非 ASCII 时必须显式给。"
+    )]
+    pub slug: Option<String>,
+    /// 可选一句话描述
+    #[schemars(description = "可选：一句话描述这个技能做什么、何时该用（列表与选择时的依据）。")]
+    pub description: Option<String>,
+    /// 可选标签
+    #[schemars(description = "可选：标签列表，便于分类过滤。")]
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsUpdateParams {
+    /// 目标技能 slug
+    #[schemars(description = "要更新的技能 slug。")]
+    pub slug: String,
+    /// 可选：改技能名
+    #[schemars(description = "可选：新技能名。不传不动。")]
+    pub name: Option<String>,
+    /// 可选：改描述
+    #[schemars(description = "可选：新描述。不传不动。")]
+    pub description: Option<String>,
+    /// 可选：改正文
+    #[schemars(description = "可选：新正文（markdown，整体替换）。不传不动。")]
+    pub content: Option<String>,
+    /// 可选：改标签
+    #[schemars(description = "可选：新标签列表（整体替换）。不传不动。")]
+    pub tags: Option<Vec<String>>,
+    /// 可选：启用/停用
+    #[schemars(description = "可选：true=启用 / false=停用（停用后列表与检索对 AI 隐身）。")]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsDeleteParams {
+    /// 目标技能 slug
+    #[schemars(description = "要删除的技能 slug（级联删版本快照，不可逆）。")]
+    pub slug: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsImportParams {
+    /// SKILL.md 全文
+    #[schemars(
+        description = "SKILL.md 全文：可选 --- frontmatter（name/description/slug/tags 键）+ markdown 正文。没有 frontmatter 时需传 filename 或 name 兜底。"
+    )]
+    pub content: String,
+    /// 可选文件名（无 frontmatter name 时兜底命名）
+    #[schemars(
+        description = "可选：来源文件名（如 review-pr.md），无 frontmatter name 时用来兜底命名。"
+    )]
+    pub filename: Option<String>,
+    /// 可选：技能名（frontmatter 与 filename 都没有时兜底）
+    #[schemars(description = "可选：技能名兜底（frontmatter name 与 filename 都缺时必须给）。")]
+    pub name: Option<String>,
+    /// 命中已有 slug 时覆盖更新（默认 false）
+    #[schemars(description = "可选：slug 已存在时是否覆盖更新，默认 false（该条报错）。")]
+    pub overwrite: Option<bool>,
+}
+
 // ---------- MCP 服务器 ----------
 
 /// Engram 用户记忆 MCP 服务器。工具实现直调 MemoryService（进程内，不走 HTTP 回环）。
@@ -282,6 +396,10 @@ impl MemoryMcpServer {
 
     fn svc(&self) -> engram_core::memory::MemoryService {
         engram_core::memory::MemoryService::new(self.state.pool.clone(), self.state.registry())
+    }
+
+    fn skills_svc(&self) -> engram_core::skills::SkillsService {
+        engram_core::skills::SkillsService::new(self.state.pool.clone())
     }
 }
 
@@ -608,13 +726,256 @@ impl MemoryMcpServer {
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
         ok_json(serde_json::to_value(&hits).unwrap_or(serde_json::json!([])))
     }
+
+    /// 列出技能（AI 技能库的浏览入口；q/tag/enabled 过滤，不含正文）。
+    ///
+    /// 何时用：开始需要某种可复用能力前，先看库里有没有现成技能；或按标签浏览技能面。
+    /// 命中候选后用 skills_get 取正文照做；没有合适的再用 skills_create 沉淀新技能。
+    #[tool(
+        name = "skills_list",
+        annotations(
+            title = "列出技能",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn skills_list(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        let lp = params.0;
+        let rows = self
+            .skills_svc()
+            .list_skills(lp.q.as_deref(), lp.tag.as_deref(), lp.enabled)
+            .await
+            .map_err(from_skills)?;
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+    }
+
+    /// 读取一个技能全文（正文即指令——照做即可复用该技能）。
+    ///
+    /// 何时用：skills_list 命中候选后，取全文执行；或用户点名某个技能时。
+    #[tool(
+        name = "skills_get",
+        annotations(
+            title = "读取技能",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn skills_get(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsGetParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        let s = self
+            .skills_svc()
+            .get_skill(&params.0.slug)
+            .await
+            .map_err(from_skills)?;
+        ok_json(serde_json::to_value(&s).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 沉淀新技能：把本次对话中验证有效的做法固化成可复用指令包。
+    ///
+    /// 何时用：用户说「把这个做法存成技能/记成 SOP」，或一套流程已被验证有效且可复用时。
+    /// 何时不用：一次性的操作细节不值得建技能；用户个人事实走记忆域（memory_write_session）。
+    #[tool(
+        name = "skills_create",
+        annotations(
+            title = "创建技能",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn skills_create(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsCreateParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        let cp = params.0;
+        let s = self
+            .skills_svc()
+            .create_skill(engram_core::skills::NewSkill {
+                slug: cp.slug.as_deref(),
+                name: &cp.name,
+                description: cp.description.as_deref().unwrap_or(""),
+                content: &cp.content,
+                tags: &cp.tags.unwrap_or_default(),
+                enabled: true,
+                source: "mcp",
+            })
+            .await
+            .map_err(from_skills)?;
+        ok_json(serde_json::to_value(&s).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 更新技能（正文/名称/描述/标签/启停；语义变更自动留版本快照，可回滚）。
+    ///
+    /// 何时用：技能做法需要修正或演进时（如用户指出了更好的步骤）。
+    /// 注意：改坏可回滚（版本快照），但删除不可逆——拿不准就更新而不是删除。
+    #[tool(
+        name = "skills_update",
+        annotations(
+            title = "更新技能",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn skills_update(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsUpdateParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        let up = params.0;
+        let s = self
+            .skills_svc()
+            .update_skill(
+                &up.slug,
+                engram_core::skills::SkillPatch {
+                    name: up.name,
+                    description: up.description,
+                    content: up.content,
+                    tags: up.tags,
+                    enabled: up.enabled,
+                },
+            )
+            .await
+            .map_err(from_skills)?;
+        ok_json(serde_json::to_value(&s).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 删除技能（级联删版本快照，不可逆）。
+    ///
+    /// 何时用：仅当用户明确要求删除某个技能时。不要因「内容过时」自行删除——用 skills_update 修订。
+    #[tool(
+        name = "skills_delete",
+        annotations(
+            title = "删除技能",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn skills_delete(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsDeleteParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        self.skills_svc()
+            .delete_skill(&params.0.slug)
+            .await
+            .map_err(from_skills)?;
+        ok_json(serde_json::json!({ "deleted": params.0.slug }))
+    }
+
+    /// 导入一个 SKILL.md（frontmatter 容错解析——迁移现有技能库零改写）。
+    ///
+    /// 何时用：用户给了现成的 SKILL.md 文件/文本要入库时。逐条导入用本工具，
+    /// 批量走 HTTP API POST /skills/import（逐条报告，互不阻断）。
+    #[tool(
+        name = "skills_import",
+        annotations(
+            title = "导入 SKILL.md",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn skills_import(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsImportParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        let ip = params.0;
+        let (meta, body) = engram_core::skills::parse_frontmatter(&ip.content);
+        let name = meta
+            .name
+            .or(ip.name)
+            .or(ip.filename.clone())
+            .unwrap_or_default();
+        let name = name
+            .trim_end_matches(".md")
+            .trim_end_matches(".markdown")
+            .to_string();
+        if name.is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "无法确定技能名——请在 frontmatter 写 name，或传 filename/name 兜底",
+            ));
+        }
+        // slug：frontmatter > 名字推导（中文名推导失败 → 显式报错，不让坏 slug 落库）
+        let slug = match meta.slug.or_else(|| engram_core::skills::slugify(&name)) {
+            Some(s) => s,
+            None => {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("无法从技能名「{name}」推导 slug——请显式给 slug（kebab-case）"),
+                ));
+            }
+        };
+        let overwrite = ip.overwrite.unwrap_or(false);
+        let result = if self.skills_svc().get_skill(&slug).await.is_ok() && overwrite {
+            self.skills_svc()
+                .update_skill(
+                    &slug,
+                    engram_core::skills::SkillPatch {
+                        name: Some(name),
+                        description: Some(meta.description.unwrap_or_default()),
+                        content: Some(body),
+                        tags: Some(meta.tags),
+                        enabled: None,
+                    },
+                )
+                .await
+                .map(|s| ("updated", s))
+        } else {
+            self.skills_svc()
+                .create_skill(engram_core::skills::NewSkill {
+                    slug: Some(&slug),
+                    name: &name,
+                    description: &meta.description.unwrap_or_default(),
+                    content: &body,
+                    tags: &meta.tags,
+                    enabled: true,
+                    source: "mcp",
+                })
+                .await
+                .map(|s| ("imported", s))
+        };
+        let (status, s) = result.map_err(from_skills)?;
+        ok_json(serde_json::json!({ "status": status, "skill": s }))
+    }
 }
 
 /// MCP instructions：initialize 时返回给调用方 AI 的顶层使用说明。
 const SERVER_INSTRUCTIONS: &str = "\
-Engram —— 用户长期记忆平台（用户记忆域 MCP）。
+Engram —— 用户长期记忆平台（多域 MCP：用户记忆 + 技能）。
 
-记忆分四层蒸馏：L0 原始会话 →（蒸馏）→ L1 原子事实 → L2 场景模式 → L3 用户画像；\
+【用户记忆域】记忆分四层蒸馏：L0 原始会话 →（蒸馏）→ L1 原子事实 → L2 场景模式 → L3 用户画像；\
 另有实体坐标系（人物/项目/主题/群组/地点）横向串联记忆。全部记忆可溯源、可遗忘。
 
 使用时机：
@@ -628,7 +989,17 @@ Engram —— 用户长期记忆平台（用户记忆域 MCP）。
 - 你的写入通道只有「写会话」：事实抽取、画像更新、实体维护全部由蒸馏完成；
 - 直接改写记忆语义内容（原子内容、画像分面、实体档案）是用户专属权限，MCP 工具面不提供；
 - 纠错也走会话：把正确的表述写成对话（correction 语义），蒸馏会自动生成取代链；
-- 敏感对话（医疗/感情/财务等）写入时置 sensitive=true，默认不进检索与上下文。\
+- 敏感对话（医疗/感情/财务等）写入时置 sensitive=true，默认不进检索与上下文。
+
+【技能域】技能 = 可复用的指令包（SKILL.md 形态：名称/描述/标签 + markdown 正文）。
+
+使用时机：
+1. 需要某种可复用能力前：先 skills_list 看有没有现成技能，命中就 skills_get 照做；
+2. 用户说「把这个做法存成技能」或一套流程被验证有效且可复用：skills_create 沉淀；
+3. 技能需要修正/演进：skills_update（自动留版本快照，可回滚）；
+4. 用户给了现成 SKILL.md：skills_import（frontmatter 容错解析）。
+
+技能域分权：删除（skills_delete）仅限用户明确要求——内容过时用 update 修订，不要自行删除。\
 ";
 
 #[tool_handler(router = self.tool_router)]

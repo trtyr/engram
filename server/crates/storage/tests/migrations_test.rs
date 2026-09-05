@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 30 份迁移：0030 = 约束名归 wiki + api_keys 默认 scopes 去 knowledge）
+    // 版本可查（当前 31 份迁移：0031 = 技能域 skills + skill_revisions 两表）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(30), "0001-0030 迁移应已应用");
+    assert_eq!(version, Some(31), "0001-0031 迁移应已应用");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")
@@ -63,6 +63,8 @@ async fn all_domain_tables_exist_with_columns() {
         "projects",
         "project_locations",
         "project_docs",
+        "skills",
+        "skill_revisions",
     ];
     for table in expected_tables {
         let exists: bool = sqlx::query_scalar(

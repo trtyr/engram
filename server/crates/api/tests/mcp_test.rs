@@ -648,7 +648,7 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(info["disabled_tools"], json!(["memory_write_session"]));
 
-    // tools/list 对 AI 隐身（9 → 8）
+    // tools/list 对 AI 隐身（15 → 14）
     let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
     let result = expect_result(&v, "tools/list");
     let names: Vec<String> = result["tools"]
@@ -657,7 +657,7 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .iter()
         .filter_map(|t| t["name"].as_str().map(String::from))
         .collect();
-    assert_eq!(names.len(), 8, "停用工具不应出现在 tools/list：{names:?}");
+    assert_eq!(names.len(), 14, "停用工具不应出现在 tools/list：{names:?}");
     assert!(!names.contains(&"memory_write_session".to_string()));
 
     // tools/call 直接拒绝
@@ -705,4 +705,316 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     )
     .await;
     expect_result(&v, "恢复后 write_session");
+}
+
+// ---------- 技能域（skills_*）----------
+
+#[tokio::test]
+async fn mcp_skills_tools_listed_with_domain() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["skills"]).await;
+
+    // initialize：instructions 应包含技能域说明
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "0.1.0"}
+            }),
+        ),
+    )
+    .await;
+    let instructions = expect_result(&v, "initialize")["instructions"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        instructions.contains("skills_list"),
+        "instructions 应包含技能域说明"
+    );
+
+    // tools/list：6 个 skills_* 工具齐备，注解正确
+    let (_, v) = mcp_rpc(&app, &key, rpc(2, "tools/list", json!({}))).await;
+    let tools = expect_result(&v, "tools/list")["tools"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    for expected in [
+        "skills_list",
+        "skills_get",
+        "skills_create",
+        "skills_update",
+        "skills_delete",
+        "skills_import",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "tools/list 缺少 {expected}：{names:?}"
+        );
+    }
+    let list = tools.iter().find(|t| t["name"] == "skills_list").unwrap();
+    assert_eq!(list["annotations"]["readOnlyHint"], json!(true));
+    let del = tools.iter().find(|t| t["name"] == "skills_delete").unwrap();
+    assert_eq!(del["annotations"]["destructiveHint"], json!(true));
+
+    // 管理端点：skills 工具归 skills 域（前端管理台按此自动分组）
+    let admin = login_token(&app).await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/settings/mcp")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let info: Value = serde_json::from_slice(&body).unwrap();
+    let skills_tools: Vec<&Value> = info["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["name"].as_str().unwrap_or("").starts_with("skills_"))
+        .collect();
+    assert_eq!(skills_tools.len(), 6, "管理端点应展示 6 个 skills 工具");
+    assert!(
+        skills_tools.iter().all(|t| t["domain"] == "skills"),
+        "skills 工具应归 skills 域：{skills_tools:?}"
+    );
+}
+
+#[tokio::test]
+async fn mcp_skills_crud_journey() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["skills"]).await;
+
+    // create
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            1,
+            "tools/call",
+            json!({
+                "name": "skills_create",
+                "arguments": {
+                    "name": "PR 审查",
+                    "slug": "review-pr",
+                    "description": "审查 Rust PR 的固定流程",
+                    "content": "# 审查步骤\n1. 读 diff\n2. 跑 clippy",
+                    "tags": ["rust", "review"]
+                }
+            }),
+        ),
+    )
+    .await;
+    let result = expect_result(&v, "skills_create");
+    assert!(
+        result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("review-pr"),
+        "创建结果应回显 slug：{result}"
+    );
+
+    // list（q 命中）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            2,
+            "tools/call",
+            json!({"name": "skills_list", "arguments": {"q": "审查"}}),
+        ),
+    )
+    .await;
+    let result = expect_result(&v, "skills_list");
+    assert!(
+        result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("review-pr"),
+        "列表应包含刚建的技能：{result}"
+    );
+
+    // get
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            3,
+            "tools/call",
+            json!({"name": "skills_get", "arguments": {"slug": "review-pr"}}),
+        ),
+    )
+    .await;
+    assert!(
+        expect_result(&v, "skills_get")["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("读 diff")
+    );
+
+    // update（改正文 + 停用）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            4,
+            "tools/call",
+            json!({
+                "name": "skills_update",
+                "arguments": {"slug": "review-pr", "content": "# 新流程", "enabled": false}
+            }),
+        ),
+    )
+    .await;
+    let updated = expect_result(&v, "skills_update");
+    assert!(
+        updated["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("新流程")
+    );
+
+    // 停用后 enabled 过滤查不到
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            5,
+            "tools/call",
+            json!({"name": "skills_list", "arguments": {"enabled": true}}),
+        ),
+    )
+    .await;
+    assert!(
+        !expect_result(&v, "enabled 过滤")["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("review-pr"),
+        "停用技能不应出现在 enabled=true 列表"
+    );
+
+    // import（SKILL.md 全文 + frontmatter）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            6,
+            "tools/call",
+            json!({
+                "name": "skills_import",
+                "arguments": {
+                    "content": "---\nname: Deploy Check\ndescription: 部署前检查清单\nslug: deploy-check\ntags: ops\n---\n# 检查清单\n- 健康检查\n- 回滚预案"
+                }
+            }),
+        ),
+    )
+    .await;
+    let imported = expect_result(&v, "skills_import");
+    assert!(
+        imported["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("deploy-check")
+    );
+
+    // delete（先重新启用被停用的技能）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            7,
+            "tools/call",
+            json!({"name": "skills_update", "arguments": {"slug": "review-pr", "enabled": true}}),
+        ),
+    )
+    .await;
+    expect_result(&v, "重新启用");
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            8,
+            "tools/call",
+            json!({"name": "skills_delete", "arguments": {"slug": "review-pr"}}),
+        ),
+    )
+    .await;
+    expect_result(&v, "skills_delete");
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            9,
+            "tools/call",
+            json!({"name": "skills_get", "arguments": {"slug": "review-pr"}}),
+        ),
+    )
+    .await;
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("不存在"),
+        "删除后 get 应报不存在：{v}"
+    );
+}
+
+#[tokio::test]
+async fn mcp_skills_scope_enforcement() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // 只有 memory scope 的 key：tools/list 放行（协议能力），skills_* 调用被拒
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+    let (_, v) = mcp_rpc(
+        &app,
+        &mem_key,
+        rpc(
+            1,
+            "tools/call",
+            json!({"name": "skills_create", "arguments": {"name": "x", "content": "y"}}),
+        ),
+    )
+    .await;
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("skills scope"),
+        "无 skills scope 应被拒：{v}"
+    );
+
+    // skills scope 的 key 调 memory_* 同样被拒（域间分权）
+    let skills_key = create_key(&app, &admin, &["skills"]).await;
+    let (_, v) = mcp_rpc(
+        &app,
+        &skills_key,
+        rpc(
+            2,
+            "tools/call",
+            json!({"name": "memory_search", "arguments": {"query": "test"}}),
+        ),
+    )
+    .await;
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("memory scope"),
+        "skills key 调记忆工具应被拒：{v}"
+    );
 }

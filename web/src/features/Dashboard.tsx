@@ -9,6 +9,7 @@ import {
   type Persona,
   type Scenario,
   type Session,
+  type SkillSummaryDto,
   type UsageRow,
   type WikiPage,
 } from '@/lib/api'
@@ -153,6 +154,7 @@ export default function Dashboard() {
   const [cg, setCg] = useState<{ id: string }[] | null>(null)
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [usage, setUsage] = useState<UsageRow[] | null>(null)
+  const [skills, setSkills] = useState<SkillSummaryDto[] | null>(null)
   // 复用侧栏轮询源（10s，页面隐藏自动跳过）：失败徽章 + 蒸馏脉冲与全局状态一致
   const { failed, distilling } = useSystemStatus()
 
@@ -170,6 +172,7 @@ export default function Dashboard() {
     api.get<{ id: string }[]>('/codegraph/projects').then(setCg).catch(() => setCg([]))
     api.get<Job[]>('/jobs?limit=8').then(setJobs).catch(() => setJobs([]))
     api.get<UsageRow[]>('/llm/usage').then(setUsage).catch(() => setUsage([]))
+    api.get<SkillSummaryDto[]>('/skills').then(setSkills).catch(() => setSkills([]))
   }, [])
 
   if (err) return <ErrorBox msg={err} />
@@ -217,6 +220,11 @@ export default function Dashboard() {
     },
     { label: 'Wiki 页面', n: wikiPages.length.toLocaleString(), sub: `共 ${core.pages.length}` },
     { label: '代码图谱项目', n: (cg?.length ?? 0).toLocaleString(), sub: '已注册' },
+    {
+      label: '技能',
+      n: (skills?.length ?? 0).toLocaleString(),
+      sub: `启用 ${skills?.filter((s) => s.enabled).length ?? 0}`,
+    },
     { label: 'LLM tokens', n: totalTokens.toLocaleString(), sub: '近 30 天' },
   ]
 
@@ -236,7 +244,7 @@ export default function Dashboard() {
         </p>
       )}
 
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border/50 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border/50 lg:grid-cols-5">
         {stats.map((s) => (
           <div key={s.label} className="bg-card p-4">
             <p className="font-mono text-2xl font-medium tracking-tight tabular-nums">{s.n}</p>

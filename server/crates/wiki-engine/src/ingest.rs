@@ -725,11 +725,7 @@ async fn upsert_system_page(
 }
 
 /// W4：Permanent 失败 → wiki_sources 标 failed + error 落列（此前 'failed' 态全代码无人写）。
-async fn mark_source_failed(
-    pool: &sqlx::PgPool,
-    ctx_job: &engram_jobs::types::Job,
-    msg: &str,
-) {
+async fn mark_source_failed(pool: &sqlx::PgPool, ctx_job: &engram_jobs::types::Job, msg: &str) {
     let Some(sid) = ctx_job
         .payload
         .0

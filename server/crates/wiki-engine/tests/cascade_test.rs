@@ -9,9 +9,7 @@ async fn setup() -> (sqlx::PgPool, WikiService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let registry = engram_llm::ProviderRegistry::new(
         pool.clone(),
         engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),

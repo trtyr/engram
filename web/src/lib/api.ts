@@ -391,3 +391,42 @@ export interface ProjectTypeDto {
   label: string
   default_categories: string[]
 }
+
+// ---- 技能域（第六域） ----
+export interface SkillSummaryDto {
+  id: string
+  slug: string
+  name: string
+  description: string
+  tags: string[]
+  enabled: boolean
+  source: string
+  created_at: string
+  updated_at: string
+}
+export interface SkillDto extends SkillSummaryDto {
+  content: string
+}
+export interface SkillRevisionDto {
+  id: string
+  skill_id: string
+  rev: number
+  name: string
+  description: string
+  content: string
+  tags: string[]
+  origin: string
+  created_at: string
+}
+export interface SkillImportItem {
+  index: number
+  slug: string | null
+  status: string
+  error: string | null
+}
+export interface SkillImportReport {
+  imported: number
+  updated: number
+  failed: number
+  items: SkillImportItem[]
+}

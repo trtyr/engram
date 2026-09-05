@@ -8,12 +8,12 @@ web
 
 ## Users
 
-- 人类用户：平台所有者本人（单用户），通过 Web 控制台管理、浏览、治理四类记忆资产。
-- AI 用户：持有 API key（scopes 限定）经 HTTP API 操纵平台——写会话、触发蒸馏、摄取知识、编译 Wiki、查图谱。
+- 人类用户：平台所有者本人（单用户），通过 Web 控制台管理、浏览、治理五类记忆资产。
+- AI 用户：持有 API key（scopes 限定）经 HTTP API / MCP 操纵平台——写会话、触发蒸馏、摄取知识、编译 Wiki、查图谱、读写技能库。
 
 ## Product Purpose
 
-单用户 AI 长期记忆平台。核心理念「平台即工具」：平台对外暴露 HTTP API，AI（或人）拿着 API 操纵平台；人通过 Web UI 管理浏览。四类长期记忆资产：Chat Memory（L0→L3 分层蒸馏，全程可溯源）、Wiki（文档知识：文档/URL 摄取→混合检索 + LLM 增量维护的互链知识库）、CodeGraph（代码知识图谱）、项目记忆（跨会话工作线）。成功 = 所有者与其 AI 能长期信赖的、可溯源的记忆系统。
+单用户 AI 长期记忆平台。核心理念「平台即工具」：平台对外暴露 HTTP API，AI（或人）拿着 API 操纵平台；人通过 Web UI 管理浏览。五类长期记忆资产：Chat Memory（L0→L3 分层蒸馏，全程可溯源）、Wiki（文档知识：文档/URL 摄取→混合检索 + LLM 增量维护的互链知识库）、CodeGraph（代码知识图谱）、项目记忆（跨会话工作线）、Skills（SKILL.md 形态的可复用指令包：导入/检索/版本回滚）。成功 = 所有者与其 AI 能长期信赖的、可溯源的记忆系统。
 
 ## Positioning
 
@@ -25,8 +25,8 @@ web
 
 ## Capabilities and Constraints
 
-- 八个页面：Dashboard / Memory / Circle / Wiki / CodeGraph / Projects / Jobs / Settings + 登录。
-- 后端 HTTP API（88 路径，OpenAPI 权威）已定型；本次重设计**后端零改动**。
+- 九个页面：Dashboard / Memory / Circle / Wiki / CodeGraph / Projects / Skills / Jobs / Settings + 登录。
+- 后端 HTTP API（95 路径，OpenAPI 权威）已定型。
 - 技术栈保持：React 19 + TypeScript + Vite 8 + Tailwind 4 + pnpm（radix/shadcn 基件可用可弃）。
 - e2e（Playwright journey）断言语义保持，选择器允许随新 DOM 同步更新。
 - 无营销面：纯控制台（Operate 模式），无注册/计费/多语言诉求；界面语言中文。

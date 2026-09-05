@@ -41,9 +41,7 @@ async fn setup_llm(
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
 
     let l1 = llm.clone();
     let runner = engram_wiki_engine::ingest::register_handlers(
@@ -307,14 +305,16 @@ async fn ingest_document_url_fallback_uses_chunks() {
         (1, "第一段：异步运行时的选型考量。"),
         (2, "第二段：tokio 与 async-std 的取舍。"),
     ] {
-        sqlx::query("INSERT INTO wiki_chunks (id, document_id, seq, content) VALUES ($1, $2, $3, $4)")
-            .bind(uuid::Uuid::now_v7())
-            .bind(doc_id)
-            .bind(seq)
-            .bind(content)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO wiki_chunks (id, document_id, seq, content) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(doc_id)
+        .bind(seq)
+        .bind(content)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
 
     let skipped = wiki.ingest_document(doc_id).await.unwrap();
@@ -839,9 +839,7 @@ async fn graph_community_sparse_flag_matches_insights_threshold() {
     let env = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&env).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let registry = engram_llm::ProviderRegistry::new(
         pool.clone(),
         engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),

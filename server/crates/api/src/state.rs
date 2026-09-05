@@ -50,8 +50,8 @@ impl AppState {
             .as_ref()
             .map(|m| m.0.clone())
             .unwrap_or_else(|| "00".repeat(32));
-        let cipher = engram_llm::KeyCipher::from_hex_master(&hex)
-            .expect("主密钥格式恒合法（占位 64 hex）");
+        let cipher =
+            engram_llm::KeyCipher::from_hex_master(&hex).expect("主密钥格式恒合法（占位 64 hex）");
         engram_llm::ProviderRegistry::new(self.pool.clone(), cipher)
     }
 

@@ -1,11 +1,10 @@
-# 当前状态（2026-09-04 验证基线）
+# 当前状态（2026-09-05 验证基线）
 
 > 2026-08-30 初始化，09-01/09-03/09-04 多次全面更新。历史（CI 修复、Engram 重设计）见 git log 与根 docs/plantree/。
 
 ## 一句话状态
 
-origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）。用户记忆 MCP 已落地（rmcp Streamable HTTP `/mcp`，九工具）。cargo **189** 测试（38 套件）/ **30 迁移** / **89 路径 / 114 方法** / 27 业务表。
-项目记忆第五域落地（三表 + 15 端点 + 唯一约束）+ 根 README 美化。**数据已由所有者主动清空，本地库已清理**。
+feat/skills-mcp（基于 main @ a21bec7）**技能域第六域落地**：0031 迁移（skills + skill_revisions 两表）+ SkillsService（frontmatter 容错解析 / 批量导入 / 版本快照回滚 / 全量导出）+ 9 端点（95 路径）+ skills scope（八 scope）+ MCP 扩为双域 15 工具（skills_* 六工具）+ Web 技能页（第十页）。cargo **211** 测试（39 套件）/ **31 迁移** / **29 业务表**。
 
 ## 当日验证矩阵
 
@@ -13,8 +12,8 @@ origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）
 |---|---|
 | cargo fmt --check | exit 0 |
 | cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
-| cargo test --workspace | 189 passed / 0 failed（38 套件） |
-| cargo run -q -p engram-api --bin openapi-dump | 89 路径 / 114 方法（GET 47/POST 47/PUT 7/PATCH 3/DELETE 10） |
+| cargo test --workspace | 211 passed / 0 failed（39 套件） |
+| cargo run -q -p engram-api --bin openapi-dump | 95 路径 / 124 方法（GET 51/POST 50/PUT 9/PATCH 3/DELETE 11） |
 
 ## 2026-08-30 基线以来的落地（按主题）
 

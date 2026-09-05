@@ -9,9 +9,9 @@ use engram_llm::ProviderRegistry;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::wiki_docs::WikiDocumentService;
 use crate::memory::MemoryService;
 use crate::wiki::WikiService;
+use crate::wiki_docs::WikiDocumentService;
 
 /// 统一命中（跨域检索的最小公分母）。
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]

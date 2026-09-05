@@ -25,9 +25,7 @@ async fn setup(chats: Vec<serde_json::Value>) -> Env {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
 
     let llm: Arc<MockLlm> = Arc::new(MockLlm::with_raw_chats(
         chats

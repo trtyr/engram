@@ -1,14 +1,14 @@
 //! 记忆域端点（memory scope）。
 
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use engram_core::memory::{
     AtomDto, ContextPack, EmbeddingStatus, EntityDetail, EntityDto, EntityGraph, MemoryError,
     MemoryService, PersonaVersion, ScenarioDto, SearchResponse, SessionDto,
 };
 use engram_search::{SearchHit, search_entities};
-use axum::Json;
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;

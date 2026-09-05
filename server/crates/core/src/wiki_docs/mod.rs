@@ -6,12 +6,12 @@ pub mod chunking;
 pub mod pipeline;
 pub mod ssrf;
 
+use chrono::{DateTime, Utc};
 use engram_jobs::JobQueue;
 use engram_jobs::types::JobTemplate;
 use engram_llm::ProviderRegistry;
 use engram_llm::types::Purpose;
 use engram_search::tokenize::{has_query_tokens, tsv_query_smart};
-use chrono::{DateTime, Utc};
 use sqlx::{PgPool, QueryBuilder, Row};
 use uuid::Uuid;
 
@@ -167,7 +167,11 @@ impl WikiDocumentService {
     }
 
     /// 混合检索 chunks（FTS + 向量 + RRF，带文档引用）。
-    pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<ChunkHit>, WikiDocumentError> {
+    pub async fn search(
+        &self,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<ChunkHit>, WikiDocumentError> {
         // L6：经记账门面（查询嵌入也计入用量，不再绕过记账）
         let qv: Option<Vec<f32>> = self
             .registry
