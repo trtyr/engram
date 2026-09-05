@@ -552,7 +552,7 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(info["disabled_tools"], json!(["memory_write_session"]));
 
-    // tools/list 对 AI 隐身（38 → 37）
+    // tools/list 对 AI 隐身（9 → 8；scope 过滤后 memory-only key 只见 memory 域九工具）
     let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
     let result = expect_result(&v, "tools/list");
     let names: Vec<String> = result["tools"]
@@ -561,7 +561,7 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .iter()
         .filter_map(|t| t["name"].as_str().map(String::from))
         .collect();
-    assert_eq!(names.len(), 37, "停用工具不应出现在 tools/list：{names:?}");
+    assert_eq!(names.len(), 8, "停用工具不应出现在 tools/list：{names:?}");
     assert!(!names.contains(&"memory_write_session".to_string()));
 
     // tools/call 直接拒绝
