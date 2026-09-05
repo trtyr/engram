@@ -1,6 +1,6 @@
 # API（集成索引）
 
-全栈共一个 HTTP API，**89 路径 / 115 方法注册**（GET 47 · POST 47 · PUT 8 · PATCH 3 · DELETE 10，2026-09-05
+全栈共一个 HTTP API，**95 路径 / 124 方法注册**（GET 51 · POST 50 · PUT 9 · PATCH 3 · DELETE 11，2026-09-05
 openapi-dump 活体导出；另有 MCP 端点 **POST /mcp**——Streamable HTTP JSON-RPC，不进 OpenAPI）。权威全表在 [server/docs/api.md](../server/docs/api.md)；
 前端消费约定（认证、类型双轨、/jobs 分流）在 [web/docs/api.md](../web/docs/api.md)。
 
@@ -17,7 +17,9 @@ openapi-dump 活体导出；另有 MCP 端点 **POST /mcp**——Streamable HTTP
 | codegraph | /codegraph/projects/{id}/index、/query | 注册→索引→查询 |
 | jobs | /jobs、/jobs/{id}/events、/jobs/{id}/revive | 任务观测与恢复 |
 | settings | /settings/llm/providers、/settings/llm/routing（含 /suggest）、/settings/api-keys（含 /batch-revoke） | LLM 网关配置 |
-| mcp | POST /mcp（Streamable HTTP JSON-RPC）、GET/PUT /settings/mcp | 用户记忆域 MCP 工具面（9 工具，memory scope；服务开关 + 工具粒度开关，管理 admin-only） |
+| projects | /projects、/projects/{id}/docs/{doc_id} | 项目记忆（多主机位置 + 分类文档 + 精确寻址读） |
+| skills | /skills、/skills/import、/skills/{slug}/revisions | 技能库（frontmatter 导入/版本快照回滚/全量导出） |
+| mcp | POST /mcp（Streamable HTTP JSON-RPC）、GET/PUT /settings/mcp | 四域 MCP 工具面（38 工具：memory 九 + project 15 + skills 六 + wiki 八，scope 分权；服务开关 + 工具粒度开关，管理 admin-only） |
 | search | POST /search | 跨域统一检索（含实体域） |
 | health | /health、/ready | 探针 |
 

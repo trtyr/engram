@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-三个 feat 分支已并入 main：**技能域第六域落地**（0031 迁移 skills + skill_revisions 两表 + SkillsService + 9 端点 + skills scope + MCP skills_* 六工具 + Web 技能页）+ **Wiki 域 MCP**（wiki_* 八工具 + wiki scope 分权）+ 项目记忆第五域（三表 + 15 端点 + 唯一约束）。/mcp 扩为四域工具面（memory 九 + project 15 + skills 六 + wiki 八）。cargo 211+ 测试（并入 wiki 用例后待复跑）/ **31 迁移** / **29 业务表**。
+三 feat 分支已并入 main，仓库收敛为单分支。Rust 侧全貌：五域服务（memory / wiki / codegraph / project / skills）+ **四域 MCP 工具面**（`/mcp` 承载 memory 九 + project 15 + skills 六 + wiki 八共 38 工具，scope 分权 + 管理台开关，tools/list 按 key scope 过滤）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **234** 测试（40 套件）/ **31 迁移** / **29 业务表**。
 
 ## 当日验证矩阵
 
@@ -12,7 +12,7 @@
 |---|---|
 | cargo fmt --check | exit 0 |
 | cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
-| cargo test --workspace | 211 passed / 0 failed（39 套件） |
+| cargo test --workspace | 234 passed / 0 failed（40 套件） |
 | cargo run -q -p engram-api --bin openapi-dump | 95 路径 / 124 方法（GET 51/POST 50/PUT 9/PATCH 3/DELETE 11） |
 
 ## 2026-08-30 基线以来的落地（按主题）

@@ -1,11 +1,10 @@
-# 当前状态（2026-09-04 验证基线）
+# 当前状态（2026-09-05 验证基线）
 
 > 本页是全栈快照；分栈细节：[server](../server/docs/current-state.md)、[web](../web/docs/current-state.md)。
 
 ## 一句话状态
 
-main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）+ 项目记忆 MCP 已并入（project_* 15 工具，project scope 分权）+ **技能域第六域落地**（skills 六工具 + skills scope，0031 迁移两表，Web 技能页第十页）。cargo **211** 测试（39 套件）/ vitest 52。
-**项目记忆第五域已实现**：三表（projects / project_locations / project_docs）+ 类型模板（开发四分类/调研六分类）+ 完整 API（88 路径）+ Web（列表 CRUD/多选/类型筛选 + 详情页 Wiki 式左树右内容树状图）。
+**四域 MCP 单服务器成型**：`/mcp` 一个端点承载 memory 九 + project 15 + skills 六 + wiki 八共 **38 工具**，按 key scope 分权（AI 看到的工具面与可调用集一致），管理台按域分组逐工具开关。仓库收敛为**单分支 main**（三个 feat 分支已并入并删除），与 origin/main 同步。cargo **234** 测试（40 套件）/ vitest **53**（10 文件）/ 95 路径 / 124 方法 / 31 迁移 / 29 业务表。
 :8090 开发栈在跑（am_dev 库，数据由所有者主动清空后重建）。
 
 ## 当日验证矩阵（活体）
@@ -13,9 +12,9 @@ main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）+ 项�
 | 栈 | 命令 | 结果 |
 |---|---|---|
 | server | cargo fmt --check / clippy -D warnings | exit 0 / 0 errors |
-| server | cargo test --workspace | 211 passed（39 套件） |
-| web | pnpm run lint / tsc / test / build | 11 既有警告（WikiMarkdown） / 0 / 45 全过（9 文件）/ exit 0 |
-| web | 入口 bundle | 285.60 kB（gzip 91.81），预算 350 内 |
+| server | cargo test --workspace | 234 passed（40 套件） |
+| web | pnpm run lint / tsc / test / build | 11 既有警告（WikiMarkdown） / 0 / 53 全过（10 文件）/ exit 0 |
+| web | 入口 bundle | 287.55 kB（gzip 92.46），预算 350 内 |
 | CI | gh run list（f8e1031） | CI + e2e FAIL（GitHub 支出限额，未启动） |
 | 事实 | OpenAPI 活体 / 迁移 / 表 | **95 路径 / 124 方法注册**（GET 51/POST 50/PUT 9/PATCH 3/DELETE 11，另有 POST /mcp JSON-RPC 不进 OpenAPI）/ **31 迁移** / **29 业务表**（openapi-dump + am_dev 库实查） |
 
@@ -25,7 +24,7 @@ main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）+ 项�
   的运行态已终止。当前系统无生产数据在跑。
 - 本地 PG 已清理：仅存 `postgres`（系统）与 `project_manage`（其他项目）；Engram 相关的
   11 个库（agent_memory 老库 / am_design_audit 审计库 / 8 个一次性栈残留）已全部删除。
-- :19180 design-audit 栈进程已停（审计证据落档 docs/design/）。需要本地栈时：
+- :19180 design-audit 栈进程已停（审计报告已随仓库清理移除，见 git 历史 docs/design/）。需要本地栈时：
   `CREATE DATABASE` + `cargo run`（迁移自动跑，见 run-and-deploy.md）。
 
 ## 2026-08-30 基线以来的大事记
@@ -54,6 +53,8 @@ main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）+ 项�
 
 21. **knowledge 彻底并入 wiki**（2026-09-05，goal mtn6mye4-ql1zkm）：删 knowledge scope（八→七）、代码模块/类型归 wiki 命名（KnowledgeService→WikiDocumentService、knowledge_api→wiki_docs_api）、数据表改名（documents/chunks→wiki_documents/wiki_chunks，0029 迁移）、删 /knowledge/* 兼容别名、统一检索 knowledge 域标签并入 wiki；0030 迁移收尾——约束名归位（documents_pkey→wiki_documents_pkey 等 6 个）+ api_keys 默认 scopes 去 knowledge。
 
+22. **用户记忆 MCP 落地**（2026-09-05）：官方 Rust SDK rmcp 3.2 Streamable HTTP 服务端宿主于 engram-server `/mcp`（无状态 + JSON 响应，复用 Bearer 中间件——每请求独立认证，key 吊销即刻生效）；九个 memory 域工具（context/search/list_atoms/list_sessions/get_session/write_session/append_session/forget/entities）进程内直调 MemoryService，instructions + 工具描述中文写明调用时机与编辑分权（AI 只写会话，纠错走蒸馏）；`GET /settings/mcp` 管理信息（与工具注册表同源）；前端新增 `/mcp` 页（端点信息 / Claude Code·Cursor·Claude Desktop 连接配置一键复制 / 工具清单 / MCP 密钥签发带 scope 选择）；远程部署 Host 白名单 `AGENT_MEMORY_MCP_ALLOWED_HOSTS`（默认 loopback 防 DNS rebinding）。验证：cargo +6（mcp_test 六用例：401 矩阵 / initialize+tools/list / 写读链 / scope 分权 / 管理端点）+ vitest +2。
+
 23. **MCP 管理面 + 密钥管理归位**（2026-09-05）：MCP 配置入 settings KV（key=`mcp`：enabled + disabled_tools，缺省全开无迁移）；`/mcp` 前置 gate 中间件——服务关闭对已认证客户端也 503（Bearer 之内、MCP 之前）；覆写 rmcp `list_tools`/`call_tool`——停用工具对 AI 隐身且调用被拒（管理端点仍展示全量）；`GET/PUT /settings/mcp`（PUT 校验未知工具名 400）；前端 MCP 页重排为管理台（状态条 + 域 Tabs 逐域工具开关列表，域归属后端同源 domain 字段），密钥管理收敛回设置页 Keys tab（签发表单补七 scope 选择器 + 表格 scopes 列）。验证：cargo 189（+2 toggle 用例）+ vitest 45（mcp.test 重写 3 用例）+ 真机冒烟（关服务 503 / 停用工具隐身+拒绝 / 恢复全开）。
 
 24. **记忆域 MCP v2 测试修复**（2026-09-05，fix/memory-mcp-v2 worktree）：黑盒测试报告（engram-mcp-test-report-v2.md）四项根因修复——① **检索零匹配短路**：FTS 零命中时向量腿收紧阈值（默认 0.45，`AGENT_MEMORY_VEC_FALLBACK_MAX_DISTANCE` 可调）+ 查询侧领域停用词（用户/什么等通用词不再让 FTS「处处命中」），不相关查询从满页噪声变空结果；② **distill=off 永久豁免**：off 会话落 metadata.distill=off，extract 认领/积压统计全部排除（此前会被任何蒸馏扫描顺带蒸掉）；③ **void 语义扩大**（P0-3 遗忘断层）：done 会话可 void，级联归档其蒸馏产物原子 + session_void_cascade 审计行；④ **context 预算**：budget_items 改各层独立上限（persona 不再挤占）、chars_used 按完整序列化计量（含 evidence_refs）；⑤ SearchHit.title 取内容前缀（不再恒 null）；⑥ 蒸馏 prompt v4/v2：隐私约定归 preference、场景措辞近似禁止另建 + 实体名包含关系近似归并 + 实体画像随 organize 链路生成。验证：cargo 195（+6 回归测试：off 豁免/void 级联/occurred_at 窗口/零匹配/title/预算）+ 8091 黑盒复验 11 项（不相关查询 0 结果、off 保持 pending、void 后检索立即失效、append 竞速 3/3、跨语言召回保留）。瞬态 401（N4）记录为启动窗口现象，warm 后 0/12 不可复现（新增两处观测均伴随服务重启窗口；怀疑与实例切换相关，未复现根因）。
@@ -63,12 +64,13 @@ main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）+ 项�
 26. **项目域审查问题修复**（2026-09-05，紧接 25 的审查结论）：① 归属校验——`/projects/{id}` 路径下 location/doc 的 get/update/delete 原先不核对资源归属（甲项目路径可寻址乙项目资源 id），现在 handler 层 owned_location/owned_doc 校验 project_id 一致，跨项目一律 404 且不泄露存在性；② 孤儿分类治理下沉 service——add_doc 校验 category ∈ project.categories（400 列出现有分类），update_doc 仅在换分类时校验（分类被移除后存量文档仍可原地编辑，不锁死），MCP 层预校验删除改依赖 service 单一真源。遗留：project_get 全量文档无分页，留待 context pack 协议一并设计。验证：cargo 200（+2：project_cross_project_access_blocked 六路 404 + 资源无损断言、project_doc_category_validation 四段矩阵）+ vitest 45。
 
 27. **项目文档精确寻址读**（2026-09-05，所有者否决截断方案后重设计）：project_get 默认索引模式（docs 只给 id/分类/标题/content_chars，不带正文；include_content=true 无损全量；category 过滤）；新增 project_doc_search——grep 式跨文档按行检索（大小写不敏感子串，命中 doc_id/title/category/line/text，limit 上限）；project_doc_get 加 start_line/end_line 区间精读（1-based 含两端，输出恒带行号前缀便于连环寻址）与 with_line_numbers 全文行号——全文恒可得、零截断，工作流=索引看结构→搜索定位行号→区间精读。core 新增 read_doc_lines/search_doc_lines/DocLineHitDto。project 域工具 14→15。验证：cargo 201（+1：project_precise_addressing_read——索引/全量/过滤/搜索定位/区间端点含入/行号边界/空检索词）+ vitest 45。
-28. **Wiki 域 MCP**（2026-09-05，feat/wiki-mcp）：单服务器扩为多域（memory + project + skills + wiki，工具名前缀即域，管理台按域分组自动出 Wiki tab）——`EngramMcpServer`（原 MemoryMcpServer 更名）新增八个 `wiki_*` 工具（mcp_wiki.rs 放参数结构/错误桥/实现辅助，`#[tool]` 方法落在 mcp.rs 同一 tool_router 块）：`wiki_search`（search_with_purpose 混合检索 + purpose）/ `wiki_list_pages`（瘦身去正文 content_omitted）/ `wiki_get_page`（slug 宽容匹配读全文）/ `wiki_write_page`（AI 通道 put_page，frontmatter.via="ai" 区分执行者；描述写明覆盖前先读原文）/ `wiki_ingest`（入队织入，返回 async=true 提示异步）/ `wiki_archive_query`（同标题幂等跳过）/ `wiki_graph` / `wiki_lint`；全部 wiki scope 分权（缺 scope 报 JSON-RPC 错误）；instructions 扩为多域（memory_* 管用户本人、wiki_* 管世界知识的域选择指引）；无参工具用空结构体 WikiNoParams（`Parameters<()>` schema 为 null 违反 MCP inputSchema 规范）。验证：cargo **193**（mcp_test 12 用例：wiki 工具清单/写读改搜列图 lint/问答存档幂等/织入/双域 scope 互拒/wiki 工具停用隐身+拒绝/管理台校验 wiki 工具名）+ vitest 46（mcp.test +1 Wiki 域 Tab 用例）+ 前端门禁四绿。
+28. **技能域第六域落地**（2026-09-05，feat/skills-mcp worktree）：0031 迁移建 skills + skill_revisions 两表（slug 唯一、tags GIN、版本快照保留 50 版）；SkillsService（frontmatter 容错解析支持 `>-`/`|` 块标量——现网 SKILL.md 真实形态、批量导入逐条报告 + 附带 tags、overwrite 覆盖、全量导出、q/tag/enabled 过滤、变更前自动快照 + 回滚前现状快照；scripts/import-skills.sh 目录一键灌入）；skills scope（七→八）+ 9 端点；MCP skills_* 六工具（list/get/create/update/delete/import，require_skills 分权，instructions 双域化）；Web 第十页 /skills（列表/新建/编辑/导入导出/版本回滚）+ 概览统计 + scope/域标签同步。验证：cargo 211（+skills 单测 12 + 集成 8 + MCP 3）/ vitest 52（+skills 7）/ 前后端门禁全绿。
+
+29. **Wiki 域 MCP**（2026-09-05，feat/wiki-mcp）：单服务器扩为多域（memory + project + skills + wiki，工具名前缀即域，管理台按域分组自动出 Wiki tab）——`EngramMcpServer`（原 MemoryMcpServer 更名）新增八个 `wiki_*` 工具（mcp_wiki.rs 放参数结构/错误桥/实现辅助，`#[tool]` 方法落在 mcp.rs 同一 tool_router 块）：`wiki_search`（search_with_purpose 混合检索 + purpose）/ `wiki_list_pages`（瘦身去正文 content_omitted）/ `wiki_get_page`（slug 宽容匹配读全文）/ `wiki_write_page`（AI 通道 put_page，frontmatter.via="ai" 区分执行者；描述写明覆盖前先读原文）/ `wiki_ingest`（入队织入，返回 async=true 提示异步）/ `wiki_archive_query`（同标题幂等跳过）/ `wiki_graph` / `wiki_lint`；全部 wiki scope 分权（缺 scope 报 JSON-RPC 错误）；instructions 扩为多域（memory_* 管用户本人、wiki_* 管世界知识的域选择指引）；无参工具用空结构体 WikiNoParams（`Parameters<()>` schema 为 null 违反 MCP inputSchema 规范）。验证：cargo **193**（mcp_test 12 用例：wiki 工具清单/写读改搜列图 lint/问答存档幂等/织入/双域 scope 互拒/wiki 工具停用隐身+拒绝/管理台校验 wiki 工具名）+ vitest 46（mcp.test +1 Wiki 域 Tab 用例）+ 前端门禁四绿。
+
+30. **三 feat 分支并入 main + 仓库收敛**（2026-09-05）：feat/project-memory-mcp、feat/skills-mcp、feat/wiki-mcp 三分支以 --no-ff 依次并入 main（b7ba722 / 67348b7 / 966d3f6）——四域工具链拼接、tool_scope 补 skills/wiki 分支、SERVER_INSTRUCTIONS 扩为四域、README/docs 多域口径统一；顺修 mcp_test toggle 断言（scope 过滤下 memory-only key 见 9 工具 9→8，skills 分支遗留的 15→14 与 project 分支的 scope 过滤矛盾）。三 worktree 撤除、四分支删除（含已合并的 fix/memory-mcp-v2，远端同步删除），仓库收敛为单分支 main。验证：cargo 234（40 套件）+ vitest 53 + fmt/clippy 全绿。
 
 ## 已知未了项
 
 - e2e key 表历史积压（journey 现已自撤新 key；历史 revoked 行留存无害）
 - skill 安装副本版本同步（~/.pi 侧非 git 跟踪，roadmap 0t）
-22. **用户记忆 MCP 落地**（2026-09-05）：官方 Rust SDK rmcp 3.2 Streamable HTTP 服务端宿主于 engram-server `/mcp`（无状态 + JSON 响应，复用 Bearer 中间件——每请求独立认证，key 吊销即刻生效）；九个 memory 域工具（context/search/list_atoms/list_sessions/get_session/write_session/append_session/forget/entities）进程内直调 MemoryService，instructions + 工具描述中文写明调用时机与编辑分权（AI 只写会话，纠错走蒸馏）；`GET /settings/mcp` 管理信息（与工具注册表同源）；前端新增 `/mcp` 页（端点信息 / Claude Code·Cursor·Claude Desktop 连接配置一键复制 / 工具清单 / MCP 密钥签发带 scope 选择）；远程部署 Host 白名单 `AGENT_MEMORY_MCP_ALLOWED_HOSTS`（默认 loopback 防 DNS rebinding）。验证：cargo +6（mcp_test 六用例：401 矩阵 / initialize+tools/list / 写读链 / scope 分权 / 管理端点）+ vitest +2。
-
-24. **技能域第六域落地**（2026-09-05，feat/skills-mcp worktree）：0031 迁移建 skills + skill_revisions 两表（slug 唯一、tags GIN、版本快照保留 50 版）；SkillsService（frontmatter 容错解析支持 `>-`/`|` 块标量——现网 SKILL.md 真实形态、批量导入逐条报告 + 附带 tags、overwrite 覆盖、全量导出、q/tag/enabled 过滤、变更前自动快照 + 回滚前现状快照；scripts/import-skills.sh 目录一键灌入）；skills scope（七→八）+ 9 端点；MCP skills_* 六工具（list/get/create/update/delete/import，require_skills 分权，instructions 双域化）；Web 第十页 /skills（列表/新建/编辑/导入导出/版本回滚）+ 概览统计 + scope/域标签同步。验证：cargo 211（+skills 单测 12 + 集成 8 + MCP 3）/ vitest 52（+skills 7）/ 前后端门禁全绿。

@@ -4,8 +4,8 @@
 
 ## 一句话状态
 
-vitest **52**（10 文件）/ oxlint 0 错误（11 既有警告）/ tsc 0 / build 0 / 入口 bundle **287.55 kB**（gzip 92.46，预算 350 内）。
-feat/skills-mcp 技能页（第十页）落地：列表（搜索/启停筛选）+ 新建/编辑 + SKILL.md 导入（frontmatter 容错 + 冲突报告）+ 全量导出 + 版本快照回滚面板；设置页 scope 选择器与 MCP 页域 Tabs 随 skills scope / skills 工具面同步扩展。
+vitest **53**（10 文件）/ oxlint 0 错误（11 既有警告）/ tsc 0 / build 0 / 入口 bundle **287.55 kB**（gzip 92.46，预算 350 内）。
+三 feat 分支并入后前端全貌：十页 SPA——技能页（第十页：列表/新建编辑/SKILL.md 导入导出/版本回滚）+ MCP 管理台（状态条 + 四域 Tabs 逐工具开关，域归属后端同源）+ 设置页 Keys tab（八 scope 签发）。仓库收敛单分支 main。
 
 ## 2026-08-30 基线以来的前端大事记
 

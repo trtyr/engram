@@ -30,7 +30,6 @@
 
 ## 本目录其他内容
 
-- [design/](design/audit.md)——前端设计审计证据（七维报告、双主题截图、色彩/度量 JSON）
 - [plantree/](plantree/README.md)——规划树（frontend-polish 进行中；后端规划在 server/docs/plantree/）
 
 ## 快速上手（当日全绿命令）

@@ -34,3 +34,7 @@ test-results/
 
 __pycache__/
 .zcode/
+
+# 本地工具产物
+.impeccable/
+.rumdl_cache/

@@ -40,8 +40,7 @@ Engram/
 ├── web/             # React 19 SPA（Engram 控制台）
 │   └── docs/        # ← 前端项目档案
 ├── docs/            # ← 本档案（全栈集成视角）
-│   ├── design/      #   设计审计证据（audit.md + 截图 + 度量）
-│   └── plantree/    #   规划树（frontend-polish 进行中）
+│   └── plantree/    #   规划树（历史决策与开放项）
 ├── deploy/          # Dockerfile + docker-compose（开发期暂不维护，CI 验证构建）
 ├── scripts/         # e2e Python 脚本、备份、provider 验证
 ├── PRODUCT.md       # 产品事实（impeccable 产品文档）

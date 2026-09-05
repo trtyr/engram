@@ -25,7 +25,7 @@ web
 
 ## Capabilities and Constraints
 
-- 九个页面：Dashboard / Memory / Circle / Wiki / CodeGraph / Projects / Skills / Jobs / Settings + 登录。
+- 十个页面：Dashboard / Memory / Circle / Wiki / CodeGraph / Projects / Skills / Jobs / MCP / Settings + 登录。
 - 后端 HTTP API（95 路径，OpenAPI 权威）已定型。
 - 技术栈保持：React 19 + TypeScript + Vite 8 + Tailwind 4 + pnpm（radix/shadcn 基件可用可弃）。
 - e2e（Playwright journey）断言语义保持，选择器允许随新 DOM 同步更新。
