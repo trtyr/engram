@@ -213,7 +213,11 @@ pub async fn mcp_call_json(app: &Router, auth: &str, name: &str, arguments: Valu
     let (_, v) = mcp_rpc(
         app,
         auth,
-        rpc(2, "tools/call", json!({"name": name, "arguments": arguments})),
+        rpc(
+            2,
+            "tools/call",
+            json!({"name": name, "arguments": arguments}),
+        ),
     )
     .await;
     let out = expect_result(&v, &format!("tools/call {name}"));

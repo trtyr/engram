@@ -176,9 +176,7 @@ impl ProjectService {
         description: Option<&str>,
     ) -> Result<ProjectDto, ProjectError> {
         if name.trim().is_empty() {
-            return Err(ProjectError::BadRequest(
-                "项目名不能为空".to_string(),
-            ));
+            return Err(ProjectError::BadRequest("项目名不能为空".to_string()));
         }
         let categories = Self::default_categories(type_).ok_or_else(|| {
             ProjectError::BadRequest(format!("未知项目类型: {type_}（支持 dev/research）"))
@@ -283,13 +281,12 @@ impl ProjectService {
             return Err(ProjectError::BadRequest("项目名不能为空".to_string()));
         }
         // 改名撞唯一约束会以 sqlx 错误冒成 500，这里先查给出 409 语义
-        if let Some(holder) = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM projects WHERE name = $1 AND id <> $2",
-        )
-        .bind(name)
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?
+        if let Some(holder) =
+            sqlx::query_scalar::<_, Uuid>("SELECT id FROM projects WHERE name = $1 AND id <> $2")
+                .bind(name)
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?
         {
             return Err(ProjectError::Conflict(format!(
                 "项目名「{name}」已被项目 {holder} 占用——项目名唯一，请改名"

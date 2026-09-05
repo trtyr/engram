@@ -549,9 +549,23 @@ async fn project_rename_conflict_and_empty_name() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    let (st, a) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"改名-甲","type":"dev"}))).await;
+    let (st, a) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"改名-甲","type":"dev"})),
+    )
+    .await;
     assert_eq!(st, StatusCode::CREATED, "{a}");
-    let (st, b) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"改名-乙","type":"dev"}))).await;
+    let (st, b) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"改名-乙","type":"dev"})),
+    )
+    .await;
     assert_eq!(st, StatusCode::CREATED, "{b}");
     let b_id = b["id"].as_str().unwrap();
 
@@ -584,7 +598,14 @@ async fn project_rename_conflict_and_empty_name() {
         )
         .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "空名应 400：{v}");
-        let (st, _) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":bad,"type":"dev"}))).await;
+        let (st, _) = send(
+            &app,
+            "POST",
+            "/projects",
+            &admin,
+            Some(serde_json::json!({"name":bad,"type":"dev"})),
+        )
+        .await;
         assert_eq!(st, StatusCode::BAD_REQUEST, "空名建项目应 400");
     }
 
@@ -610,9 +631,23 @@ async fn project_cross_project_access_blocked() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    let (st, a) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"归属-甲","type":"dev"}))).await;
+    let (st, a) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"归属-甲","type":"dev"})),
+    )
+    .await;
     assert_eq!(st, StatusCode::CREATED);
-    let (st, b) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"归属-乙","type":"dev"}))).await;
+    let (st, b) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"归属-乙","type":"dev"})),
+    )
+    .await;
     assert_eq!(st, StatusCode::CREATED);
     let (a_id, b_id) = (a["id"].as_str().unwrap(), b["id"].as_str().unwrap());
 
@@ -624,9 +659,13 @@ async fn project_cross_project_access_blocked() {
     assert_eq!(st, StatusCode::CREATED, "{loc}");
     let loc_id = loc["id"].as_str().unwrap();
     let (st, doc) = send(
-        &app, "POST", &format!("/projects/{a_id}/docs"), &admin,
+        &app,
+        "POST",
+        &format!("/projects/{a_id}/docs"),
+        &admin,
         Some(serde_json::json!({"category":"后端","title":"甲的文档","content":"v1"})),
-    ).await;
+    )
+    .await;
     assert_eq!(st, StatusCode::CREATED, "{doc}");
     let doc_id = doc["id"].as_str().unwrap();
 
@@ -639,31 +678,74 @@ async fn project_cross_project_access_blocked() {
         assert_eq!(st, StatusCode::NOT_FOUND, "{method} {uri} 应 404");
     }
     let (st, _) = send(
-        &app, "PUT", &format!("/projects/{b_id}/locations/{loc_id}"), &admin,
+        &app,
+        "PUT",
+        &format!("/projects/{b_id}/locations/{loc_id}"),
+        &admin,
         Some(serde_json::json!({"ip":"0.0.0.0","host":"x","os":"x","path":"/x","purpose":null})),
-    ).await;
+    )
+    .await;
     assert_eq!(st, StatusCode::NOT_FOUND, "跨项目改位置应 404");
     let (st, _) = send(
-        &app, "PUT", &format!("/projects/{b_id}/docs/{doc_id}"), &admin,
+        &app,
+        "PUT",
+        &format!("/projects/{b_id}/docs/{doc_id}"),
+        &admin,
         Some(serde_json::json!({"category":"后端","title":"hijack","content":"hijack"})),
-    ).await;
+    )
+    .await;
     assert_eq!(st, StatusCode::NOT_FOUND, "跨项目改文档应 404");
-    let (st, _) = send(&app, "DELETE", &format!("/projects/{b_id}/locations/{loc_id}"), &admin, None).await;
+    let (st, _) = send(
+        &app,
+        "DELETE",
+        &format!("/projects/{b_id}/locations/{loc_id}"),
+        &admin,
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::NOT_FOUND, "跨项目删位置应 404");
-    let (st, _) = send(&app, "DELETE", &format!("/projects/{b_id}/docs/{doc_id}"), &admin, None).await;
+    let (st, _) = send(
+        &app,
+        "DELETE",
+        &format!("/projects/{b_id}/docs/{doc_id}"),
+        &admin,
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::NOT_FOUND, "跨项目删文档应 404");
 
     // 资源无损：内容未被篡改、仍在甲名下
-    let (st, doc_now) = send(&app, "GET", &format!("/projects/{a_id}/docs/{doc_id}"), &admin, None).await;
+    let (st, doc_now) = send(
+        &app,
+        "GET",
+        &format!("/projects/{a_id}/docs/{doc_id}"),
+        &admin,
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(doc_now["content"], "v1", "被拦截的跨项目写不应生效");
     assert_eq!(doc_now["title"], "甲的文档");
-    let (st, loc_now) = send(&app, "GET", &format!("/projects/{a_id}/locations/{loc_id}"), &admin, None).await;
+    let (st, loc_now) = send(
+        &app,
+        "GET",
+        &format!("/projects/{a_id}/locations/{loc_id}"),
+        &admin,
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(loc_now["path"], "/a");
 
     // 正路仍通：甲的路径 + 甲的资源
-    let (st, _) = send(&app, "DELETE", &format!("/projects/{a_id}/locations/{loc_id}"), &admin, None).await;
+    let (st, _) = send(
+        &app,
+        "DELETE",
+        &format!("/projects/{a_id}/locations/{loc_id}"),
+        &admin,
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::NO_CONTENT);
 }
 
@@ -674,22 +756,40 @@ async fn project_doc_category_validation() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    let (st, p) = send(&app, "POST", "/projects", &admin, Some(serde_json::json!({"name":"分类校验","type":"dev"}))).await;
+    let (st, p) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"分类校验","type":"dev"})),
+    )
+    .await;
     assert_eq!(st, StatusCode::CREATED);
     let pid = p["id"].as_str().unwrap();
 
     // add 到未登记分类 → 400，错误列出现有分类
     let (st, v) = send(
-        &app, "POST", &format!("/projects/{pid}/docs"), &admin,
+        &app,
+        "POST",
+        &format!("/projects/{pid}/docs"),
+        &admin,
         Some(serde_json::json!({"category":"后段","title":"t","content":""})),
-    ).await;
+    )
+    .await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
-    assert!(v["error"]["message"].as_str().unwrap().contains("后端"), "应列出现有分类：{v}");
+    assert!(
+        v["error"]["message"].as_str().unwrap().contains("后端"),
+        "应列出现有分类：{v}"
+    );
 
     let (st, doc) = send(
-        &app, "POST", &format!("/projects/{pid}/docs"), &admin,
+        &app,
+        "POST",
+        &format!("/projects/{pid}/docs"),
+        &admin,
         Some(serde_json::json!({"category":"后端","title":"存量文档","content":"v1"})),
-    ).await;
+    )
+    .await;
     assert_eq!(st, StatusCode::CREATED, "{doc}");
     let doc_id = doc["id"].as_str().unwrap();
 
@@ -702,17 +802,25 @@ async fn project_doc_category_validation() {
 
     // 存量文档原地编辑（分类不变）→ 放行
     let (st, v) = send(
-        &app, "PUT", &format!("/projects/{pid}/docs/{doc_id}"), &admin,
+        &app,
+        "PUT",
+        &format!("/projects/{pid}/docs/{doc_id}"),
+        &admin,
         Some(serde_json::json!({"category":"后端","title":"存量文档","content":"v2"})),
-    ).await;
+    )
+    .await;
     assert_eq!(st, StatusCode::OK, "保留现分类的原地编辑不应被拦：{v}");
     assert_eq!(v["content"], "v2");
 
     // 换到未登记分类 → 400
     let (st, v) = send(
-        &app, "PUT", &format!("/projects/{pid}/docs/{doc_id}"), &admin,
+        &app,
+        "PUT",
+        &format!("/projects/{pid}/docs/{doc_id}"),
+        &admin,
         Some(serde_json::json!({"category":"瞎写","title":"存量文档","content":"v2"})),
-    ).await;
+    )
+    .await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
 
     // 把「后端」加回，再迁移 → 放行
@@ -722,9 +830,13 @@ async fn project_doc_category_validation() {
     ).await;
     assert_eq!(st, StatusCode::OK);
     let (st, v) = send(
-        &app, "PUT", &format!("/projects/{pid}/docs/{doc_id}"), &admin,
+        &app,
+        "PUT",
+        &format!("/projects/{pid}/docs/{doc_id}"),
+        &admin,
         Some(serde_json::json!({"category":"测试","title":"存量文档","content":"v3"})),
-    ).await;
+    )
+    .await;
     assert_eq!(st, StatusCode::OK, "迁移到已登记分类应放行：{v}");
     assert_eq!(v["category"], "测试");
 }

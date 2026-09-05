@@ -54,11 +54,7 @@ fn from_project(e: engram_core::project::ProjectError) -> rmcp::ErrorData {
     use engram_core::project::ProjectError;
     match e {
         ProjectError::NotFound(m) => rmcp::ErrorData::resource_not_found(m, None),
-        ProjectError::Conflict(m) => rmcp::ErrorData::new(
-            ErrorCode::INVALID_REQUEST,
-            m,
-            None,
-        ),
+        ProjectError::Conflict(m) => rmcp::ErrorData::new(ErrorCode::INVALID_REQUEST, m, None),
         ProjectError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
         ProjectError::Storage(m) => rmcp::ErrorData::internal_error(m, None),
     }
@@ -423,7 +419,9 @@ pub struct ProjectLocationAddParams {
     #[schemars(description = "项目名（唯一）。与 project_id 至少给一个。")]
     pub project_name: Option<String>,
     /// 主机 IP（内网/公网/IPv6 均可，仅登记不校验格式）
-    #[schemars(description = "主机 IP（内网/公网/IPv6 均可，仅登记不校验格式；本机可填 127.0.0.1）。")]
+    #[schemars(
+        description = "主机 IP（内网/公网/IPv6 均可，仅登记不校验格式；本机可填 127.0.0.1）。"
+    )]
     pub ip: String,
     /// 主机名
     #[schemars(description = "主机名（如 MacBook Pro / tencent-beijing）。")]
@@ -537,7 +535,9 @@ pub struct ProjectDocUpdateParams {
     #[schemars(description = "可选：新标题。不传不改。")]
     pub title: Option<String>,
     /// 新正文（替换式；先 project_doc_get 取原文再追加修改）
-    #[schemars(description = "可选：替换整个 Markdown 正文（是替换不是追加——改长文档先 project_doc_get 取原文）。不传不改。")]
+    #[schemars(
+        description = "可选：替换整个 Markdown 正文（是替换不是追加——改长文档先 project_doc_get 取原文）。不传不改。"
+    )]
     pub content: Option<String>,
 }
 
@@ -1039,8 +1039,10 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_project(&p)?;
-        ok_json(serde_json::to_value(engram_core::project::ProjectService::list_types())
-            .unwrap_or(serde_json::json!([])))
+        ok_json(
+            serde_json::to_value(engram_core::project::ProjectService::list_types())
+                .unwrap_or(serde_json::json!([])),
+        )
     }
 
     /// 列出项目（可按类型过滤）。
@@ -1100,7 +1102,11 @@ impl EngramMcpServer {
         let id = self
             .resolve_project(&gp.project_id, &gp.project_name)
             .await?;
-        let detail = self.svc_project().get_project(id).await.map_err(from_project)?;
+        let detail = self
+            .svc_project()
+            .get_project(id)
+            .await
+            .map_err(from_project)?;
         let mut v = serde_json::to_value(&detail).unwrap_or(serde_json::json!({}));
         if let Some(category) = &gp.category {
             if let Some(docs) = v["docs"].as_array_mut() {
@@ -1177,7 +1183,11 @@ impl EngramMcpServer {
             .resolve_project(&up.project_id, &up.project_name)
             .await?;
         // 补丁式：先取现值，未传字段保持原样
-        let current = self.svc_project().get_project(id).await.map_err(from_project)?;
+        let current = self
+            .svc_project()
+            .get_project(id)
+            .await
+            .map_err(from_project)?;
         let name = up.new_name.unwrap_or(current.name);
         let status = up.status.unwrap_or(current.status);
         let description = up.description.or(current.description);
@@ -1212,7 +1222,10 @@ impl EngramMcpServer {
         require_project(&p)?;
         let id = Uuid::parse_str(&params.0.project_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "project_id 不是合法 UUID"))?;
-        self.svc_project().delete_project(id).await.map_err(from_project)?;
+        self.svc_project()
+            .delete_project(id)
+            .await
+            .map_err(from_project)?;
         ok_json(serde_json::json!({ "deleted": params.0.project_id }))
     }
 
@@ -1239,7 +1252,10 @@ impl EngramMcpServer {
         let mut ids = Vec::with_capacity(params.0.ids.len());
         for raw in &params.0.ids {
             ids.push(Uuid::parse_str(raw).map_err(|_| {
-                mcp_err(ErrorCode::INVALID_PARAMS, format!("ids 里有非法 UUID：{raw}"))
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("ids 里有非法 UUID：{raw}"),
+                )
             })?);
         }
         let (deleted, failed) = self
@@ -1277,7 +1293,14 @@ impl EngramMcpServer {
             .await?;
         let loc = self
             .svc_project()
-            .add_location(id, &lp.ip, &lp.host, &lp.os, &lp.path, lp.purpose.as_deref())
+            .add_location(
+                id,
+                &lp.ip,
+                &lp.host,
+                &lp.os,
+                &lp.path,
+                lp.purpose.as_deref(),
+            )
             .await
             .map_err(from_project)?;
         ok_json(serde_json::to_value(&loc).unwrap_or(serde_json::json!({})))
@@ -1552,7 +1575,10 @@ impl EngramMcpServer {
         require_project(&p)?;
         let id = Uuid::parse_str(&params.0.doc_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "doc_id 不是合法 UUID"))?;
-        self.svc_project().delete_doc(id).await.map_err(from_project)?;
+        self.svc_project()
+            .delete_doc(id)
+            .await
+            .map_err(from_project)?;
         ok_json(serde_json::json!({ "deleted": params.0.doc_id }))
     }
     // ---------- 技能域工具（可复用指令包：SKILL.md 形态） ----------
@@ -1799,7 +1825,6 @@ impl EngramMcpServer {
         let (status, s) = result.map_err(from_skills)?;
         ok_json(serde_json::json!({ "status": status, "skill": s }))
     }
-
 
     // ---------- Wiki 域（wiki scope；实现细节见 mcp_wiki.rs） ----------
 
@@ -2060,7 +2085,6 @@ impl EngramMcpServer {
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
     }
-
 }
 
 /// MCP instructions：initialize 时返回给调用方 AI 的顶层使用说明。

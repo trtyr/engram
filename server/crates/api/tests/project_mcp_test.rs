@@ -49,14 +49,20 @@ async fn project_tools_listed_with_annotations() {
 
     let info = mcp_initialize(&app, &key).await;
     assert!(
-        info["instructions"].as_str().unwrap_or("").contains("project_get"),
+        info["instructions"]
+            .as_str()
+            .unwrap_or("")
+            .contains("project_get"),
         "instructions 应包含项目记忆用法：{}",
         info["instructions"]
     );
 
     let names = tool_names(&app, &key).await;
     for expected in PROJECT_TOOLS {
-        assert!(names.contains(&expected.to_string()), "缺少 {expected}：{names:?}");
+        assert!(
+            names.contains(&expected.to_string()),
+            "缺少 {expected}：{names:?}"
+        );
     }
     // project scope 的 key 只见 project_*（scope 过滤），memory_* 不出现
     assert!(
@@ -66,7 +72,10 @@ async fn project_tools_listed_with_annotations() {
 
     // 只读/破坏性注解与实现一致
     let (_, v) = mcp_rpc(&app, &key, rpc(10, "tools/list", json!({}))).await;
-    let tools = expect_result(&v, "tools/list")["tools"].as_array().unwrap().clone();
+    let tools = expect_result(&v, "tools/list")["tools"]
+        .as_array()
+        .unwrap()
+        .clone();
     let ann = |name: &str| {
         tools
             .iter()
@@ -93,8 +102,14 @@ async fn project_types_template() {
     let arr = types.as_array().expect("类型数组");
     let dev = arr.iter().find(|t| t["type"] == "dev").expect("dev 类型");
     assert_eq!(dev["label"], "开发");
-    assert_eq!(dev["default_categories"], json!(["后端", "前端", "测试", "规划"]));
-    let research = arr.iter().find(|t| t["type"] == "research").expect("research 类型");
+    assert_eq!(
+        dev["default_categories"],
+        json!(["后端", "前端", "测试", "规划"])
+    );
+    let research = arr
+        .iter()
+        .find(|t| t["type"] == "research")
+        .expect("research 类型");
     assert_eq!(
         research["default_categories"],
         json!(["待查", "线索", "资料", "结论", "疑点", "证伪"])
@@ -105,12 +120,7 @@ async fn project_types_template() {
 #[tokio::test]
 async fn project_full_journey() {
     let (app, _pg) = app().await;
-    let key = create_key(
-        &app,
-        &login_token(&app).await,
-        &["project", "memory"],
-    )
-    .await;
+    let key = create_key(&app, &login_token(&app).await, &["project", "memory"]).await;
     mcp_initialize(&app, &key).await;
 
     // 建项目（dev）→ 类型模板分类被复制
@@ -141,7 +151,10 @@ async fn project_full_journey() {
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("已存在"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("已存在"),
         "撞名应报 Conflict：{v}"
     );
 
@@ -157,7 +170,10 @@ async fn project_full_journey() {
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("未知项目类型"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("未知项目类型"),
         "未知类型应报 BadRequest：{v}"
     );
 
@@ -206,7 +222,10 @@ async fn project_full_journey() {
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("已存在"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("已存在"),
         "同分类同标题应报冲突：{v}"
     );
 
@@ -238,7 +257,11 @@ async fn project_full_journey() {
     );
     assert_eq!(
         detail["docs"][0]["content_chars"],
-        json!("# 工具面\n\n14 个 project_* 工具并入 /mcp。".chars().count())
+        json!(
+            "# 工具面\n\n14 个 project_* 工具并入 /mcp。"
+                .chars()
+                .count()
+        )
     );
     assert_eq!(detail["docs"][0]["title"], "MCP 工具设计");
 
@@ -275,18 +298,30 @@ async fn project_full_journey() {
     .await;
     assert_eq!(updated_doc["title"], "MCP 工具设计", "未传 title 不应改变");
     assert_eq!(updated_doc["category"], "后端");
-    assert!(updated_doc["content"].as_str().unwrap().contains("补丁式更新可用"));
+    assert!(
+        updated_doc["content"]
+            .as_str()
+            .unwrap()
+            .contains("补丁式更新可用")
+    );
 
     // 文档移到未登记分类 → 报错
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(7, "tools/call", json!({"name": "project_doc_update",
-            "arguments": {"doc_id": doc_id, "category": "前端x"}})),
+        rpc(
+            7,
+            "tools/call",
+            json!({"name": "project_doc_update",
+            "arguments": {"doc_id": doc_id, "category": "前端x"}}),
+        ),
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("不在项目分类里"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("不在项目分类里"),
         "移到未登记分类应报错：{v}"
     );
 
@@ -311,7 +346,11 @@ async fn project_full_journey() {
     .await;
     assert_eq!(upd["status"], "paused");
     assert_eq!(upd["description"], "第一版完成，暂停");
-    assert_eq!(upd["categories"], json!(["后端", "前端", "测试", "规划"]), "补丁式更新不应动分类");
+    assert_eq!(
+        upd["categories"],
+        json!(["后端", "前端", "测试", "规划"]),
+        "补丁式更新不应动分类"
+    );
 
     // 追加分类：替换式带全量
     let upd2 = mcp_call_json(
@@ -321,7 +360,10 @@ async fn project_full_journey() {
         json!({"project_id": project_id, "categories": ["后端", "前端", "测试", "规划", "运维"]}),
     )
     .await;
-    assert_eq!(upd2["categories"], json!(["后端", "前端", "测试", "规划", "运维"]));
+    assert_eq!(
+        upd2["categories"],
+        json!(["后端", "前端", "测试", "规划", "运维"])
+    );
 
     // 改名：new_name；旧名寻址失效、新名可用
     mcp_call_json(
@@ -334,40 +376,78 @@ async fn project_full_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(8, "tools/call", json!({"name": "project_get",
-            "arguments": {"project_name": "Engram 项目记忆 MCP"}})),
+        rpc(
+            8,
+            "tools/call",
+            json!({"name": "project_get",
+            "arguments": {"project_name": "Engram 项目记忆 MCP"}}),
+        ),
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("不存在"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("不存在"),
         "旧名寻址应 NotFound：{v}"
     );
-    let renamed = mcp_call_json(&app, &key, "project_get", json!({"project_name": "Engram MCP"})).await;
+    let renamed = mcp_call_json(
+        &app,
+        &key,
+        "project_get",
+        json!({"project_name": "Engram MCP"}),
+    )
+    .await;
     assert_eq!(renamed["id"], json!(project_id));
 
     // 列表 + 类型过滤
     let listed = mcp_call_json(&app, &key, "project_list", json!({"type": "dev"})).await;
-    assert!(listed.as_array().unwrap().iter().any(|p| p["id"] == json!(project_id)));
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == json!(project_id))
+    );
     let none = mcp_call_json(&app, &key, "project_list", json!({"type": "research"})).await;
     assert_eq!(none.as_array().unwrap().len(), 0, "research 过滤应为空");
 
     // 删位置、删文档
-    mcp_call_json(&app, &key, "project_location_delete", json!({"location_id": loc_id})).await;
+    mcp_call_json(
+        &app,
+        &key,
+        "project_location_delete",
+        json!({"location_id": loc_id}),
+    )
+    .await;
     mcp_call_json(&app, &key, "project_doc_delete", json!({"doc_id": doc_id})).await;
     let detail2 = mcp_call_json(&app, &key, "project_get", json!({"project_id": project_id})).await;
     assert_eq!(detail2["locations"].as_array().unwrap().len(), 0);
     assert_eq!(detail2["docs"].as_array().unwrap().len(), 0);
 
     // 删项目 → 级联（本例已无子行）+ 再查 NotFound
-    mcp_call_json(&app, &key, "project_delete", json!({"project_id": project_id})).await;
+    mcp_call_json(
+        &app,
+        &key,
+        "project_delete",
+        json!({"project_id": project_id}),
+    )
+    .await;
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(11, "tools/call", json!({"name": "project_get", "arguments": {"project_id": project_id}})),
+        rpc(
+            11,
+            "tools/call",
+            json!({"name": "project_get", "arguments": {"project_id": project_id}}),
+        ),
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("不存在"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("不存在"),
         "删除后查询应 NotFound：{v}"
     );
 }
@@ -379,14 +459,30 @@ async fn project_rename_conflict_is_conflict() {
     let key = create_key(&app, &login_token(&app).await, &["project"]).await;
     mcp_initialize(&app, &key).await;
 
-    let a = mcp_call_json(&app, &key, "project_create", json!({"name": "项目A", "type": "dev"})).await;
-    mcp_call_json(&app, &key, "project_create", json!({"name": "项目B", "type": "dev"})).await;
+    let a = mcp_call_json(
+        &app,
+        &key,
+        "project_create",
+        json!({"name": "项目A", "type": "dev"}),
+    )
+    .await;
+    mcp_call_json(
+        &app,
+        &key,
+        "project_create",
+        json!({"name": "项目B", "type": "dev"}),
+    )
+    .await;
 
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(2, "tools/call", json!({"name": "project_update",
-            "arguments": {"project_id": a["id"], "new_name": "项目B"}})),
+        rpc(
+            2,
+            "tools/call",
+            json!({"name": "project_update",
+            "arguments": {"project_id": a["id"], "new_name": "项目B"}}),
+        ),
     )
     .await;
     let msg = v["error"]["message"].as_str().unwrap_or_default();
@@ -397,12 +493,19 @@ async fn project_rename_conflict_is_conflict() {
         let (_, v) = mcp_rpc(
             &app,
             &key,
-            rpc(3, "tools/call", json!({"name": "project_update",
-                "arguments": {"project_id": a["id"], "new_name": bad}})),
+            rpc(
+                3,
+                "tools/call",
+                json!({"name": "project_update",
+                "arguments": {"project_id": a["id"], "new_name": bad}}),
+            ),
         )
         .await;
         assert!(
-            v["error"]["message"].as_str().unwrap_or("").contains("不能为空"),
+            v["error"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("不能为空"),
             "空名应被拒：{v}"
         );
     }
@@ -411,12 +514,19 @@ async fn project_rename_conflict_is_conflict() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(4, "tools/call", json!({"name": "project_create",
-            "arguments": {"name": "", "type": "dev"}})),
+        rpc(
+            4,
+            "tools/call",
+            json!({"name": "project_create",
+            "arguments": {"name": "", "type": "dev"}}),
+        ),
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("不能为空"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("不能为空"),
         "空名建项目应被拒：{v}"
     );
 }
@@ -428,8 +538,20 @@ async fn project_batch_delete_and_cascade() {
     let key = create_key(&app, &login_token(&app).await, &["project"]).await;
     mcp_initialize(&app, &key).await;
 
-    let p1 = mcp_call_json(&app, &key, "project_create", json!({"name": "调研一", "type": "research"})).await;
-    let p2 = mcp_call_json(&app, &key, "project_create", json!({"name": "调研二", "type": "research"})).await;
+    let p1 = mcp_call_json(
+        &app,
+        &key,
+        "project_create",
+        json!({"name": "调研一", "type": "research"}),
+    )
+    .await;
+    let p2 = mcp_call_json(
+        &app,
+        &key,
+        "project_create",
+        json!({"name": "调研二", "type": "research"}),
+    )
+    .await;
     assert_eq!(
         p1["categories"],
         json!(["待查", "线索", "资料", "结论", "疑点", "证伪"]),
@@ -453,16 +575,17 @@ async fn project_batch_delete_and_cascade() {
     )
     .await;
 
-    let ids = [p1["id"].as_str().unwrap(), p2["id"].as_str().unwrap(), "00000000-0000-0000-0000-000000000000"];
-    let result = mcp_call_json(
-        &app,
-        &key,
-        "project_batch_delete",
-        json!({"ids": ids}),
-    )
-    .await;
+    let ids = [
+        p1["id"].as_str().unwrap(),
+        p2["id"].as_str().unwrap(),
+        "00000000-0000-0000-0000-000000000000",
+    ];
+    let result = mcp_call_json(&app, &key, "project_batch_delete", json!({"ids": ids})).await;
     assert_eq!(result["deleted"], json!(2));
-    assert_eq!(result["failed"], json!(["00000000-0000-0000-0000-000000000000"]));
+    assert_eq!(
+        result["failed"],
+        json!(["00000000-0000-0000-0000-000000000000"])
+    );
 
     // 级联验证：直接查表——位置/文档行应随项目一起没了
     let loc_id = uuid::Uuid::parse_str(loc["id"].as_str().unwrap()).unwrap();
@@ -497,11 +620,18 @@ async fn project_scope_enforcement() {
     let (_, v) = mcp_rpc(
         &app,
         &proj_key,
-        rpc(2, "tools/call", json!({"name": "memory_search", "arguments": {"query": "x"}})),
+        rpc(
+            2,
+            "tools/call",
+            json!({"name": "memory_search", "arguments": {"query": "x"}}),
+        ),
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("memory scope"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("memory scope"),
         "project key 调 memory 工具应被拒：{v}"
     );
 
@@ -515,11 +645,18 @@ async fn project_scope_enforcement() {
     let (_, v) = mcp_rpc(
         &app,
         &mem_key,
-        rpc(3, "tools/call", json!({"name": "project_create", "arguments": {"name": "x", "type": "dev"}})),
+        rpc(
+            3,
+            "tools/call",
+            json!({"name": "project_create", "arguments": {"name": "x", "type": "dev"}}),
+        ),
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("project scope"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("project scope"),
         "memory key 调 project 工具应被拒：{v}"
     );
 
@@ -533,11 +670,18 @@ async fn project_scope_enforcement() {
     let (_, v) = mcp_rpc(
         &app,
         &both,
-        rpc(4, "tools/call", json!({"name": "project_get", "arguments": {}})),
+        rpc(
+            4,
+            "tools/call",
+            json!({"name": "project_get", "arguments": {}}),
+        ),
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("project_id 或 project_name"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("project_id 或 project_name"),
         "缺定位应提示二选一：{v}"
     );
 
@@ -545,11 +689,18 @@ async fn project_scope_enforcement() {
     let (_, v) = mcp_rpc(
         &app,
         &both,
-        rpc(5, "tools/call", json!({"name": "project_get", "arguments": {"project_id": "not-a-uuid"}})),
+        rpc(
+            5,
+            "tools/call",
+            json!({"name": "project_get", "arguments": {"project_id": "not-a-uuid"}}),
+        ),
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("UUID"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("UUID"),
         "坏 UUID 应报参数错误：{v}"
     );
 }
@@ -575,11 +726,17 @@ async fn project_tools_admin_info_and_toggle() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let info: Value = serde_json::from_slice(&body).unwrap();
     let tools = info["tools"].as_array().expect("工具清单");
     let project_tools: Vec<&Value> = tools.iter().filter(|t| t["domain"] == "project").collect();
-    assert_eq!(project_tools.len(), 15, "project 域应自动分组 15 个工具：{tools:?}");
+    assert_eq!(
+        project_tools.len(),
+        15,
+        "project 域应自动分组 15 个工具：{tools:?}"
+    );
 
     // 停用 project_delete：tools/list 隐身 + call 拒绝
     let resp = app
@@ -598,7 +755,10 @@ async fn project_tools_admin_info_and_toggle() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let names = tool_names(&app, &key).await;
-    assert!(!names.contains(&"project_delete".to_string()), "停用后不应出现在 tools/list");
+    assert!(
+        !names.contains(&"project_delete".to_string()),
+        "停用后不应出现在 tools/list"
+    );
     let other_count = names.len();
     assert_eq!(other_count, 14, "其余 14 个应仍在：{names:?}");
 
@@ -609,7 +769,10 @@ async fn project_tools_admin_info_and_toggle() {
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("已停用"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("已停用"),
         "停用工具调用应报错：{v}"
     );
 
@@ -659,8 +822,12 @@ async fn project_doc_add_missing_fields_rejected() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(1, "tools/call", json!({"name": "project_doc_add",
-            "arguments": {"project_name": "不存在", "title": "t", "content": "c"}})),
+        rpc(
+            1,
+            "tools/call",
+            json!({"name": "project_doc_add",
+            "arguments": {"project_name": "不存在", "title": "t", "content": "c"}}),
+        ),
     )
     .await;
     let out = expect_result(&v, "tools/call project_doc_add");
@@ -685,12 +852,24 @@ async fn project_precise_addressing_read() {
     let key = create_key(&app, &login_token(&app).await, &["project"]).await;
     mcp_initialize(&app, &key).await;
 
-    let p = mcp_call_json(&app, &key, "project_create", json!({"name": "寻址读", "type": "dev"})).await;
+    let p = mcp_call_json(
+        &app,
+        &key,
+        "project_create",
+        json!({"name": "寻址读", "type": "dev"}),
+    )
+    .await;
     let pid = p["id"].as_str().unwrap().to_string();
 
     // 长文档：12 行，含特征词
     let progress = (1..=12)
-        .map(|i| if i == 7 { "第七行提到 streamable http 传输".to_string() } else { format!("第{i}行普通内容") })
+        .map(|i| {
+            if i == 7 {
+                "第七行提到 streamable http 传输".to_string()
+            } else {
+                format!("第{i}行普通内容")
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let doc = mcp_call_json(
@@ -811,25 +990,46 @@ async fn project_precise_addressing_read() {
         json!({"doc_id": doc_id, "with_line_numbers": true}),
     )
     .await;
-    assert!(numbered["content"].as_str().unwrap().starts_with("1: 第1行"));
+    assert!(
+        numbered["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("1: 第1行")
+    );
 
     // 边界与参数错误
     for bad in [
         json!({"doc_id": doc_id, "start_line": 0}),
         json!({"doc_id": doc_id, "start_line": 9, "end_line": 3}),
     ] {
-        let (_, v) = mcp_rpc(&app, &key, rpc(20, "tools/call", json!({"name": "project_doc_get", "arguments": bad}))).await;
+        let (_, v) = mcp_rpc(
+            &app,
+            &key,
+            rpc(
+                20,
+                "tools/call",
+                json!({"name": "project_doc_get", "arguments": bad}),
+            ),
+        )
+        .await;
         assert!(v.get("error").is_some(), "坏区间应报错：{v}");
     }
     // 空检索词
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(21, "tools/call", json!({"name": "project_doc_search", "arguments": {"project_id": pid, "query": "  "}})),
+        rpc(
+            21,
+            "tools/call",
+            json!({"name": "project_doc_search", "arguments": {"project_id": pid, "query": "  "}}),
+        ),
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or("").contains("不能为空"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("不能为空"),
         "空检索词应报错：{v}"
     );
 
