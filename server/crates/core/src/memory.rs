@@ -1665,12 +1665,32 @@ impl MemoryService {
     // ---------- 检索 ----------
 
     async fn try_embed(&self, texts: &[String]) -> Option<Vec<Vec<f32>>> {
-        // L6：经记账门面（查询/场景嵌入计入用量）
-        self.registry
-            .embed_for(Purpose::Embed, texts.to_vec(), Some(1024), None)
-            .await
-            .ok()
-            .map(|r| r.embeddings)
+        // L6：经记账门面（查询/场景嵌入计入用量）。
+        // v2 遗留修复：embed 间歇失败（上游限流/抖动）此前被 .ok() 静默吞掉——
+        // 查询无提示地降级为纯 FTS、文档静默缺向量。现在重试 3 次（退避）+ 失败显式记日志。
+        for attempt in 1..=3 {
+            match self
+                .registry
+                .embed_for(Purpose::Embed, texts.to_vec(), Some(1024), None)
+                .await
+            {
+                Ok(r) => return Some(r.embeddings),
+                Err(e) => {
+                    if attempt < 3 {
+                        tracing::warn!(error = %e, attempt, "embed 失败，退避重试");
+                        tokio::time::sleep(std::time::Duration::from_millis(400 * attempt as u64))
+                            .await;
+                    } else {
+                        tracing::error!(
+                            error = %e,
+                            texts = texts.len(),
+                            "embed 重试耗尽——查询降级为纯 FTS / 文档暂缺向量（后续 reembed 可补）"
+                        );
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// v2（Qwen3-Embedding）：查询侧指令包装。Qwen3-Embedding 是非对称检索模型，
@@ -1829,13 +1849,15 @@ impl MemoryService {
             None => None,
         };
 
-        // L3 全量（很小；v2 修复 N3：画像分面不再计入 budget_items——预算是各层条数上限，
-        // 此前 7 个分面把小预算的 atoms/scenarios 挤成 0）
+        // L3 画像：v2 修复 N3（不计入 budget_items 条数）+ 字符子预算 ≤40%——
+        // evidence_refs 计入计量后 7 个分面可能吃光整段预算，把 atoms/scenarios 挤成 0。
+        // 画像先取（上限 40%），剩余预算全数让给场景/实体/原子。
+        let persona_char_cap = budget_chars * 2 / 5;
         let persona: Vec<PersonaVersion> = self
             .persona()
             .await?
             .into_iter()
-            .take_while(|p| count_json(&p, budget_chars, &mut chars_used, &mut truncated))
+            .take_while(|p| count_json(&p, persona_char_cap, &mut chars_used, &mut truncated))
             .collect();
 
         // L2：有 query 按相关性，否则最近。v2（N3）：条数上限语义 = budget_items，

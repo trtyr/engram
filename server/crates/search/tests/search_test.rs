@@ -324,3 +324,57 @@ async fn time_filter_prefers_occurred_at() {
         .unwrap();
     assert!(hits.is_empty(), "occurred_at 在窗口外不应命中");
 }
+
+/// v2 遗留修复：兜底相对间隔——绝对距离漂移时仍保留最近邻一档内的语义相关项，
+/// 同时裁掉远端尾巴（绝对天花板 + min+margin 双条件）。
+#[tokio::test]
+async fn vec_fallback_keeps_relative_neighbors_drops_tail() {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
+
+    // 查询向量 q = e0；三个原子与 q 的余弦距离：A=0.29（最近）、C=0.20（最近）、B=0.50（远端尾巴）
+    let mut q = vec![0f32; 1024];
+    q[0] = 1.0;
+    let mk = |a: f32, b: f32| -> Vec<f32> {
+        let norm = (a * a + b * b).sqrt();
+        let mut v = vec![0f32; 1024];
+        v[0] = a / norm;
+        v[1] = b / norm;
+        v
+    };
+    let rows = [
+        ("用户养了一只橘猫", mk(0.707, 0.707)), // dist ≈ 0.29
+        ("用户在学帆船", mk(0.8, 0.6)),         // dist ≈ 0.20（最近）
+        ("用户喜欢骑马", mk(0.5, 0.866)),       // dist = 0.50（远端尾巴，margin 外）
+    ];
+    for (content, emb) in &rows {
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, status, embedding, tsv) \
+             VALUES ($1, 'fact', $2, 'active', $3, to_tsvector('simple', $4))",
+        )
+        .bind(uuid::Uuid::new_v4())
+        .bind(content)
+        .bind(Vector::from(emb.clone()))
+        .bind(engram_search::tokenize::tsv_text(content))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // 查询词「观光」不在任何 tsv → FTS 零命中 → 兜底路径
+    let hits =
+        engram_search::search_atoms(&pool, "用户会开直升机观光", Some(&q), 10, false, None, None)
+            .await
+            .unwrap();
+    let snippets: Vec<&str> = hits.iter().map(|h| h.snippet.as_str()).collect();
+    assert!(
+        snippets.iter().any(|s| s.contains("橘猫")) && snippets.iter().any(|s| s.contains("帆船")),
+        "最近邻一档内的项应保留：{snippets:?}"
+    );
+    assert!(
+        !snippets.iter().any(|s| s.contains("骑马")),
+        "远端尾巴应被相对间隔裁掉（min+0.15 之外）：{snippets:?}"
+    );
+}

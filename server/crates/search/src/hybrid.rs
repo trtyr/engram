@@ -36,6 +36,15 @@ static VEC_FALLBACK_MAX_DISTANCE: LazyLock<f32> = LazyLock::new(|| {
         .unwrap_or(0.45)
 });
 
+/// 兜底相对间隔：兜底候选中只保留与最近邻距离差 ≤ 此值的项——
+/// 绝对天花板挡「全库无相关」，相对间隔挡「逐措辞的距离漂移」。
+static VEC_FALLBACK_RELATIVE_MARGIN: LazyLock<f32> = LazyLock::new(|| {
+    std::env::var("AGENT_MEMORY_VEC_FALLBACK_RELATIVE_MARGIN")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.15)
+});
+
 /// FTS 词法命中预检（同表同口径过滤 + tsv @@ q）。`filter` 由调用方按表结构给出。
 async fn fts_has_match(
     pool: &PgPool,
@@ -93,15 +102,29 @@ pub async fn search_atoms(
     qb.push(") AND tsv @@ q LIMIT 100) ");
 
     if has_vec {
-        qb.push(", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> ");
-        qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
-        qb.push(") AS rank FROM atoms WHERE status = 'active' AND embedding IS NOT NULL");
-        if !fts_matched {
-            qb.push(" AND embedding <=> ");
+        if fts_matched {
+            qb.push(", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> ");
             qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
-            qb.push(format!(" <= {}", *VEC_FALLBACK_MAX_DISTANCE));
+            qb.push(") AS rank FROM atoms WHERE status = 'active' AND embedding IS NOT NULL LIMIT 100) ");
+        } else {
+            // v2 遗留修复：兜底双条件——绝对天花板（挡全库无相关的查询）+ 相对间隔
+            // （只留与最近邻一档距离内的项，容忍逐措辞的绝对距离漂移：
+            //   「宠物」查询下橘猫即使绝对距离偏大也保留；完全无关查询全体超天花板 → 空）
+            qb.push(", vec_raw AS (SELECT id, embedding <=> ");
+            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
+            qb.push(
+                " AS dist FROM atoms WHERE status = 'active' AND embedding IS NOT NULL \
+                     AND embedding <=> ",
+            );
+            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
+            qb.push(format!(" <= {})", *VEC_FALLBACK_MAX_DISTANCE));
+            qb.push(
+                ", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY dist) AS rank \
+                     FROM vec_raw WHERE dist <= (SELECT min(dist) FROM vec_raw) + ",
+            );
+            qb.push_bind(*VEC_FALLBACK_RELATIVE_MARGIN);
+            qb.push(") ");
         }
-        qb.push(" LIMIT 100) ");
     }
 
     qb.push("SELECT a.id, a.kind, a.content, a.needs_review, (COALESCE(1.0/(");
@@ -177,15 +200,24 @@ pub async fn search_scenarios(
     qb.push(") q WHERE tsv @@ q LIMIT 100) ");
 
     if has_vec {
-        qb.push(", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> ");
-        qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
-        qb.push(") AS rank FROM scenarios WHERE embedding IS NOT NULL");
-        if !fts_matched {
-            qb.push(" AND embedding <=> ");
+        if fts_matched {
+            qb.push(", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> ");
             qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
-            qb.push(format!(" <= {}", *VEC_FALLBACK_MAX_DISTANCE));
+            qb.push(") AS rank FROM scenarios WHERE embedding IS NOT NULL LIMIT 100) ");
+        } else {
+            // v2 遗留修复：与 atoms 同款兜底双条件（绝对天花板 + 相对间隔）
+            qb.push(", vec_raw AS (SELECT id, embedding <=> ");
+            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
+            qb.push(" AS dist FROM scenarios WHERE embedding IS NOT NULL AND embedding <=> ");
+            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
+            qb.push(format!(" <= {})", *VEC_FALLBACK_MAX_DISTANCE));
+            qb.push(
+                ", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY dist) AS rank \
+                     FROM vec_raw WHERE dist <= (SELECT min(dist) FROM vec_raw) + ",
+            );
+            qb.push_bind(*VEC_FALLBACK_RELATIVE_MARGIN);
+            qb.push(") ");
         }
-        qb.push(" LIMIT 100) ");
     }
 
     qb.push("SELECT s.id, s.topic, s.summary, COALESCE(1.0/(");
