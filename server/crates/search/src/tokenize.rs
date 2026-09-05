@@ -57,10 +57,31 @@ pub fn tsv_query_or(text: &str) -> String {
     tokenize(text).join(" | ")
 }
 
+/// 查询侧领域停用词：在几乎所有原子正文出现的通用词（记忆域内容以「用户…」开头）
+/// 与问句虚词——它们对相关性零贡献，却会让 FTS 腿「处处命中」，
+/// 进而使零匹配向量兜底失效（v2 测试 H-B2：「用户会开直升机」经「用户」token
+/// 命中满页噪声）。只过滤查询侧，不动写入侧 tsv。
+const QUERY_STOPWORDS: &[&str] = &[
+    "用户",
+    "我们",
+    "你们",
+    "他们",
+    "什么",
+    "怎么",
+    "怎样",
+    "为什么",
+    "哪个",
+    "哪些",
+    "如何",
+];
+
 /// 查询用：token 数 ≤ `max_and_tokens` 时用 AND（精确），超过用 OR（召回兜底）。
 /// 避免长查询因全 AND 命中而零召回。
 pub fn tsv_query_smart(text: &str, max_and_tokens: usize) -> String {
-    let tokens = tokenize(text);
+    let tokens: Vec<String> = tokenize(text)
+        .into_iter()
+        .filter(|t| !QUERY_STOPWORDS.contains(&t.as_str()))
+        .collect();
     if tokens.len() > max_and_tokens {
         tokens.join(" | ")
     } else {

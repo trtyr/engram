@@ -33,11 +33,14 @@ struct SessionRow {
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {
     let pool = ctx.pool();
 
-    // 1. 认领待蒸馏会话（processing 中防重复认领）
+    // 1. 认领待蒸馏会话（processing 中防重复认领）。
+    //    v2 修复（H-A2）：metadata.distill=off 的会话**永久豁免**——off 是会话级语义，
+    //    不再被后续任何 extract 任务的 pending 全量扫描顺带蒸掉。
     let sessions: Vec<SessionRow> =
         sqlx::query_as::<_, (Uuid, String, serde_json::Value, bool, serde_json::Value)>(
             "UPDATE raw_sessions SET distill_status = 'processing' \
-         WHERE distill_status = 'pending' RETURNING id, agent, content, sensitive, metadata",
+         WHERE distill_status = 'pending' AND COALESCE(metadata->>'distill','') <> 'off' \
+         RETURNING id, agent, content, sensitive, metadata",
         )
         .fetch_all(pool)
         .await
@@ -375,27 +378,44 @@ async fn run_claimed(
             .execute(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
-            // 实体挂链：同名同类活体复用（部分唯一索引），否则新建；失败不阻断蒸馏主链
+            // 实体挂链：同名同类活体复用（部分唯一索引），否则新建；失败不阻断蒸馏主链。
+            // v2 修复（N5）：新建前先做**名字包含**近似归并——LLM 对同一实体常给出措辞
+            // 繁简不同的称呼（「星云」/「星云项目」），互为子串且同 kind 即视为同一实体，
+            // 挂到既有实体上，不再各建一个空档案。
             for (name, ekind) in &entities {
                 let link = async {
-                    sqlx::query(
-                        "INSERT INTO entities (id, name, kind) VALUES ($1, $2, $3) \
-                         ON CONFLICT DO NOTHING",
-                    )
-                    .bind(Uuid::now_v7())
-                    .bind(name)
-                    .bind(ekind)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                    let eid: Uuid = sqlx::query_scalar(
-                        "SELECT id FROM entities WHERE name = $1 AND kind = $2 AND merged_into IS NULL",
+                    let similar: Option<Uuid> = sqlx::query_scalar(
+                        "SELECT id FROM entities WHERE kind = $2 AND merged_into IS NULL \
+                         AND (position($1 in name) > 0 OR position(name in $1) > 0) LIMIT 1",
                     )
                     .bind(name)
                     .bind(ekind)
-                    .fetch_one(pool)
+                    .fetch_optional(pool)
                     .await
                     .map_err(|e| e.to_string())?;
+                    let eid: Uuid = match similar {
+                        Some(eid) => eid,
+                        None => {
+                            sqlx::query(
+                                "INSERT INTO entities (id, name, kind) VALUES ($1, $2, $3) \
+                                 ON CONFLICT DO NOTHING",
+                            )
+                            .bind(Uuid::now_v7())
+                            .bind(name)
+                            .bind(ekind)
+                            .execute(pool)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                            sqlx::query_scalar(
+                                "SELECT id FROM entities WHERE name = $1 AND kind = $2 AND merged_into IS NULL",
+                            )
+                            .bind(name)
+                            .bind(ekind)
+                            .fetch_one(pool)
+                            .await
+                            .map_err(|e| e.to_string())?
+                        }
+                    };
                     sqlx::query(
                         "INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2) \
                          ON CONFLICT DO NOTHING",

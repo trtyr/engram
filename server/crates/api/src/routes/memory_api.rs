@@ -1,14 +1,14 @@
 //! 记忆域端点（memory scope）。
 
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use engram_core::memory::{
     AtomDto, ContextPack, EmbeddingStatus, EntityDetail, EntityDto, EntityGraph, MemoryError,
     MemoryService, PersonaVersion, ScenarioDto, SearchResponse, SessionDto,
 };
 use engram_search::{SearchHit, search_entities};
-use axum::Json;
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
@@ -340,7 +340,8 @@ where
     }
 }
 
-/// P5 会话作废：「这段白记了」——蒸馏跳过、记录保留（只对未蒸馏会话）。
+/// P5 会话作废（v2 扩大语义）：「这段白记了」——任何会话可作废：pending/off 蒸馏跳过；
+/// done 会话作废时其蒸馏产出的 active 原子级联归档（检索/context 立即失效），原文保留可审计。
 #[utoipa::path(post, path = "/memory/sessions/{id}/void",
     responses((status = 200, body = SessionDto), (status = 400, description = "不存在或已蒸馏")))]
 pub async fn void_session(

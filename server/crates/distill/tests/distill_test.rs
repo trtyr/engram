@@ -25,9 +25,7 @@ async fn setup(chats: Vec<serde_json::Value>) -> Env {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
 
     let llm: Arc<MockLlm> = Arc::new(MockLlm::with_raw_chats(
         chats
@@ -1612,4 +1610,40 @@ async fn cron_full_consolidate_daily_idempotent() {
     let mc2 = m2.iter().find(|j| j.kind == "consolidate").unwrap();
     assert_ne!(mc1.id, mc2.id, "manual consolidate 不幂等（旧行为保留）");
     assert_eq!(mc1.payload.get("reason"), Some(&json!("manual")));
+}
+
+/// v2 修复（H-A2）：distill=off 的会话**永久豁免**蒸馏——即使 extract 任务运行，
+/// off 会话也不被认领（此前会被 pending 全量扫描顺带蒸掉）。
+#[tokio::test]
+async fn extract_skips_distill_off_sessions() {
+    let env = setup(vec![]).await;
+
+    let off_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO raw_sessions (id, agent, content, metadata) \
+         VALUES ($1, 'pi', $2::jsonb, '{\"distill\":\"off\"}'::jsonb)",
+    )
+    .bind(off_id)
+    .bind(r#"[{"speaker":"user","text":"OFF 会话内容"}]"#)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "extract_atoms").await;
+    assert_eq!(j.status, JobStatus::Succeeded, "extract 任务应成功");
+
+    // off 会话必须仍是 pending——豁免生效
+    let status: String =
+        sqlx::query_scalar("SELECT distill_status FROM raw_sessions WHERE agent = 'pi'")
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        status, "pending",
+        "distill=off 会话不应被 extract 认领（H-A2 回归）"
+    );
 }

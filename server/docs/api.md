@@ -17,11 +17,11 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET/POST | /memory/sessions | 会话列表（过滤 agent/distill_status）/ 写入新会话（turns 数组、distill auto/manual/off、30s 防抖自动蒸馏） |
+| GET/POST | /memory/sessions | 会话列表（过滤 agent/distill_status）/ 写入新会话（turns 数组、distill auto/manual/**off（永久豁免蒸馏扫描，metadata.distill=off）**、30s 防抖自动蒸馏） |
 | DELETE/GET | /memory/sessions/{id} | 详情 / 擦除（**需 erase scope**；关联原子溯源标记 erased） |
 | POST | /memory/sessions/{id}/append | 追加轮次（仅 pending 会话；agent 维度；已蒸馏 400 引导开新会话） |
 | POST | /memory/sessions/import | 批量导入历史对话为会话（JSONL/文本 → turns → source=import；蒸馏感知 import 过滤对方观点） |
-| POST | /memory/sessions/{id}/void | 作废未蒸馏会话（one-way，区别于擦除） |
+| POST | /memory/sessions/{id}/void | 作废会话（v2 扩大语义：pending/off 蒸馏跳过；**done 会话作废时级联归档其蒸馏产物原子**——检索/context 立即失效，原文保留可审计，落 session_void_cascade 审计行） |
 | POST | /memory/distill | 触发蒸馏流水线（202 + Job[]；full=true 附带 consolidate——含实体档案 + **关系回溯**：存量实体无 session 重放也抽关系，常识关系 + 记忆明确关系；空认领也链 organize——直写原子可聚类） |
 | GET/POST | /memory/atoms | 原子列表（needs_review/sensitive 过滤）/ 手工补录（幂等：同 kind+content 活体返回既有；低置信自动人审） |
 | PATCH | /memory/atoms/{id} | **分权**：AI 可改 sensitive/needs_review/status/superseded_by/时间；content/kind/confidence 仅用户（403 教学文案指路 correction 流） |

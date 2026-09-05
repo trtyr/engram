@@ -122,76 +122,15 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         }
     }
 
-    // 2.5 实体档案：有原子且摘要滞后（空摘要或有更新原子）→ LLM 聚合切片。
-    //     门槛从 ≥3 降到 ≥1：稀疏实体（当前数据每个实体常只有 1 条原子）也应获得画像；
-    //     LIMIT 10 + 密度降序保证高密度优先，best-effort 失败不拖垮主链。
-    let portrait_candidates: Vec<(Uuid, String, String)> =
-        sqlx::query_as::<_, (Uuid, String, String)>(
-            "SELECT e.id, e.name, e.kind FROM entities e \
-         JOIN atom_entities ae ON ae.entity_id = e.id \
-         JOIN atoms a ON a.id = ae.atom_id \
-         WHERE e.merged_into IS NULL AND NOT e.manually_edited \
-         GROUP BY e.id, e.name, e.kind, e.summary, e.updated_at \
-         HAVING count(ae.atom_id) >= 1 AND (e.summary = '' OR max(a.created_at) > e.updated_at) \
-         ORDER BY count(ae.atom_id) DESC LIMIT 10",
-        )
-        .fetch_all(pool)
+    // 2.5 实体档案（v2 抽为共享函数：organize 链路末尾也生成，实体摘要不再长期为空）
+    let portraits = crate::consolidate::fill_entity_portraits(&ctx, &llm, 10)
         .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
-
-    let mut portraits = 0usize;
-    for (eid, name, kind) in &portrait_candidates {
-        let atoms: Vec<String> = sqlx::query_scalar(
-            "SELECT a.content FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
-             WHERE ae.entity_id = $1 AND a.status = 'active' AND NOT a.sensitive \
-         ORDER BY a.created_at DESC LIMIT 20",
-        )
-        .bind(eid)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
-        let user = format!(
-            "实体：{name}（{kind}）\n\n涉及记忆：\n{}",
-            atoms
-                .iter()
-                .map(|c| format!("- {c}"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
-        let portrait = async {
-            let out = crate::llm_port::chat_json_retrying(
-                &ctx,
-                llm.as_ref(),
-                engram_llm::types::Purpose::Consolidate,
-                &prompts::entity_portrait_system(),
-                &user,
-                ctx.job.id,
-            )
-            .await?;
-            let summary = out
-                .get("summary")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if summary.is_empty() {
-                return Ok::<Option<String>, JobError>(None); // 模型没给 → 跳过，不算失败
-            }
-            sqlx::query("UPDATE entities SET summary = $2, updated_at = now() WHERE id = $1")
-                .bind(eid)
-                .bind(&summary)
-                .execute(pool)
-                .await
-                .map_err(|e| JobError::Retryable(e.to_string()))?;
-            Ok(Some(summary))
-        };
-        match portrait.await {
-            Ok(Some(_)) => portraits += 1,
-            Ok(None) => {}
-            Err(e) => {
-                tracing::warn!(error = %e, entity = %name, "实体档案生成失败（跳过，不影响主链）");
-            }
-        }
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "实体档案批量生成失败（跳过，不影响主链）");
+            0
+        });
+    if portraits > 0 {
+        tracing::info!(portraits, "实体画像已生成");
     }
 
     // 2.6 关系回溯：存量实体（有原子）间抽关系，不依赖 session 重放。
@@ -313,4 +252,89 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         .await?;
 
     Ok(json!({"merged": merged, "stale_downweighted": stale}))
+}
+
+/// v2（N5）：实体画像生成（原 consolidate 内联块抽为共享函数）。
+/// 有原子且摘要滞后（空摘要或有更新原子）的实体 → LLM 聚合切片为一句档案。
+/// organize 链路末尾也调用（小限额），新实体摘要随蒸馏自动填上，不再等 full consolidate。
+pub(crate) async fn fill_entity_portraits(
+    ctx: &JobContext,
+    llm: &LlmRef,
+    limit: usize,
+) -> Result<usize, JobError> {
+    let pool = ctx.pool();
+    let limit = limit as i64;
+    let portrait_candidates: Vec<(Uuid, String, String)> =
+        sqlx::query_as::<_, (Uuid, String, String)>(
+            "SELECT e.id, e.name, e.kind FROM entities e \
+         JOIN atom_entities ae ON ae.entity_id = e.id \
+         JOIN atoms a ON a.id = ae.atom_id \
+         WHERE e.merged_into IS NULL AND NOT e.manually_edited \
+         GROUP BY e.id, e.name, e.kind, e.summary, e.updated_at \
+         HAVING count(ae.atom_id) >= 1 AND (e.summary = '' OR max(a.created_at) > e.updated_at) \
+         ORDER BY count(ae.atom_id) DESC LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    let mut portraits = 0usize;
+    for (eid, name, kind) in &portrait_candidates {
+        let atoms: Vec<String> = sqlx::query_scalar(
+            "SELECT a.content FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
+             WHERE ae.entity_id = $1 AND a.status = 'active' AND NOT a.sensitive \
+         ORDER BY a.created_at DESC LIMIT 20",
+        )
+        .bind(eid)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        if atoms.is_empty() {
+            continue;
+        }
+        let user = format!(
+            "实体：{name}（{kind}）\n\n涉及记忆：\n{}",
+            atoms
+                .iter()
+                .map(|c| format!("- {c}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let portrait = async {
+            let out = crate::llm_port::chat_json_retrying(
+                ctx,
+                llm.as_ref(),
+                engram_llm::types::Purpose::Consolidate,
+                &prompts::entity_portrait_system(),
+                &user,
+                ctx.job.id,
+            )
+            .await?;
+            let summary = out
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if summary.is_empty() {
+                return Ok::<Option<String>, JobError>(None); // 模型没给 → 跳过，不算失败
+            }
+            sqlx::query("UPDATE entities SET summary = $2, updated_at = now() WHERE id = $1")
+                .bind(eid)
+                .bind(&summary)
+                .execute(pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+            Ok(Some(summary))
+        };
+        match portrait.await {
+            Ok(Some(_)) => portraits += 1,
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, entity = %name, "实体档案生成失败（跳过，不影响主链）");
+            }
+        }
+    }
+    Ok(portraits)
 }
