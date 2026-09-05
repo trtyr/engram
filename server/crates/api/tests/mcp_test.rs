@@ -552,7 +552,7 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(info["disabled_tools"], json!(["memory_write_session"]));
 
-    // tools/list 对 AI 隐身（15 → 14）
+    // tools/list 对 AI 隐身（38 → 37）
     let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
     let result = expect_result(&v, "tools/list");
     let names: Vec<String> = result["tools"]
@@ -561,7 +561,7 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .iter()
         .filter_map(|t| t["name"].as_str().map(String::from))
         .collect();
-    assert_eq!(names.len(), 14, "停用工具不应出现在 tools/list：{names:?}");
+    assert_eq!(names.len(), 37, "停用工具不应出现在 tools/list：{names:?}");
     assert!(!names.contains(&"memory_write_session".to_string()));
 
     // tools/call 直接拒绝
@@ -921,4 +921,459 @@ async fn mcp_skills_scope_enforcement() {
             .contains("memory scope"),
         "skills key 调记忆工具应被拒：{v}"
     );
+}
+
+#[tokio::test]
+async fn wiki_mcp_tools_listed() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["wiki"]).await;
+
+    let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
+    let result = expect_result(&v, "tools/list");
+    let tools = result["tools"].as_array().expect("tools 数组");
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    for expected in [
+        "wiki_search",
+        "wiki_list_pages",
+        "wiki_get_page",
+        "wiki_write_page",
+        "wiki_ingest",
+        "wiki_archive_query",
+        "wiki_graph",
+        "wiki_lint",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "tools/list 缺少 {expected}：{names:?}"
+        );
+    }
+    // 只读 wiki 工具应带 readOnlyHint；写工具不应带
+    let search = tools.iter().find(|t| t["name"] == "wiki_search").unwrap();
+    assert_eq!(search["annotations"]["readOnlyHint"], json!(true));
+    let write = tools
+        .iter()
+        .find(|t| t["name"] == "wiki_write_page")
+        .unwrap();
+    assert_eq!(write["annotations"]["readOnlyHint"], json!(false));
+
+    // 管理台信息与 MCP 层同源：wiki 域工具出现、domain 前缀正确
+    let admin = login_token(&app).await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/settings/mcp")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let info: Value = serde_json::from_slice(&body).unwrap();
+    let wiki_tools: Vec<&Value> = info["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["domain"] == "wiki")
+        .collect();
+    assert_eq!(wiki_tools.len(), 8, "管理台应展示 8 个 wiki 工具");
+    // instructions 应覆盖两个域
+    assert!(
+        info["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("wiki_search")
+    );
+}
+
+#[tokio::test]
+async fn wiki_mcp_journey_write_read_search_archive() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["wiki"]).await;
+
+    // 写页面（AI 通道：via=ai）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            1,
+            "tools/call",
+            json!({
+                "name": "wiki_write_page",
+                "arguments": {
+                    "slug": "tokio-调度器",
+                    "title": "Tokio 调度器",
+                    "content": "# Tokio 调度器\n\n工作窃取式调度，参见 [[tokio-runtime]]。另有死链 [[not-exist-page]]。"
+                }
+            }),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_write_page");
+    assert!(
+        !out["isError"].as_bool().unwrap_or(false),
+        "写页不应报错：{out}"
+    );
+    let page: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(page["slug"], "tokio-调度器");
+    assert_eq!(page["frontmatter"]["via"], "ai", "AI 写入应落 via 标记");
+
+    // 第二页（被双链目标）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            2,
+            "tools/call",
+            json!({
+                "name": "wiki_write_page",
+                "arguments": {
+                    "slug": "tokio-runtime",
+                    "title": "Tokio Runtime",
+                    "content": "# Tokio Runtime\n\n多线程运行时，与 tokio 调度器协同。"
+                }
+            }),
+        ),
+    )
+    .await;
+    expect_result(&v, "tools/call wiki_write_page #2");
+
+    // 覆盖更新：同 slug 再写 → version +1
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            3,
+            "tools/call",
+            json!({
+                "name": "wiki_write_page",
+                "arguments": {
+                    "slug": "tokio-runtime",
+                    "title": "Tokio Runtime",
+                    "content": "# Tokio Runtime\n\n更新后的正文。"
+                }
+            }),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_write_page 覆盖更新");
+    let updated: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(updated["version"], 2, "同 slug 覆盖应递增版本");
+
+    // 读页面（slug 宽容匹配：空格→连字符）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            4,
+            "tools/call",
+            json!({"name": "wiki_get_page", "arguments": {"slug": "tokio runtime"}}),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_get_page");
+    let got: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(got["slug"], "tokio-runtime");
+    assert!(got["content"].as_str().unwrap().contains("更新后的正文"));
+
+    // 列表（瘦身：不带正文）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            5,
+            "tools/call",
+            json!({"name": "wiki_list_pages", "arguments": {}}),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_list_pages");
+    let pages: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        pages.as_array().unwrap().len(),
+        2,
+        "应列出两个页面：{pages}"
+    );
+    assert_eq!(pages[0]["content_omitted"], json!(true), "列表应省略正文");
+
+    // 检索（FTS 命中 + purpose 字段存在）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            6,
+            "tools/call",
+            json!({"name": "wiki_search", "arguments": {"query": "tokio"}}),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_search");
+    let result: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(result.get("purpose").is_some(), "检索应返回 purpose 字段");
+    let hits = result["pages"].as_array().expect("pages 数组");
+    assert!(
+        hits.iter().any(|p| p["slug"] == "tokio-runtime"),
+        "检索应命中 tokio-runtime：{hits:?}"
+    );
+
+    // 链接图：两个节点
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            7,
+            "tools/call",
+            json!({"name": "wiki_graph", "arguments": {}}),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_graph");
+    let graph: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        graph["nodes"].as_array().unwrap().len(),
+        2,
+        "图应有两个节点"
+    );
+
+    // lint：应报出正文里的死链
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            8,
+            "tools/call",
+            json!({"name": "wiki_lint", "arguments": {}}),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_lint");
+    let report: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(report["checked_pages"], 2);
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["rule"] == "dead_link"),
+        "lint 应报出 [[not-exist-page]] 死链：{report}"
+    );
+
+    // 问答存档：首次落页，同标题幂等跳过
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            9,
+            "tools/call",
+            json!({
+                "name": "wiki_archive_query",
+                "arguments": {
+                    "title": "tokio 调度原理",
+                    "question": "tokio 怎么调度任务？",
+                    "answer": "工作窃取式多队列调度。"
+                }
+            }),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_archive_query");
+    let archived: Value =
+        serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        archived["skipped"],
+        json!(false),
+        "首次存档不应跳过：{archived}"
+    );
+
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            10,
+            "tools/call",
+            json!({
+                "name": "wiki_archive_query",
+                "arguments": {
+                    "title": "tokio 调度原理",
+                    "question": "tokio 怎么调度任务？",
+                    "answer": "重复内容。"
+                }
+            }),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_archive_query 重复");
+    let again: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        again["skipped"],
+        json!(true),
+        "同标题重复存档应幂等跳过：{again}"
+    );
+
+    // 织入（入队即返回；测试环境无 worker 不消费）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            11,
+            "tools/call",
+            json!({
+                "name": "wiki_ingest",
+                "arguments": {"title": "一份新文档", "text": "# 新文档\n\n正文内容供 LLM 织入。"}
+            }),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call wiki_ingest");
+    let ingested: Value =
+        serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(ingested["skipped"], json!(false), "新内容首次织入不应跳过");
+
+    // 非法 slug → JSON-RPC 层 invalid_params
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            12,
+            "tools/call",
+            json!({
+                "name": "wiki_write_page",
+                "arguments": {"slug": "bad slug/路径", "title": "x", "content": "x"}
+            }),
+        ),
+    )
+    .await;
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("slug"),
+        "非法 slug 应报错：{v}"
+    );
+}
+
+#[tokio::test]
+async fn wiki_mcp_scope_enforcement() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // memory-only key 调 wiki 工具 → JSON-RPC 层拒绝（HTTP 200）
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+    let (status, v) = mcp_rpc(
+        &app,
+        &mem_key,
+        rpc(
+            1,
+            "tools/call",
+            json!({"name": "wiki_search", "arguments": {"query": "x"}}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "业务拒绝在 JSON-RPC 错误层");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("wiki scope"),
+        "应报缺少 wiki scope：{v}"
+    );
+
+    // wiki-only key 调 memory 工具 → 拒绝（域间分权双向生效）
+    let wiki_key = create_key(&app, &admin, &["wiki"]).await;
+    let (_, v) = mcp_rpc(
+        &app,
+        &wiki_key,
+        rpc(
+            2,
+            "tools/call",
+            json!({"name": "memory_search", "arguments": {"query": "x"}}),
+        ),
+    )
+    .await;
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("memory scope"),
+        "应报缺少 memory scope：{v}"
+    );
+
+    // 带 wiki scope 的 key 正常可用
+    let (status, v) = mcp_rpc(
+        &app,
+        &wiki_key,
+        rpc(
+            3,
+            "tools/call",
+            json!({"name": "wiki_search", "arguments": {"query": "x"}}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    expect_result(&v, "wiki key 调 wiki_search");
+}
+
+#[tokio::test]
+async fn wiki_mcp_tool_toggle_hides_and_rejects() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let key = create_key(&app, &admin, &["wiki"]).await;
+
+    // 停用 wiki_write_page（管理台校验应认识 wiki 域工具名）
+    let (status, info) =
+        put_mcp_config(&app, &admin, json!({"disabled_tools": ["wiki_write_page"]})).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "wiki 工具名应通过管理台校验：{info}"
+    );
+    assert_eq!(info["disabled_tools"], json!(["wiki_write_page"]));
+
+    // tools/list 隐身
+    let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
+    let names: Vec<String> = expect_result(&v, "tools/list")["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(String::from))
+        .collect();
+    assert!(
+        !names.contains(&"wiki_write_page".to_string()),
+        "停用工具应隐身：{names:?}"
+    );
+    assert!(
+        names.contains(&"wiki_search".to_string()),
+        "其余 wiki 工具不受影响"
+    );
+
+    // tools/call 拒绝
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            2,
+            "tools/call",
+            json!({
+                "name": "wiki_write_page",
+                "arguments": {"slug": "x", "title": "x", "content": "x"}
+            }),
+        ),
+    )
+    .await;
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("已停用"),
+        "停用工具调用应报错：{v}"
+    );
+
+    // 未知 wiki 工具名 → 管理台 400
+    let (status, _) = put_mcp_config(&app, &admin, json!({"disabled_tools": ["wiki_bogus"]})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

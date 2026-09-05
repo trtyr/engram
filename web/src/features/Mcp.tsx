@@ -1,7 +1,8 @@
 /**
  * MCP 管理页：Engram MCP 服务的管理台。
  * 布局：顶部状态条（状态灯 + 端点 + 总开关一行收口）→ 域 Tabs（一个域一个域地看，
- * 未来 Wiki/CodeGraph 接入即新增 tab）→ 选中域的工具开关列表（拨杆 + 语义徽标，说明收 tooltip）。
+ * 用户记忆 + Wiki 已接入，CodeGraph/项目未来接入即新增 tab）→ 选中域的工具开关列表
+ * （拨杆 + 语义徽标，说明收 tooltip）。
  * 管理语义：总开关关闭 = /mcp 整体 503；工具停用 = 对 AI 隐身 + 调用拒。
  */
 import { useEffect, useMemo, useState } from 'react'

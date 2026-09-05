@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-feat/skills-mcp（基于 main @ a21bec7）**技能域第六域落地**：0031 迁移（skills + skill_revisions 两表）+ SkillsService（frontmatter 容错解析 / 批量导入 / 版本快照回滚 / 全量导出）+ 9 端点（95 路径）+ skills scope（八 scope）+ MCP 扩为双域 15 工具（skills_* 六工具）+ Web 技能页（第十页）。cargo **211** 测试（39 套件）/ **31 迁移** / **29 业务表**。
+三个 feat 分支已并入 main：**技能域第六域落地**（0031 迁移 skills + skill_revisions 两表 + SkillsService + 9 端点 + skills scope + MCP skills_* 六工具 + Web 技能页）+ **Wiki 域 MCP**（wiki_* 八工具 + wiki scope 分权）+ 项目记忆第五域（三表 + 15 端点 + 唯一约束）。/mcp 扩为四域工具面（memory 九 + project 15 + skills 六 + wiki 八）。cargo 211+ 测试（并入 wiki 用例后待复跑）/ **31 迁移** / **29 业务表**。
 
 ## 当日验证矩阵
 

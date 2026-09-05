@@ -86,15 +86,18 @@ cd web && pnpm install && pnpm dev
 engram-server 内置 MCP（Model Context Protocol）服务端（官方 Rust SDK `rmcp`，Streamable HTTP），
 让 Claude Code / Cursor / Claude Desktop 等 AI 客户端直接操纵你的用户记忆：
 
-- **端点**：`http://<host>:8080/mcp`（鉴权：`Authorization: Bearer amk_…`，memory scope）
-- **十五个工具（memory 九 + skills 六）**：`memory_context`（冷启动上下文包）/ `memory_search` / `memory_list_atoms` /
+- **端点**：`http://<host>:8080/mcp`（鉴权：`Authorization: Bearer amk_…`，按域 scope：memory / project / skills / wiki）
+- **二十三个工具（memory 九 + skills 六 + wiki 八）**：`memory_context`（冷启动上下文包）/ `memory_search` / `memory_list_atoms` /
   `memory_list_sessions` / `memory_get_session` / `memory_write_session` / `memory_append_session` /
   `memory_forget` / `memory_entities`；`skills_list` / `skills_get` / `skills_create` / `skills_update` /
   `skills_delete` / `skills_import`——instructions 与工具描述写明调用时机与编辑分权
   （AI 只写会话，蒸馏沉淀为 L1~L3；改写语义内容是用户专属）
+- **Wiki 域八工具**：`wiki_search`（混合检索 + purpose）/ `wiki_list_pages` / `wiki_get_page` /
+  `wiki_write_page`（AI 通道写页，frontmatter 落 via="ai"）/ `wiki_ingest`（异步织入）/
+  `wiki_archive_query`（问答存档）/ `wiki_graph` / `wiki_lint`
 - **管理**：控制台「MCP」页——服务总开关（关闭即整体 503）、按域逐个看工具开关
   （停用即对 AI 隐身 + 调用拒绝）；MCP 专用密钥在
-  「设置 → API 密钥」签发（scope 选择器勾 memory）
+  「设置 → API 密钥」签发（scope 选择器勾 memory / project / skills / wiki）
 - **检索质量**：FTS 零命中时向量腿收紧阈值（不相关查询返回空而非噪声页）+ 查询侧
   领域停用词；阈值按 embedding 模型用 `AGENT_MEMORY_VEC_FALLBACK_MAX_DISTANCE` 调整
   （Qwen3-Embedding-8B 建议 0.65），非对称检索模型（Qwen3）需同时设

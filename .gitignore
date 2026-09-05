@@ -33,3 +33,4 @@ test-results/
 *.swp
 
 __pycache__/
+.zcode/

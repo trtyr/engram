@@ -38,6 +38,20 @@ const mcpInfo = () => ({
       read_only: false,
       destructive: true,
     },
+    {
+      name: 'wiki_search',
+      domain: 'wiki',
+      description: '检索 Wiki（FTS + 向量，带 purpose）。',
+      read_only: true,
+      destructive: false,
+    },
+    {
+      name: 'wiki_write_page',
+      domain: 'wiki',
+      description: '写入 / 更新 Wiki 页面（AI 通道）。',
+      read_only: false,
+      destructive: false,
+    },
   ],
 })
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -121,5 +135,23 @@ describe('Mcp 管理页', () => {
     await waitFor(() => expect(calls.put.length).toBe(2))
     expect(calls.put[1]).toEqual(['/settings/mcp', { disabled_tools: [] }])
     await waitFor(() => screen.getByText(/启用 3\/3/))
+  })
+
+  it('Wiki 域 Tab：切换后展示 wiki 工具并可停用', async () => {
+    render(<Mcp />)
+    await waitFor(() => screen.getByText('运行中'))
+
+    // 切到 Wiki 域
+    fireEvent.click(screen.getByRole('button', { name: 'Wiki' }))
+    expect(screen.getByText('Wiki域工具')).toBeTruthy()
+    expect(screen.getByText('wiki_search')).toBeTruthy()
+    expect(screen.getByText('wiki_write_page')).toBeTruthy()
+    expect(screen.getByText(/启用 2\/2/)).toBeTruthy()
+
+    // 停用 wiki_write_page → PUT 增量 + 计数刷新
+    fireEvent.click(screen.getByRole('switch', { name: '停用 wiki_write_page' }))
+    await waitFor(() => expect(calls.put.length).toBe(1))
+    expect(calls.put[0]).toEqual(['/settings/mcp', { disabled_tools: ['wiki_write_page'] }])
+    await waitFor(() => screen.getByText(/启用 1\/2/))
   })
 })
