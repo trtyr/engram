@@ -6,107 +6,11 @@ mod support;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use engram_api::routes;
-use engram_api::state::AppState;
 use serde_json::{Value, json};
+use support::{
+    app, create_key, expect_result, login_token, mcp_rpc, rpc,
+};
 use tower::util::ServiceExt;
-
-async fn app() -> (Router, support::TestPg) {
-    let container = support::start_pgvector().await.expect("容器");
-    let url = support::connection_url(&container).await.unwrap();
-    let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool).await.expect("迁移");
-
-    let state = AppState::new(pool)
-        .with_admin_password(Some("test-admin-pw".into()))
-        .with_master_key(Some("ab".repeat(32)));
-    (routes::router(state), container)
-}
-
-async fn login_token(app: &Router) -> String {
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/login")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"password":"test-admin-pw"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let v: Value = serde_json::from_slice(&body).unwrap();
-    v["token"].as_str().unwrap().to_string()
-}
-
-async fn create_key(app: &Router, token: &str, scopes: &[&str]) -> String {
-    let scopes_json = serde_json::json!(scopes);
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/settings/api-keys")
-                .header("content-type", "application/json")
-                .header("authorization", format!("Bearer {token}"))
-                .body(Body::from(format!(
-                    r#"{{"name":"mcp-test","scopes":{scopes_json}}}"#
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED, "签发 key 应成功");
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let v: Value = serde_json::from_slice(&body).unwrap();
-    v["key"].as_str().unwrap().to_string()
-}
-
-/// 向 /mcp 发一条 JSON-RPC 请求，返回 HTTP 状态 + 响应 JSON（无状态模式：纯 JSON 响应）。
-async fn mcp_rpc(app: &Router, auth: &str, payload: Value) -> (StatusCode, Value) {
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/mcp")
-                .header("content-type", "application/json")
-                .header("accept", "application/json, text/event-stream")
-                .header("host", "localhost")
-                .header("authorization", format!("Bearer {auth}"))
-                .body(Body::from(payload.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let status = resp.status();
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let v: Value = serde_json::from_slice(&body)
-        .unwrap_or_else(|e| panic!("响应应为 JSON：{e}\n{}", String::from_utf8_lossy(&body)));
-    (status, v)
-}
-
-fn rpc(id: i64, method: &str, params: Value) -> Value {
-    json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
-}
-
-/// 从 JSON-RPC 响应取 result（报 panic 带上下文）。
-fn expect_result(v: &Value, what: &str) -> Value {
-    assert!(
-        v.get("error").is_none(),
-        "{what} 不应报错：{}",
-        v.get("error").unwrap_or(&Value::Null)
-    );
-    v["result"].clone()
-}
 
 #[tokio::test]
 async fn mcp_unauthorized_without_credentials() {
