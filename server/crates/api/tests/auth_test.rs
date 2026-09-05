@@ -3,11 +3,11 @@
 
 mod support;
 
-use engram_api::routes;
-use engram_api::state::AppState;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use engram_api::routes;
+use engram_api::state::AppState;
 use tower::util::ServiceExt;
 use uuid::Uuid;
 
@@ -15,9 +15,7 @@ async fn app() -> (Router, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
 
     let state = AppState::new(pool)
         .with_admin_password(Some("test-admin-pw".into()))
@@ -500,9 +498,7 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let state = AppState::new(pool.clone())
         .with_admin_password(Some("test-admin-pw".into()))
         .with_master_key(Some("ab".repeat(32)));
@@ -658,9 +654,7 @@ async fn edit_split_atom_rewrite_user_only() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let state = engram_api::state::AppState::new(pool.clone())
         .with_admin_password(Some("test-admin-pw".into()))
         .with_master_key(Some("ab".repeat(32)));
@@ -748,9 +742,7 @@ async fn ai_direct_write_revoked() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let state = engram_api::state::AppState::new(pool.clone())
         .with_admin_password(Some("test-admin-pw".into()))
         .with_master_key(Some("ab".repeat(32)));
@@ -901,9 +893,7 @@ async fn edit_split_persona_and_entity_user_only() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let state = engram_api::state::AppState::new(pool.clone())
         .with_admin_password(Some("test-admin-pw".into()))
         .with_master_key(Some("ab".repeat(32)));
@@ -1332,6 +1322,12 @@ async fn openapi_snapshot() {
             "/settings/llm/routing",
             "/settings/llm/routing/suggest",
             "/settings/mcp",
+            "/skills",
+            "/skills/export",
+            "/skills/import",
+            "/skills/{slug}",
+            "/skills/{slug}/revisions",
+            "/skills/{slug}/revisions/{rev_id}/restore",
             "/wiki/documents",
             "/wiki/documents/search",
             "/wiki/documents/{id}",
@@ -1606,9 +1602,7 @@ async fn wiki_proposals_aggregates_latest_per_job() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
 
     let state = AppState::new(pool.clone())
         .with_admin_password(Some("test-admin-pw".into()))

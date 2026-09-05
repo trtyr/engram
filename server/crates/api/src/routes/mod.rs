@@ -4,12 +4,13 @@ pub mod auth_api;
 pub mod codegraph_api;
 pub mod health;
 pub mod jobs_api;
-pub mod wiki_docs_api;
 pub mod llm_api;
 pub mod memory_api;
 pub mod project_api;
 pub mod search_api;
+pub mod skills_api;
 pub mod wiki_api;
+pub mod wiki_docs_api;
 
 use crate::state::AppState;
 use axum::middleware::from_fn_with_state;
@@ -64,6 +65,9 @@ use utoipa::OpenApi;
         project_api::batch_delete_projects,
         project_api::add_location, project_api::get_location, project_api::update_location, project_api::delete_location,
         project_api::add_doc, project_api::get_doc, project_api::update_doc, project_api::delete_doc,
+        skills_api::list_skills, skills_api::create_skill, skills_api::import_skills,
+        skills_api::export_skills, skills_api::get_skill, skills_api::update_skill,
+        skills_api::delete_skill, skills_api::list_revisions, skills_api::restore_revision,
     ),
 )]
 pub(crate) struct ApiDoc;
@@ -311,6 +315,24 @@ pub fn router(state: AppState) -> Router {
             get(project_api::get_doc)
                 .put(project_api::update_doc)
                 .delete(project_api::delete_doc),
+        )
+        // 技能域：import/export 先于 {slug}，避免被当作 slug 解析
+        .route("/skills/import", post(skills_api::import_skills))
+        .route("/skills/export", get(skills_api::export_skills))
+        .route(
+            "/skills",
+            post(skills_api::create_skill).get(skills_api::list_skills),
+        )
+        .route(
+            "/skills/{slug}",
+            get(skills_api::get_skill)
+                .put(skills_api::update_skill)
+                .delete(skills_api::delete_skill),
+        )
+        .route("/skills/{slug}/revisions", get(skills_api::list_revisions))
+        .route(
+            "/skills/{slug}/revisions/{rev_id}/restore",
+            post(skills_api::restore_revision),
         );
 
     Router::new()

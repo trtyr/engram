@@ -2,20 +2,18 @@
 
 mod support;
 
-use engram_api::routes;
-use engram_api::state::AppState;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use engram_api::routes;
+use engram_api::state::AppState;
 use tower::util::ServiceExt;
 
 async fn app() -> (Router, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let state = AppState::new(pool)
         .with_admin_password(Some("test-admin-pw".into()))
         .with_master_key(Some("ab".repeat(32)));

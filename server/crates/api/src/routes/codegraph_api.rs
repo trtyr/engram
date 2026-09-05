@@ -1,9 +1,9 @@
 //! CodeGraph 域端点（codegraph scope）。
 
-use engram_core::codegraph::{CgBridge, CgError, CgProjectDto, QueryKind};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use engram_core::codegraph::{CgBridge, CgError, CgProjectDto, QueryKind};
 use serde::Deserialize;
 use uuid::Uuid;
 

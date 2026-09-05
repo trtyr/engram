@@ -95,6 +95,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   wiki: 'Wiki',
   codegraph: '代码图谱',
   project: '项目',
+  skills: '技能',
 }
 
 export default function Mcp() {

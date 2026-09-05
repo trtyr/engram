@@ -1,11 +1,11 @@
-# 当前状态（2026-09-04 验证基线）
+# 当前状态（2026-09-05 验证基线）
 
 > 2026-08-30 初始化，09-01/09-03/09-04 多次全面更新。
 
 ## 一句话状态
 
-vitest **45**（9 文件）/ oxlint 0 警告 / tsc 0 / build 0 / 入口 bundle **285.60 kB**（gzip 91.81，预算 350 内）。
-origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian IA 重做（roadmap 0w，28 项审计全修）。
+vitest **52**（10 文件）/ oxlint 0 错误（11 既有警告）/ tsc 0 / build 0 / 入口 bundle **287.55 kB**（gzip 92.46，预算 350 内）。
+feat/skills-mcp 技能页（第十页）落地：列表（搜索/启停筛选）+ 新建/编辑 + SKILL.md 导入（frontmatter 容错 + 冲突报告）+ 全量导出 + 版本快照回滚面板；设置页 scope 选择器与 MCP 页域 Tabs 随 skills scope / skills 工具面同步扩展。
 
 ## 2026-08-30 基线以来的前端大事记
 
@@ -24,7 +24,8 @@ origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian 
 12. **设置页 AI 配置体系重构**（2026-09-02，ac55a6d..2397d53 八连提交）：先看功能再配 API（AI 功能页纯选）、供应商真 label 表单 + 类型下拉、批量吊销、全站下拉框美化（去原生箭头 + 自定义 chevron）
 13. **Wiki Obsidian IA 重做**（2026-09-03，1edff15..a3b6a2d，roadmap 0w 28 项审计全修）：目录树（folder 层级，折叠 localStorage 持久化，role=tree 语义）+ 树/图双视图切换 + 收件箱/运维二级面板；布局骨架重做（视口实算/状态提升切视图不丢/分割线拖拽 220-480px/?page= 深链自动展开 folder）；双链渲染三连修（递归 withWikilinks 深入行内 children 覆盖标题/列表/表格 / 404 显性提示不再静默刷树）；阅读区排版 70ch→4xl 放宽；Tabs 脏竖线改发丝网格；新增 e2e wiki-ia.spec.ts（折叠持久化/URL 写回/深链断言）
 
-14. **MCP 管理页**（2026-09-05）：/mcp 九页，管理台布局（顶部状态条一行收口：状态灯 + 端点 + 协议/版本 + 总开关）——域 Tabs 逐域查看工具（域归属由后端 McpToolInfo.domain 同源提供，按工具名前缀归域；目前记忆域，未来 Wiki/CodeGraph 接入即新增 tab）+ 拨杆开关列表（语义徽标、说明收 tooltip、启用 N/M 计数）；服务开关（关闭 = /mcp 503）、工具粒度开关（停用 = 对 AI 隐身 + 调用拒，PUT /settings/mcp 覆盖式 disabled_tools）；密钥管理在设置页 Keys tab（七 scope 选择器），接入指导按用户决策不做在管理页。
+14. **MCP 管理页**（2026-09-05）：/mcp 九页，管理台布局（顶部状态条一行收口：状态灯 + 端点 + 协议/版本 + 总开关）——域 Tabs 逐域查看工具（域归属由后端 McpToolInfo.domain 同源提供，按工具名前缀归域；目前记忆域，未来 Wiki/CodeGraph 接入即新增 tab）+ 拨杆开关列表（语义徽标、说明收 tooltip、启用 N/M 计数）；服务开关（关闭 = /mcp 503）、工具粒度开关（停用 = 对 AI 隐身 + 调用拒，PUT /settings/mcp 覆盖式 disabled_tools）；密钥管理在设置页 Keys tab（八 scope 选择器），接入指导按用户决策不做在管理页。
+15. **技能页（第十页）**（2026-09-05，feat/skills-mcp）：/skills——列表卡（搜索/启停筛选/来源徽标）+ 新建/内联编辑 + 导入面板（SKILL.md 全文粘贴，逐条成败报告）+ 导出下载 + 版本面板（快照列表 + 一键回滚）；MCP 页域 Tabs 自动新增「技能」组（DOMAIN_LABELS 加 skills），概览页统计格加技能计数（四格→五格）。
 
 ## 当日验证
 

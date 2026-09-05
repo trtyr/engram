@@ -27,7 +27,7 @@ L0 会话 ──蒸馏──▶ L1 原子 ──组织──▶ L2 场景 ──
 - 🔍 **全程可溯源**：蒸馏链每层记录 `prompt_version`，任意记忆可归因回放到产出它的那一版 prompt。
 - 🧭 **一坐标系**：entities（人物/项目/主题/群组/地点）由蒸馏自动抽取，横向切记忆的透镜；用户本人是所有记忆的 owner。
 
-## 🗂️ 四域资产
+## 🗂️ 五域资产
 
 | 域 | 记什么 | 形态 |
 |:--|:--|:--|
@@ -35,6 +35,7 @@ L0 会话 ──蒸馏──▶ L1 原子 ──组织──▶ L2 场景 ──
 | 🕸️ **Wiki** | 世界的知识：文档 + LLM 增量互链 | 文档/URL 摄取→检索（jieba FTS + pgvector ANN + RRF）+ 多源摄取→生成→图谱 + lint 死链分级 |
 | 🧬 **CodeGraph** | 代码库结构索引 | 符号/调用关系六种结构化查询 |
 | 🧩 **项目记忆** | 跨会话的工作「线」 | 项目 CRUD + 多主机位置 + 分类文档 |
+| 🧩 **Skills** | 可复用的 AI 指令包（SKILL.md 形态） | slug 唯一 + frontmatter 容错导入（含 `>-`/`|` 块标量，`scripts/import-skills.sh` 目录一键灌入）+ 版本快照回滚 + 全量导出 |
 
 ## 🛡️ 治理能力
 
@@ -52,7 +53,7 @@ Rust (axum) 单二进制 ──同源托管──▶ React 19 SPA（Engram 控�
 ```
 
 - **后端**：Rust workspace 10 crates（`engram-api` / `engram-core` / `engram-storage` / `engram-wiki-engine` / …），axum + sqlx + pgvector，rust-embed 托管前端。
-- **前端**：React 19 + TypeScript + Vite 8 + Tailwind 4，九页 SPA（概览/用户记忆/圈子/Wiki/代码图谱/项目/任务/MCP/设置），墨白双主题。
+- **前端**：React 19 + TypeScript + Vite 8 + Tailwind 4，十页 SPA（概览/用户记忆/圈子/Wiki/代码图谱/项目/技能/任务/MCP/设置），墨白双主题。
 - **单二进制单端口**：一个 `engram-server` 交付前后端，本地/Docker 单机部署。
 
 ## 🚀 快速上手
@@ -86,12 +87,13 @@ engram-server 内置 MCP（Model Context Protocol）服务端（官方 Rust SDK 
 让 Claude Code / Cursor / Claude Desktop 等 AI 客户端直接操纵你的用户记忆：
 
 - **端点**：`http://<host>:8080/mcp`（鉴权：`Authorization: Bearer amk_…`，memory scope）
-- **九个工具**：`memory_context`（冷启动上下文包）/ `memory_search` / `memory_list_atoms` /
+- **十五个工具（memory 九 + skills 六）**：`memory_context`（冷启动上下文包）/ `memory_search` / `memory_list_atoms` /
   `memory_list_sessions` / `memory_get_session` / `memory_write_session` / `memory_append_session` /
-  `memory_forget` / `memory_entities`——instructions 与工具描述写明调用时机与编辑分权
+  `memory_forget` / `memory_entities`；`skills_list` / `skills_get` / `skills_create` / `skills_update` /
+  `skills_delete` / `skills_import`——instructions 与工具描述写明调用时机与编辑分权
   （AI 只写会话，蒸馏沉淀为 L1~L3；改写语义内容是用户专属）
 - **管理**：控制台「MCP」页——服务总开关（关闭即整体 503）、按域逐个看工具开关
-  （停用即对 AI 隐身 + 调用拒绝，未来各域逐个 MCP 化）；MCP 专用密钥在
+  （停用即对 AI 隐身 + 调用拒绝）；MCP 专用密钥在
   「设置 → API 密钥」签发（scope 选择器勾 memory）
 - **检索质量**：FTS 零命中时向量腿收紧阈值（不相关查询返回空而非噪声页）+ 查询侧
   领域停用词；阈值按 embedding 模型用 `AGENT_MEMORY_VEC_FALLBACK_MAX_DISTANCE` 调整

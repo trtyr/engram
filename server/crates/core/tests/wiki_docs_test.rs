@@ -121,9 +121,7 @@ async fn setup() -> (sqlx::PgPool, WikiDocumentService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let dir = tempfile::tempdir().unwrap();
     let registry = ProviderRegistry::new(
         pool.clone(),
@@ -529,10 +527,7 @@ async fn reembed_only_touches_missing_chunks() {
     // 不存在的文档 → NotFound
     let err = svc.reembed(uuid::Uuid::now_v7()).await.unwrap_err();
     assert!(
-        matches!(
-            err,
-            engram_core::wiki_docs::WikiDocumentError::NotFound(_)
-        ),
+        matches!(err, engram_core::wiki_docs::WikiDocumentError::NotFound(_)),
         "{err:?}"
     );
 

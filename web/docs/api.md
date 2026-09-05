@@ -36,7 +36,8 @@ api.get<T>(path) / post / put / patch / del / upload(path, file)
 Dashboard：POST /search；Memory：sessions/atoms/scenarios/persona + distill + 擦除 + 检索；
 Wiki·文档（原 Knowledge）：upload/documents/chunks/re-embed/documents-search；Wiki·知识网：pages/graph/lint/reviews/insights/
 proposals/sources/purpose/ingest/search；CodeGraph：projects/index/sync/query；
-Jobs：jobs/events/revive；Settings：providers/routing/suggest/api-keys/batch-revoke/re-encrypt/test + /llm/usage；
+Skills：skills 列表（q/enabled 过滤）/create/import/export/{slug}（get/put/del）/{slug}/revisions + restore；
+Jobs：jobs/events/revive；Settings：providers/routing/suggest/api-keys/batch-revoke/re-encrypt/test + /llm/usage + /settings/mcp；
 Login：POST /auth/login；壳：/jobs?limit=1 探活 + /jobs?limit=200 徽章轮询。
 
 历史对接审计（44 调用点零缺漏）见 [api-alignment-audit.md](api-alignment-audit.md)（2026-08-28，

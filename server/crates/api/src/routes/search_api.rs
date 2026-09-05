@@ -1,8 +1,8 @@
 //! 跨域统一检索端点（memory + wiki）。
 
-use engram_core::unified::{UnifiedError, UnifiedHit, UnifiedSearch};
 use axum::Json;
 use axum::extract::State;
+use engram_core::unified::{UnifiedError, UnifiedHit, UnifiedSearch};
 use serde::Deserialize;
 use utoipa::ToSchema;
 

@@ -15,6 +15,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
+  Puzzle,
   Search,
   Settings as SettingsIcon,
   Users,
@@ -35,6 +36,7 @@ const Wiki = lazy(() => import('@/features/Wiki'))
 const CodeGraph = lazy(() => import('@/features/CodeGraph'))
 const Projects = lazy(() => import('@/features/Projects'))
 const ProjectDetail = lazy(() => import('@/features/ProjectDetail'))
+const Skills = lazy(() => import('@/features/Skills'))
 const Jobs = lazy(() => import('@/features/Jobs'))
 const Settings = lazy(() => import('@/features/Settings'))
 const Mcp = lazy(() => import('@/features/Mcp'))
@@ -61,6 +63,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
       { to: '/wiki', label: 'Wiki', icon: Network },
       { to: '/codegraph', label: '代码图谱', icon: Waypoints },
       { to: '/projects', label: '项目', icon: FolderKanban },
+      { to: '/skills', label: '技能', icon: Puzzle },
     ],
   },
   {
@@ -314,6 +317,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/codegraph" element={<CodeGraph />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetail />} />
+              <Route path="/skills" element={<Skills />} />
               <Route path="/jobs" element={<Jobs />} />
               <Route path="/mcp" element={<Mcp />} />
               <Route path="/settings" element={<Settings />} />

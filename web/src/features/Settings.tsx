@@ -335,12 +335,13 @@ function Routing() {
   )
 }
 
-/** scope 中文标签（与后端 SCOPES 七项对齐）。 */
+/** scope 中文标签（与后端 SCOPES 八项对齐）。 */
 const SCOPE_LABELS: Record<string, string> = {
   memory: '记忆',
   wiki: 'Wiki',
   codegraph: '代码图谱',
   project: '项目',
+  skills: '技能',
   llm: 'LLM 网关',
   erase: '擦除（不可逆删除）',
   cron: '节律心跳',

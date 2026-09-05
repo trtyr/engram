@@ -14,11 +14,12 @@ use uuid::Uuid;
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 
 /// 资产域 scope。
-pub const SCOPES: [&str; 7] = [
+pub const SCOPES: [&str; 8] = [
     "memory",
     "wiki",
     "codegraph",
     "project",
+    "skills",
     "llm",
     "erase",
     "cron",
@@ -223,7 +224,12 @@ pub fn require_scope(principal: &Principal, scope: &str) -> Result<(), ApiError>
 /// /mcp 与 MCP Streamable HTTP 端点同路径：MCP 客户端发 JSON Accept 照常认证，
 /// 浏览器导航（text/html）回 SPA 页——否则硬刷新 /mcp 会 401。
 fn is_spa_nav_path(path: &str) -> bool {
-    path == "/jobs" || path == "/projects" || path.starts_with("/projects/") || path == "/mcp"
+    path == "/jobs"
+        || path == "/projects"
+        || path.starts_with("/projects/")
+        || path == "/skills"
+        || path.starts_with("/skills/")
+        || path == "/mcp"
 }
 
 fn auth_error(message: &str) -> Response {

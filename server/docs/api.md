@@ -1,9 +1,9 @@
 # API
 
-> 2026-09-05 从当日代码 `openapi-dump` 活体导出，共 **89 路径 / 115 方法注册**（GET 47 · POST 47 · PUT 8 · PATCH 3 · DELETE 10）。
+> 2026-09-05 从当日代码 `openapi-dump` 活体导出，共 **95 路径 / 124 方法注册**（GET 51 · POST 50 · PUT 9 · PATCH 3 · DELETE 11）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
-> 七 scope：memory/wiki/codegraph/project/llm/erase/cron）。
+> 八 scope：memory/wiki/codegraph/project/skills/llm/erase/cron）。
 > 权威 schema 以 `cargo run -q -p engram-api --bin openapi-dump` 输出为准（前端 CI 有零漂移门禁）。
 
 ## 认证与健康
@@ -102,6 +102,17 @@
 | POST | /projects/{id}/docs | 新增分类文档（markdown） |
 | GET/PUT/DELETE | /projects/{id}/docs/{doc_id} | 读 / 编辑 / 删除文档 |
 
+## skills（技能域，第六域）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | /skills | 技能列表（摘要不含正文；?q= 搜名称/描述、?tag=、?enabled= 过滤）/ 新建（slug 唯一 409；缺省从名字推导，中文名须显式传；初始态留 rev1 快照） |
+| POST | /skills/import | 批量导入 SKILL.md 全文（frontmatter 容错解析 name/description/slug/tags，支持 `>-`/`|` 块标量；每条可附带 tags（如来源子目录名）与 frontmatter 合并；逐条成败互不阻断，overwrite=true 命中已有 slug 走更新） |
+| GET | /skills/export | 全量导出（含正文，按 slug 排序——技能库随时整体带走） |
+| GET/PUT/DELETE | /skills/{slug} | 详情（含正文）/ 编辑（语义字段变更前自动留版本快照，enabled-only 不留）/ 删除（级联删快照） |
+| GET | /skills/{slug}/revisions | 版本快照列表（新→旧，保留最近 50 版） |
+| POST | /skills/{slug}/revisions/{rev_id}/restore | 回滚到某版本（回滚前先快照现状，回滚本身可再撤销） |
+
 ## jobs（任务域）
 
 | 方法 | 路径 | 说明 |
@@ -124,7 +135,7 @@
 | GET/POST | /settings/api-keys | API Key 列表 / 签发（scope；明文只在创建时返回一次）——admin-only |
 | POST | /settings/api-keys/{id}/revoke | 删除（admin-only；物理删除不留记录，删除后 401 走通用文案） |
 | POST | /settings/api-keys/batch-revoke | 批量删除（{ids}；物理删除，返回 {revoked}） |
-| GET/PUT | /settings/mcp | MCP 服务信息 / 配置更新（服务总开关 + 工具粒度开关 disabled_tools；admin-only）——工具面本体在 **POST /mcp**（Streamable HTTP JSON-RPC，非 OpenAPI 路径；复用 Bearer 认证，memory scope 调工具；关闭时 503） |
+| GET/PUT | /settings/mcp | MCP 服务信息 / 配置更新（服务总开关 + 工具粒度开关 disabled_tools；admin-only）——工具面本体在 **POST /mcp**（Streamable HTTP JSON-RPC，非 OpenAPI 路径；复用 Bearer 认证，按工具域分权（memory/skills scope）；关闭时 503） |
 
 ## 错误文案三问规范（2026-08-31 起）
 

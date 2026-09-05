@@ -1,11 +1,11 @@
 //! Wiki 域端点（wiki scope）。
 
-use engram_core::wiki::{CascadeReport, InsightsReport, Purpose, ReviewItem};
-use engram_core::wiki::{LintReport, WikiError, WikiPageDto, WikiService};
-use engram_jobs::types::JobEvent;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use engram_core::wiki::{CascadeReport, InsightsReport, Purpose, ReviewItem};
+use engram_core::wiki::{LintReport, WikiError, WikiPageDto, WikiService};
+use engram_jobs::types::JobEvent;
 use serde::Deserialize;
 use utoipa::IntoParams;
 
