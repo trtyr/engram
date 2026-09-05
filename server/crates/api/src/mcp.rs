@@ -88,7 +88,10 @@ fn parse_flex_datetime(s: &str) -> Result<chrono::DateTime<chrono::Utc>, rmcp::E
     if let Ok(d) = chrono::NaiveDate::parse_from_str(t, "%Y-%m-%d")
         && let Some(ndt) = d.and_hms_opt(0, 0, 0)
     {
-        return Ok(chrono::DateTime::from_naive_utc_and_offset(ndt, chrono::Utc));
+        return Ok(chrono::DateTime::from_naive_utc_and_offset(
+            ndt,
+            chrono::Utc,
+        ));
     }
     Err(mcp_err(
         ErrorCode::INVALID_PARAMS,
