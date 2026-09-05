@@ -101,6 +101,17 @@ pub struct ProjectDocDto {
     pub updated_at: DateTime<Utc>,
 }
 
+/// 文档行检索命中（grep 式定位：行号 + 原文行；配合 read_doc_lines 区间精读）。
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct DocLineHitDto {
+    pub doc_id: Uuid,
+    pub title: String,
+    pub category: String,
+    /// 1-based 行号（基于文档当前版本）
+    pub line: i64,
+    pub text: String,
+}
+
 /// 项目详情（本体 + 位置 + 文档），Web 详情页左树右内容用。
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ProjectDetailDto {
@@ -546,5 +557,79 @@ impl ProjectService {
                 "文档 {id} 不存在——先 project-get <项目> 看 docs 列表取 id"
             ))
         })
+    }
+
+    // ---------- 精确寻址读（行号定位，无截断） ----------
+
+    /// 按行区间读文档（1-based、含两端；None = 从头/到尾）。
+    /// 返回 (总行数, [(行号, 行文本)])。行号基于当前版本，改文档后需重取。
+    pub async fn read_doc_lines(
+        &self,
+        id: Uuid,
+        start: Option<i64>,
+        end: Option<i64>,
+    ) -> Result<(i64, Vec<(i64, String)>), ProjectError> {
+        let start = start.unwrap_or(1);
+        let end = end.unwrap_or(i64::MAX);
+        if start < 1 {
+            return Err(ProjectError::BadRequest(format!(
+                "start_line 从 1 开始，收到 {start}"
+            )));
+        }
+        if start > end {
+            return Err(ProjectError::BadRequest(format!(
+                "start_line({start}) 不能大于 end_line({end})"
+            )));
+        }
+        let doc = self.get_doc(id).await?;
+        let total = doc.content.lines().count() as i64;
+        let lines = doc
+            .content
+            .lines()
+            .enumerate()
+            .skip_while(|(i, _)| (*i as i64) < start - 1)
+            .take_while(|(i, _)| (*i as i64) < end)
+            .map(|(i, text)| (i as i64 + 1, text.to_string()))
+            .collect();
+        Ok((total, lines))
+    }
+
+    /// grep 式跨文档按行检索（大小写不敏感子串），返回命中行号 + 原文行。
+    /// 定位到行号后用 read_doc_lines / project_doc_get 区间精读。
+    pub async fn search_doc_lines(
+        &self,
+        project_id: Uuid,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<DocLineHitDto>, ProjectError> {
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return Err(ProjectError::BadRequest("检索词不能为空".to_string()));
+        }
+        self.get_project_bare(project_id).await?;
+        let docs: Vec<(Uuid, String, String, String)> =
+            sqlx::query_as("SELECT id, title, category, content FROM project_docs WHERE project_id = $1 ORDER BY category, created_at")
+                .bind(project_id)
+                .fetch_all(&self.pool)
+                .await?;
+        let mut hits = Vec::new();
+        let cap = limit.clamp(1, 500) as usize;
+        for (id, title, category, content) in docs {
+            for (i, line) in content.lines().enumerate() {
+                if hits.len() >= cap {
+                    return Ok(hits);
+                }
+                if line.to_lowercase().contains(&q) {
+                    hits.push(DocLineHitDto {
+                        doc_id: id,
+                        title: title.clone(),
+                        category: category.clone(),
+                        line: i as i64 + 1,
+                        text: line.to_string(),
+                    });
+                }
+            }
+        }
+        Ok(hits)
     }
 }

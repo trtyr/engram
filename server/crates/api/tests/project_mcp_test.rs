@@ -14,7 +14,7 @@ use support::{
 };
 use tower::util::ServiceExt;
 
-const PROJECT_TOOLS: [&str; 14] = [
+const PROJECT_TOOLS: [&str; 15] = [
     "project_types",
     "project_list",
     "project_get",
@@ -27,6 +27,7 @@ const PROJECT_TOOLS: [&str; 14] = [
     "project_location_delete",
     "project_doc_add",
     "project_doc_get",
+    "project_doc_search",
     "project_doc_update",
     "project_doc_delete",
 ];
@@ -225,12 +226,34 @@ async fn project_full_journey() {
     assert!(msg.contains("不在项目分类里"), "未登记分类应报错：{v}");
     assert!(msg.contains("后端"), "错误应列出现有分类：{msg}");
 
-    // project_get 按 id 取详情：位置与文档都在
+    // project_get 按 id 取详情（默认索引模式）：位置与文档都在，正文只给字符数
     let detail = mcp_call_json(&app, &key, "project_get", json!({"project_id": project_id})).await;
     assert_eq!(detail["name"], "Engram 项目记忆 MCP");
     assert_eq!(detail["locations"].as_array().unwrap().len(), 1);
     assert_eq!(detail["docs"].as_array().unwrap().len(), 1);
-    assert_eq!(detail["docs"][0]["content"], "# 工具面\n\n14 个 project_* 工具并入 /mcp。");
+    assert!(
+        detail["docs"][0].get("content").is_none(),
+        "索引模式不应带正文：{}",
+        detail["docs"][0]
+    );
+    assert_eq!(
+        detail["docs"][0]["content_chars"],
+        json!("# 工具面\n\n14 个 project_* 工具并入 /mcp。".chars().count())
+    );
+    assert_eq!(detail["docs"][0]["title"], "MCP 工具设计");
+
+    // include_content=true：无损全量
+    let full = mcp_call_json(
+        &app,
+        &key,
+        "project_get",
+        json!({"project_id": project_id, "include_content": true}),
+    )
+    .await;
+    assert_eq!(
+        full["docs"][0]["content"],
+        json!("# 工具面\n\n14 个 project_* 工具并入 /mcp。")
+    );
 
     // project_get 按名取详情（名字寻址）
     let by_name = mcp_call_json(
@@ -556,7 +579,7 @@ async fn project_tools_admin_info_and_toggle() {
     let info: Value = serde_json::from_slice(&body).unwrap();
     let tools = info["tools"].as_array().expect("工具清单");
     let project_tools: Vec<&Value> = tools.iter().filter(|t| t["domain"] == "project").collect();
-    assert_eq!(project_tools.len(), 14, "project 域应自动分组 14 个工具：{tools:?}");
+    assert_eq!(project_tools.len(), 15, "project 域应自动分组 15 个工具：{tools:?}");
 
     // 停用 project_delete：tools/list 隐身 + call 拒绝
     let resp = app
@@ -577,7 +600,7 @@ async fn project_tools_admin_info_and_toggle() {
     let names = tool_names(&app, &key).await;
     assert!(!names.contains(&"project_delete".to_string()), "停用后不应出现在 tools/list");
     let other_count = names.len();
-    assert_eq!(other_count, 13, "其余 13 个应仍在：{names:?}");
+    assert_eq!(other_count, 14, "其余 14 个应仍在：{names:?}");
 
     let (_, v) = mcp_rpc(
         &app,
@@ -652,4 +675,174 @@ async fn project_doc_add_missing_fields_rejected() {
             .contains("missing field"),
         "应提示缺字段：{out}"
     );
+}
+
+/// 精确寻址读设计：索引模式 → 搜索定位行号 → 区间精读；全文模式无损；
+/// 行号边界校验；分类过滤。全程无截断。
+#[tokio::test]
+async fn project_precise_addressing_read() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["project"]).await;
+    mcp_initialize(&app, &key).await;
+
+    let p = mcp_call_json(&app, &key, "project_create", json!({"name": "寻址读", "type": "dev"})).await;
+    let pid = p["id"].as_str().unwrap().to_string();
+
+    // 长文档：12 行，含特征词
+    let progress = (1..=12)
+        .map(|i| if i == 7 { "第七行提到 streamable http 传输".to_string() } else { format!("第{i}行普通内容") })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let doc = mcp_call_json(
+        &app,
+        &key,
+        "project_doc_add",
+        json!({"project_id": pid, "category": "后端", "title": "进度", "content": progress}),
+    )
+    .await;
+    let doc_id = doc["id"].as_str().unwrap().to_string();
+    let other = mcp_call_json(
+        &app,
+        &key,
+        "project_doc_add",
+        json!({"project_id": pid, "category": "规划", "title": "结论", "content": "结论一：MCP 并入 /mcp\n结论二：scope 分权"}),
+    )
+    .await;
+
+    // 索引模式：无正文，有 content_chars
+    let idx = mcp_call_json(&app, &key, "project_get", json!({"project_id": pid})).await;
+    let docs = idx["docs"].as_array().unwrap();
+    assert_eq!(docs.len(), 2);
+    for d in docs {
+        assert!(d.get("content").is_none(), "索引模式不带正文：{d}");
+        assert!(d["content_chars"].as_i64().unwrap() > 0, "{d}");
+        assert!(d.get("id").is_some() && d.get("title").is_some(), "{d}");
+    }
+
+    // 全量模式：无损拿回原文
+    let full = mcp_call_json(
+        &app,
+        &key,
+        "project_get",
+        json!({"project_id": pid, "include_content": true}),
+    )
+    .await;
+    assert_eq!(full["docs"].as_array().unwrap().len(), 2);
+    assert_eq!(full["docs"][0]["content"], json!(progress));
+
+    // 分类过滤
+    let filtered = mcp_call_json(
+        &app,
+        &key,
+        "project_get",
+        json!({"project_id": pid, "category": "规划"}),
+    )
+    .await;
+    let fd = filtered["docs"].as_array().unwrap();
+    assert_eq!(fd.len(), 1);
+    assert_eq!(fd[0]["title"], "结论");
+
+    // 搜索定位：命中行号 + 原文行（大小写不敏感）
+    let hits = mcp_call_json(
+        &app,
+        &key,
+        "project_doc_search",
+        json!({"project_id": pid, "query": "Streamable HTTP"}),
+    )
+    .await;
+    let arr = hits.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "{hits}");
+    assert_eq!(arr[0]["doc_id"], json!(doc_id));
+    assert_eq!(arr[0]["line"], 7);
+    assert_eq!(arr[0]["text"], "第七行提到 streamable http 传输");
+
+    // 搜索跨行：同一篇文档多行命中
+    let multi = mcp_call_json(
+        &app,
+        &key,
+        "project_doc_search",
+        json!({"project_name": "寻址读", "query": "结论"}),
+    )
+    .await;
+    let mh = multi.as_array().unwrap();
+    assert_eq!(mh.len(), 2, "{multi}");
+    assert_eq!(mh[0]["line"], 1);
+    assert_eq!(mh[1]["line"], 2);
+
+    // 区间精读 5-9 行：恒带行号前缀，端点含入
+    let range = mcp_call_json(
+        &app,
+        &key,
+        "project_doc_get",
+        json!({"doc_id": doc_id, "start_line": 5, "end_line": 9}),
+    )
+    .await;
+    assert_eq!(range["total_lines"], 12);
+    assert_eq!(range["start_line"], 5);
+    assert_eq!(range["end_line"], 9);
+    let content = range["content"].as_str().unwrap();
+    for l in 5..=9 {
+        assert!(content.contains(&format!("{l}: ")), "缺 {l} 行：{content}");
+    }
+    assert!(content.contains("5: 第5行普通内容"), "{content}");
+    assert!(content.contains("9: 第9行普通内容"), "{content}");
+    assert!(!content.contains("1: 第1行"), "区间外行不应出现：{content}");
+    assert!(content.contains("7: 第七行"));
+
+    // 区间开右端：start=11 到末尾
+    let tail = mcp_call_json(
+        &app,
+        &key,
+        "project_doc_get",
+        json!({"doc_id": doc_id, "start_line": 11}),
+    )
+    .await;
+    assert_eq!(tail["end_line"], 12);
+    assert!(tail["content"].as_str().unwrap().contains("12: 第12行"));
+
+    // 全文模式：无损原文 + total_lines；with_line_numbers 加行号
+    let whole = mcp_call_json(&app, &key, "project_doc_get", json!({"doc_id": doc_id})).await;
+    assert_eq!(whole["content"], json!(progress));
+    assert_eq!(whole["total_lines"], 12);
+    let numbered = mcp_call_json(
+        &app,
+        &key,
+        "project_doc_get",
+        json!({"doc_id": doc_id, "with_line_numbers": true}),
+    )
+    .await;
+    assert!(numbered["content"].as_str().unwrap().starts_with("1: 第1行"));
+
+    // 边界与参数错误
+    for bad in [
+        json!({"doc_id": doc_id, "start_line": 0}),
+        json!({"doc_id": doc_id, "start_line": 9, "end_line": 3}),
+    ] {
+        let (_, v) = mcp_rpc(&app, &key, rpc(20, "tools/call", json!({"name": "project_doc_get", "arguments": bad}))).await;
+        assert!(v.get("error").is_some(), "坏区间应报错：{v}");
+    }
+    // 空检索词
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(21, "tools/call", json!({"name": "project_doc_search", "arguments": {"project_id": pid, "query": "  "}})),
+    )
+    .await;
+    assert!(
+        v["error"]["message"].as_str().unwrap_or("").contains("不能为空"),
+        "空检索词应报错：{v}"
+    );
+
+    // 精读另一篇 + limit 上限
+    let limited = mcp_call_json(
+        &app,
+        &key,
+        "project_doc_search",
+        json!({"project_id": pid, "query": "行", "limit": 2}),
+    )
+    .await;
+    assert_eq!(limited.as_array().unwrap().len(), 2);
+
+    // 覆盖 other 引用，避免未使用告警
+    assert_eq!(other["title"], "结论");
 }

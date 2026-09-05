@@ -23,6 +23,7 @@ use rmcp::transport::streamable_http_server::tower::{
     StreamableHttpServerConfig, StreamableHttpService,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::auth::Principal;
@@ -310,15 +311,22 @@ pub struct ProjectListParams {
     pub type_: Option<String>,
 }
 
-/// 项目寻址公共参数：id 或 name 二选一（项目名唯一，可直接用名字）。
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ProjectRef {
+pub struct ProjectGetParams {
     /// 项目 id（UUID，来自 project_list / project_get）
     #[schemars(description = "项目 id（UUID，来自 project_list / project_get 的返回）。")]
     pub project_id: Option<String>,
     /// 项目名（项目名唯一，可代替 id 定位）
     #[schemars(description = "项目名（唯一，可代替 project_id 定位）。与 project_id 至少给一个。")]
     pub project_name: Option<String>,
+    /// 索引模式（默认）：docs 只给 id/分类/标题/content_chars，不带正文
+    #[schemars(
+        description = "默认 false（索引模式）：docs 只含 id/分类/标题/content_chars（正文字符数），不带正文——先看结构，再 project_doc_search 定位或 project_doc_get 精读。true = 全量带上每篇正文（项目文档很少时可用，无损）。"
+    )]
+    pub include_content: Option<bool>,
+    /// 只看某个分类下的文档
+    #[schemars(description = "可选：只返回该分类下的文档（分类名须与项目 categories 一致）。")]
+    pub category: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -457,6 +465,35 @@ pub struct ProjectDocGetParams {
     /// 文档 id（UUID）
     #[schemars(description = "文档 id（UUID，来自 project_get 返回的 docs 列表）。")]
     pub doc_id: String,
+    /// 起始行（1-based；与 end_line 搭配精确读一个区间）
+    #[schemars(
+        description = "可选：起始行号（1-based，含该行）。与 end_line 搭配做区间精读；行号来自 project_doc_search 的命中或 with_line_numbers 的全文。不传 = 从头。"
+    )]
+    pub start_line: Option<i64>,
+    /// 结束行（1-based，含该行）
+    #[schemars(description = "可选：结束行号（1-based，含该行）。不传 = 到末尾。")]
+    pub end_line: Option<i64>,
+    /// 输出加行号前缀（区间模式恒带行号；全文默认不加）
+    #[schemars(
+        description = "可选：true = 全文每行加「行号: 」前缀，便于后续按行寻址。不传或 false = 原文。区间读取（传了 start_line/end_line）恒带行号。"
+    )]
+    pub with_line_numbers: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProjectDocSearchParams {
+    /// 定位项目：项目 id（UUID）
+    #[schemars(description = "项目 id（UUID）。与 project_name 至少给一个。")]
+    pub project_id: Option<String>,
+    /// 定位项目：项目名
+    #[schemars(description = "项目名（唯一）。与 project_id 至少给一个。")]
+    pub project_name: Option<String>,
+    /// 检索词（按行大小写不敏感子串匹配）
+    #[schemars(description = "检索词：按行大小写不敏感子串匹配（grep 式）。")]
+    pub query: String,
+    /// 命中上限（默认 50）
+    #[schemars(description = "命中上限，默认 50。命中含 doc_id/title/category/line/text。")]
+    pub limit: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -909,10 +946,13 @@ impl MemoryMcpServer {
         ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
     }
 
-    /// 项目详情：本体 + 多主机位置 + 全部分类文档（含正文）。
+    /// 项目详情：本体 + 多主机位置 + 文档索引。
     ///
-    /// 何时用：开工拉上下文——目标（description）、进度与决策（docs）、
-    /// 代码在哪（locations）一次拿全。可用 project_id 或 project_name（唯一）定位。
+    /// 何时用：开工拉上下文——目标（description）、代码在哪（locations）、
+    /// 有哪些文档（docs 索引：id/分类/标题/正文字符数）一次拿全。
+    /// 默认索引模式不带正文（文档多时省 token 也无信息损失）：
+    /// 用 project_doc_search 定位关键词行号，project_doc_get 区间精读；
+    /// 小项目想一次全量就 include_content=true。可用 project_id 或 project_name（唯一）定位。
     #[tool(
         name = "project_get",
         annotations(
@@ -926,15 +966,33 @@ impl MemoryMcpServer {
     async fn project_get(
         &self,
         ctx: RequestContext<RoleServer>,
-        params: Parameters<ProjectRef>,
+        params: Parameters<ProjectGetParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_project(&p)?;
+        let gp = params.0;
         let id = self
-            .resolve_project(&params.0.project_id, &params.0.project_name)
+            .resolve_project(&gp.project_id, &gp.project_name)
             .await?;
         let detail = self.svc_project().get_project(id).await.map_err(from_project)?;
-        ok_json(serde_json::to_value(&detail).unwrap_or(serde_json::json!({})))
+        let mut v = serde_json::to_value(&detail).unwrap_or(serde_json::json!({}));
+        if let Some(category) = &gp.category {
+            if let Some(docs) = v["docs"].as_array_mut() {
+                docs.retain(|d| d["category"] == json!(category));
+            }
+        }
+        let include_content = gp.include_content.unwrap_or(false);
+        if let Some(docs) = v["docs"].as_array_mut() {
+            for (d, orig) in docs.iter_mut().zip(&detail.docs) {
+                let chars = orig.content.chars().count() as i64;
+                let obj = d.as_object_mut().expect("doc 是对象");
+                if !include_content {
+                    obj.remove("content");
+                }
+                obj.insert("content_chars".into(), json!(chars));
+            }
+        }
+        ok_json(v)
     }
 
     /// 新建项目（type 决定初始分类，之后可增删）。
@@ -1205,9 +1263,12 @@ impl MemoryMcpServer {
         ok_json(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})))
     }
 
-    /// 读取单个项目文档全文。
+    /// 读取项目文档：全文或按行区间精读（1-based，含两端）。
     ///
-    /// 何时用：改长文档前取原文（project_doc_update 的 content 是替换式）。
+    /// 何时用：project_get 索引或 project_doc_search 命中之后精确读内容。
+    /// 传 start_line/end_line 只读该区间（输出恒带「行号: 」前缀，便于连环寻址）；
+    /// 不传读全文（无损，不截断），with_line_numbers=true 可给全文加行号。
+    /// 行号基于文档当前版本——改文档后需重取。
     #[tool(
         name = "project_doc_get",
         annotations(
@@ -1225,10 +1286,83 @@ impl MemoryMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_project(&p)?;
-        let id = Uuid::parse_str(&params.0.doc_id)
+        let dp = params.0;
+        let id = Uuid::parse_str(&dp.doc_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "doc_id 不是合法 UUID"))?;
+        let ranged = dp.start_line.is_some() || dp.end_line.is_some();
+        let numbered = |line: i64, text: &str| format!("{line}: {text}");
+        if ranged {
+            let (total, lines) = self
+                .svc_project()
+                .read_doc_lines(id, dp.start_line, dp.end_line)
+                .await
+                .map_err(from_project)?;
+            let start = dp.start_line.unwrap_or(1);
+            let end = dp.end_line.unwrap_or(total).min(total);
+            let content = lines
+                .iter()
+                .map(|(l, t)| numbered(*l, t))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return ok_json(json!({
+                "doc_id": dp.doc_id,
+                "total_lines": total,
+                "start_line": start,
+                "end_line": end,
+                "content": content,
+            }));
+        }
         let doc = self.svc_project().get_doc(id).await.map_err(from_project)?;
-        ok_json(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})))
+        let total = doc.content.lines().count() as i64;
+        let mut v = serde_json::to_value(&doc).unwrap_or(serde_json::json!({}));
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("total_lines".into(), json!(total));
+            if dp.with_line_numbers.unwrap_or(false) {
+                let numbered_content = doc
+                    .content
+                    .lines()
+                    .enumerate()
+                    .map(|(i, t)| numbered(i as i64 + 1, t))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                obj.insert("content".into(), json!(numbered_content));
+            }
+        }
+        ok_json(v)
+    }
+
+    /// grep 式跨文档按行检索项目文档（大小写不敏感子串）。
+    ///
+    /// 何时用：索引模式下想找「某句话/某个结论在哪篇文档哪一行」。
+    /// 返回命中 {doc_id, title, category, line, text}；拿到行号后用
+    /// project_doc_get 的 start_line/end_line 区间精读上下文。
+    #[tool(
+        name = "project_doc_search",
+        annotations(
+            title = "检索项目文档行",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn project_doc_search(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<ProjectDocSearchParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_project(&p)?;
+        let sp = params.0;
+        let id = self
+            .resolve_project(&sp.project_id, &sp.project_name)
+            .await?;
+        let hits = self
+            .svc_project()
+            .search_doc_lines(id, &sp.query, sp.limit.unwrap_or(50))
+            .await
+            .map_err(from_project)?;
+        ok_json(serde_json::to_value(&hits).unwrap_or(serde_json::json!([])))
     }
 
     /// 编辑项目文档（补丁式：只传要改的字段）。
@@ -1314,11 +1448,14 @@ Engram —— 长期记忆平台（用户记忆域 + 项目记忆域 MCP）。
 4. 用户明确表达遗忘：「别记住这个」→ memory_forget。
 
 项目记忆用法：
-1. 开工：project_list / project_get 找到这件事的项目锚点，读目标、进度与决策文档接上上下文；
+1. 开工：project_list / project_get 找到这件事的项目锚点，读目标、位置与文档索引接上上下文；
    没有就 project_create 建一个（dev=开发 / research=调研），再用 project_location_add 登记代码位置；
-2. 干活中：有阶段性进展或结论就 project_doc_add / project_doc_update 沉淀成文档
+2. 找内容：project_get 默认索引模式（文档只给 id/分类/标题/字符数，不带正文）；
+   project_doc_search 按关键词定位到「哪篇文档哪一行」，project_doc_get 传 start_line/end_line
+   区间精读（无截断、无损）——按需取用，不必整篇倒腾；
+3. 干活中：有阶段性进展或结论就 project_doc_add / project_doc_update 沉淀成文档
    （category 必须是项目已有分类，要新分类先 project_update 追加进 categories）；
-3. 收尾：project_update 改状态、写总结文档，下次会话从 project_get 接上。
+4. 收尾：project_update 改状态、写总结文档，下次会话从 project_get 接上。
 
 分权规则（务必遵守）：
 - 用户记忆的写入通道只有「写会话」：事实抽取、画像更新、实体维护全部由蒸馏完成；

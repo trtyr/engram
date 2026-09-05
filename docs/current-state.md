@@ -60,6 +60,8 @@ origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具�
 
 25. **项目域审查问题修复**（2026-09-05，紧接 24 的审查结论）：① 归属校验——`/projects/{id}` 路径下 location/doc 的 get/update/delete 原先不核对资源归属（甲项目路径可寻址乙项目资源 id），现在 handler 层 owned_location/owned_doc 校验 project_id 一致，跨项目一律 404 且不泄露存在性；② 孤儿分类治理下沉 service——add_doc 校验 category ∈ project.categories（400 列出现有分类），update_doc 仅在换分类时校验（分类被移除后存量文档仍可原地编辑，不锁死），MCP 层预校验删除改依赖 service 单一真源。遗留：project_get 全量文档无分页，留待 context pack 协议一并设计。验证：cargo 200（+2：project_cross_project_access_blocked 六路 404 + 资源无损断言、project_doc_category_validation 四段矩阵）+ vitest 45。
 
+26. **项目文档精确寻址读**（2026-09-05，所有者否决截断方案后重设计）：project_get 默认索引模式（docs 只给 id/分类/标题/content_chars，不带正文；include_content=true 无损全量；category 过滤）；新增 project_doc_search——grep 式跨文档按行检索（大小写不敏感子串，命中 doc_id/title/category/line/text，limit 上限）；project_doc_get 加 start_line/end_line 区间精读（1-based 含两端，输出恒带行号前缀便于连环寻址）与 with_line_numbers 全文行号——全文恒可得、零截断，工作流=索引看结构→搜索定位行号→区间精读。core 新增 read_doc_lines/search_doc_lines/DocLineHitDto。project 域工具 14→15。验证：cargo 201（+1：project_precise_addressing_read——索引/全量/过滤/搜索定位/区间端点含入/行号边界/空检索词）+ vitest 45。
+
 ## 已知未了项
 
 - e2e key 表历史积压（journey 现已自撤新 key；历史 revoked 行留存无害）
