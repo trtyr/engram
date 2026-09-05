@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vitest 42。
+origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）。cargo **187** 测试（38 套件）/ vitest 44。
 **项目记忆第五域已实现**：三表（projects / project_locations / project_docs）+ 类型模板（开发四分类/调研六分类）+ 完整 API（88 路径）+ Web（列表 CRUD/多选/类型筛选 + 详情页 Wiki 式左树右内容树状图）。
 :8090 开发栈在跑（am_dev 库，数据由所有者主动清空后重建）。
 
@@ -13,11 +13,11 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 | 栈 | 命令 | 结果 |
 |---|---|---|
 | server | cargo fmt --check / clippy -D warnings | exit 0 / 0 errors |
-| server | cargo test --workspace | 181 passed（37 套件） |
-| web | pnpm run lint / tsc / test / build | 0 警告 / 0 / 42 全过（8 文件）/ exit 0 |
-| web | 入口 bundle | 285.23 kB（gzip 91.70），预算 350 内 |
+| server | cargo test --workspace | 187 passed（38 套件） |
+| web | pnpm run lint / tsc / test / build | 0 警告 / 0 / 44 全过（9 文件）/ exit 0 |
+| web | 入口 bundle | 285.60 kB（gzip 91.81），预算 350 内 |
 | CI | gh run list（f8e1031） | CI + e2e FAIL（GitHub 支出限额，未启动） |
-| 事实 | OpenAPI 活体 / 迁移 / 表 | **88 路径 / 113 方法注册**（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10）/ **30 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
+| 事实 | OpenAPI 活体 / 迁移 / 表 | **89 路径 / 114 方法注册**（GET 47/POST 47/PUT 7/PATCH 3/DELETE 10，另有 POST /mcp JSON-RPC 不进 OpenAPI）/ **30 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
 
 ## 运行环境实况（2026-09-03 实查 + 所有者确认）
 
@@ -58,3 +58,4 @@ origin/main 产品更名 Engram 完成。cargo **181** 测试（37 套件）/ vi
 
 - e2e key 表历史积压（journey 现已自撤新 key；历史 revoked 行留存无害）
 - skill 安装副本版本同步（~/.pi 侧非 git 跟踪，roadmap 0t）
+22. **用户记忆 MCP 落地**（2026-09-05）：官方 Rust SDK rmcp 3.2 Streamable HTTP 服务端宿主于 engram-server `/mcp`（无状态 + JSON 响应，复用 Bearer 中间件——每请求独立认证，key 吊销即刻生效）；九个 memory 域工具（context/search/list_atoms/list_sessions/get_session/write_session/append_session/forget/entities）进程内直调 MemoryService，instructions + 工具描述中文写明调用时机与编辑分权（AI 只写会话，纠错走蒸馏）；`GET /settings/mcp` 管理信息（与工具注册表同源）；前端新增 `/mcp` 页（端点信息 / Claude Code·Cursor·Claude Desktop 连接配置一键复制 / 工具清单 / MCP 密钥签发带 scope 选择）；远程部署 Host 白名单 `AGENT_MEMORY_MCP_ALLOWED_HOSTS`（默认 loopback 防 DNS rebinding）。验证：cargo +6（mcp_test 六用例：401 矩阵 / initialize+tools/list / 写读链 / scope 分权 / 管理端点）+ vitest +2。

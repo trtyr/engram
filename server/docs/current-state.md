@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）。cargo **181** 测试（37 套件）/ **30 迁移** / **88 路径 / 113 方法** / 27 业务表。
+origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）。用户记忆 MCP 已落地（rmcp Streamable HTTP `/mcp`，九工具）。cargo **187** 测试（38 套件）/ **30 迁移** / **89 路径 / 114 方法** / 27 业务表。
 项目记忆第五域落地（三表 + 15 端点 + 唯一约束）+ 根 README 美化。**数据已由所有者主动清空，本地库已清理**。
 
 ## 当日验证矩阵
@@ -13,8 +13,8 @@ origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）
 |---|---|
 | cargo fmt --check | exit 0 |
 | cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
-| cargo test --workspace | 181 passed / 0 failed（37 套件） |
-| cargo run -q -p engram-api --bin openapi-dump | 88 路径 / 113 方法（GET 46/POST 47/PUT 7/PATCH 3/DELETE 10） |
+| cargo test --workspace | 187 passed / 0 failed（38 套件） |
+| cargo run -q -p engram-api --bin openapi-dump | 89 路径 / 114 方法（GET 47/POST 47/PUT 7/PATCH 3/DELETE 10） |
 
 ## 2026-08-30 基线以来的落地（按主题）
 

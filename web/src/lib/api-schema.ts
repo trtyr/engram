@@ -1119,6 +1119,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** MCP 服务信息（Web 控制台「MCP」页：端点、协议版本、工具清单）。 */
+        get: operations["settings_mcp"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wiki/documents": {
         parameters: {
             query?: never;
@@ -1978,6 +1995,23 @@ export interface components {
         LoginResponse: {
             /** @description 会话 token（ams_ 前缀，7 天有效；只在登录响应出现一次） */
             token: string;
+        };
+        McpInfo: {
+            /** @description MCP 端点路径（相对服务根） */
+            endpoint: string;
+            /** @description initialize 时下发给调用方 AI 的使用说明（与工具面同源展示） */
+            instructions: string;
+            /** @description MCP 协议版本 */
+            protocol_version: string;
+            server_name: string;
+            server_version: string;
+            tools: components["schemas"]["McpToolInfo"][];
+        };
+        McpToolInfo: {
+            description: string;
+            destructive?: boolean | null;
+            name: string;
+            read_only?: boolean | null;
         };
         MergeEntityRequest: {
             /**
@@ -4341,6 +4375,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutingTable"];
+                };
+            };
+        };
+    };
+    settings_mcp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpInfo"];
                 };
             };
         };

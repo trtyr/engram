@@ -1,0 +1,574 @@
+//! MCP 端点集成测试：JSON-RPC 全链路（initialize → tools/list → tools/call）。
+//! 全链路：真 PG + 完整 router + Bearer 中间件 + rmcp Streamable HTTP 服务。
+
+mod support;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use engram_api::routes;
+use engram_api::state::AppState;
+use serde_json::{Value, json};
+use tower::util::ServiceExt;
+
+async fn app() -> (Router, support::TestPg) {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
+
+    let state = AppState::new(pool)
+        .with_admin_password(Some("test-admin-pw".into()))
+        .with_master_key(Some("ab".repeat(32)));
+    (routes::router(state), container)
+}
+
+async fn login_token(app: &Router) -> String {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"password":"test-admin-pw"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    v["token"].as_str().unwrap().to_string()
+}
+
+async fn create_key(app: &Router, token: &str, scopes: &[&str]) -> String {
+    let scopes_json = serde_json::json!(scopes);
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(format!(
+                    r#"{{"name":"mcp-test","scopes":{scopes_json}}}"#
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "签发 key 应成功");
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    v["key"].as_str().unwrap().to_string()
+}
+
+/// 向 /mcp 发一条 JSON-RPC 请求，返回 HTTP 状态 + 响应 JSON（无状态模式：纯 JSON 响应）。
+async fn mcp_rpc(app: &Router, auth: &str, payload: Value) -> (StatusCode, Value) {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("content-type", "application/json")
+                .header("accept", "application/json, text/event-stream")
+                .header("host", "localhost")
+                .header("authorization", format!("Bearer {auth}"))
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body)
+        .unwrap_or_else(|e| panic!("响应应为 JSON：{e}\n{}", String::from_utf8_lossy(&body)));
+    (status, v)
+}
+
+fn rpc(id: i64, method: &str, params: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+}
+
+/// 从 JSON-RPC 响应取 result（报 panic 带上下文）。
+fn expect_result(v: &Value, what: &str) -> Value {
+    assert!(
+        v.get("error").is_none(),
+        "{what} 不应报错：{}",
+        v.get("error").unwrap_or(&Value::Null)
+    );
+    v["result"].clone()
+}
+
+#[tokio::test]
+async fn mcp_unauthorized_without_credentials() {
+    let (app, _pg) = app().await;
+    // 无凭证 → 401（Bearer 中间件在 MCP 层之前拦截）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("content-type", "application/json")
+                .header("accept", "application/json, text/event-stream")
+                .header("host", "localhost")
+                .body(Body::from(rpc(1, "initialize", json!({})).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    // 坏凭证 → 401
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("content-type", "application/json")
+                .header("accept", "application/json, text/event-stream")
+                .header("host", "localhost")
+                .header("authorization", "Bearer amk_bogus")
+                .body(Body::from(rpc(1, "initialize", json!({})).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn mcp_initialize_and_list_tools() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["memory"]).await;
+
+    let (status, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "0.1.0"}
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let result = expect_result(&v, "initialize");
+    assert_eq!(result["serverInfo"]["name"], "engram");
+    assert!(
+        result["instructions"]
+            .as_str()
+            .unwrap_or("")
+            .contains("memory_context"),
+        "instructions 应包含使用时机说明"
+    );
+
+    let (_, v) = mcp_rpc(&app, &key, rpc(2, "tools/list", json!({}))).await;
+    let tools = expect_result(&v, "tools/list")["tools"]
+        .as_array()
+        .expect("tools 数组")
+        .clone();
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    for expected in [
+        "memory_context",
+        "memory_search",
+        "memory_list_atoms",
+        "memory_list_sessions",
+        "memory_get_session",
+        "memory_write_session",
+        "memory_append_session",
+        "memory_forget",
+        "memory_entities",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "tools/list 缺少 {expected}：{names:?}"
+        );
+    }
+    // 只读工具应带 readOnlyHint 注解
+    let search = tools.iter().find(|t| t["name"] == "memory_search").unwrap();
+    assert_eq!(search["annotations"]["readOnlyHint"], json!(true));
+    let forget = tools.iter().find(|t| t["name"] == "memory_forget").unwrap();
+    assert_eq!(forget["annotations"]["destructiveHint"], json!(true));
+}
+
+#[tokio::test]
+async fn mcp_tool_call_write_search_forget_journey() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["memory"]).await;
+
+    // initialize（无状态模式下每条请求独立，但客户端仍按规范先 initialize）
+    let (status, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "0.1.0"}
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    expect_result(&v, "initialize");
+
+    // 写会话（agent 归因缺省取 key 名 mcp-test）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            2,
+            "tools/call",
+            json!({
+                "name": "memory_write_session",
+                "arguments": {
+                    "turns": [
+                        {"speaker": "user", "text": "我叫特让他也让，我在开发 Engram 记忆系统"},
+                        {"speaker": "assistant", "text": "好的，我记住了。"}
+                    ]
+                }
+            }),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call write_session");
+    assert!(
+        !out["isError"].as_bool().unwrap_or(false),
+        "write_session 不应报错：{out}"
+    );
+    let content_text = out["content"][0]["text"].as_str().expect("文本内容");
+    let session: Value = serde_json::from_str(content_text).expect("SessionDto JSON");
+    assert_eq!(session["agent"], "mcp-test", "agent 归因应取 key 名");
+
+    // 上下文包（无蒸馏产物 → 各层为空但结构完整）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            4,
+            "tools/call",
+            json!({"name": "memory_context", "arguments": {}}),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call context");
+    let content_text = out["content"][0]["text"].as_str().expect("文本内容");
+    let pack: Value = serde_json::from_str(content_text).expect("ContextPack JSON");
+    assert!(pack.get("meta").is_some(), "ContextPack 应含 meta");
+
+    // 遗忘（void：蒸馏跳过、原文保留）
+    let session_id = session["id"].as_str().unwrap().to_string();
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            5,
+            "tools/call",
+            json!({
+                "name": "memory_forget",
+                "arguments": {"session_id": session_id, "mode": "void"}
+            }),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call forget void");
+    assert!(
+        !out["isError"].as_bool().unwrap_or(false),
+        "void 遗忘不应报错：{out}"
+    );
+}
+
+#[tokio::test]
+async fn mcp_tool_call_l0_read_chain() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["memory"]).await;
+
+    // initialize
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "0.1.0"}
+            }),
+        ),
+    )
+    .await;
+    expect_result(&v, "initialize");
+
+    // 写会话（distill=off，测试环境无 LLM——L1/L2 蒸馏由带 stub 的蒸馏域测试覆盖）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            2,
+            "tools/call",
+            json!({
+                "name": "memory_write_session",
+                "arguments": {
+                    "distill": "off",
+                    "turns": [
+                        {"speaker": "user", "text": "我在开发 Engram 记忆系统"},
+                        {"speaker": "assistant", "text": "好的。"}
+                    ]
+                }
+            }),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call write_session");
+    let content_text = out["content"][0]["text"].as_str().expect("文本内容");
+    let session: Value = serde_json::from_str(content_text).expect("SessionDto JSON");
+    assert_eq!(session["agent"], "mcp-test");
+    let session_id = session["id"].as_str().unwrap().to_string();
+
+    // list_sessions 应看到它
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            3,
+            "tools/call",
+            json!({"name": "memory_list_sessions", "arguments": {}}),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call list_sessions");
+    let sessions: Value =
+        serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(
+        sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == session["id"]),
+        "list_sessions 应包含刚写的会话：{sessions}"
+    );
+
+    // get_session 逐轮原文
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            4,
+            "tools/call",
+            json!({"name": "memory_get_session", "arguments": {"session_id": session_id}}),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call get_session");
+    let got: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(got["id"], session["id"]);
+
+    // 追加轮次
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            5,
+            "tools/call",
+            json!({
+                "name": "memory_append_session",
+                "arguments": {
+                    "session_id": session_id,
+                    "distill": "off",
+                    "turns": [{"speaker": "user", "text": "补充一句"}]
+                }
+            }),
+        ),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call append_session");
+    assert!(!out["isError"].as_bool().unwrap_or(false));
+
+    // 实体检索工具可执行（空库合法）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            6,
+            "tools/call",
+            json!({"name": "memory_entities", "arguments": {"q": "Engram"}}),
+        ),
+    )
+    .await;
+    expect_result(&v, "tools/call entities");
+
+    // 检索工具可执行（无蒸馏产物 → 空结果合法）
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            7,
+            "tools/call",
+            json!({"name": "memory_search", "arguments": {"query": "Engram"}}),
+        ),
+    )
+    .await;
+    expect_result(&v, "tools/call search");
+}
+
+#[tokio::test]
+async fn mcp_scope_enforcement() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // 无 memory scope 的 key：能过认证，但工具面拒绝
+    let wiki_key = create_key(&app, &admin, &["wiki"]).await;
+    let (status, v) = mcp_rpc(&app, &wiki_key, rpc(1, "tools/list", json!({}))).await;
+    // tools/list 是协议能力（不含业务数据），放行
+    assert_eq!(status, StatusCode::OK);
+    expect_result(&v, "tools/list");
+
+    let (status, v) = mcp_rpc(
+        &app,
+        &wiki_key,
+        rpc(
+            2,
+            "tools/call",
+            json!({
+                "name": "memory_search",
+                "arguments": {"query": "test"}
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "业务拒绝在 JSON-RPC 错误层，不在 HTTP 层"
+    );
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("memory scope"),
+        "应报缺少 memory scope：{v}"
+    );
+
+    // erase 工具面分权：无 erase scope 的 key 用 erase 模式被拒
+    let mem_key = create_key(&app, &admin, &["memory"]).await;
+    // 先造一个会话（走 HTTP API 直写）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/memory/sessions")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {mem_key}"))
+                .body(Body::from(
+                    r#"{"turns":[{"speaker":"user","text":"erase target"}],"distill":"off"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let session: Value = serde_json::from_slice(&body).unwrap();
+    let session_id = session["id"].as_str().unwrap().to_string();
+
+    let (_, v) = mcp_rpc(
+        &app,
+        &mem_key,
+        rpc(
+            3,
+            "tools/call",
+            json!({
+                "name": "memory_forget",
+                "arguments": {"session_id": session_id, "mode": "erase"}
+            }),
+        ),
+    )
+    .await;
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("erase"),
+        "erase 模式需要 erase scope：{v}"
+    );
+
+    // void 模式同 key 可用（memory scope 足够）
+    let (_, v) = mcp_rpc(
+        &app,
+        &mem_key,
+        rpc(
+            4,
+            "tools/call",
+            json!({
+                "name": "memory_forget",
+                "arguments": {"session_id": session_id, "mode": "void"}
+            }),
+        ),
+    )
+    .await;
+    expect_result(&v, "tools/call forget void");
+}
+
+#[tokio::test]
+async fn mcp_admin_info_endpoint() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/settings/mcp")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let info: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(info["endpoint"], "/mcp");
+    assert_eq!(info["server_name"], "engram");
+    let tools = info["tools"].as_array().expect("工具清单");
+    assert!(tools.len() >= 9, "工具清单应与 MCP 层同源：{}", tools.len());
+
+    // 非 admin 拒绝
+    let key = create_key(&app, &admin, &["memory"]).await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/settings/mcp")
+                .header("authorization", format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}

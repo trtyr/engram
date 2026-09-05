@@ -8,11 +8,11 @@
 ```text
 ┌────────────────────────── 浏览器 ──────────────────────────┐
 │  Engram SPA（web/，React 19）                              │
-│  八页（概览/记忆/圈子/Wiki/图谱/项目/任务/设置）+ 壳          │
+│  九页（概览/记忆/圈子/Wiki/图谱/项目/任务/MCP/设置）+ 壳      │
 └───────────────┬────────────────────────────────────────────┘
                 │ 同源 fetch（Bearer ams_/amk_）
 ┌───────────────▼──────────────── engram-server ───────┐
-│ axum Router（88 路径 / 113 方法）                           │
+│ axum Router（89 路径 / 114 方法）+ MCP /mcp（rmcp）          │
 │ ├─ 认证层 bearer_auth（/jobs 对 text/html 分流回 SPA）       │
 │ ├─ rust-embed：web/dist 静态托管（生产单二进制）             │
 │ └─ 域 crate：distill / wiki-engine / cg-bridge / search     │

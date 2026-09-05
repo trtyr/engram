@@ -14,6 +14,7 @@ import {
   Network,
   PanelLeftClose,
   PanelLeftOpen,
+  Plug,
   Search,
   Settings as SettingsIcon,
   Users,
@@ -36,6 +37,7 @@ const Projects = lazy(() => import('@/features/Projects'))
 const ProjectDetail = lazy(() => import('@/features/ProjectDetail'))
 const Jobs = lazy(() => import('@/features/Jobs'))
 const Settings = lazy(() => import('@/features/Settings'))
+const Mcp = lazy(() => import('@/features/Mcp'))
 
 type NavItem = {
   to: string
@@ -65,6 +67,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
     label: '系统',
     items: [
       { to: '/jobs', label: '任务', icon: ListChecks, badge: (s) => s.failed || null },
+      { to: '/mcp', label: 'MCP', icon: Plug },
       { to: '/settings', label: '设置', icon: SettingsIcon },
     ],
   },
@@ -312,6 +315,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/jobs" element={<Jobs />} />
+              <Route path="/mcp" element={<Mcp />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </Suspense>

@@ -66,6 +66,10 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 anyhow = "1"
 
+# MCP（官方 Rust SDK：Streamable HTTP 服务端，宿主于 engram-server /mcp）
+rmcp = { version = "3", features = ["server", "transport-streamable-http-server", "macros"] }
+schemars = "1"
+
 # LLM crate
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 aes-gcm = "0.10"

@@ -29,7 +29,7 @@ export default defineConfig({
   // 开发时后端在 :8080（compose 或 cargo run）
   server: {
     proxy: Object.fromEntries(
-      ['/api', '/auth', '/jobs', '/memory', '/wiki', '/codegraph', '/settings', '/llm'].map(
+      ['/api', '/auth', '/jobs', '/memory', '/mcp', '/wiki', '/codegraph', '/settings', '/llm'].map(
         (p) => [p, process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080'],
       ),
     ),

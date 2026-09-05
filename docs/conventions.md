@@ -12,7 +12,7 @@
 
 | 门 | 内容 |
 |---|---|
-| backend | fmt → clippy(-D warnings) → test(181)；pgvector service；`mkdir -p ../web/dist` 占位 |
+| backend | fmt → clippy(-D warnings) → test(187)；pgvector service；`mkdir -p ../web/dist` 占位 |
 | web | oxlint（0 警告）→ tsc → vitest(42) → build |
 | api-types | OpenAPI 导出 → 生成 → 与 api-schema.ts 零漂移 |
 | docker | 多阶段镜像构建 |

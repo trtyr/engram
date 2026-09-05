@@ -30,6 +30,7 @@ use utoipa::OpenApi;
         llm_api::get_routing, llm_api::put_routing, llm_api::suggest_routing, llm_api::usage,
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
         llm_api::batch_revoke_api_keys,
+        crate::mcp::settings_mcp,
         memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
         memory_api::erase_session, memory_api::append_session, memory_api::import_session, memory_api::void_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
@@ -75,6 +76,9 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/login", post(auth_api::login_handler));
 
     let authed = Router::new()
+        // MCP（用户记忆域工具面）：nest 在 authed 内 → 复用 Bearer 中间件，
+        // 每个 JSON-RPC 请求独立认证（key 吊销即刻生效，会话保活不能豁免）
+        .nest_service("/mcp", crate::mcp::service(state.clone()))
         .route("/jobs", get(jobs_api::list_jobs))
         .route("/jobs/{id}", get(jobs_api::get_job))
         .route("/jobs/{id}/events", get(jobs_api::get_job_events))
@@ -115,6 +119,7 @@ pub fn router(state: AppState) -> Router {
             "/settings/api-keys/batch-revoke",
             post(llm_api::batch_revoke_api_keys),
         )
+        .route("/settings/mcp", get(crate::mcp::settings_mcp))
         .route("/llm/usage", get(llm_api::usage))
         .route("/memory/sessions/import", post(memory_api::import_session))
         .route(

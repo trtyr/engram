@@ -1331,6 +1331,7 @@ async fn openapi_snapshot() {
             "/settings/llm/providers/{id}/test",
             "/settings/llm/routing",
             "/settings/llm/routing/suggest",
+            "/settings/mcp",
             "/wiki/documents",
             "/wiki/documents/search",
             "/wiki/documents/{id}",

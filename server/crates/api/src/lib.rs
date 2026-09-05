@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod mcp;
 pub mod routes;
 pub mod state;
 pub mod web_assets;

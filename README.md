@@ -52,7 +52,7 @@ Rust (axum) 单二进制 ──同源托管──▶ React 19 SPA（Engram 控�
 ```
 
 - **后端**：Rust workspace 10 crates（`engram-api` / `engram-core` / `engram-storage` / `engram-wiki-engine` / …），axum + sqlx + pgvector，rust-embed 托管前端。
-- **前端**：React 19 + TypeScript + Vite 8 + Tailwind 4，八页 SPA（概览/用户记忆/圈子/Wiki/代码图谱/项目/任务/设置），墨白双主题。
+- **前端**：React 19 + TypeScript + Vite 8 + Tailwind 4，九页 SPA（概览/用户记忆/圈子/Wiki/代码图谱/项目/任务/MCP/设置），墨白双主题。
 - **单二进制单端口**：一个 `engram-server` 交付前后端，本地/Docker 单机部署。
 
 ## 🚀 快速上手
@@ -79,6 +79,28 @@ AGENT_MEMORY_MASTER_KEY=$(python3 -c "print('ab'*32)") \
 # 前端（dev server）
 cd web && pnpm install && pnpm dev
 ```
+
+## 🔌 MCP 接入（用户记忆域）
+
+engram-server 内置 MCP（Model Context Protocol）服务端（官方 Rust SDK `rmcp`，Streamable HTTP），
+让 Claude Code / Cursor / Claude Desktop 等 AI 客户端直接操纵你的用户记忆：
+
+- **端点**：`http://<host>:8080/mcp`（鉴权：`Authorization: Bearer amk_…`，memory scope）
+- **九个工具**：`memory_context`（冷启动上下文包）/ `memory_search` / `memory_list_atoms` /
+  `memory_list_sessions` / `memory_get_session` / `memory_write_session` / `memory_append_session` /
+  `memory_forget` / `memory_entities`——instructions 与工具描述写明调用时机与编辑分权
+  （AI 只写会话，蒸馏沉淀为 L1~L3；改写语义内容是用户专属）
+- **管理**：控制台「MCP」页一键复制 Claude Code / Cursor / Claude Desktop 连接配置、
+  签发 MCP 专用密钥（scope 可选）
+
+Claude Code 快速接入：
+
+```bash
+claude mcp add --transport http engram http://localhost:8080/mcp \
+  --header "Authorization: Bearer amk_你的密钥"
+```
+
+> 远程部署需放开 Host 白名单：`AGENT_MEMORY_MCP_ALLOWED_HOSTS=mem.example.com`（默认仅 loopback，防 DNS rebinding）。
 
 门禁（当日全绿命令）：
 

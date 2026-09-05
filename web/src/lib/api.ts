@@ -309,6 +309,20 @@ export interface ApiKey {
   last_used_at: string | null
   revoked_at: string | null
 }
+export interface McpToolInfo {
+  name: string
+  description: string
+  read_only: boolean | null
+  destructive: boolean | null
+}
+export interface McpInfo {
+  endpoint: string
+  protocol_version: string
+  server_name: string
+  server_version: string
+  instructions: string
+  tools: McpToolInfo[]
+}
 export interface UnifiedHit {
   id: string
   domain: string
