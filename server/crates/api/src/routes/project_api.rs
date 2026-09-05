@@ -2,13 +2,13 @@
 //!
 //! 设计：docs/plantree/plans/project-memory/（0005 三表模型，双入口平等）。
 
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use engram_core::project::{
     ProjectDetailDto, ProjectDocDto, ProjectDto, ProjectError, ProjectLocationDto, ProjectService,
     ProjectTypeDto,
 };
-use axum::Json;
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;

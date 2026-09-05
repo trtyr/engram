@@ -3,12 +3,12 @@
 
 mod support;
 
+use axum::Json;
+use axum::routing::post;
 use engram_llm::KeyCipher;
 use engram_llm::provider::{LlmProvider, OpenAiCompatProvider, ProviderRegistry};
 use engram_llm::router::{PurposeRouter, RouteRule, RoutingTable};
 use engram_llm::types::{EmbedRequest, Purpose};
-use axum::Json;
-use axum::routing::post;
 
 /// 起 mock OpenAI 兼容端点（/v1/chat/completions + /v1/embeddings）。
 /// 返回 base_url。
@@ -49,9 +49,7 @@ async fn setup() -> (support::TestPg, ProviderRegistry, PurposeRouter) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
     (
         container,

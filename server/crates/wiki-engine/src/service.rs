@@ -1,10 +1,10 @@
 //! Wiki 服务层：页面 CRUD、图数据、ingest 入口、lint 调用。
 
+use chrono::{DateTime, Utc};
 use engram_jobs::{JobQueue, JobTemplate};
 use engram_llm::ProviderRegistry;
 use engram_llm::types::Purpose;
 use engram_search::tokenize::tsv_text;
-use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::ingest;

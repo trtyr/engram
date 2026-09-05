@@ -12,9 +12,7 @@ async fn setup() -> (support::TestPg, JobQueue, sqlx::PgPool, String) {
     let container = support::start_pgvector().await.expect("启动容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     (container, JobQueue::new(pool.clone()), pool, url)
 }
 

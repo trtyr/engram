@@ -66,8 +66,7 @@ pub async fn connection_url(t: &TestPg) -> anyhow::Result<String> {
 pub async fn connect_with_retry(url: &str) -> anyhow::Result<PgPool> {
     // 库已建好，正常一次即连；保留重试壳兼容旧签名
     for _ in 0..10 {
-        if let Ok(pool) =
-            engram_storage::connect_pool(&engram_storage::PoolConfig::new(url)).await
+        if let Ok(pool) = engram_storage::connect_pool(&engram_storage::PoolConfig::new(url)).await
             && sqlx::query("SELECT 1").execute(&pool).await.is_ok()
         {
             return Ok(pool);

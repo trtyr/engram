@@ -5,6 +5,7 @@
 ## 一句话状态
 
 origin/main 产品更名 Engram 完成（仓库 trtyr/engram + crate engram-*）。用户记忆 MCP 已落地（rmcp Streamable HTTP `/mcp`，九工具）。cargo **189** 测试（38 套件）/ **30 迁移** / **89 路径 / 114 方法** / 27 业务表。
+feat/wiki-mcp 分支：MCP 扩为双域（memory 九工具 + wiki 八工具 = 17），cargo **193** 测试。
 项目记忆第五域落地（三表 + 15 端点 + 唯一约束）+ 根 README 美化。**数据已由所有者主动清空，本地库已清理**。
 
 ## 当日验证矩阵

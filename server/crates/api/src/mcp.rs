@@ -1,9 +1,11 @@
-//! MCP（Model Context Protocol）服务端：用户记忆域工具面。
+//! MCP（Model Context Protocol）服务端：用户记忆域 + Wiki 域工具面。
 //!
 //! 官方 Rust SDK（rmcp）Streamable HTTP 传输，宿主于 engram-server 的 `/mcp` 端点。
-//! 鉴权复用 Bearer 中间件（amk_ key / ams_ 会话）：每个工具调用请求都过 `bearer_auth`，
-//! Principal 已注入 request extensions；rmcp 把 HTTP request Parts 注入工具上下文，
-//! 工具实现从这里取 Principal 做与 HTTP API 同一套的 scope / 编辑分权检查。
+//! 单服务器多域：工具名前缀即域（memory_* / wiki_*，管理台按域分组），
+//! 各域工具在调用时检查各自 scope。鉴权复用 Bearer 中间件（amk_ key / ams_ 会话）：
+//! 每个工具调用请求都过 `bearer_auth`，Principal 已注入 request extensions；
+//! rmcp 把 HTTP request Parts 注入工具上下文，工具实现从这里取 Principal
+//! 做与 HTTP API 同一套的 scope / 编辑分权检查。
 //! key 吊销即刻生效（每个请求独立认证，会话保活也不能豁免）。
 
 use rmcp::ServerHandler;
@@ -26,11 +28,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::auth::Principal;
+use crate::mcp_wiki as wiki;
 use crate::state::AppState;
 use axum::response::IntoResponse;
 
 /// 错误桥：把本模块的错误统一成 MCP ErrorData。
-fn mcp_err(code: ErrorCode, msg: impl Into<String>) -> rmcp::ErrorData {
+pub(crate) fn mcp_err(code: ErrorCode, msg: impl Into<String>) -> rmcp::ErrorData {
     rmcp::ErrorData::new(code, msg.into(), None)
 }
 
@@ -265,14 +268,14 @@ pub struct EntitiesParams {
 
 // ---------- MCP 服务器 ----------
 
-/// Engram 用户记忆 MCP 服务器。工具实现直调 MemoryService（进程内，不走 HTTP 回环）。
+/// Engram MCP 服务器（用户记忆域 + Wiki 域）。工具实现进程内直调各域 service（不走 HTTP 回环）。
 #[derive(Clone)]
-pub struct MemoryMcpServer {
+pub struct EngramMcpServer {
     state: AppState,
     tool_router: ToolRouter<Self>,
 }
 
-impl MemoryMcpServer {
+impl EngramMcpServer {
     pub fn new(state: AppState) -> Self {
         Self {
             state,
@@ -286,7 +289,7 @@ impl MemoryMcpServer {
 }
 
 #[tool_router]
-impl MemoryMcpServer {
+impl EngramMcpServer {
     /// 装载用户记忆上下文包（L3 画像 + L2 场景 + L1 原子事实 + 实体，按预算裁剪）。
     ///
     /// 何时用：会话开始时调用一次，冷启动装载「这个用户是谁、在忙什么、有什么偏好与约束」。
@@ -608,31 +611,298 @@ impl MemoryMcpServer {
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
         ok_json(serde_json::to_value(&hits).unwrap_or(serde_json::json!([])))
     }
+
+    // ---------- Wiki 域（wiki scope；实现细节见 mcp_wiki.rs） ----------
+
+    /// Wiki 检索（FTS + 向量 RRF 融合，带 wiki 方向意图 purpose）。
+    ///
+    /// 何时用：需要查证「世界知识」（用户 Wiki 里沉淀的文档、概念、实体、问答）时。
+    /// 何时不用：回忆「用户本人」的偏好/事实/经历用 memory_search——那是用户记忆域。
+    /// 返回 {purpose, pages}：purpose 是 wiki 的研究方向意图（未设为 null），
+    /// pages 为命中页面全文；写作前先检索可避免造重复页面。
+    #[tool(
+        name = "wiki_search",
+        annotations(
+            title = "检索 Wiki",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_search(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiSearchParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let wp = params.0;
+        let result = wiki::svc(&self.state)
+            .search_with_purpose(&wp.query, wp.max_items.unwrap_or(20))
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(result)
+    }
+
+    /// 浏览 Wiki 页面列表（可按页型过滤；列表不带正文）。
+    ///
+    /// 何时用：想系统性看看 Wiki 里有什么（而非定向检索）时；读全文用 wiki_get_page。
+    #[tool(
+        name = "wiki_list_pages",
+        annotations(
+            title = "列出 Wiki 页面",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_list_pages(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiListPagesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lp = params.0;
+        let pages = wiki::svc(&self.state)
+            .list_pages(lp.page_type.as_deref(), lp.limit.unwrap_or(100))
+            .await
+            .map_err(wiki::from_wiki)?;
+        let values: Vec<serde_json::Value> = serde_json::to_value(&pages)
+            .unwrap_or(serde_json::json!([]))
+            .as_array()
+            .map(|a| a.iter().map(wiki::trim_page).collect())
+            .unwrap_or_default();
+        ok_json(serde_json::to_value(&values).unwrap_or(serde_json::json!([])))
+    }
+
+    /// 读取一个 Wiki 页面全文（含 frontmatter 与版本）。
+    ///
+    /// 何时用：wiki_search / wiki_list_pages 定位到页面后需要读全文时。
+    #[tool(
+        name = "wiki_get_page",
+        annotations(
+            title = "读取 Wiki 页面",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_get_page(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiGetPageParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let page = wiki::svc(&self.state)
+            .get_page(&params.0.slug)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::to_value(&page).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 写入 / 更新一个 Wiki 页面（AI 通道，frontmatter.via 落 "ai" 标记）。
+    ///
+    /// 何时用：用户明确要求「把……记到 Wiki / 写个页面」时，把结构化的知识沉淀成页面
+    /// （Markdown + [[wikilink]]）。已存在同 slug 页面则整体覆盖更新（版本 +1）。
+    /// 注意：这是覆盖式写入——更新既有页面前先用 wiki_get_page 读原文，别盲目覆盖；
+    /// 临时性的问答结论更适合 wiki_archive_query 而非手搓页面。
+    #[tool(
+        name = "wiki_write_page",
+        annotations(
+            title = "写入 Wiki 页面",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_write_page(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiWritePageParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let wp = params.0;
+        let page = wiki::svc(&self.state)
+            .put_page(
+                &wp.slug,
+                &wp.title,
+                &wp.content,
+                wp.folder.as_deref(),
+                Some("ai"),
+            )
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::to_value(&page).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 把一段源文本织入 Wiki（异步：入队 LLM 流水线，自动抽取实体/概念并互链）。
+    ///
+    /// 何时用：有一篇完整文档 / 长文本值得沉淀进知识库时。内容相同（sha 命中）会跳过。
+    /// 注意：织入是异步任务（前端「任务」页可见），立即返回 skipped 只代表入队/去重结果；
+    /// 单条问答式的结论用 wiki_archive_query 更合适。
+    #[tool(
+        name = "wiki_ingest",
+        annotations(
+            title = "织入 Wiki 来源",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_ingest(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiIngestParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let wp = params.0;
+        let skipped = wiki::svc(&self.state)
+            .ingest(&wp.title, &wp.text)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::json!({
+            "skipped": skipped,
+            "async": true,
+            "message": if skipped {
+                "内容已存在（sha 命中），本次跳过"
+            } else {
+                "已入队织入任务——LLM 流水线异步处理，稍后可在 Wiki 页面看到产物"
+            }
+        }))
+    }
+
+    /// 把一条问答（问 + 答）存档为 queries 页并自动再摄取。
+    ///
+    /// 何时用：一次检索/讨论得出值得长期保留的结论时，落成「查询」页沉淀。
+    /// 同标题已存档 → 幂等跳过（skipped=true），不会重复烧 LLM。
+    #[tool(
+        name = "wiki_archive_query",
+        annotations(
+            title = "存档问答",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_archive_query(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiArchiveQueryParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let qp = params.0;
+        let skipped = wiki::svc(&self.state)
+            .archive_query(&qp.title, &qp.question, &qp.answer)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::json!({
+            "skipped": skipped,
+            "async": true,
+            "message": if skipped {
+                "同标题已存档，本次跳过"
+            } else {
+                "已落 queries 页并入队再摄取"
+            }
+        }))
+    }
+
+    /// Wiki 链接图全貌（节点 = 页面，边 = [[wikilink]]，含社区划分）。
+    ///
+    /// 何时用：写页面前了解现有结构、找相关页面、看知识网络长什么样。
+    /// 页面很多时输出较大——粗看结构够用，定位具体页面用 wiki_search。
+    #[tool(
+        name = "wiki_graph",
+        annotations(
+            title = "Wiki 链接图",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_graph(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        _params: Parameters<wiki::WikiNoParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let graph = wiki::svc(&self.state)
+            .graph()
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::to_value(&graph).unwrap_or(serde_json::json!({})))
+    }
+
+    /// Wiki 健康检查（死链、孤页、缺源等 lint 报告）。
+    ///
+    /// 何时用：怀疑 Wiki 结构有问题（失效双链、孤立页面）时体检；只报告不修改。
+    #[tool(
+        name = "wiki_lint",
+        annotations(
+            title = "Wiki 健康检查",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_lint(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        _params: Parameters<wiki::WikiNoParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let report = wiki::svc(&self.state)
+            .lint()
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
+    }
 }
 
 /// MCP instructions：initialize 时返回给调用方 AI 的顶层使用说明。
 const SERVER_INSTRUCTIONS: &str = "\
-Engram —— 用户长期记忆平台（用户记忆域 MCP）。
+Engram —— 用户长期记忆平台 MCP（用户记忆域 + Wiki 域）。
 
-记忆分四层蒸馏：L0 原始会话 →（蒸馏）→ L1 原子事实 → L2 场景模式 → L3 用户画像；\
+【用户记忆域】记忆分四层蒸馏：L0 原始会话 →（蒸馏）→ L1 原子事实 → L2 场景模式 → L3 用户画像；\
 另有实体坐标系（人物/项目/主题/群组/地点）横向串联记忆。全部记忆可溯源、可遗忘。
-
 使用时机：
 1. 会话开始：调用 memory_context 装载用户画像与近期记忆，再开始对话；
 2. 对话中需要背景：用 memory_search 定向回忆，或 memory_entities 按人/项目/主题查档案；
 3. 会话收尾：用 memory_write_session 把值得长期记住的对话写入（蒸馏自动沉淀为结构化记忆）；
    长对话可分段 memory_append_session 追加；
 4. 用户明确表达遗忘：「别记住这个」→ memory_forget。
-
 分权规则（务必遵守）：
 - 你的写入通道只有「写会话」：事实抽取、画像更新、实体维护全部由蒸馏完成；
 - 直接改写记忆语义内容（原子内容、画像分面、实体档案）是用户专属权限，MCP 工具面不提供；
 - 纠错也走会话：把正确的表述写成对话（correction 语义），蒸馏会自动生成取代链；
-- 敏感对话（医疗/感情/财务等）写入时置 sensitive=true，默认不进检索与上下文。\
+- 敏感对话（医疗/感情/财务等）写入时置 sensitive=true，默认不进检索与上下文。
+
+【Wiki 域】世界知识库：Markdown 页面 + [[wikilink]] 互链 + 混合检索（FTS + 向量）。
+使用时机：
+1. 需要查证事实性知识（文档、概念、实体、既往问答）→ wiki_search；
+2. 浏览结构：wiki_list_pages / wiki_graph，读全文 wiki_get_page；
+3. 用户要求把知识沉淀进 Wiki → 单条结论 wiki_archive_query，整篇文档 wiki_ingest（异步织入），
+   明确要页面则 wiki_write_page（更新前先 wiki_get_page 读原文，别盲目覆盖）；
+4. 怀疑结构问题（死链/孤页）→ wiki_lint。
+域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory_*；查证「客观知识」用 wiki_*。\
 ";
 
 #[tool_handler(router = self.tool_router)]
-impl ServerHandler for MemoryMcpServer {
+impl ServerHandler for EngramMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("engram", env!("CARGO_PKG_VERSION")))
@@ -691,7 +961,7 @@ impl ServerHandler for MemoryMcpServer {
 ///
 /// Host 白名单：SDK 默认只放行 loopback（防 DNS rebinding）；远程部署用
 /// `AGENT_MEMORY_MCP_ALLOWED_HOSTS`（逗号分隔，如 `mem.example.com,mem.example.com:8080`）放开。
-pub fn service(state: AppState) -> StreamableHttpService<MemoryMcpServer, LocalSessionManager> {
+pub fn service(state: AppState) -> StreamableHttpService<EngramMcpServer, LocalSessionManager> {
     let mut config = StreamableHttpServerConfig::default();
     // 工具面是纯 request-response（无服务端主动通知）：全无状态 + JSON 响应最稳——
     // 每个请求独立认证、独立应答，无会话句柄依赖
@@ -709,7 +979,7 @@ pub fn service(state: AppState) -> StreamableHttpService<MemoryMcpServer, LocalS
         }
     }
     StreamableHttpService::new(
-        move || Ok(MemoryMcpServer::new(state.clone())),
+        move || Ok(EngramMcpServer::new(state.clone())),
         std::sync::Arc::new(LocalSessionManager::default()),
         config,
     )
@@ -824,7 +1094,7 @@ pub struct McpInfo {
 
 async fn build_info(pool: &sqlx::PgPool) -> McpInfo {
     let cfg = load_config(pool).await;
-    let router = MemoryMcpServer::tool_router();
+    let router = EngramMcpServer::tool_router();
     let tools = router
         .list_all()
         .into_iter()
@@ -887,7 +1157,7 @@ pub async fn settings_mcp_update(
     }
     if let Some(disabled) = req.disabled_tools {
         // 工具名校验：停用一个不存在的名字多半是调用方笔误，宁可 400
-        let known: Vec<String> = MemoryMcpServer::tool_router()
+        let known: Vec<String> = EngramMcpServer::tool_router()
             .list_all()
             .into_iter()
             .map(|t| t.name.to_string())

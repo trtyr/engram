@@ -15,9 +15,7 @@ async fn setup() -> (PgPool, MemoryService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let registry = ProviderRegistry::new(
         pool.clone(),
         KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
@@ -87,9 +85,7 @@ async fn search_hits_bump_hit_count() {
          ($1, '开发环境', '用户偏好 Rust', '完整描述', to_tsvector('simple', $2))",
     )
     .bind(sid)
-    .bind(engram_search::tokenize::tsv_text(
-        "开发环境 用户偏好 Rust",
-    ))
+    .bind(engram_search::tokenize::tsv_text("开发环境 用户偏好 Rust"))
     .execute(&pool)
     .await
     .unwrap();

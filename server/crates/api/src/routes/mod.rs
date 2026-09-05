@@ -4,12 +4,12 @@ pub mod auth_api;
 pub mod codegraph_api;
 pub mod health;
 pub mod jobs_api;
-pub mod wiki_docs_api;
 pub mod llm_api;
 pub mod memory_api;
 pub mod project_api;
 pub mod search_api;
 pub mod wiki_api;
+pub mod wiki_docs_api;
 
 use crate::state::AppState;
 use axum::middleware::from_fn_with_state;

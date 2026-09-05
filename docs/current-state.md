@@ -56,6 +56,8 @@ origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具�
 
 23. **MCP 管理面 + 密钥管理归位**（2026-09-05）：MCP 配置入 settings KV（key=`mcp`：enabled + disabled_tools，缺省全开无迁移）；`/mcp` 前置 gate 中间件——服务关闭对已认证客户端也 503（Bearer 之内、MCP 之前）；覆写 rmcp `list_tools`/`call_tool`——停用工具对 AI 隐身且调用被拒（管理端点仍展示全量）；`GET/PUT /settings/mcp`（PUT 校验未知工具名 400）；前端 MCP 页重排为管理台（状态条 + 域 Tabs 逐域工具开关列表，域归属后端同源 domain 字段），密钥管理收敛回设置页 Keys tab（签发表单补七 scope 选择器 + 表格 scopes 列）。验证：cargo 189（+2 toggle 用例）+ vitest 45（mcp.test 重写 3 用例）+ 真机冒烟（关服务 503 / 停用工具隐身+拒绝 / 恢复全开）。
 
+24. **Wiki 域 MCP**（2026-09-05，feat/wiki-mcp）：单服务器扩为双域（memory + wiki，工具名前缀即域，管理台按域分组自动出 Wiki tab）——`EngramMcpServer`（原 MemoryMcpServer 更名）新增八个 `wiki_*` 工具（mcp_wiki.rs 放参数结构/错误桥/实现辅助，`#[tool]` 方法落在 mcp.rs 同一 tool_router 块）：`wiki_search`（search_with_purpose 混合检索 + purpose）/ `wiki_list_pages`（瘦身去正文 content_omitted）/ `wiki_get_page`（slug 宽容匹配读全文）/ `wiki_write_page`（AI 通道 put_page，frontmatter.via="ai" 区分执行者；描述写明覆盖前先读原文）/ `wiki_ingest`（入队织入，返回 async=true 提示异步）/ `wiki_archive_query`（同标题幂等跳过）/ `wiki_graph` / `wiki_lint`；全部 wiki scope 分权（缺 scope 报 JSON-RPC 错误）；instructions 扩为双域（memory_* 管用户本人、wiki_* 管世界知识的域选择指引）；无参工具用空结构体 WikiNoParams（`Parameters<()>` schema 为 null 违反 MCP inputSchema 规范）。验证：cargo **193**（mcp_test 12 用例：wiki 工具清单/写读改搜列图 lint/问答存档幂等/织入/双域 scope 互拒/wiki 工具停用隐身+拒绝/管理台校验 wiki 工具名）+ vitest 46（mcp.test +1 Wiki 域 Tab 用例）+ 前端门禁四绿。
+
 ## 已知未了项
 
 - e2e key 表历史积压（journey 现已自撤新 key；历史 revoked 行留存无害）

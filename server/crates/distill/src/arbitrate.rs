@@ -90,9 +90,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                  WHERE status = 'active' AND tsv @@ q \
                  ORDER BY ts_rank(tsv, q) DESC LIMIT 5",
             )
-            .bind(engram_search::tokenize::tsv_query_smart(
-                &c.content, 3,
-            ))
+            .bind(engram_search::tokenize::tsv_query_smart(&c.content, 3))
             .fetch_all(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;

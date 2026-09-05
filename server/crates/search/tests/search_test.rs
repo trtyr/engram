@@ -10,9 +10,7 @@ async fn chinese_hybrid_search_hits() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
 
     // ≥10 条中文记忆样本
     let samples = [
@@ -76,9 +74,7 @@ async fn entity_token_search_prefers_name_hit() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
 
     sqlx::query("INSERT INTO entities (id, name, kind, summary) VALUES ($1, '张三', 'person', '同事，负责后端')")
         .bind(uuid::Uuid::new_v4()).execute(&pool).await.unwrap();
@@ -112,9 +108,7 @@ async fn search_demotes_expired_atoms() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
 
     // 同题材两条（同 content 保证基础分相同）：一条过期、一条未过期
     // search crate 无 chrono 依赖，valid_until 用 SQL now()±interval 表达
@@ -162,9 +156,7 @@ async fn search_filters_by_time_range() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
 
     // 三条同题材原子，occurred_at 分处 8/9/10 月
     for month in ["2026-08-15", "2026-09-15", "2026-10-15"] {
@@ -188,16 +180,9 @@ async fn search_filters_by_time_range() {
         chrono::DateTime::parse_from_rfc3339("2026-09-30T00:00:00Z")
             .unwrap()
             .into();
-    let hits = engram_search::search_atoms(
-        &pool,
-        "时间过滤测试",
-        None,
-        20,
-        false,
-        Some(from),
-        Some(to),
-    )
-    .await
-    .unwrap();
+    let hits =
+        engram_search::search_atoms(&pool, "时间过滤测试", None, 20, false, Some(from), Some(to))
+            .await
+            .unwrap();
     assert_eq!(hits.len(), 2, "8/15~9/30 窗内应命中 8 月和 9 月两条");
 }
