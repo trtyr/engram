@@ -1,6 +1,6 @@
 # Project Memory（项目记忆域）
 
-**状态：Landed（第一版落地 2026-09-04——三表 + 类型模板 + API + Web 列表/详情树状图；goal mtmmgwuu-d6g4rc 完成 + 独立 auditor 批准）**
+**状态：Landed（第一版落地 2026-09-04 + MCP 开放 2026-09-05——15 个 project_* 工具并入 /mcp + 精确寻址读；AI 入口定板见 0006）**
 
 agent-memory 第五域：围绕长期任务的跨会话工作上下文。本根记录概念对齐结论与落地进展。
 
@@ -11,6 +11,7 @@ agent-memory 第五域：围绕长期任务的跨会话工作上下文。本根�
 - **API**：15 endpoint（project scope 第八域，88 路径）
 - **Web**：列表页（CRUD/多选批量删除/类型筛选）+ 详情页（Wiki 式左树右内容树状图）
 - 验证：cargo 176/0、vitest 42/42、端到端 + 截图、docs 三层落档
+- **MCP 开放**（2026-09-05）：15 个 project_* 工具并入 `/mcp`（scope 分权、tools/list 按 key 过滤、名字寻址、补丁式更新）+ 精确寻址读（project_get 索引模式 / project_doc_search 行级搜索 / project_doc_get 区间精读，零截断）+ 审查修复（改名撞名 409、空名 400、跨项目寻址 404、孤儿分类下沉 service）。AI 入口定板：MCP 为正入口，memory.py 冻结备用，检测导入与 context pack 降级为约定（0006）。验证：cargo 201 + vitest 45 全绿 + 真机 JSON-RPC E2E。
 
 ## Scope
 
