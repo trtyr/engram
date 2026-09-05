@@ -213,7 +213,7 @@ pub struct WriteSessionParams {
     pub turns: Vec<Turn>,
     /// auto（默认，防抖自动蒸馏）| manual（立即蒸馏）| off
     #[schemars(
-        description = "蒸馏模式：\"auto\"（默认，写入后防抖自动蒸馏）/ \"manual\"（立即触发蒸馏）/ \"off\"（不蒸馏）。一般用默认。"
+        description = "蒸馏模式：\"auto\"（默认，写入后 ~30 秒窗口合并蒸馏）/ \"manual\"（立即触发蒸馏）/ \"off\"（**永久豁免**——该会话不会被任何自动或手动蒸馏扫到，适合只归档不提炼的内容）。一般用默认。"
     )]
     pub distill: Option<String>,
     /// 会话级敏感标记（医疗/感情/财务等隐私）：蒸馏产物继承，默认不进检索
@@ -237,7 +237,9 @@ pub struct AppendSessionParams {
     #[schemars(description = "追加的对话轮次数组（同 memory_write_session 的 turns）。")]
     pub turns: Vec<Turn>,
     /// auto（默认，防抖）| off
-    #[schemars(description = "蒸馏模式：\"auto\"（默认）/ \"off\"。")]
+    #[schemars(
+        description = "蒸馏模式：\"auto\"（默认，合并进 ~30 秒防抖窗）/ \"off\"（永久豁免蒸馏）。"
+    )]
     pub distill: Option<String>,
 }
 
@@ -248,7 +250,7 @@ pub struct ForgetParams {
     pub session_id: String,
     /// void（默认：蒸馏跳过，记录保留）| erase（需 erase scope：物理删除）
     #[schemars(
-        description = "遗忘力度：\"void\"（默认，「这段白记了」——蒸馏跳过、原文保留）/ \"erase\"（物理删除，需要 erase scope 的 key）。"
+        description = "遗忘力度：\"void\"（默认，推荐——会话作废、原文保留，已蒸馏产物自动级联归档）/ \"erase\"（物理删除，需要 erase scope 的 key）。"
     )]
     pub mode: Option<String>,
 }
@@ -535,9 +537,10 @@ impl MemoryMcpServer {
         ok_json(serde_json::to_value(&s).unwrap_or(serde_json::json!({})))
     }
 
-    /// 遗忘：用户说「别记住这段/把这事忘了」时使用。
+    /// 遗忘：用户说「别记住这段/把这事忘了」时使用，对任何会话都有效。
     ///
-    /// mode="void"（默认）：该会话被蒸馏跳过（若尚未蒸馏），原文保留可审计；
+    /// mode="void"（默认）：该会话作废、原文保留可审计；若会话已蒸馏，其产出的
+    /// active 原子会**级联归档**——检索与上下文包立即不再返回它们。
     /// mode="erase"：物理删除该会话（不可逆，需要 erase scope 的 key）。
     /// 注意：只对用户明确表达的遗忘请求使用，不要自行判断「这段不重要」就遗忘。
     #[tool(
@@ -622,7 +625,7 @@ Engram —— 用户长期记忆平台（用户记忆域 MCP）。
 2. 对话中需要背景：用 memory_search 定向回忆，或 memory_entities 按人/项目/主题查档案；
 3. 会话收尾：用 memory_write_session 把值得长期记住的对话写入（蒸馏自动沉淀为结构化记忆）；
    长对话可分段 memory_append_session 追加；
-4. 用户明确表达遗忘：「别记住这个」→ memory_forget。
+4. 用户明确表达遗忘：「别记住这个」→ memory_forget（void 会话作废且已蒸馏产物自动级联归档，检索立即失效）。
 
 分权规则（务必遵守）：
 - 你的写入通道只有「写会话」：事实抽取、画像更新、实体维护全部由蒸馏完成；

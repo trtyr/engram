@@ -394,5 +394,15 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         .await?;
     }
 
-    Ok(json!({"scenario_ids": all_touched}))
+    // v2（N5）：实体画像随 organize 链路生成——新实体的 summary 不再等 full consolidate。
+    // 小限额 best-effort，失败不影响主链。
+    let portraits = match crate::consolidate::fill_entity_portraits(&ctx, &llm, 5).await {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!(error = %e, "organize 末尾实体画像生成失败（跳过）");
+            0
+        }
+    };
+
+    Ok(json!({"scenario_ids": all_touched, "portraits": portraits}))
 }

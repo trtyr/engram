@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）。cargo **189** 测试（38 套件）/ vitest 45。
+origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）。cargo **195** 测试（38 套件）/ vitest 45。
 **项目记忆第五域已实现**：三表（projects / project_locations / project_docs）+ 类型模板（开发四分类/调研六分类）+ 完整 API（88 路径）+ Web（列表 CRUD/多选/类型筛选 + 详情页 Wiki 式左树右内容树状图）。
 :8090 开发栈在跑（am_dev 库，数据由所有者主动清空后重建）。
 
@@ -13,7 +13,7 @@ origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具�
 | 栈 | 命令 | 结果 |
 |---|---|---|
 | server | cargo fmt --check / clippy -D warnings | exit 0 / 0 errors |
-| server | cargo test --workspace | 189 passed（38 套件） |
+| server | cargo test --workspace | 195 passed（38 套件） |
 | web | pnpm run lint / tsc / test / build | 11 既有警告（WikiMarkdown） / 0 / 45 全过（9 文件）/ exit 0 |
 | web | 入口 bundle | 285.60 kB（gzip 91.81），预算 350 内 |
 | CI | gh run list（f8e1031） | CI + e2e FAIL（GitHub 支出限额，未启动） |
@@ -55,6 +55,8 @@ origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具�
 21. **knowledge 彻底并入 wiki**（2026-09-05，goal mtn6mye4-ql1zkm）：删 knowledge scope（八→七）、代码模块/类型归 wiki 命名（KnowledgeService→WikiDocumentService、knowledge_api→wiki_docs_api）、数据表改名（documents/chunks→wiki_documents/wiki_chunks，0029 迁移）、删 /knowledge/* 兼容别名、统一检索 knowledge 域标签并入 wiki；0030 迁移收尾——约束名归位（documents_pkey→wiki_documents_pkey 等 6 个）+ api_keys 默认 scopes 去 knowledge。
 
 23. **MCP 管理面 + 密钥管理归位**（2026-09-05）：MCP 配置入 settings KV（key=`mcp`：enabled + disabled_tools，缺省全开无迁移）；`/mcp` 前置 gate 中间件——服务关闭对已认证客户端也 503（Bearer 之内、MCP 之前）；覆写 rmcp `list_tools`/`call_tool`——停用工具对 AI 隐身且调用被拒（管理端点仍展示全量）；`GET/PUT /settings/mcp`（PUT 校验未知工具名 400）；前端 MCP 页重排为管理台（状态条 + 域 Tabs 逐域工具开关列表，域归属后端同源 domain 字段），密钥管理收敛回设置页 Keys tab（签发表单补七 scope 选择器 + 表格 scopes 列）。验证：cargo 189（+2 toggle 用例）+ vitest 45（mcp.test 重写 3 用例）+ 真机冒烟（关服务 503 / 停用工具隐身+拒绝 / 恢复全开）。
+
+24. **记忆域 MCP v2 测试修复**（2026-09-05，fix/memory-mcp-v2 worktree）：黑盒测试报告（engram-mcp-test-report-v2.md）四项根因修复——① **检索零匹配短路**：FTS 零命中时向量腿收紧阈值（默认 0.45，`AGENT_MEMORY_VEC_FALLBACK_MAX_DISTANCE` 可调）+ 查询侧领域停用词（用户/什么等通用词不再让 FTS「处处命中」），不相关查询从满页噪声变空结果；② **distill=off 永久豁免**：off 会话落 metadata.distill=off，extract 认领/积压统计全部排除（此前会被任何蒸馏扫描顺带蒸掉）；③ **void 语义扩大**（P0-3 遗忘断层）：done 会话可 void，级联归档其蒸馏产物原子 + session_void_cascade 审计行；④ **context 预算**：budget_items 改各层独立上限（persona 不再挤占）、chars_used 按完整序列化计量（含 evidence_refs）；⑤ SearchHit.title 取内容前缀（不再恒 null）；⑥ 蒸馏 prompt v4/v2：隐私约定归 preference、场景措辞近似禁止另建 + 实体名包含关系近似归并 + 实体画像随 organize 链路生成。验证：cargo 195（+6 回归测试：off 豁免/void 级联/occurred_at 窗口/零匹配/title/预算）+ 8091 黑盒复验 11 项（不相关查询 0 结果、off 保持 pending、void 后检索立即失效、append 竞速 3/3、跨语言召回保留）。瞬态 401（N4）记录为启动窗口现象，warm 后 0/12 不可复现。
 
 ## 已知未了项
 

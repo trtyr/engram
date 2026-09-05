@@ -1,5 +1,7 @@
 //! 混合检索：单条 SQL 内做 FTS + ANN + RRF 融合（D0009/D0010）。
 
+use std::sync::LazyLock;
+
 use pgvector::Vector;
 use sqlx::{PgPool, QueryBuilder, Row};
 use uuid::Uuid;
@@ -22,6 +24,35 @@ pub struct SearchHit {
 
 const RRF_K: i32 = 60;
 
+/// FTS 零命中时的向量腿兜底阈值（余弦距离上限）。
+/// 词法证据缺席时，只保留语义强相关项——否则不相关查询会返回按名次排序的
+/// 全库噪声页（v2 测试报告 H-B2：空查询/乱码/不相关词一律 20 条）。
+/// 依模型几何而异（实测短中文句不相关对 ~0.5-0.67、相关对 <0.5），可用
+/// `AGENT_MEMORY_VEC_FALLBACK_MAX_DISTANCE` 按部署的 embedding 模型调整。
+static VEC_FALLBACK_MAX_DISTANCE: LazyLock<f32> = LazyLock::new(|| {
+    std::env::var("AGENT_MEMORY_VEC_FALLBACK_MAX_DISTANCE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.45)
+});
+
+/// FTS 词法命中预检（同表同口径过滤 + tsv @@ q）。`filter` 由调用方按表结构给出。
+async fn fts_has_match(
+    pool: &PgPool,
+    table: &str,
+    query: &str,
+    filter: &str,
+) -> Result<bool, sqlx::Error> {
+    let sql = format!(
+        "SELECT EXISTS(SELECT 1 FROM {table}, to_tsquery('simple', $1) q \
+         WHERE ({filter}) AND tsv @@ q)"
+    );
+    sqlx::query_scalar(&sql)
+        .bind(tsv_query_smart(query, 3))
+        .fetch_one(pool)
+        .await
+}
+
 /// atoms 混合检索（仅 active）。`query_vec` None 时退化为纯 FTS。
 pub async fn search_atoms(
     pool: &PgPool,
@@ -43,6 +74,14 @@ pub async fn search_atoms(
     } else {
         "NOT sensitive"
     };
+    // v2 修复（H-B2）：FTS 零命中 → 向量腿收紧阈值，宁缺毋滥
+    let fts_matched = fts_has_match(
+        pool,
+        "atoms",
+        query,
+        &format!("status = 'active' AND ({sens_filter})"),
+    )
+    .await?;
     let has_vec = query_vec.is_some();
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
         "WITH fts AS (SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
@@ -56,9 +95,13 @@ pub async fn search_atoms(
     if has_vec {
         qb.push(", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> ");
         qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
-        qb.push(
-            ") AS rank FROM atoms WHERE status = 'active' AND embedding IS NOT NULL LIMIT 100) ",
-        );
+        qb.push(") AS rank FROM atoms WHERE status = 'active' AND embedding IS NOT NULL");
+        if !fts_matched {
+            qb.push(" AND embedding <=> ");
+            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
+            qb.push(format!(" <= {}", *VEC_FALLBACK_MAX_DISTANCE));
+        }
+        qb.push(" LIMIT 100) ");
     }
 
     qb.push("SELECT a.id, a.kind, a.content, a.needs_review, (COALESCE(1.0/(");
@@ -96,13 +139,18 @@ pub async fn search_atoms(
     let rows = qb.build().fetch_all(pool).await?;
     Ok(rows
         .into_iter()
-        .map(|r| SearchHit {
-            id: r.get("id"),
-            score: r.get::<f64, _>("score"),
-            title: None,
-            snippet: r.get("content"),
-            kind: r.get("kind"),
-            needs_review: r.get("needs_review"),
+        .map(|r| {
+            // v2 修复（N1）：atoms 无 title 列——取内容前缀做标题，MCP 消费方不再只能看 snippet
+            let content: String = r.get("content");
+            let title: String = content.chars().take(40).collect();
+            SearchHit {
+                id: r.get("id"),
+                score: r.get::<f64, _>("score"),
+                title: Some(title),
+                snippet: content,
+                kind: r.get("kind"),
+                needs_review: r.get("needs_review"),
+            }
         })
         .collect())
 }
@@ -118,6 +166,8 @@ pub async fn search_scenarios(
     if query_vec.is_none() && !has_query_tokens(query) {
         return Ok(vec![]);
     }
+    // v2 修复（H-B2）：FTS 零命中 → 向量腿收紧阈值（与 atoms 同策略）
+    let fts_matched = fts_has_match(pool, "scenarios", query, "true").await?;
     let has_vec = query_vec.is_some();
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
         "WITH fts AS (SELECT id, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
@@ -129,7 +179,13 @@ pub async fn search_scenarios(
     if has_vec {
         qb.push(", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> ");
         qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
-        qb.push(") AS rank FROM scenarios WHERE embedding IS NOT NULL LIMIT 100) ");
+        qb.push(") AS rank FROM scenarios WHERE embedding IS NOT NULL");
+        if !fts_matched {
+            qb.push(" AND embedding <=> ");
+            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
+            qb.push(format!(" <= {}", *VEC_FALLBACK_MAX_DISTANCE));
+        }
+        qb.push(" LIMIT 100) ");
     }
 
     qb.push("SELECT s.id, s.topic, s.summary, COALESCE(1.0/(");

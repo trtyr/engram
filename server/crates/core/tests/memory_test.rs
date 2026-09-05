@@ -8,6 +8,7 @@ mod support;
 use engram_core::memory::{MemoryError, MemoryService};
 use engram_llm::{KeyCipher, ProviderRegistry};
 use engram_search::tokenize::tsv_text;
+use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -15,9 +16,7 @@ async fn setup() -> (PgPool, MemoryService, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool)
-        .await
-        .expect("迁移");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
     let registry = ProviderRegistry::new(
         pool.clone(),
         KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
@@ -87,9 +86,7 @@ async fn search_hits_bump_hit_count() {
          ($1, '开发环境', '用户偏好 Rust', '完整描述', to_tsvector('simple', $2))",
     )
     .bind(sid)
-    .bind(engram_search::tokenize::tsv_text(
-        "开发环境 用户偏好 Rust",
-    ))
+    .bind(engram_search::tokenize::tsv_text("开发环境 用户偏好 Rust"))
     .execute(&pool)
     .await
     .unwrap();
@@ -661,8 +658,8 @@ async fn void_session_semantics() {
     // M-2：已处理 → BadRequest（400），文案点破当前状态
     let again = svc.void_session(s.id).await;
     assert!(
-        matches!(&again, Err(engram_core::memory::MemoryError::BadRequest(m)) if m.contains("已处理")),
-        "void 不可重复（非 pending）且文案分开：{again:?}"
+        matches!(&again, Err(engram_core::memory::MemoryError::BadRequest(m)) if m.contains("已作废")),
+        "void 不可重复且文案分开：{again:?}"
     );
     // M-2：不存在 → NotFound（404），不再与「已蒸馏」合并成一句
     let ghost = svc.void_session(uuid::Uuid::now_v7()).await;
@@ -685,7 +682,25 @@ async fn void_session_semantics() {
         .execute(&pool)
         .await
         .unwrap();
-    assert!(svc.void_session(s2.id).await.is_err(), "已蒸馏不可 void");
+    // v2 语义扩大（P0-3）：done 会话可 void，且级联归档其蒸馏产物
+    let atom2 = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, source_refs, tsv) \
+         VALUES ($1, 'fact', 'y 的蒸馏产物', 'active', $2::jsonb, to_tsvector('simple', 'x'))",
+    )
+    .bind(atom2)
+    .bind(serde_json::json!([{"session_id": s2.id.to_string()}]))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let v2 = svc.void_session(s2.id).await.unwrap();
+    assert_eq!(v2.distill_status, "void", "done 会话可 void（v2 语义）");
+    let atom_status: String = sqlx::query_scalar("SELECT status FROM atoms WHERE id = $1")
+        .bind(atom2)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(atom_status, "archived", "done 会话 void 应级联归档原子");
 }
 
 /// P11/SEC-E purge_agent（2026-09-03 彻底化）：该 agent **全部**会话物理删除
@@ -974,7 +989,7 @@ async fn rhythm_status_reports_heartbeat_and_backlog() {
             .write_session(
                 "cron-test",
                 serde_json::json!([{"speaker":"user","text":format!("第{i}条")}]),
-                "off",
+                "auto", // v2：off 会话已豁免蒸馏、不再计入积压——积压口径用 auto
                 false,
             )
             .await
@@ -999,5 +1014,130 @@ async fn rhythm_status_reports_heartbeat_and_backlog() {
     assert!(
         (10_000..=11_000).contains(&age),
         "最老积压应约 3 小时（10800s）：{age}"
+    );
+}
+
+/// v2 修复（P0-3）：已蒸馏（done）会话 void → 级联归档其蒸馏产出的 active 原子。
+#[tokio::test]
+async fn void_done_session_cascades_atom_archive() {
+    let (pool, svc, _pg) = setup().await;
+
+    // off 写入（不触发任务）→ 手动置为 done，模拟蒸馏完成
+    let s = svc
+        .write_session(
+            "t2",
+            json!([{"speaker": "user", "text": "VOIDCASCADE 测试内容"}]),
+            "off",
+            false,
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE raw_sessions SET distill_status = 'done' WHERE id = $1")
+        .bind(s.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // 该会话蒸馏产出的 active 原子
+    let atom_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, source_refs, tsv) \
+         VALUES ($1, 'fact', 'VOIDCASCADE 蒸馏产物原子', 'active', $2, to_tsvector('simple', 'x'))",
+    )
+    .bind(atom_id)
+    .bind(json!([{"session_id": s.id}]))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let voided = svc.void_session(s.id).await.unwrap();
+    assert_eq!(voided.distill_status, "void");
+
+    let status: String = sqlx::query_scalar("SELECT status FROM atoms WHERE id = $1")
+        .bind(atom_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        status, "archived",
+        "done 会话 void 应级联归档其原子（P0-3 回归）"
+    );
+
+    // 审计链有记录
+    let audit: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'session_void_cascade'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(audit, 1, "void 级联应落审计行");
+}
+
+/// v2 修复（N3）：budget_items 是各层条数上限——persona 分面不再把 atoms 挤成 0。
+#[tokio::test]
+async fn context_budget_keeps_atoms_alive() {
+    let (pool, svc, _pg) = setup().await;
+
+    // 7 个画像分面（与真实分布一致）
+    for (i, aspect) in [
+        "identity",
+        "preferences",
+        "skills",
+        "constraints",
+        "communication_style",
+        "goals",
+        "routines",
+    ]
+    .iter()
+    .enumerate()
+    {
+        sqlx::query(
+            "INSERT INTO persona_aspects (id, aspect, content, version, evidence_refs) \
+             VALUES ($1, $2, $3, 1, '[]'::jsonb)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(*aspect)
+        .bind(format!("分面 {i} 内容"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // 3 条 active 原子
+    for i in 0..3 {
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, status, tsv, hit_count) \
+             VALUES ($1, 'fact', $2, 'active', to_tsvector('simple', $2), $3)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(format!("用户偏好条目 {i}：喜欢深色主题"))
+        .bind(i)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // 小预算：v1 行为 atoms=0（被 7 分面挤死）；v2 各层独立预算 → atoms 至少 1
+    let pack = svc.context_pack(None, 1, 8000, true).await.unwrap();
+    assert_eq!(pack.persona.len(), 7, "画像分面全量保留");
+    assert!(
+        !pack.atoms.is_empty(),
+        "budget_items=1 时 atoms 不应被 persona 挤成 0（N3 回归）"
+    );
+
+    // 大预算：正常
+    let pack = svc.context_pack(None, 50, 100_000, true).await.unwrap();
+    assert_eq!(pack.atoms.len(), 3);
+
+    // N7：chars_used 接近完整序列化体积（含 evidence_refs），不再只是正文文本
+    let pack = svc.context_pack(None, 50, 100_000, true).await.unwrap();
+    let text_only: usize = pack
+        .atoms
+        .iter()
+        .map(|a| a.content.len())
+        .chain(pack.persona.iter().map(|p| p.content.len()))
+        .sum();
+    assert!(
+        pack.meta.chars_used >= text_only,
+        "chars_used 应按完整序列化计量（含 evidence_refs）：{} < 正文和 {text_only}",
+        pack.meta.chars_used
     );
 }

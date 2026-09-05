@@ -1,12 +1,12 @@
 //! 记忆域服务：L0 写入/触发、检索、上下文包、L1 治理、L3 画像视图。
 
+use chrono::{DateTime, Utc};
 use engram_jobs::types::Job;
 use engram_jobs::{JobQueue, JobTemplate};
 use engram_llm::ProviderRegistry;
 use engram_llm::types::Purpose;
 use engram_search::tokenize::tokenize;
 use engram_search::{SearchHit, search_atoms, search_scenarios};
-use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::json;
 use sqlx::PgPool;
@@ -331,13 +331,22 @@ impl MemoryService {
         }
         validate_turns(arr)?;
         let id = Uuid::now_v7();
+        // v2 修复（H-A2）：distill=off 落 metadata 标记——蒸馏认领扫描据此豁免，
+        // off 会话不再被后续任何 extract 任务的 pending 全量扫描"顺走"蒸掉。
+        // off 是会话级永久语义（直到 void/erase），append 不改变它。
+        let metadata = if distill == "off" {
+            json!({"distill": "off"})
+        } else {
+            json!({})
+        };
         let row = sqlx::query_as::<_, SessionDto>(
-            "INSERT INTO raw_sessions (id, agent, content, sensitive) VALUES ($1, $2, $3, $4) RETURNING *",
+            "INSERT INTO raw_sessions (id, agent, content, sensitive, metadata) VALUES ($1, $2, $3, $4, $5) RETURNING *",
         )
         .bind(id)
         .bind(agent)
         .bind(sqlx::types::Json(&turns))
         .bind(sensitive)
+        .bind(sqlx::types::Json(&metadata))
         .fetch_one(&self.pool)
         .await?;
 
@@ -586,7 +595,8 @@ impl MemoryService {
         .fetch_optional(&self.pool)
         .await?;
         let pending: (i64, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
-            "SELECT count(*), min(created_at) FROM raw_sessions WHERE distill_status = 'pending'",
+            "SELECT count(*), min(created_at) FROM raw_sessions WHERE distill_status = 'pending' \
+             AND COALESCE(metadata->>'distill','') <> 'off'",
         )
         .fetch_one(&self.pool)
         .await?;
@@ -1332,6 +1342,12 @@ impl MemoryService {
     /// P5 会话作废：「这段白记了」——标记 void，蒸馏跳过（claim 只取 pending）。
     /// 只允许 pending 会话作废（已蒸馏的产出用 purge 清场处理）。
     /// M-2（2026-09-03）：「不存在」404 与「非 pending」400 分开报，不再合并一句。
+    /// P5 会话作废（v2 扩大语义）：「这段白记了」。
+    /// - pending/off 会话：标记 void，蒸馏跳过（原文保留可审计）；
+    /// - done 会话：void + **级联归档**其蒸馏产出的 active 原子（v2 修复 P0-3 遗忘断层——
+    ///   此前已蒸馏会话无任何遗忘手段，错误文案指路的 purge 又不在 MCP 工具面）。
+    ///   归档保留原文与原子（可审计、可恢复），检索/context 不再返回。
+    /// - processing：仍拒绝（蒸馏 worker 持有中，稍后重试）。
     pub async fn void_session(&self, id: Uuid) -> Result<SessionDto, MemoryError> {
         let status: Option<String> =
             sqlx::query_scalar("SELECT distill_status FROM raw_sessions WHERE id = $1")
@@ -1340,25 +1356,52 @@ impl MemoryService {
                 .await?;
         match status.as_deref() {
             None => return Err(MemoryError::NotFound(format!("会话 {id} 不存在"))),
-            Some("pending") => {}
-            Some(s) => {
+            Some("processing") => {
                 return Err(MemoryError::BadRequest(format!(
-                    "会话 {id} 已处理（当前状态 {s}）——作废只对未蒸馏会话；已蒸馏的用 purge 清场"
+                    "会话 {id} 正在蒸馏（processing）——请稍后重试作废"
                 )));
             }
+            Some("void") => {
+                return Err(MemoryError::BadRequest(format!(
+                    "会话 {id} 已处理（当前状态 void）——已作废，无需重复操作"
+                )));
+            }
+            _ => {}
         }
         let row = sqlx::query_as::<_, SessionDto>(
-            "UPDATE raw_sessions SET distill_status = 'void' WHERE id = $1 AND distill_status = 'pending' RETURNING *",
+            "UPDATE raw_sessions SET distill_status = 'void' \
+             WHERE id = $1 AND distill_status IN ('pending','done') RETURNING *",
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
-        row.ok_or_else(|| {
+        let row = row.ok_or_else(|| {
             // 查询与更新之间的竞态兜底（状态刚被蒸馏 worker 抢走）
             MemoryError::BadRequest(format!(
-                "会话 {id} 刚被蒸馏任务取走（processing）——请稍后用 purge 清场"
+                "会话 {id} 刚被蒸馏任务取走（processing）——请稍后重试作废"
             ))
-        })
+        })?;
+        // done 会话：级联归档其蒸馏产出的 active 原子（与 purge_agent 同口径）
+        if status.as_deref() == Some("done") {
+            let archived = sqlx::query(
+                "UPDATE atoms SET status = 'archived', updated_at = now() \
+                 WHERE status = 'active' AND EXISTS ( \
+                    SELECT 1 FROM jsonb_array_elements(atoms.source_refs) e \
+                    WHERE e->>'session_id' = $1)",
+            )
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(MemoryError::from)?
+            .rows_affected();
+            // 审计链：job 行记遗忘动作（与 purge/erase 同哲学）
+            self.audit(
+                "session_void_cascade",
+                json!({"session": id.to_string(), "archived_atoms": archived as i64}),
+            )
+            .await;
+        }
+        Ok(row)
     }
 
     /// P11/SEC-E 按 agent 清场（测试隔离，2026-09-03 彻底化）：该 agent **全部**会话
@@ -1734,15 +1777,23 @@ impl MemoryService {
         let mut chars_used = 0usize;
         let mut truncated = false;
 
-        let count = |s: &str, used: &mut usize, trunc: &mut bool| -> bool {
-            if *used + s.len() > budget_chars {
+        // v2 修复（N7）：按**完整序列化体积**计量（含 evidence_refs/source_refs）——
+        // 此前只数正文文本，chars_used 远小于真实注入体积，字符预算形同虚设。
+        fn count_json(
+            item: &impl serde::Serialize,
+            budget_chars: usize,
+            used: &mut usize,
+            trunc: &mut bool,
+        ) -> bool {
+            let full = serde_json::to_string(item).unwrap_or_default();
+            if *used + full.len() > budget_chars {
                 *trunc = true;
                 false
             } else {
-                *used += s.len();
+                *used += full.len();
                 true
             }
-        };
+        }
 
         // 有 query 时预计算 query 向量（L2/L1 共用，避免重复 embed）
         let qv: Option<Vec<f32>> = match query {
@@ -1753,19 +1804,22 @@ impl MemoryService {
             None => None,
         };
 
-        // L3 全量（很小）
+        // L3 全量（很小；v2 修复 N3：画像分面不再计入 budget_items——预算是各层条数上限，
+        // 此前 7 个分面把小预算的 atoms/scenarios 挤成 0）
         let persona: Vec<PersonaVersion> = self
             .persona()
             .await?
             .into_iter()
-            .take_while(|p| count(&p.content, &mut chars_used, &mut truncated))
+            .take_while(|p| count_json(&p, budget_chars, &mut chars_used, &mut truncated))
             .collect();
 
-        // L2：有 query 按相关性，否则最近
+        // L2：有 query 按相关性，否则最近。v2（N3）：条数上限语义 = budget_items，
+        // 保底 1——此前 budget_items*2/5 在小预算下把场景挤成 0。
+        let scenario_cap = (budget_items * 2 / 5).max(1).min(budget_items.max(1));
         let scenarios = if let Some(q) = query {
-            search_scenarios(&self.pool, q, qv.as_deref(), (budget_items as i64).max(3)).await?
+            search_scenarios(&self.pool, q, qv.as_deref(), (scenario_cap as i64).max(3)).await?
         } else {
-            self.list_scenarios((budget_items as i64).max(3) / 2)
+            self.list_scenarios((scenario_cap as i64).max(3))
                 .await?
                 .into_iter()
                 .map(|s| SearchHit {
@@ -1779,15 +1833,9 @@ impl MemoryService {
                 .collect::<Vec<_>>()
         };
         let mut out_scenarios = Vec::new();
-        for h in scenarios.into_iter().take(budget_items * 2 / 5) {
+        for h in scenarios.into_iter().take(scenario_cap) {
             match self.get_scenario(h.id).await {
-                Ok(s)
-                    if count(
-                        &format!("{}{}", s.topic, s.summary),
-                        &mut chars_used,
-                        &mut truncated,
-                    ) =>
-                {
+                Ok(s) if count_json(&s, budget_chars, &mut chars_used, &mut truncated) => {
                     out_scenarios.push(s)
                 }
                 _ => break,
@@ -1796,7 +1844,7 @@ impl MemoryService {
 
         // 实体透镜（小预算 ~20%）：AI 冷启动要知道用户世界里都有谁。
         // 有 query 走 token 相关（纯 jieba，不依赖向量）；无 query 按密度头部。best-effort。
-        let ent_budget = (budget_items / 5).max(2);
+        let ent_budget = (budget_items / 5).max(2).min(budget_items.max(1));
         let entity_ids: Vec<Uuid> = match query {
             Some(q) => engram_search::search_entities(&self.pool, q, ent_budget as i64)
                 .await
@@ -1828,11 +1876,7 @@ impl MemoryService {
                 rows.into_iter().map(|e| (e.id, e)).collect();
             for id in entity_ids {
                 if let Some(e) = by_id.get(&id).cloned() {
-                    if count(
-                        &format!("{}{}", e.name, e.summary),
-                        &mut chars_used,
-                        &mut truncated,
-                    ) {
+                    if count_json(&e, budget_chars, &mut chars_used, &mut truncated) {
                         out_entities.push(e);
                     } else {
                         truncated = true;
@@ -1842,9 +1886,9 @@ impl MemoryService {
             }
         }
 
-        // L1 补充（预算剩余）：有 query 按语义相关（search_atoms），否则 hit_count
-        let remaining =
-            budget_items.saturating_sub(persona.len() + out_scenarios.len() + out_entities.len());
+        // L1：v2 修复（N3）——条数上限 = budget_items（各层独立预算，不再被 persona/场景/实体
+        // 相减挤成 0）；字符预算仍全局统一裁剪
+        let remaining = budget_items;
         let atoms: Vec<AtomDto> = match query {
             Some(q) => {
                 let hits = search_atoms(
@@ -1896,7 +1940,7 @@ impl MemoryService {
         };
         let mut out_atoms = Vec::new();
         for a in atoms {
-            if count(&a.content, &mut chars_used, &mut truncated) {
+            if count_json(&a, budget_chars, &mut chars_used, &mut truncated) {
                 out_atoms.push(a);
             } else {
                 truncated = true;

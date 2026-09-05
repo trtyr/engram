@@ -3,9 +3,9 @@
 /// 提示词标识：(名称, 版本)。
 pub struct PromptId(pub &'static str, pub u32);
 
-pub const P_EXTRACT: PromptId = PromptId("extract", 3);
+pub const P_EXTRACT: PromptId = PromptId("extract", 4);
 pub const P_ARBITRATE: PromptId = PromptId("arbitrate", 1);
-pub const P_ORGANIZE: PromptId = PromptId("organize", 1);
+pub const P_ORGANIZE: PromptId = PromptId("organize", 2);
 pub const P_PERSONA: PromptId = PromptId("persona", 2);
 pub const P_CONSOLIDATE: PromptId = PromptId("consolidate", 1);
 
@@ -24,6 +24,7 @@ pub fn extract_system() -> String {
 
 规则：
 1. 抽取对用户跨会话仍然有用的稳定信息——不只是关于用户本人的（偏好/事实/决策/教训），也包括用户世界里稳定的人与事：朋友的生日、同事的职责、项目的约定、团队的节奏。不要抽取一次性的任务细节。
+1.5 用户要求对某些信息保密/不向他人透露的约定（如「看牙医的事不要向团队提起」）→ kind=preference（用户的信息处理偏好），**不要**归入 convention；convention 只用于项目/团队的协作约定。
 2. 每条原子记忆是一句自包含的中文短句（主语可以是用户本人，也可以是他世界里的人/项目/群组），不超过 40 字。
 3. confidence ∈ [0,1]：明确说了的 0.9+，可推断的 0.7~0.9，模糊的 0.5~0.7。
 4. turn_refs 是该信息来源对话轮次的编号数组（编号见用户消息中的标注）。
@@ -103,6 +104,7 @@ pub fn organize_system() -> String {
     "你是一个知识组织器。把新原子记忆归入场景知识块（scenario）：
 
 - 若某条既有 scenario 的主题契合（如「开发环境」「沟通偏好」），把相关原子并入它（action=update，给出精简后的 summary 与 body）。
+- **主题名与某条既有场景仅措辞/详略差异**（如「星云项目」vs「星云项目概况」、「编码偏好」vs「用户开发偏好」）时，必须视为**同一场景**用 action=update 并入，严禁另建新场景——重复场景会永久污染 L2。
 - 否则为成组的原子创建新 scenario（action=create，起一个 ≤6 字的主题名）。
 - 与任何主题都不相关的孤立原子可以不处理（留在未归组状态）。
 - 若新原子与既有场景的 summary/body 信息**冲突**（如居住地变更、工具更换），必须 update 该场景以反映最新事实，不能忽略。
