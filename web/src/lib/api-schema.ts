@@ -1137,6 +1137,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 技能列表（摘要，不含正文；q/tag/enabled 过滤）。 */
+        get: operations["skills_list"];
+        put?: never;
+        /** 新建技能（slug 唯一，冲突 409；初始状态留 rev1 快照）。 */
+        post: operations["create_skill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全量导出（含正文，数据主权：技能库随时整体带走）。 */
+        get: operations["export_skills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量导入 SKILL.md 全文（逐条成败互不阻断，返回逐条报告）。 */
+        post: operations["import_skills"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 技能详情（含 markdown 正文）。 */
+        get: operations["skills_get"];
+        /** 编辑技能（语义字段变更留版本快照；enabled-only 不留）。 */
+        put: operations["update_skill"];
+        post?: never;
+        /** 删除技能（级联删版本快照，不可逆）。 */
+        delete: operations["delete_skill"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{slug}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 版本快照列表（新→旧）。 */
+        get: operations["list_revisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{slug}/revisions/{rev_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 回滚到某版本（回滚前先快照现状，回滚本身可再撤销）。 */
+        post: operations["restore_revision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wiki/documents": {
         parameters: {
             query?: never;
@@ -1764,6 +1869,15 @@ export interface components {
             /** Format: uuid */
             to_id: string;
         };
+        CreateSkillRequest: {
+            content?: string;
+            description?: string;
+            enabled?: boolean;
+            name: string;
+            /** @description kebab-case 标识（缺省从 name 推导；中文名必须显式给） */
+            slug?: string | null;
+            tags?: string[];
+        };
         DismissInsightRequest: {
             key: string;
         };
@@ -1896,6 +2010,19 @@ export interface components {
             distill?: string;
             /** @description jsonl | text */
             format: string;
+        };
+        ImportSkillDoc: {
+            /** @description SKILL.md 全文（frontmatter 容错解析：name/description/slug/tags） */
+            content: string;
+            /** @description 可选文件名（无 frontmatter name 时兜底命名） */
+            filename?: string | null;
+            /** @description 可选附带标签（如来源子目录名），与 frontmatter tags 合并 */
+            tags?: string[] | null;
+        };
+        ImportSkillsRequest: {
+            documents: components["schemas"]["ImportSkillDoc"][];
+            /** @description 命中已有 slug 时覆盖更新（默认 false——冲突按条目失败，不阻断其余） */
+            overwrite?: boolean;
         };
         IngestAccepted: {
             skipped: boolean;
@@ -2277,6 +2404,70 @@ export interface components {
             scope?: string[];
             thesis?: string | null;
         };
+        /** @description 详情（含 markdown 正文）。 */
+        SkillDto: {
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+            description: string;
+            enabled: boolean;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            source: string;
+            tags: string[];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description 批量导入的单条结果（逐条成败互不阻断）。 */
+        SkillImportItem: {
+            error?: string | null;
+            /** @description 来源文档序号（从 0 起）或 filename */
+            index: number;
+            /** @description 成功时返回 slug */
+            slug?: string | null;
+            /** @description imported=新建 / updated=覆盖已有 / failed=该条失败 */
+            status: string;
+        };
+        SkillImportReport: {
+            failed: number;
+            imported: number;
+            items: components["schemas"]["SkillImportItem"][];
+            updated: number;
+        };
+        /** @description 版本快照。 */
+        SkillRevisionDto: {
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+            description: string;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description create=初始版 / update=变更前快照 / restore=回滚前的现状快照 */
+            origin: string;
+            /** Format: int32 */
+            rev: number;
+            /** Format: uuid */
+            skill_id: string;
+            tags: string[];
+        };
+        /** @description 列表/导入/概览用摘要（不含正文——列表与仪表盘不必拖全量指令）。 */
+        SkillSummaryDto: {
+            /** Format: date-time */
+            created_at: string;
+            description: string;
+            enabled: boolean;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            source: string;
+            tags: string[];
+            /** Format: date-time */
+            updated_at: string;
+        };
         SubmitUrlRequest: {
             url: string;
         };
@@ -2354,6 +2545,13 @@ export interface components {
             is_default?: boolean | null;
             /** @description 新模型 id（可选） */
             model_id?: string | null;
+        };
+        UpdateSkillRequest: {
+            content?: string | null;
+            description?: string | null;
+            enabled?: boolean | null;
+            name?: string | null;
+            tags?: string[] | null;
         };
         /** @description 用量记账行。 */
         UsageRecord: {
@@ -4438,6 +4636,206 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    skills_list: {
+        parameters: {
+            query?: {
+                /** @description 关键词（搜 name/description） */
+                q?: string | null;
+                /** @description 标签过滤（含即命中） */
+                tag?: string | null;
+                /** @description true=只看启用 / false=只看停用 / 缺省=全部 */
+                enabled?: boolean | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillSummaryDto"][];
+                };
+            };
+        };
+    };
+    create_skill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSkillRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDto"];
+                };
+            };
+        };
+    };
+    export_skills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDto"][];
+                };
+            };
+        };
+    };
+    import_skills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportSkillsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillImportReport"];
+                };
+            };
+        };
+    };
+    skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDto"];
+                };
+            };
+        };
+    };
+    update_skill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSkillRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDto"];
+                };
+            };
+        };
+    };
+    delete_skill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_revisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillRevisionDto"][];
+                };
+            };
+        };
+    };
+    restore_revision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDto"];
                 };
             };
         };
