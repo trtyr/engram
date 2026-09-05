@@ -320,6 +320,8 @@ export interface McpInfo {
   protocol_version: string
   server_name: string
   server_version: string
+  enabled: boolean
+  disabled_tools: string[]
   instructions: string
   tools: McpToolInfo[]
 }

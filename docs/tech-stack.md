@@ -14,7 +14,7 @@
 | 样式 | Tailwind CSS（CSS-first token） | 4.3.3 |
 | 构建 | Vite（+tsc -b） | 8.2.2 |
 | 包管理 | pnpm（web）；cargo（server） | 11.20.0 |
-| 测试 | cargo test（187）+ vitest（44）+ Playwright（journey） | — |
+| 测试 | cargo test（189）+ vitest（45）+ Playwright（journey） | — |
 | Lint | clippy -D warnings + oxlint | — |
 | 字体 | Geist / Geist Mono（@fontsource-variable 5.3.0） | — |
 | 重可视化 | mermaid 11.17.2 / sigma 3.0.3 / cytoscape（懒加载） | — |

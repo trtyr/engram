@@ -1,14 +1,15 @@
 /**
- * MCP 管理页：把 Engram 接入 AI 客户端（Claude Code / Cursor / Claude Desktop 等）。
- * 三件事：端点与协议信息（与后端 MCP 层同源）、连接配置一键复制、MCP 密钥签发（scope 选择）。
- * 未来 Wiki / CodeGraph 等域接入 MCP 时，本页扩展为按域分区的统一 MCP 管理界面。
+ * MCP 管理页：管理 Engram 的 MCP 服务面。
+ * 三件事：服务总开关（关闭 = /mcp 整体 503）、工具粒度开关（停用 = 对 AI 隐身 + 调用拒绝）、
+ * 连接配置一键复制（密钥在「设置 → API 密钥」签发，这里只选不建）。
+ * 未来 Wiki / CodeGraph 等域接入 MCP 时，工具管理卡按域分组扩展。
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { api, type ApiKey, type McpInfo } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
-import { fmtTime, inputCls, selectCls, tableCls } from '@/lib/ui'
+import { Card, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
+import { selectCls } from '@/lib/ui'
 
 /** 可复制的连接配置：每种客户端一段文案（<KEY> 占位符由用户粘贴 key 明文）。 */
 function useConnectionConfigs(url: string | null, hasKey: boolean) {
@@ -77,9 +78,7 @@ export default function Mcp() {
   const [err, setErr] = useState('')
   const [keys, setKeys] = useState<ApiKey[] | null>(null)
   const [selectedKeyId, setSelectedKeyId] = useState<string>('')
-  const [name, setName] = useState('')
-  const [withErase, setWithErase] = useState(false)
-  const [newKey, setNewKey] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const load = () => {
     api
@@ -93,6 +92,20 @@ export default function Mcp() {
   }
   useEffect(load, [])
 
+  /** 更新配置（开关粒度由调用方给全量或增量字段），成功后以响应刷新本地状态。 */
+  const putConfig = async (body: { enabled?: boolean; disabled_tools?: string[] }) => {
+    setBusy(true)
+    try {
+      const next = await api.put<McpInfo>('/settings/mcp', body)
+      setInfo(next)
+      setErr('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const mcpKeys = keys?.filter((k) => k.scopes.includes('memory')) ?? []
   const selectedKey = mcpKeys.find((k) => k.id === selectedKeyId) ?? mcpKeys[0] ?? null
   const mcpUrl = info ? `${window.location.origin}${info.endpoint}` : null
@@ -102,7 +115,7 @@ export default function Mcp() {
     <div className="space-y-6">
       <PageHeader
         title="MCP"
-        desc="Model Context Protocol——把 Engram 的用户记忆接入 AI 客户端，让 AI 自己来读写你的记忆"
+        desc="管理 Engram 的 MCP 服务——控制 AI 客户端能接入什么、能调用哪些工具"
       />
       {err && <ErrorBox msg={err} />}
 
@@ -110,11 +123,29 @@ export default function Mcp() {
         <Spinner />
       ) : info ? (
         <>
-          {/* 端点信息 */}
-          <Card className="p-4">
+          {/* 服务总开关 */}
+          <Card className={info.enabled ? 'p-4' : 'border-destructive/40 p-4'}>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">MCP 端点</p>
+                <p className="text-sm font-semibold">MCP 服务{info.enabled ? '运行中' : '已关闭'}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  关闭后 /mcp 整体拒绝（503）——已签发的 key 也无法连接
+                </p>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant={info.enabled ? 'destructive' : 'outline'}
+                  disabled={busy}
+                  onClick={() => putConfig({ enabled: !info.enabled })}
+                >
+                  {info.enabled ? '关闭服务' : '开启服务'}
+                </Button>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border pt-3">
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">端点</p>
                 <code className="mt-0.5 block truncate font-mono text-sm">{mcpUrl}</code>
               </div>
               <div>
@@ -131,18 +162,79 @@ export default function Mcp() {
                 <CopyBtn text={mcpUrl ?? ''} label="复制端点" />
               </div>
             </div>
-            <p className="mt-3 border-t border-border pt-3 text-xs leading-5 text-muted-foreground">
-              鉴权用 <code className="font-mono">amk_</code> API key（memory scope），每个请求独立认证——
-              在下方签发专用 key，吊销即刻失权。
-            </p>
           </Card>
 
-          {/* 连接配置 */}
+          {/* 工具粒度开关 */}
+          <Card className="overflow-hidden">
+            <div className="border-b border-border px-4 py-3">
+              <h3 className="text-sm font-semibold">工具管理（{info.tools.length}）</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                停用的工具对 AI 隐身（tools/list 不出现）且调用被拒——语义等同下线，不影响配置
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-border text-left">
+                  <tr>
+                    <th className="px-3 py-2 text-xs font-medium text-muted-foreground">工具</th>
+                    <th className="px-3 py-2 text-xs font-medium text-muted-foreground">说明</th>
+                    <th className="w-24 px-3 py-2 text-xs font-medium text-muted-foreground">语义</th>
+                    <th className="w-24 px-3 py-2 text-xs font-medium text-muted-foreground">状态</th>
+                    <th className="w-20 px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {info.tools.map((t) => {
+                    const disabled = info.disabled_tools.includes(t.name)
+                    return (
+                      <tr key={t.name} className="border-b border-border/60 transition-colors last:border-b-0 hover:bg-muted/40">
+                        <td className="px-3 py-2 font-mono text-xs align-top">{t.name}</td>
+                        <td className="px-3 py-2 text-xs leading-5 text-muted-foreground align-top">
+                          {t.description.split('\n').filter(Boolean).slice(0, 2).join(' ')}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground align-top">
+                          {t.destructive ? '破坏性' : t.read_only ? '只读' : '写入'}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <span className={disabled ? 'text-xs text-muted-foreground' : 'text-xs text-success'}>
+                            {disabled ? '停用' : '启用'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right align-top">
+                          <Button
+                            size="sm"
+                            variant={disabled ? 'outline' : 'ghost'}
+                            disabled={busy}
+                            onClick={() =>
+                              putConfig({
+                                disabled_tools: disabled
+                                  ? info.disabled_tools.filter((d) => d !== t.name)
+                                  : [...info.disabled_tools, t.name],
+                              })
+                            }
+                          >
+                            {disabled ? '启用' : '停用'}
+                          </Button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          {/* 连接配置（密钥在设置页签发，这里只选） */}
           <Card className="p-4">
-            <h3 className="text-sm font-semibold">连接配置</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">连接配置</h3>
+              <p className="text-xs text-muted-foreground">
+                密钥在「设置 → API 密钥」签发（勾 memory scope），配置中的 &lt;KEY&gt; 粘贴时换成 key 明文
+              </p>
+            </div>
             {mcpKeys.length === 0 ? (
               <p className="mt-2 text-xs text-muted-foreground">
-                还没有 memory scope 的 key——先在下方「MCP 密钥」签发一把，再回这里复制配置。
+                还没有 memory scope 的 key——去「设置 → API 密钥」签发一把（勾选 memory scope），再回这里复制配置。
               </p>
             ) : (
               <>
@@ -162,7 +254,6 @@ export default function Mcp() {
                       </option>
                     ))}
                   </select>
-                  <span className="text-xs text-muted-foreground">配置中的 &lt;KEY&gt; 粘贴时换成 key 明文</span>
                 </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-3">
                   {configs.map((c) => (
@@ -183,153 +274,8 @@ export default function Mcp() {
               </>
             )}
           </Card>
-
-          {/* 工具清单（与 MCP 层同源：GET /settings/mcp） */}
-          <Card className="overflow-hidden">
-            <div className="border-b border-border px-4 py-3">
-              <h3 className="text-sm font-semibold">工具清单（{info.tools.length}）</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                AI 客户端在 initialize 时收到的 instructions：摘要见下方引用
-              </p>
-            </div>
-            <div className="border-b border-border bg-muted/30 px-4 py-3">
-              <p className="text-xs leading-5 text-muted-foreground">
-                {info.instructions.split('\n').slice(0, 3).join(' ')}
-              </p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className={tableCls.root}>
-                <thead className={tableCls.thead}>
-                  <tr>
-                    <th className={tableCls.th}>工具</th>
-                    <th className={tableCls.th}>说明</th>
-                    <th className={`${tableCls.th} w-24`}>语义</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {info.tools.map((t) => (
-                    <tr key={t.name} className={tableCls.row}>
-                      <td className={`${tableCls.td} font-mono text-xs`}>{t.name}</td>
-                      <td className={`${tableCls.td} text-xs leading-5 text-muted-foreground`}>
-                        {t.description.split('\n').filter(Boolean).slice(0, 2).join(' ')}
-                      </td>
-                      <td className={tableCls.td}>
-                        <span className="text-xs text-muted-foreground">
-                          {t.destructive ? '破坏性' : t.read_only ? '只读' : '写入'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
         </>
       ) : null}
-
-      {/* MCP 密钥 */}
-      <Card className="p-4">
-        <h3 className="text-sm font-semibold">签发 MCP 密钥</h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          memory scope 让 AI 读写记忆；追加 erase 才能物理删除（不可逆，默认不勾）
-        </p>
-        <form
-          className="mt-3 flex flex-wrap items-center gap-3"
-          onSubmit={async (e) => {
-            e.preventDefault()
-            const scopes = withErase ? ['memory', 'erase'] : ['memory']
-            const r = await api.post<{ key: string }>('/settings/api-keys', { name, scopes })
-            setNewKey(r.key)
-            setName('')
-            setWithErase(false)
-            load()
-          }}
-        >
-          <label htmlFor="mcp-key-name" className="text-sm font-medium">
-            名称
-          </label>
-          <input
-            id="mcp-key-name"
-            className={`${inputCls} w-48`}
-            placeholder="claude-code"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <label className="flex items-center gap-1.5 text-sm">
-            <input
-              type="checkbox"
-              className="accent-current"
-              checked={withErase}
-              onChange={(e) => setWithErase(e.target.checked)}
-            />
-            含 erase scope（可物理删除会话）
-          </label>
-          <Button size="sm" type="submit">
-            签发
-          </Button>
-        </form>
-      </Card>
-      {newKey && (
-        <Card className="border-success/30 bg-success/10 p-4">
-          <p className="text-xs text-muted-foreground">
-            新 key（只显示这一次，粘贴到上方连接配置的 &lt;KEY&gt; 处）：
-          </p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <code className="block break-all font-mono text-sm">{newKey}</code>
-            <CopyBtn text={newKey} label="复制" />
-          </div>
-        </Card>
-      )}
-      {keys === null ? (
-        <Spinner />
-      ) : mcpKeys.length === 0 ? (
-        <Empty text="无 MCP 密钥（memory scope）" />
-      ) : (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className={tableCls.root}>
-              <thead className={tableCls.thead}>
-                <tr>
-                  <th className={tableCls.th}>名称</th>
-                  <th className={tableCls.th}>前缀</th>
-                  <th className={tableCls.th}>scopes</th>
-                  <th className={tableCls.th}>创建</th>
-                  <th className={tableCls.th}>最近使用</th>
-                  <th className={tableCls.th} />
-                </tr>
-              </thead>
-              <tbody>
-                {mcpKeys.map((k) => (
-                  <tr key={k.id} className={tableCls.row}>
-                    <td className={`${tableCls.td} font-medium`}>{k.name}</td>
-                    <td className={`${tableCls.td} font-mono`}>{k.key_prefix}…</td>
-                    <td className={`${tableCls.td} font-mono text-xs text-muted-foreground`}>
-                      {k.scopes.join(', ')}
-                    </td>
-                    <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(k.created_at)}</td>
-                    <td className={`${tableCls.td} text-muted-foreground`}>
-                      {k.last_used_at ? fmtTime(k.last_used_at) : '—'}
-                    </td>
-                    <td className={`${tableCls.td} text-right`}>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={async () => {
-                          if (!confirm(`删除 key「${k.name}」？使用它的 AI 将立即失权。`)) return
-                          await api.post(`/settings/api-keys/${k.id}/revoke`)
-                          load()
-                        }}
-                      >
-                        删除
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
     </div>
   )
 }

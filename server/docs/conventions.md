@@ -32,7 +32,7 @@
 ## 测试
 
 - 集成测试为主（每 crate 一个 tests/ 目录），共享 `tests/support/mod.rs` 建一次性库。
-- 187 用例全绿是合并前提；测试用 PG 由 CI 的 pgvector service 提供。
+- 189 用例全绿是合并前提；测试用 PG 由 CI 的 pgvector service 提供。
 - MockLlm.sent_user 可断言"LLM 实际看到什么"（提示词行为测试）。
 
 ## Git 与提交

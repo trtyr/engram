@@ -553,6 +553,8 @@ async fn mcp_admin_info_endpoint() {
     let info: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(info["endpoint"], "/mcp");
     assert_eq!(info["server_name"], "engram");
+    assert_eq!(info["enabled"], json!(true), "缺省配置应全开");
+    assert_eq!(info["disabled_tools"], json!([]));
     let tools = info["tools"].as_array().expect("工具清单");
     assert!(tools.len() >= 9, "工具清单应与 MCP 层同源：{}", tools.len());
 
@@ -571,4 +573,136 @@ async fn mcp_admin_info_endpoint() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+/// PUT /settings/mcp（admin-only）：返回更新后的 McpInfo。
+async fn put_mcp_config(app: &Router, token: &str, body: Value) -> (StatusCode, Value) {
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/settings/mcp")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    (status, v)
+}
+
+#[tokio::test]
+async fn mcp_service_toggle_gates_endpoint() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let key = create_key(&app, &admin, &["memory"]).await;
+
+    // 关闭服务
+    let (status, info) = put_mcp_config(&app, &admin, json!({"enabled": false})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(info["enabled"], json!(false));
+
+    // 已认证 key 的 JSON-RPC 也被 gate 拦下（503，先于 MCP 层）
+    let (status, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "关闭后应 503：{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("MCP 服务已关闭"),
+        "503 应带关闭说明：{v}"
+    );
+
+    // 重新开启 → 恢复
+    let (status, _) = put_mcp_config(&app, &admin, json!({"enabled": true})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, v) = mcp_rpc(&app, &key, rpc(2, "tools/list", json!({}))).await;
+    assert_eq!(status, StatusCode::OK);
+    expect_result(&v, "重新开启后 tools/list");
+
+    // 非 admin 不能动开关
+    let (status, _) = put_mcp_config(&app, &key, json!({"enabled": false})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn mcp_tool_toggle_hides_and_rejects() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let key = create_key(&app, &admin, &["memory"]).await;
+
+    // 停用 write_session
+    let (status, info) = put_mcp_config(
+        &app,
+        &admin,
+        json!({"disabled_tools": ["memory_write_session"]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(info["disabled_tools"], json!(["memory_write_session"]));
+
+    // tools/list 对 AI 隐身（9 → 8）
+    let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
+    let result = expect_result(&v, "tools/list");
+    let names: Vec<String> = result["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(String::from))
+        .collect();
+    assert_eq!(names.len(), 8, "停用工具不应出现在 tools/list：{names:?}");
+    assert!(!names.contains(&"memory_write_session".to_string()));
+
+    // tools/call 直接拒绝
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            2,
+            "tools/call",
+            json!({
+                "name": "memory_write_session",
+                "arguments": {"turns": [{"speaker": "user", "text": "x"}]}
+            }),
+        ),
+    )
+    .await;
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("已停用"),
+        "停用工具调用应报错：{v}"
+    );
+
+    // 未知工具名 400（防笔误）
+    let (status, _) =
+        put_mcp_config(&app, &admin, json!({"disabled_tools": ["memory_bogus"]})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // 恢复全开 → 工具回归
+    let (status, info) = put_mcp_config(&app, &admin, json!({"disabled_tools": []})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(info["disabled_tools"], json!([]));
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            3,
+            "tools/call",
+            json!({
+                "name": "memory_write_session",
+                "arguments": {"distill": "off", "turns": [{"speaker": "user", "text": "回归测试"}]}
+            }),
+        ),
+    )
+    .await;
+    expect_result(&v, "恢复后 write_session");
 }

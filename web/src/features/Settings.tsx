@@ -335,10 +335,22 @@ function Routing() {
   )
 }
 
+/** scope 中文标签（与后端 SCOPES 七项对齐）。 */
+const SCOPE_LABELS: Record<string, string> = {
+  memory: '记忆',
+  wiki: 'Wiki',
+  codegraph: '代码图谱',
+  project: '项目',
+  llm: 'LLM 网关',
+  erase: '擦除（不可逆删除）',
+  cron: '节律心跳',
+}
+
 function Keys() {
   const [rows, setRows] = useState<ApiKey[] | null>(null)
   const [newKey, setNewKey] = useState('')
   const [name, setName] = useState('')
+  const [scopes, setScopes] = useState<Set<string>>(new Set(['memory']))
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const load = () => api.get<ApiKey[]>('/settings/api-keys').then(setRows).catch(() => {})
   const active = rows?.filter((k) => !k.revoked_at) ?? []
@@ -350,6 +362,12 @@ function Keys() {
     else next.add(id)
     setSelected(next)
   }
+  const toggleScope = (s: string) => {
+    const next = new Set(scopes)
+    if (next.has(s)) next.delete(s)
+    else next.add(s)
+    setScopes(next)
+  }
   useEffect(() => {
     load()
   }, [])
@@ -357,12 +375,12 @@ function Keys() {
     <div className="space-y-4">
       <Card className="p-4">
         <h3 className="text-sm font-semibold">签发新密钥</h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">给 AI 客户端签发 amk_ 密钥（scope 在签发时选择）</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">给 AI 客户端签发 amk_ 密钥（scope 在签发时选择，至少一个）</p>
         <form
           className="mt-3 flex flex-wrap items-center gap-2"
           onSubmit={async (e) => {
             e.preventDefault()
-            const r = await api.post<{ key: string }>('/settings/api-keys', { name })
+            const r = await api.post<{ key: string }>('/settings/api-keys', { name, scopes: [...scopes] })
             setNewKey(r.key)
             setName('')
             load()
@@ -376,7 +394,21 @@ function Keys() {
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-          <Button size="sm" type="submit">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1" role="group" aria-label="scope 选择">
+            {Object.entries(SCOPE_LABELS).map(([s, label]) => (
+              <label key={s} className="flex items-center gap-1 text-xs">
+                <input
+                  type="checkbox"
+                  className="accent-current"
+                  checked={scopes.has(s)}
+                  onChange={() => toggleScope(s)}
+                />
+                <span className="font-mono">{s}</span>
+                <span className="text-muted-foreground">{label}</span>
+              </label>
+            ))}
+          </div>
+          <Button size="sm" type="submit" disabled={scopes.size === 0}>
             签发
           </Button>
         </form>
@@ -419,6 +451,7 @@ function Keys() {
                   </th>
                   <th className={tableCls.th}>名称</th>
                   <th className={tableCls.th}>前缀</th>
+                  <th className={tableCls.th}>scopes</th>
                   <th className={tableCls.th}>创建</th>
                   <th className={tableCls.th}>最近使用</th>
                   <th className={tableCls.th} />
@@ -432,6 +465,7 @@ function Keys() {
                     </td>
                     <td className={`${tableCls.td} font-medium`}>{k.name}</td>
                     <td className={`${tableCls.td} font-mono`}>{k.key_prefix}…</td>
+                    <td className={`${tableCls.td} font-mono text-xs text-muted-foreground`}>{k.scopes.join(', ')}</td>
                     <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(k.created_at)}</td>
                     <td className={`${tableCls.td} text-muted-foreground`}>
                       {k.last_used_at ? fmtTime(k.last_used_at) : '—'}

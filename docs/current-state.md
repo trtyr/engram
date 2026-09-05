@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）。cargo **187** 测试（38 套件）/ vitest 44。
+origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具）。cargo **189** 测试（38 套件）/ vitest 45。
 **项目记忆第五域已实现**：三表（projects / project_locations / project_docs）+ 类型模板（开发四分类/调研六分类）+ 完整 API（88 路径）+ Web（列表 CRUD/多选/类型筛选 + 详情页 Wiki 式左树右内容树状图）。
 :8090 开发栈在跑（am_dev 库，数据由所有者主动清空后重建）。
 
@@ -13,11 +13,11 @@ origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具�
 | 栈 | 命令 | 结果 |
 |---|---|---|
 | server | cargo fmt --check / clippy -D warnings | exit 0 / 0 errors |
-| server | cargo test --workspace | 187 passed（38 套件） |
-| web | pnpm run lint / tsc / test / build | 0 警告 / 0 / 44 全过（9 文件）/ exit 0 |
+| server | cargo test --workspace | 189 passed（38 套件） |
+| web | pnpm run lint / tsc / test / build | 11 既有警告（WikiMarkdown） / 0 / 45 全过（9 文件）/ exit 0 |
 | web | 入口 bundle | 285.60 kB（gzip 91.81），预算 350 内 |
 | CI | gh run list（f8e1031） | CI + e2e FAIL（GitHub 支出限额，未启动） |
-| 事实 | OpenAPI 活体 / 迁移 / 表 | **89 路径 / 114 方法注册**（GET 47/POST 47/PUT 7/PATCH 3/DELETE 10，另有 POST /mcp JSON-RPC 不进 OpenAPI）/ **30 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
+| 事实 | OpenAPI 活体 / 迁移 / 表 | **89 路径 / 115 方法注册**（GET 47/POST 47/PUT 8/PATCH 3/DELETE 10，另有 POST /mcp JSON-RPC 不进 OpenAPI）/ **30 迁移** / **27 业务表**（openapi-dump + am_dev 库实查） |
 
 ## 运行环境实况（2026-09-03 实查 + 所有者确认）
 
@@ -53,6 +53,8 @@ origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具�
 20. **产品更名 Engram**（2026-09-04，goal mtmzv6xt-b6u3ql）：GitHub 仓库 trtyr/engram、10 crate engram-*、品牌面全面 Engram 化、根 README 美化 + MIT LICENSE。
 
 21. **knowledge 彻底并入 wiki**（2026-09-05，goal mtn6mye4-ql1zkm）：删 knowledge scope（八→七）、代码模块/类型归 wiki 命名（KnowledgeService→WikiDocumentService、knowledge_api→wiki_docs_api）、数据表改名（documents/chunks→wiki_documents/wiki_chunks，0029 迁移）、删 /knowledge/* 兼容别名、统一检索 knowledge 域标签并入 wiki；0030 迁移收尾——约束名归位（documents_pkey→wiki_documents_pkey 等 6 个）+ api_keys 默认 scopes 去 knowledge。
+
+23. **MCP 管理面 + 密钥管理归位**（2026-09-05）：MCP 配置入 settings KV（key=`mcp`：enabled + disabled_tools，缺省全开无迁移）；`/mcp` 前置 gate 中间件——服务关闭对已认证客户端也 503（Bearer 之内、MCP 之前）；覆写 rmcp `list_tools`/`call_tool`——停用工具对 AI 隐身且调用被拒（管理端点仍展示全量）；`GET/PUT /settings/mcp`（PUT 校验未知工具名 400）；前端 MCP 页重排为管理向（服务开关卡 + 工具粒度开关表 + 连接配置），密钥管理收敛回设置页 Keys tab（签发表单补七 scope 选择器 + 表格 scopes 列，MCP 页只选不建）。验证：cargo 189（+2 toggle 用例）+ vitest 45（mcp.test 重写 3 用例）+ 真机冒烟（关服务 503 / 停用工具隐身+拒绝 / 恢复全开）。
 
 ## 已知未了项
 

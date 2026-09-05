@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 use crate::auth::Principal;
 use crate::state::AppState;
+use axum::response::IntoResponse;
 
 /// 错误桥：把本模块的错误统一成 MCP ErrorData。
 fn mcp_err(code: ErrorCode, msg: impl Into<String>) -> rmcp::ErrorData {
@@ -637,6 +638,53 @@ impl ServerHandler for MemoryMcpServer {
             .with_server_info(Implementation::new("engram", env!("CARGO_PKG_VERSION")))
             .with_instructions(SERVER_INSTRUCTIONS)
     }
+
+    /// 停用工具不进 tools/list（对 AI 隐身），控制台管理端点仍展示全量。
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+        let cfg = load_config(&self.state.pool).await;
+        let tools: Vec<_> = self
+            .tool_router
+            .list_all()
+            .into_iter()
+            .filter(|t| !cfg.disabled_tools.iter().any(|d| d == t.name.as_ref()))
+            .collect();
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
+        Ok(rmcp::model::ListToolsResult {
+            result_type: Some(rmcp::model::ResultType::COMPLETE),
+            tools,
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
+        })
+    }
+
+    /// 停用工具的调用直接拒绝（服务总开关在 HTTP gate 层已拦）。
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
+        let cfg = load_config(&self.state.pool).await;
+        if cfg
+            .disabled_tools
+            .iter()
+            .any(|d| d == request.name.as_ref())
+        {
+            return Err(mcp_err(
+                ErrorCode::INVALID_REQUEST,
+                format!("工具 {} 已停用——控制台「MCP」页可重新开启", request.name),
+            ));
+        }
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
 }
 
 /// 构造挂载到 axum 的 MCP 服务（Streamable HTTP，会话保存在进程内存）。
@@ -667,21 +715,82 @@ pub fn service(state: AppState) -> StreamableHttpService<MemoryMcpServer, LocalS
     )
 }
 
-/// 工具元数据清单（管理端点 GET /settings/mcp 与 MCP 层同源：从注册表取）。
-pub fn tool_catalog() -> Vec<serde_json::Value> {
-    let router = MemoryMcpServer::tool_router();
-    router
-        .list_all()
-        .into_iter()
-        .map(|t| {
-            serde_json::json!({
-                "name": t.name,
-                "description": t.description.as_deref().unwrap_or(""),
-                "readOnly": t.annotations.as_ref().and_then(|a| a.read_only_hint),
-                "destructive": t.annotations.as_ref().and_then(|a| a.destructive_hint),
-            })
-        })
-        .collect()
+// ---------- MCP 配置（settings KV 单行：服务开关 + 工具粒度开关） ----------
+
+/// MCP 配置（settings 表 key=`mcp`，jsonb）。缺省 = 全开。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct McpConfig {
+    /// 服务总开关：false 时 /mcp 整体 503（AI 客户端连接/调用一律拒绝）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 停用的工具名清单：tools/list 不出现、tools/call 报错
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
+}
+fn default_true() -> bool {
+    true
+}
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            disabled_tools: Vec::new(),
+        }
+    }
+}
+
+const MCP_SETTINGS_KEY: &str = "mcp";
+
+/// 读配置（行缺失 → 全开缺省；坏 JSON 按缺省处理，不让配置损坏打死端点）。
+pub async fn load_config(pool: &sqlx::PgPool) -> McpConfig {
+    let row: Option<(sqlx::types::Json<McpConfig>,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = $1")
+            .bind(MCP_SETTINGS_KEY)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    row.map(|(j,)| j.0).unwrap_or_default()
+}
+
+/// 写配置（settings KV upsert）。
+pub async fn save_config(
+    pool: &sqlx::PgPool,
+    cfg: &McpConfig,
+) -> Result<(), crate::error::ApiError> {
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()",
+    )
+    .bind(MCP_SETTINGS_KEY)
+    .bind(sqlx::types::Json(cfg))
+    .execute(pool)
+    .await
+    .map_err(|e| crate::error::ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+    Ok(())
+}
+
+/// 服务总开关拦截：关闭时 /mcp 一律 503（在 Bearer 之内、MCP 层之前——
+/// 关闭是对外的，已认证客户端也拿不到 initialize）。
+pub async fn gate(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if !load_config(&state.pool).await.enabled {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "error": {
+                    "code": "mcp_disabled",
+                    "message": "MCP 服务已关闭——控制台「MCP」页可重新开启",
+                    "retryable": true,
+                }
+            })),
+        )
+            .into_response();
+    }
+    next.run(req).await
 }
 
 // ---------- 管理端点（Web 控制台用） ----------
@@ -702,20 +811,17 @@ pub struct McpInfo {
     pub protocol_version: String,
     pub server_name: String,
     pub server_version: String,
+    /// 服务总开关（false = /mcp 整体 503）
+    pub enabled: bool,
+    /// 停用的工具名（tools/list 对 AI 隐身、call 拒绝）
+    pub disabled_tools: Vec<String>,
     /// initialize 时下发给调用方 AI 的使用说明（与工具面同源展示）
     pub instructions: String,
     pub tools: Vec<McpToolInfo>,
 }
 
-/// MCP 服务信息（Web 控制台「MCP」页：端点、协议版本、工具清单）。
-#[utoipa::path(get, path = "/settings/mcp",
-    responses((status = 200, body = McpInfo)))]
-pub async fn settings_mcp(
-    principal: axum::Extension<Principal>,
-) -> Result<axum::Json<McpInfo>, crate::error::ApiError> {
-    if !matches!(principal.0, Principal::Admin) {
-        return Err(crate::error::ApiError::Forbidden("仅限管理员".into()));
-    }
+async fn build_info(pool: &sqlx::PgPool) -> McpInfo {
+    let cfg = load_config(pool).await;
     let router = MemoryMcpServer::tool_router();
     let tools = router
         .list_all()
@@ -727,12 +833,72 @@ pub async fn settings_mcp(
             destructive: t.annotations.as_ref().and_then(|a| a.destructive_hint),
         })
         .collect();
-    Ok(axum::Json(McpInfo {
+    McpInfo {
         endpoint: "/mcp".into(),
         protocol_version: rmcp::model::ProtocolVersion::default().to_string(),
         server_name: "engram".into(),
         server_version: env!("CARGO_PKG_VERSION").into(),
+        enabled: cfg.enabled,
+        disabled_tools: cfg.disabled_tools,
         instructions: SERVER_INSTRUCTIONS.into(),
         tools,
-    }))
+    }
+}
+
+/// MCP 服务信息（Web 控制台「MCP」页：端点、协议版本、开关状态、工具清单）。
+#[utoipa::path(get, path = "/settings/mcp",
+    responses((status = 200, body = McpInfo)))]
+pub async fn settings_mcp(
+    principal: axum::Extension<Principal>,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Result<axum::Json<McpInfo>, crate::error::ApiError> {
+    if !matches!(principal.0, Principal::Admin) {
+        return Err(crate::error::ApiError::Forbidden("仅限管理员".into()));
+    }
+    Ok(axum::Json(build_info(&state.pool).await))
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub struct McpConfigUpdate {
+    /// 服务总开关
+    pub enabled: Option<bool>,
+    /// 停用工具全量清单（覆盖式；空数组 = 全部启用）。未知工具名 400。
+    pub disabled_tools: Option<Vec<String>>,
+}
+
+/// 更新 MCP 配置（服务开关 / 工具粒度开关）。
+#[utoipa::path(put, path = "/settings/mcp",
+    request_body = McpConfigUpdate,
+    responses((status = 200, body = McpInfo), (status = 400, body = crate::error::ErrorEnvelope)))]
+pub async fn settings_mcp_update(
+    principal: axum::Extension<Principal>,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::Json(req): axum::Json<McpConfigUpdate>,
+) -> Result<axum::Json<McpInfo>, crate::error::ApiError> {
+    if !matches!(principal.0, Principal::Admin) {
+        return Err(crate::error::ApiError::Forbidden("仅限管理员".into()));
+    }
+    let mut cfg = load_config(&state.pool).await;
+    if let Some(enabled) = req.enabled {
+        cfg.enabled = enabled;
+    }
+    if let Some(disabled) = req.disabled_tools {
+        // 工具名校验：停用一个不存在的名字多半是调用方笔误，宁可 400
+        let known: Vec<String> = MemoryMcpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        for name in &disabled {
+            if !known.contains(name) {
+                return Err(crate::error::ApiError::BadRequest(format!(
+                    "未知工具 {name:?}——可用：{}",
+                    known.join(", ")
+                )));
+            }
+        }
+        cfg.disabled_tools = disabled;
+    }
+    save_config(&state.pool, &cfg).await?;
+    Ok(axum::Json(build_info(&state.pool).await))
 }

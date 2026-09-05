@@ -19,7 +19,7 @@ Engram 控制台：把九页能力（一架梯子 + 一坐标系 + 四资产域 
 | /codegraph | CodeGraph | 项目注册→索引→结构化查询（面板化结果） |
 | /projects | 项目 | 项目记忆第五域：列表（CRUD/多选/类型筛选）+ 详情（Wiki 式左树右内容：位置多主机 + 分类文档） |
 | /jobs | Jobs | 任务表、事件流水展开、死信 revive |
-| /mcp | MCP | 端点信息 / 连接配置一键复制（Claude Code·Cursor·Claude Desktop）/ 工具清单 / MCP 密钥签发（scope 选择） |
+| /mcp | MCP | 管理面：服务开关（关闭 = /mcp 503）/ 工具粒度开关（停用 = 对 AI 隐身）/ 连接配置一键复制（Claude Code·Cursor·Claude Desktop） |
 | /settings | Settings | Provider 管理（真 label 表单）、路由表、API Key、危险区（重加密 + **deep 清空两阶段**） |
 
 IA 语义：**用户记忆 = 一架梯子（蒸馏深度），圈子 = 一坐标系（按人/事横向切）**——

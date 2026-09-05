@@ -1126,9 +1126,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** MCP 服务信息（Web 控制台「MCP」页：端点、协议版本、工具清单）。 */
+        /** MCP 服务信息（Web 控制台「MCP」页：端点、协议版本、开关状态、工具清单）。 */
         get: operations["settings_mcp"];
-        put?: never;
+        /** 更新 MCP 配置（服务开关 / 工具粒度开关）。 */
+        put: operations["settings_mcp_update"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1996,7 +1997,17 @@ export interface components {
             /** @description 会话 token（ams_ 前缀，7 天有效；只在登录响应出现一次） */
             token: string;
         };
+        McpConfigUpdate: {
+            /** @description 停用工具全量清单（覆盖式；空数组 = 全部启用）。未知工具名 400。 */
+            disabled_tools?: string[] | null;
+            /** @description 服务总开关 */
+            enabled?: boolean | null;
+        };
         McpInfo: {
+            /** @description 停用的工具名（tools/list 对 AI 隐身、call 拒绝） */
+            disabled_tools: string[];
+            /** @description 服务总开关（false = /mcp 整体 503） */
+            enabled: boolean;
             /** @description MCP 端点路径（相对服务根） */
             endpoint: string;
             /** @description initialize 时下发给调用方 AI 的使用说明（与工具面同源展示） */
@@ -4394,6 +4405,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["McpInfo"];
+                };
+            };
+        };
+    };
+    settings_mcp_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConfigUpdate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpInfo"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };

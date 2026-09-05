@@ -30,7 +30,7 @@ use utoipa::OpenApi;
         llm_api::get_routing, llm_api::put_routing, llm_api::suggest_routing, llm_api::usage,
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
         llm_api::batch_revoke_api_keys,
-        crate::mcp::settings_mcp,
+        crate::mcp::settings_mcp, crate::mcp::settings_mcp_update,
         memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
         memory_api::erase_session, memory_api::append_session, memory_api::import_session, memory_api::void_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
@@ -77,8 +77,13 @@ pub fn router(state: AppState) -> Router {
 
     let authed = Router::new()
         // MCP（用户记忆域工具面）：nest 在 authed 内 → 复用 Bearer 中间件，
-        // 每个 JSON-RPC 请求独立认证（key 吊销即刻生效，会话保活不能豁免）
-        .nest_service("/mcp", crate::mcp::service(state.clone()))
+        // 每个 JSON-RPC 请求独立认证（key 吊销即刻生效，会话保活不能豁免）；
+        // gate 在 Bearer 之内、MCP 之前——服务总开关关闭时对已认证客户端也 503
+        .merge(
+            Router::new()
+                .nest_service("/mcp", crate::mcp::service(state.clone()))
+                .route_layer(from_fn_with_state(state.clone(), crate::mcp::gate)),
+        )
         .route("/jobs", get(jobs_api::list_jobs))
         .route("/jobs/{id}", get(jobs_api::get_job))
         .route("/jobs/{id}/events", get(jobs_api::get_job_events))
@@ -119,7 +124,10 @@ pub fn router(state: AppState) -> Router {
             "/settings/api-keys/batch-revoke",
             post(llm_api::batch_revoke_api_keys),
         )
-        .route("/settings/mcp", get(crate::mcp::settings_mcp))
+        .route(
+            "/settings/mcp",
+            get(crate::mcp::settings_mcp).put(crate::mcp::settings_mcp_update),
+        )
         .route("/llm/usage", get(llm_api::usage))
         .route("/memory/sessions/import", post(memory_api::import_session))
         .route(

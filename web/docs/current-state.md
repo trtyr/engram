@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-vitest **44**（9 文件）/ oxlint 0 警告 / tsc 0 / build 0 / 入口 bundle **285.60 kB**（gzip 91.81，预算 350 内）。
+vitest **45**（9 文件）/ oxlint 0 警告 / tsc 0 / build 0 / 入口 bundle **285.60 kB**（gzip 91.81，预算 350 内）。
 origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian IA 重做（roadmap 0w，28 项审计全修）。
 
 ## 2026-08-30 基线以来的前端大事记
@@ -24,7 +24,7 @@ origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian 
 12. **设置页 AI 配置体系重构**（2026-09-02，ac55a6d..2397d53 八连提交）：先看功能再配 API（AI 功能页纯选）、供应商真 label 表单 + 类型下拉、批量吊销、全站下拉框美化（去原生箭头 + 自定义 chevron）
 13. **Wiki Obsidian IA 重做**（2026-09-03，1edff15..a3b6a2d，roadmap 0w 28 项审计全修）：目录树（folder 层级，折叠 localStorage 持久化，role=tree 语义）+ 树/图双视图切换 + 收件箱/运维二级面板；布局骨架重做（视口实算/状态提升切视图不丢/分割线拖拽 220-480px/?page= 深链自动展开 folder）；双链渲染三连修（递归 withWikilinks 深入行内 children 覆盖标题/列表/表格 / 404 显性提示不再静默刷树）；阅读区排版 70ch→4xl 放宽；Tabs 脏竖线改发丝网格；新增 e2e wiki-ia.spec.ts（折叠持久化/URL 写回/深链断言）
 
-14. **MCP 管理页**（2026-09-05）：/mcp 九页——端点信息（GET /settings/mcp，与后端工具注册表同源）、连接配置一键复制（Claude Code `claude mcp add` / Cursor / Claude Desktop JSON）、工具清单（名称/说明/只读·破坏性标注）、MCP 密钥签发（scope 选择：memory 默认 + erase 可选）；vite 代理白名单加 /mcp（dev 下 AI 客户端可直连测试）。
+14. **MCP 管理页**（2026-09-05）：/mcp 九页——服务开关卡（关闭 = /mcp 503）、工具粒度开关表（停用 = 对 AI 隐身 + 调用拒，PUT /settings/mcp 覆盖式 disabled_tools）、连接配置一键复制（Claude Code `claude mcp add` / Cursor / Claude Desktop JSON）；密钥管理收敛回设置页 Keys tab（签发表单补七 scope 选择器 + scopes 列，MCP 页只选不建）；vite 代理白名单加 /mcp。mcp.test 重写为管理行为三用例。
 
 ## 当日验证
 
@@ -32,7 +32,7 @@ origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian 
 |---|---|
 | pnpm run lint（oxlint） | 0 警告 |
 | pnpm exec tsc --noEmit | exit 0 |
-| pnpm test | 44 passed / 9 文件 |
+| pnpm test | 45 passed / 9 文件 |
 | pnpm run build | exit 0；入口 285.60 kB（gzip 91.81） |
 | CI（f8e1031） | e2e + CI FAIL（支出限额，未启动） |
 
