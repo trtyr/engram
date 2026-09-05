@@ -233,6 +233,13 @@ pub struct EmbeddingStatus {
 
 // ---------- 服务 ----------
 
+/// 查询侧嵌入指令（Qwen3-Embedding 等非对称检索模型用）；None = 不包装。
+static QUERY_INSTRUCTION: std::sync::LazyLock<Option<String>> = std::sync::LazyLock::new(|| {
+    std::env::var("AGENT_MEMORY_EMBED_QUERY_INSTRUCTION")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+});
+
 #[derive(Clone)]
 pub struct MemoryService {
     pool: PgPool,
@@ -1666,6 +1673,24 @@ impl MemoryService {
             .map(|r| r.embeddings)
     }
 
+    /// v2（Qwen3-Embedding）：查询侧指令包装。Qwen3-Embedding 是非对称检索模型，
+    /// 官方要求查询带 task instruction（文档侧不带）——不带指令的跨语言/短查询
+    /// 召回会明显退化（实测：英文 pet 查询在阈值内找不到已有橘猫记忆）。
+    /// 指令经 AGENT_MEMORY_EMBED_QUERY_INSTRUCTION 配置；未设置 = 不包装（bge-m3 等对称模型）。
+    /// 文档侧（atom/scene 内容嵌入）必须保持不包装。
+    async fn try_embed_query(&self, texts: &[String]) -> Option<Vec<Vec<f32>>> {
+        match QUERY_INSTRUCTION.as_ref() {
+            Some(instr) => {
+                let wrapped: Vec<String> = texts
+                    .iter()
+                    .map(|t| format!("{instr}\nQuery: {t}"))
+                    .collect();
+                self.try_embed(&wrapped).await
+            }
+            None => self.try_embed(texts).await,
+        }
+    }
+
     /// B9 命中反馈：检索命中即异步回写 hit_count（best-effort，失败只记日志）。
     /// 不刷 updated_at——hit 是使用热度而非内容变化，避免扰动「最近更新」排序。
     fn fire_hit_feedback(&self, table: &'static str, ids: Vec<Uuid>) {
@@ -1698,7 +1723,7 @@ impl MemoryService {
         to: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<SearchResponse, MemoryError> {
         let qv = self
-            .try_embed(&[query.to_string()])
+            .try_embed_query(&[query.to_string()])
             .await
             .and_then(|v| v.first().cloned());
         let all = layers.is_empty();
@@ -1798,7 +1823,7 @@ impl MemoryService {
         // 有 query 时预计算 query 向量（L2/L1 共用，避免重复 embed）
         let qv: Option<Vec<f32>> = match query {
             Some(q) => self
-                .try_embed(&[q.to_string()])
+                .try_embed_query(&[q.to_string()])
                 .await
                 .and_then(|v| v.first().cloned()),
             None => None,

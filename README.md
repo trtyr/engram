@@ -93,8 +93,10 @@ engram-server 内置 MCP（Model Context Protocol）服务端（官方 Rust SDK 
 - **管理**：控制台「MCP」页——服务总开关（关闭即整体 503）、按域逐个看工具开关
   （停用即对 AI 隐身 + 调用拒绝，未来各域逐个 MCP 化）；MCP 专用密钥在
   「设置 → API 密钥」签发（scope 选择器勾 memory）
-- **检索质量**：FTS 零命中时向量腿收紧阈值（不相关查询返回空而非噪声页），
-  阈值按部署的 embedding 模型用 `AGENT_MEMORY_VEC_FALLBACK_MAX_DISTANCE` 调整
+- **检索质量**：FTS 零命中时向量腿收紧阈值（不相关查询返回空而非噪声页）+ 查询侧
+  领域停用词；阈值按 embedding 模型用 `AGENT_MEMORY_VEC_FALLBACK_MAX_DISTANCE` 调整
+  （Qwen3-Embedding-8B 建议 0.65），非对称检索模型（Qwen3）需同时设
+  `AGENT_MEMORY_EMBED_QUERY_INSTRUCTION`（查询侧指令，文档侧不包装）
 
 Claude Code 快速接入：
 
