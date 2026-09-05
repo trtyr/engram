@@ -1,17 +1,15 @@
 /**
  * MCP 管理页：Engram MCP 服务的管理台。
- * 布局：顶部状态条（状态灯 + 端点 + 总开关一行收口）→ 双栏：左工具开关列表（密集行 +
- * 拨杆开关，说明收 tooltip），右接入卡（密钥选择 + 客户端 tab + 配置复制）。
+ * 布局：顶部状态条（状态灯 + 端点 + 总开关一行收口）→ 域 Tabs（一个域一个域地看，
+ * 未来 Wiki/CodeGraph 接入即新增 tab）→ 选中域的工具开关列表（拨杆 + 语义徽标，说明收 tooltip）。
  * 管理语义：总开关关闭 = /mcp 整体 503；工具停用 = 对 AI 隐身 + 调用拒。
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { Check, Copy } from 'lucide-react'
-import { api, type ApiKey, type McpInfo, type McpToolInfo } from '@/lib/api'
+import { api, type McpInfo, type McpToolInfo } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
 import { cn } from '@/lib/utils'
-import { selectCls } from '@/lib/ui'
 
 /** 拨杆开关（墨白：选中即墨底白钮）。 */
 function Switch({
@@ -91,31 +89,28 @@ function ToolBadge({ t }: { t: McpToolInfo }) {
   )
 }
 
-type ClientId = 'claude-code' | 'cursor' | 'claude-desktop'
-
-const CLIENTS: { value: ClientId; label: string; hint: string }[] = [
-  { value: 'claude-code', label: 'Claude Code', hint: '终端运行' },
-  { value: 'cursor', label: 'Cursor', hint: 'mcp.json' },
-  { value: 'claude-desktop', label: 'Claude Desktop', hint: 'claude_desktop_config.json' },
-]
+/** 域 key → 中文标签（与侧栏资产域命名同源）。 */
+const DOMAIN_LABELS: Record<string, string> = {
+  memory: '用户记忆',
+  wiki: 'Wiki',
+  codegraph: '代码图谱',
+  project: '项目',
+}
 
 export default function Mcp() {
   const [info, setInfo] = useState<McpInfo | null>(null)
   const [err, setErr] = useState('')
-  const [keys, setKeys] = useState<ApiKey[] | null>(null)
-  const [selectedKeyId, setSelectedKeyId] = useState<string>('')
-  const [client, setClient] = useState<ClientId>('claude-code')
+  const [domain, setDomain] = useState<string>('')
   const [busy, setBusy] = useState(false)
 
   const load = () => {
     api
       .get<McpInfo>('/settings/mcp')
-      .then(setInfo)
+      .then((next) => {
+        setInfo(next)
+        setErr('')
+      })
       .catch((e) => setErr(e.message))
-    api
-      .get<ApiKey[]>('/settings/api-keys')
-      .then((rows) => setKeys(rows.filter((k) => !k.revoked_at)))
-      .catch(() => setKeys([]))
   }
   useEffect(load, [])
 
@@ -131,35 +126,25 @@ export default function Mcp() {
     }
   }
 
-  const mcpKeys = keys?.filter((k) => k.scopes.includes('memory')) ?? []
-  const selectedKey = mcpKeys.find((k) => k.id === selectedKeyId) ?? mcpKeys[0] ?? null
-  const mcpUrl = info ? `${window.location.origin}${info.endpoint}` : null
-
-  const configText = useMemo(() => {
-    if (!mcpUrl || !info?.enabled) return null
-    switch (client) {
-      case 'claude-code':
-        return `claude mcp add --transport http engram ${mcpUrl} --header "Authorization: Bearer <KEY>"`
-      case 'cursor':
-        return JSON.stringify(
-          { mcpServers: { engram: { url: mcpUrl, headers: { Authorization: 'Bearer <KEY>' } } } },
-          null,
-          2,
-        )
-      case 'claude-desktop':
-        return JSON.stringify(
-          { mcpServers: { engram: { type: 'http', url: mcpUrl, headers: { Authorization: 'Bearer <KEY>' } } } },
-          null,
-          2,
-        )
+  // 按域分组（后端同源 domain 字段；首次出现顺序即展示顺序）
+  const domains = useMemo(() => {
+    const map = new Map<string, McpToolInfo[]>()
+    for (const t of info?.tools ?? []) {
+      const list = map.get(t.domain) ?? []
+      list.push(t)
+      map.set(t.domain, list)
     }
-  }, [client, mcpUrl, info?.enabled])
+    return [...map.entries()]
+  }, [info])
 
-  const enabledCount = info ? info.tools.length - info.disabled_tools.length : 0
+  const currentDomain = domain || domains[0]?.[0] || ''
+  const domainTools = domains.find(([d]) => d === currentDomain)?.[1] ?? []
+  const domainDisabled = domainTools.filter((t) => info?.disabled_tools.includes(t.name)).length
+  const mcpUrl = info ? `${window.location.origin}${info.endpoint}` : null
 
   return (
     <div className="space-y-4">
-      <PageHeader title="MCP" desc="AI 接入管理——能连、能调什么，都在这里收口" />
+      <PageHeader title="MCP" desc="AI 接入管理——一个域一个域地收口：能连什么、能调什么" />
       {err && <ErrorBox msg={err} />}
 
       {info === null && !err ? (
@@ -198,112 +183,63 @@ export default function Mcp() {
             </div>
           </Card>
 
-          <div className="grid gap-4 lg:grid-cols-5">
-            {/* 左：工具开关列表 */}
-            <Card className="overflow-hidden lg:col-span-3">
-              <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                <h3 className="text-sm font-semibold">工具面</h3>
-                <p className="font-mono text-xs text-muted-foreground" aria-live="polite">
-                  启用 {enabledCount}/{info.tools.length}
-                  {info.disabled_tools.length > 0 && ` · 停用 ${info.disabled_tools.length}`}
-                </p>
+          {/* 域 Tabs + 选中域的工具开关列表 */}
+          <Card className="overflow-hidden">
+            {domains.length > 0 && (
+              <div className="border-b border-border px-3 py-2">
+                <Tabs
+                  items={domains.map(([d, tools]) => ({
+                    value: d,
+                    label: DOMAIN_LABELS[d] ?? d,
+                    count: tools.length,
+                  }))}
+                  value={currentDomain}
+                  onChange={setDomain}
+                />
               </div>
-              <ul role="list">
-                {info.tools.map((t) => {
-                  const disabled = info.disabled_tools.includes(t.name)
-                  return (
-                    <li
-                      key={t.name}
-                      className="flex items-center gap-3 border-b border-border/60 px-3 py-2 transition-colors last:border-b-0 hover:bg-muted/40"
-                      title={t.description}
-                    >
-                      <code className={cn('text-xs font-medium', disabled && 'text-muted-foreground/60 line-through')}>
-                        {t.name}
-                      </code>
-                      <ToolBadge t={t} />
-                      <span className="ml-auto">
-                        <Switch
-                          checked={!disabled}
-                          disabled={busy}
-                          label={`${disabled ? '启用' : '停用'} ${t.name}`}
-                          onChange={(next) =>
-                            putConfig({
-                              disabled_tools: next
-                                ? info.disabled_tools.filter((d) => d !== t.name)
-                                : [...info.disabled_tools, t.name],
-                            })
-                          }
-                        />
-                      </span>
-                    </li>
-                  )
-                })}
-              </ul>
-              <p className="border-t border-border bg-muted/30 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
-                停用 = 对 AI 隐身（tools/list 不出现）且调用被拒；悬浮工具名看完整说明。
+            )}
+            <div className="flex items-center justify-between px-3 py-2">
+              <h3 className="text-sm font-semibold">{DOMAIN_LABELS[currentDomain] ?? currentDomain}域工具</h3>
+              <p className="font-mono text-xs text-muted-foreground" aria-live="polite">
+                启用 {domainTools.length - domainDisabled}/{domainTools.length}
+                {domainDisabled > 0 && ` · 停用 ${domainDisabled}`}
               </p>
-            </Card>
-
-            {/* 右：接入卡（密钥选择 + 客户端 tab + 配置） */}
-            <div className="space-y-4 lg:col-span-2">
-              <Card className="p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold">接入</h3>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    memory 密钥 {mcpKeys.length}
-                  </span>
-                </div>
-                {mcpKeys.length === 0 ? (
-                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                    没有 memory scope 的 key——
-                    <Link to="/settings" className="underline underline-offset-2 hover:text-foreground">
-                      设置 → API 密钥
-                    </Link>
-                    签发一把再回来。
-                  </p>
-                ) : (
-                  <>
-                    <select
-                      aria-label="使用密钥"
-                      className={cn(selectCls, 'mt-2 w-full text-xs')}
-                      value={selectedKey?.id ?? mcpKeys[0].id}
-                      onChange={(e) => setSelectedKeyId(e.target.value)}
-                    >
-                      {mcpKeys.map((k) => (
-                        <option key={k.id} value={k.id}>
-                          {k.name}（{k.key_prefix}…）
-                        </option>
-                      ))}
-                    </select>
-                    <Tabs
-                      items={CLIENTS.map((c) => ({ value: c.value, label: c.label }))}
-                      value={client}
-                      onChange={setClient}
-                    />
-                    <p className="mt-2 text-[11px] text-muted-foreground">
-                      {CLIENTS.find((c) => c.value === client)!.hint}
-                    </p>
-                    {configText && (
-                      <div className="relative mt-2">
-                        <pre className="overflow-x-auto rounded bg-muted/50 p-2 pr-16 font-mono text-[11px] leading-4 break-all whitespace-pre-wrap">
-                          {configText}
-                        </pre>
-                        <div className="absolute top-1.5 right-1.5">
-                          <CopyBtn text={configText} label="复制" />
-                        </div>
-                      </div>
-                    )}
-                    <p className="mt-2 text-[11px] text-muted-foreground">
-                      &lt;KEY&gt; 换成密钥明文；
-                      <Link to="/settings" className="underline underline-offset-2 hover:text-foreground">
-                        签发新 key
-                      </Link>
-                    </p>
-                  </>
-                )}
-              </Card>
             </div>
-          </div>
+            <ul role="list">
+              {domainTools.map((t) => {
+                const disabled = info.disabled_tools.includes(t.name)
+                return (
+                  <li
+                    key={t.name}
+                    className="flex items-center gap-3 border-b border-border/60 px-3 py-2 transition-colors last:border-b-0 hover:bg-muted/40"
+                    title={t.description}
+                  >
+                    <code className={cn('text-xs font-medium', disabled && 'text-muted-foreground/60 line-through')}>
+                      {t.name}
+                    </code>
+                    <ToolBadge t={t} />
+                    <span className="ml-auto">
+                      <Switch
+                        checked={!disabled}
+                        disabled={busy}
+                        label={`${disabled ? '启用' : '停用'} ${t.name}`}
+                        onChange={(next) =>
+                          putConfig({
+                            disabled_tools: next
+                              ? info.disabled_tools.filter((d) => d !== t.name)
+                              : [...info.disabled_tools, t.name],
+                          })
+                        }
+                      />
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="border-t border-border bg-muted/30 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+              停用 = 对 AI 隐身（tools/list 不出现）且调用被拒；悬浮工具名看完整说明。总开关关闭时整个 /mcp 拒绝连接。
+            </p>
+          </Card>
         </>
       ) : null}
     </div>

@@ -90,9 +90,9 @@ engram-server 内置 MCP（Model Context Protocol）服务端（官方 Rust SDK 
   `memory_list_sessions` / `memory_get_session` / `memory_write_session` / `memory_append_session` /
   `memory_forget` / `memory_entities`——instructions 与工具描述写明调用时机与编辑分权
   （AI 只写会话，蒸馏沉淀为 L1~L3；改写语义内容是用户专属）
-- **管理**：控制台「MCP」页——服务总开关（关闭即整体 503）、工具粒度开关（停用即对 AI
-  隐身 + 调用拒绝）、Claude Code / Cursor / Claude Desktop 连接配置一键复制；
-  MCP 专用密钥在「设置 → API 密钥」签发（scope 选择器勾 memory）
+- **管理**：控制台「MCP」页——服务总开关（关闭即整体 503）、按域逐个看工具开关
+  （停用即对 AI 隐身 + 调用拒绝，未来各域逐个 MCP 化）；MCP 专用密钥在
+  「设置 → API 密钥」签发（scope 选择器勾 memory）
 
 Claude Code 快速接入：
 

@@ -798,6 +798,8 @@ pub async fn gate(
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct McpToolInfo {
     pub name: String,
+    /// 所属资产域（工具名前缀；memory → 用户记忆，wiki → Wiki，未来逐域扩展）
+    pub domain: String,
     pub description: String,
     pub read_only: Option<bool>,
     pub destructive: Option<bool>,
@@ -828,6 +830,7 @@ async fn build_info(pool: &sqlx::PgPool) -> McpInfo {
         .into_iter()
         .map(|t| McpToolInfo {
             name: t.name.to_string(),
+            domain: t.name.split('_').next().unwrap_or("other").to_string(),
             description: t.description.as_deref().unwrap_or("").to_string(),
             read_only: t.annotations.as_ref().and_then(|a| a.read_only_hint),
             destructive: t.annotations.as_ref().and_then(|a| a.destructive_hint),

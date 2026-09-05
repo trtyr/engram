@@ -24,7 +24,7 @@ origin/main 8af183e 产品更名 Engram 完成。Wiki 页 09-03 完成 Obsidian 
 12. **设置页 AI 配置体系重构**（2026-09-02，ac55a6d..2397d53 八连提交）：先看功能再配 API（AI 功能页纯选）、供应商真 label 表单 + 类型下拉、批量吊销、全站下拉框美化（去原生箭头 + 自定义 chevron）
 13. **Wiki Obsidian IA 重做**（2026-09-03，1edff15..a3b6a2d，roadmap 0w 28 项审计全修）：目录树（folder 层级，折叠 localStorage 持久化，role=tree 语义）+ 树/图双视图切换 + 收件箱/运维二级面板；布局骨架重做（视口实算/状态提升切视图不丢/分割线拖拽 220-480px/?page= 深链自动展开 folder）；双链渲染三连修（递归 withWikilinks 深入行内 children 覆盖标题/列表/表格 / 404 显性提示不再静默刷树）；阅读区排版 70ch→4xl 放宽；Tabs 脏竖线改发丝网格；新增 e2e wiki-ia.spec.ts（折叠持久化/URL 写回/深链断言）
 
-14. **MCP 管理页**（2026-09-05）：/mcp 九页，仪表盘布局（顶部状态条一行收口：状态灯 + 端点 + 协议/版本 + 总开关；桌面双栏）——左工具开关列表（拨杆开关 + 语义徽标，说明收 tooltip，启用 N/M 计数），右接入卡（密钥只选不建 + 客户端 tab + 配置复制）；服务开关卡（关闭 = /mcp 503）、工具粒度开关（停用 = 对 AI 隐身 + 调用拒，PUT /settings/mcp 覆盖式 disabled_tools）；密钥管理收敛回设置页 Keys tab（签发表单补七 scope 选择器 + scopes 列，MCP 页只选不建）；vite 代理白名单加 /mcp。mcp.test 重写为管理行为三用例。
+14. **MCP 管理页**（2026-09-05）：/mcp 九页，管理台布局（顶部状态条一行收口：状态灯 + 端点 + 协议/版本 + 总开关）——域 Tabs 逐域查看工具（域归属由后端 McpToolInfo.domain 同源提供，按工具名前缀归域；目前记忆域，未来 Wiki/CodeGraph 接入即新增 tab）+ 拨杆开关列表（语义徽标、说明收 tooltip、启用 N/M 计数）；服务开关（关闭 = /mcp 503）、工具粒度开关（停用 = 对 AI 隐身 + 调用拒，PUT /settings/mcp 覆盖式 disabled_tools）；密钥管理在设置页 Keys tab（七 scope 选择器），接入指导按用户决策不做在管理页。
 
 ## 当日验证
 

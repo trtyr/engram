@@ -311,6 +311,7 @@ export interface ApiKey {
 }
 export interface McpToolInfo {
   name: string
+  domain: string
   description: string
   read_only: boolean | null
   destructive: boolean | null

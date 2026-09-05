@@ -1,9 +1,8 @@
 /**
- * MCP 管理页测试：状态条总开关 / 工具拨杆开关 / 接入卡（密钥只选不建）。
+ * MCP 管理页测试：状态条总开关 / 域 Tabs / 工具拨杆开关。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
 import Mcp from './Mcp'
 
 // ---- api mock ----
@@ -20,18 +19,21 @@ const mcpInfo = () => ({
   tools: [
     {
       name: 'memory_context',
+      domain: 'memory',
       description: '装载用户记忆上下文包。\n何时用：会话开始。',
       read_only: true,
       destructive: false,
     },
     {
       name: 'memory_write_session',
+      domain: 'memory',
       description: '写入一段对话到 L0 会话。',
       read_only: false,
       destructive: false,
     },
     {
       name: 'memory_forget',
+      domain: 'memory',
       description: '遗忘会话。',
       read_only: false,
       destructive: true,
@@ -44,32 +46,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
     ...mod,
     api: {
       ...mod.api,
-      get: vi.fn(async (p: string) => {
-        if (p === '/settings/mcp') return mcpInfo()
-        if (p === '/settings/api-keys') {
-          return [
-            {
-              id: 'k1',
-              name: 'claude-code',
-              key_prefix: 'amk_abc12345',
-              scopes: ['memory'],
-              created_at: '2026-09-01T00:00:00Z',
-              last_used_at: null,
-              revoked_at: null,
-            },
-            {
-              id: 'k2',
-              name: 'wiki-bot',
-              key_prefix: 'amk_def67890',
-              scopes: ['wiki'],
-              created_at: '2026-09-01T00:00:00Z',
-              last_used_at: null,
-              revoked_at: null,
-            },
-          ]
-        }
-        return []
-      }),
+      get: vi.fn(async (p: string) => (p === '/settings/mcp' ? mcpInfo() : [])),
       put: vi.fn(async (p: string, b?: unknown) => {
         calls.put.push([p, b])
         if (p === '/settings/mcp') {
@@ -91,43 +68,33 @@ describe('Mcp 管理页', () => {
     vi.clearAllMocks()
   })
 
-  it('状态条 + 工具面密集列表（语义徽标、开关），接入卡不出现非 memory key', async () => {
-    render(
-      <MemoryRouter>
-        <Mcp />
-      </MemoryRouter>,
-    )
+  it('状态条 + 域 Tabs（记忆域默认选中）+ 工具开关列表', async () => {
+    render(<Mcp />)
     // 状态条
     await waitFor(() => screen.getByText('运行中'))
     expect(screen.getAllByText('http://localhost:3000/mcp').length).toBeGreaterThan(0)
-    // 工具面：三行 + 语义徽标 + 启用计数
-    expect(screen.getByText('工具面')).toBeTruthy()
-    expect(screen.getByText('启用 3/3')).toBeTruthy()
+    // 域 tab（后端同源 domain → 中文标签 + 计数）
+    const tab = screen.getByRole('button', { name: '用户记忆' })
+    expect(tab.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('用户记忆域工具')).toBeTruthy()
+    // 工具行：名称 + 语义徽标 + 拨杆
     expect(screen.getByText('memory_context')).toBeTruthy()
     expect(screen.getByText('memory_write_session')).toBeTruthy()
     expect(screen.getByText('memory_forget')).toBeTruthy()
     expect(screen.getByText('只读')).toBeTruthy()
     expect(screen.getByText('破坏性')).toBeTruthy()
-    // 每个工具一个拨杆开关
     expect(screen.getAllByRole('switch').length).toBe(3)
-    // 接入卡：非 memory scope 的 key（wiki-bot）不进选择器
-    expect(screen.queryByText('wiki-bot')).toBeNull()
-    expect(screen.getByText(/claude-code（amk_abc12345…）/)).toBeTruthy()
+    expect(screen.getByText(/启用 3\/3/)).toBeTruthy()
   })
 
   it('总开关：关闭 → PUT enabled=false；再开 → PUT enabled=true', async () => {
-    render(
-      <MemoryRouter>
-        <Mcp />
-      </MemoryRouter>,
-    )
+    render(<Mcp />)
     const closeBtn = await screen.findByRole('button', { name: '关闭服务' })
     fireEvent.click(closeBtn)
     await waitFor(() => expect(calls.put.length).toBe(1))
     expect(calls.put[0]).toEqual(['/settings/mcp', { enabled: false }])
     expect(mcpState.enabled).toBe(false)
 
-    // 状态条刷新为已关闭，按钮变「开启服务」
     await waitFor(() => screen.getByText('已关闭'))
     fireEvent.click(screen.getByRole('button', { name: '开启服务' }))
     await waitFor(() => expect(calls.put.length).toBe(2))
@@ -135,11 +102,7 @@ describe('Mcp 管理页', () => {
   })
 
   it('工具拨杆：停用 → PUT 增量 disabled_tools；启用 → 移除', async () => {
-    render(
-      <MemoryRouter>
-        <Mcp />
-      </MemoryRouter>,
-    )
+    render(<Mcp />)
     await waitFor(() => screen.getByText('memory_write_session'))
 
     // 停用 memory_write_session（该行拨杆）

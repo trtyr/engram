@@ -2021,6 +2021,8 @@ export interface components {
         McpToolInfo: {
             description: string;
             destructive?: boolean | null;
+            /** @description 所属资产域（工具名前缀；memory → 用户记忆，wiki → Wiki，未来逐域扩展） */
+            domain: string;
             name: string;
             read_only?: boolean | null;
         };
