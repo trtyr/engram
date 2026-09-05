@@ -8,7 +8,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
 use support::{
-    app, create_key, expect_result, login_token, mcp_initialize, mcp_rpc, rpc,
+    app, create_key, expect_result, login_token, mcp_rpc, rpc,
 };
 use tower::util::ServiceExt;
 

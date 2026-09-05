@@ -58,6 +58,8 @@ origin/main 用户记忆 MCP 已落地（rmcp Streamable HTTP，/mcp 九工具�
 
 24. **项目记忆 MCP 落地**（2026-09-05）：14 个 project_* 工具并入 `/mcp`（types/list/get/create/update/delete/batch_delete + location add/update/delete + doc add/get/update/delete），进程内直调 ProjectService，`project` scope 分权；tools/list 按 key scope 过滤（memory-only key 不见 project 工具，反之亦然——AI 看到的工具面与可调用集一致）；update 三件套（project/location/doc）MCP 层补丁式语义（不传不改，categories 替换式带提示）；doc add/update 前置分类校验（防笔误造出树上看不见的孤儿分类）；项目寻址支持 id 或 name（project_id_by_name）。顺修 core 两缺陷：改名撞名 409（原冒 500）、空/空白项目名 400（create/update 同口径）。验证：cargo 198（+9：project_mcp_test 八用例全旅程/改名冲突/批量级联/scope 分权/管理台开关 + project_test 改名回归）+ vitest 45 + 真机 E2E（curl JSON-RPC 建项目→登记→写文档→分类校验→补丁改状态→管理台域分组 9+14）。
 
+25. **项目域审查问题修复**（2026-09-05，紧接 24 的审查结论）：① 归属校验——`/projects/{id}` 路径下 location/doc 的 get/update/delete 原先不核对资源归属（甲项目路径可寻址乙项目资源 id），现在 handler 层 owned_location/owned_doc 校验 project_id 一致，跨项目一律 404 且不泄露存在性；② 孤儿分类治理下沉 service——add_doc 校验 category ∈ project.categories（400 列出现有分类），update_doc 仅在换分类时校验（分类被移除后存量文档仍可原地编辑，不锁死），MCP 层预校验删除改依赖 service 单一真源。遗留：project_get 全量文档无分页，留待 context pack 协议一并设计。验证：cargo 200（+2：project_cross_project_access_blocked 六路 404 + 资源无损断言、project_doc_category_validation 四段矩阵）+ vitest 45。
+
 ## 已知未了项
 
 - e2e key 表历史积压（journey 现已自撤新 key；历史 revoked 行留存无害）

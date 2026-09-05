@@ -34,6 +34,36 @@ fn svc(state: &AppState) -> ProjectService {
     ProjectService::new(state.pool.clone())
 }
 
+/// 归属校验：路径里的 project_id 必须与资源实际所属一致（跨项目寻址一律 404，
+/// 不泄露「别的项目下存在这个 id」）。
+async fn owned_location(
+    svc: &ProjectService,
+    project_id: Uuid,
+    loc_id: Uuid,
+) -> Result<ProjectLocationDto, ApiError> {
+    let loc = svc.get_location(loc_id).await.map_err(pe)?;
+    if loc.project_id != project_id {
+        return Err(ApiError::NotFound(
+            "位置不存在或不属于该项目——先 project-get 看该项目 locations 列表取 id".into(),
+        ));
+    }
+    Ok(loc)
+}
+
+async fn owned_doc(
+    svc: &ProjectService,
+    project_id: Uuid,
+    doc_id: Uuid,
+) -> Result<ProjectDocDto, ApiError> {
+    let doc = svc.get_doc(doc_id).await.map_err(pe)?;
+    if doc.project_id != project_id {
+        return Err(ApiError::NotFound(
+            "文档不存在或不属于该项目——先 project-get 看该项目 docs 列表取 id".into(),
+        ));
+    }
+    Ok(doc)
+}
+
 // ---------- 请求体 ----------
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -233,10 +263,12 @@ pub async fn add_location(
 pub async fn get_location(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Path((_id, loc_id)): Path<(Uuid, Uuid)>,
+    Path((id, loc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ProjectLocationDto>, ApiError> {
     require_project(&principal)?;
-    Ok(Json(svc(&state).get_location(loc_id).await.map_err(pe)?))
+    let s = svc(&state);
+    owned_location(&s, id, loc_id).await?;
+    Ok(Json(s.get_location(loc_id).await.map_err(pe)?))
 }
 
 /// 编辑位置。
@@ -246,22 +278,23 @@ pub async fn get_location(
 pub async fn update_location(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Path((_id, loc_id)): Path<(Uuid, Uuid)>,
+    Path((id, loc_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<LocationRequest>,
 ) -> Result<Json<ProjectLocationDto>, ApiError> {
     require_project(&principal)?;
+    let s = svc(&state);
+    owned_location(&s, id, loc_id).await?;
     Ok(Json(
-        svc(&state)
-            .update_location(
-                loc_id,
-                &req.ip,
-                &req.host,
-                &req.os,
-                &req.path,
-                req.purpose.as_deref(),
-            )
-            .await
-            .map_err(pe)?,
+        s.update_location(
+            loc_id,
+            &req.ip,
+            &req.host,
+            &req.os,
+            &req.path,
+            req.purpose.as_deref(),
+        )
+        .await
+        .map_err(pe)?,
     ))
 }
 
@@ -271,10 +304,12 @@ pub async fn update_location(
 pub async fn delete_location(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Path((_id, loc_id)): Path<(Uuid, Uuid)>,
+    Path((id, loc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     require_project(&principal)?;
-    svc(&state).delete_location(loc_id).await.map_err(pe)?;
+    let s = svc(&state);
+    owned_location(&s, id, loc_id).await?;
+    s.delete_location(loc_id).await.map_err(pe)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -304,10 +339,12 @@ pub async fn add_doc(
 pub async fn get_doc(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Path((_id, doc_id)): Path<(Uuid, Uuid)>,
+    Path((id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ProjectDocDto>, ApiError> {
     require_project(&principal)?;
-    Ok(Json(svc(&state).get_doc(doc_id).await.map_err(pe)?))
+    let s = svc(&state);
+    owned_doc(&s, id, doc_id).await?;
+    Ok(Json(s.get_doc(doc_id).await.map_err(pe)?))
 }
 
 /// 编辑文档。
@@ -317,13 +354,14 @@ pub async fn get_doc(
 pub async fn update_doc(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Path((_id, doc_id)): Path<(Uuid, Uuid)>,
+    Path((id, doc_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<DocRequest>,
 ) -> Result<Json<ProjectDocDto>, ApiError> {
     require_project(&principal)?;
+    let s = svc(&state);
+    owned_doc(&s, id, doc_id).await?;
     Ok(Json(
-        svc(&state)
-            .update_doc(doc_id, &req.category, &req.title, &req.content)
+        s.update_doc(doc_id, &req.category, &req.title, &req.content)
             .await
             .map_err(pe)?,
     ))
@@ -335,9 +373,11 @@ pub async fn update_doc(
 pub async fn delete_doc(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Path((_id, doc_id)): Path<(Uuid, Uuid)>,
+    Path((id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, ApiError> {
     require_project(&principal)?;
-    svc(&state).delete_doc(doc_id).await.map_err(pe)?;
+    let s = svc(&state);
+    owned_doc(&s, id, doc_id).await?;
+    s.delete_doc(doc_id).await.map_err(pe)?;
     Ok(StatusCode::NO_CONTENT)
 }

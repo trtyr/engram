@@ -527,30 +527,6 @@ impl MemoryMcpServer {
             )),
         }
     }
-
-    /// 校验分类名是项目已有分类（防笔误造出树上看不见的孤儿分类）。
-    async fn require_category(
-        &self,
-        project_id: Uuid,
-        category: &str,
-    ) -> Result<Vec<String>, rmcp::ErrorData> {
-        let detail = self
-            .svc_project()
-            .get_project(project_id)
-            .await
-            .map_err(from_project)?;
-        if detail.categories.iter().any(|c| c == category) {
-            Ok(detail.categories)
-        } else {
-            Err(mcp_err(
-                ErrorCode::INVALID_PARAMS,
-                format!(
-                    "分类「{category}」不在项目分类里——现有：{}。要新分类就先 project_update 把它加进 categories",
-                    detail.categories.join("、")
-                ),
-            ))
-        }
-    }
 }
 
 #[tool_router]
@@ -1220,7 +1196,7 @@ impl MemoryMcpServer {
         let id = self
             .resolve_project(&dp.project_id, &dp.project_name)
             .await?;
-        self.require_category(id, &dp.category).await?;
+        // 分类归属由 service 校验（防孤儿分类，报错列出现有分类）
         let doc = self
             .svc_project()
             .add_doc(id, &dp.category, &dp.title, &dp.content)
@@ -1280,9 +1256,7 @@ impl MemoryMcpServer {
         let id = Uuid::parse_str(&dp.doc_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "doc_id 不是合法 UUID"))?;
         let current = self.svc_project().get_doc(id).await.map_err(from_project)?;
-        if let Some(category) = &dp.category {
-            self.require_category(current.project_id, category).await?;
-        }
+        // 分类只在换分类时由 service 校验（保留被移除分类下的存量文档原地编辑能力）
         let doc = self
             .svc_project()
             .update_doc(

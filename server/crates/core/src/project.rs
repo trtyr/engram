@@ -444,6 +444,18 @@ impl ProjectService {
 
     // ---------- 分类文档 ----------
 
+    /// 分类校验错误（列出项目现有分类，提示先扩 categories）。
+    fn category_error(category: &str, categories: &[String]) -> ProjectError {
+        let existing = if categories.is_empty() {
+            "项目还没有分类".to_string()
+        } else {
+            categories.join("、")
+        };
+        ProjectError::BadRequest(format!(
+            "分类「{category}」不在项目分类里（现有：{existing}）——要新分类就先 update_project 把它加进 categories"
+        ))
+    }
+
     pub async fn add_doc(
         &self,
         project_id: Uuid,
@@ -451,7 +463,10 @@ impl ProjectService {
         title: &str,
         content: &str,
     ) -> Result<ProjectDocDto, ProjectError> {
-        self.get_project_bare(project_id).await?;
+        let project = self.get_project_bare(project_id).await?;
+        if !project.categories.iter().any(|c| c == category) {
+            return Err(Self::category_error(category, &project.categories));
+        }
         let id = Uuid::now_v7();
         let res = sqlx::query(
             "INSERT INTO project_docs (id, project_id, category, title, content) \
@@ -480,6 +495,14 @@ impl ProjectService {
         title: &str,
         content: &str,
     ) -> Result<ProjectDocDto, ProjectError> {
+        // 分类只在「换到别的分类」时校验——分类被项目方移除后，存量文档仍可原地编辑
+        let current = self.get_doc(id).await?;
+        if category != current.category {
+            let project = self.get_project_bare(current.project_id).await?;
+            if !project.categories.iter().any(|c| c == category) {
+                return Err(Self::category_error(category, &project.categories));
+            }
+        }
         let res = sqlx::query(
             "UPDATE project_docs SET category = $2, title = $3, content = $4, updated_at = now() \
              WHERE id = $1",

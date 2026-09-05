@@ -4,6 +4,9 @@
 //! 每个测试创建唯一命名的临时数据库，Drop 时后台 DROP DATABASE（WITH FORCE）。
 //! 隔离性与 testcontainers 等价；可用 AM_TEST_PG_URL 覆盖管理库连接串。
 
+// 本模块被每个测试二进制各自编译一份，未用到的辅助函数会报死代码，整体关闭。
+#![allow(dead_code)]
+
 use sqlx::PgPool;
 use std::sync::atomic::{AtomicU64, Ordering};
 
