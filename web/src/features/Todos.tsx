@@ -27,7 +27,7 @@ export default function Todos() {
 
   // 快速输入条
   const [title, setTitle] = useState('')
-  const [priority, setPriority] = useState('normal')
+  const [quickPriority, setQuickPriority] = useState('normal')
   const [projectHint, setProjectHint] = useState('')
 
   const query = useMemo(() => {
@@ -59,7 +59,7 @@ export default function Todos() {
     try {
       await api.post('/todos', {
         title: title.trim(),
-        priority,
+        priority: quickPriority,
         project_hint: projectHint.trim() || undefined,
       })
       setTitle('')
@@ -142,6 +142,17 @@ export default function Todos() {
         </select>
         <select
           className={selectCls}
+          aria-label="状态筛选"
+          value={status}
+          onChange={(e) => setStatus(e.target.value as StatusFilter)}
+        >
+          <option value="">全部状态</option>
+          <option value="open">进行中</option>
+          <option value="done">已完成</option>
+          <option value="archived">已归档</option>
+        </select>
+        <select
+          className={selectCls}
           aria-label="标签筛选"
           value={tag}
           onChange={(e) => setTag(e.target.value)}
@@ -173,8 +184,8 @@ export default function Todos() {
           <select
             className={selectCls}
             aria-label="优先级"
-            value={priority}
-            onChange={(e) => setPriority(e.target.value)}
+            value={quickPriority}
+            onChange={(e) => setQuickPriority(e.target.value)}
           >
             <option value="normal">普通</option>
             <option value="high">高</option>
@@ -208,7 +219,7 @@ export default function Todos() {
               </h3>
               <div className="space-y-2">
                 {open.map((t) => (
-                  <TodoRow key={t.id} t={t} busy={busy} onToggle={toggleDone} onArchive={doArchive} onDelete={doDelete} />
+                  <TodoRow key={t.id} t={t} busy={busy} onToggle={() => toggleDone(t)} onArchive={doArchive} onDelete={doDelete} />
                 ))}
               </div>
             </div>
@@ -223,7 +234,7 @@ export default function Todos() {
               </h3>
               <div className="space-y-2">
                 {finished.map((t) => (
-                  <TodoRow key={t.id} t={t} busy={busy} onToggle={toggleDone} onArchive={doArchive} onDelete={doDelete} />
+                  <TodoRow key={t.id} t={t} busy={busy} onToggle={() => toggleDone(t)} onArchive={doArchive} onDelete={doDelete} />
                 ))}
               </div>
             </div>
@@ -244,7 +255,7 @@ function TodoRow({
 }: {
   t: Todo
   busy: boolean
-  onToggle: (t: Todo) => void
+  onToggle: (id: string) => void
   onArchive: (t: Todo) => void
   onDelete: (t: Todo) => void
 }) {
@@ -300,7 +311,7 @@ function TodoRow({
               {t.project_hint}
             </span>
           )}
-          {t.tags.map((tag) => (
+          {t.tags.map((tag: string) => (
             <span key={tag} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
               #{tag}
             </span>

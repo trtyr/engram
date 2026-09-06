@@ -314,6 +314,20 @@ export interface CgCliStatus {
   version: string | null
   pin: string
 }
+/** 待办（第七域，GET /todos） */
+export interface Todo {
+  id: string
+  title: string
+  body: string
+  status: 'open' | 'done' | 'archived'
+  priority: 'low' | 'normal' | 'high'
+  tags: string[]
+  due_at: string | null
+  project_hint: string | null
+  done_at: string | null
+  created_at: string
+  updated_at: string
+}
 /** 管理员活跃会话（GET /auth/sessions） */
 export interface AdminSessionDto {
   id: string

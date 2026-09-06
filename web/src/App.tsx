@@ -10,6 +10,7 @@ import {
   FolderKanban,
   LayoutDashboard,
   ListChecks,
+  ListTodo,
   LogOut,
   Network,
   PanelLeftClose,
