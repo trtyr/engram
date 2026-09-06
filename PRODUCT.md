@@ -26,9 +26,13 @@ web
 ## Capabilities and Constraints
 
 - 十个页面：Dashboard / Memory / Circle / Wiki / CodeGraph / Projects / Skills / Jobs / MCP / Settings + 登录。
+- 系统迁移（2026-09-06 定）：`GET /migrate/export`（迁移包 JSON：五域全部业务数据）+
+  `POST /migrate/import`（冲突跳过合并语义，可重复执行）+
+  `POST /migrate/pull`（B 机一键拉取 A 机，认证 = A 机管理员密码仅请求期使用）；
+  派生数据（embedding/tsv/codegraph 索引）不迁移，导入端重建。全部 admin-only。
 - MCP 工具面（2026-09-05 定，45 工具）：工具描述是发现通道——`skills_list` / `project_list` 的描述动态织入库内资产清单（slug+description / 项目名+状态），与 tools/list 同源；控制台 MCP 页点击工具行展开完整描述 + 参数 Schema（管理台所见即 AI 所得）。
 - Skill = 文件夹（2026-09-05 定）：SKILL.md 本体 + 附属文件（scripts/、references/…）按相对路径寻址。文件是「内容」不是「文件系统位置」——云端只存内容永不执行，客户端取走后在本地跑。三种消费形态按需选：① 纯文本 MCP 读（skills_get/file_get）② 单文件 HTTP 直下 `GET /skills/{slug}/file?path=…&raw=1` ③ 整包 `GET /skills/{slug}/bundle`（zip：SKILL.md+全部文件）；工具描述内嵌形态选择指南。
-- 后端 HTTP API（100 路径，OpenAPI 权威）已定型。
+- 后端 HTTP API（104 路径，OpenAPI 权威）已定型。
 - 技术栈保持：React 19 + TypeScript + Vite 8 + Tailwind 4 + pnpm（radix/shadcn 基件可用可弃）。
 - e2e（Playwright journey）断言语义保持，选择器允许随新 DOM 同步更新。
 - 无营销面：纯控制台（Operate 模式），无注册/计费/多语言诉求；界面语言中文。

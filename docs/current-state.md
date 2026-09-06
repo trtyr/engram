@@ -16,7 +16,7 @@
 | web | pnpm run lint / tsc / test / build | 12 既有警告 / 0 / 55 全过（10 文件）/ exit 0 |
 | web | 入口 bundle | 287.55 kB（gzip 92.46），预算 350 内 |
 | CI | gh run list（f8e1031） | CI + e2e FAIL（GitHub 支出限额，未启动） |
-| 事实 | OpenAPI 活体 / 迁移 / 表 | **100 路径 / 132 方法注册**（GET 56/POST 50/PUT 10/PATCH 3/DELETE 13，另有 POST /mcp JSON-RPC 不进 OpenAPI）/ **32 迁移** / **30 业务表**（openapi-dump + 库实查） |
+| 事实 | OpenAPI 活体 / 迁移 / 表 | **104 路径 / 136 方法注册**（GET 57/POST 53/PUT 10/PATCH 3/DELETE 13，另有 POST /mcp JSON-RPC 不进 OpenAPI）/ **32 迁移** / **30 业务表**（openapi-dump + 库实查） |
 
 ## 运行环境实况（2026-09-03 实查 + 所有者确认）
 

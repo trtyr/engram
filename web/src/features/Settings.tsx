@@ -5,7 +5,7 @@ import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs
 import { fmtTime, inputCls, selectCls, relTime, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'providers' | 'routing' | 'keys' | 'rhythm' | 'danger'
+type Tab = 'providers' | 'routing' | 'keys' | 'rhythm' | 'danger' | 'migrate'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'routing', label: 'AI 功能' },
@@ -13,6 +13,7 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'keys', label: 'API 密钥' },
   { value: 'rhythm', label: '节律' },
   { value: 'danger', label: '危险操作' },
+  { value: 'migrate', label: '数据迁移' },
 ]
 
 const PURPOSES: { key: string; label: string; desc: string }[] = [
@@ -37,6 +38,155 @@ export default function Settings() {
       {tab === 'keys' && <Keys />}
       {tab === 'rhythm' && <RhythmPane />}
       {tab === 'danger' && <DangerZone />}
+      {tab === 'migrate' && <MigratePane />}
+    </div>
+  )
+}
+
+/** 数据迁移（admin）：全系统导出 / 导入（冲突跳过，分域报告）/ 远程拉取（A→B）。 */
+function MigratePane() {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [report, setReport] = useState<Record<string, unknown> | null>(null)
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [sourcePassword, setSourcePassword] = useState('')
+
+  const saveBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function doExport() {
+    setBusy(true)
+    try {
+      const blob = await api.download('/migrate/export')
+      saveBlob(blob, `engram-transfer-${new Date().toISOString().slice(0, 10)}.json`)
+      setErr('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '导出失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doImport(file: File) {
+    setBusy(true)
+    try {
+      const text = await file.text()
+      const data = JSON.parse(text)
+      const r = await api.post<Record<string, unknown>>('/migrate/import', data)
+      setReport(r)
+      setErr('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '导入失败（确认是 /migrate/export 的迁移包）')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doPull() {
+    if (!sourceUrl.trim() || !sourcePassword) return
+    setBusy(true)
+    try {
+      const r = await api.post<Record<string, unknown>>('/migrate/pull', {
+        source_url: sourceUrl.trim(),
+        source_admin_password: sourcePassword,
+      })
+      setReport((r.imported as Record<string, unknown>) ?? r)
+      setSourcePassword('')
+      setErr('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '拉取失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {err && <ErrorBox msg={err} />}
+      {report && (
+        <Card className="p-4">
+          <h3 className="text-sm font-semibold">导入报告</h3>
+          <pre className="mt-2 max-h-72 overflow-auto rounded bg-muted/40 p-3 font-mono text-xs leading-5">
+            {JSON.stringify(report, null, 2)}
+          </pre>
+          <p className="mt-2 text-xs text-muted-foreground">
+            已存在的记录按跳过处理（合并语义，可重复执行）；embedding 未迁移——
+            用「AI 功能」页重配 embed 后 POST /memory/reembed 补齐。
+          </p>
+        </Card>
+      )}
+
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold">① 全系统导出</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          下载迁移包（JSON）：用户记忆五表 + 实体关系 + 技能（含附属文件）+ Wiki 页面 +
+          项目记忆。向量不迁移（导入端重建）。
+        </p>
+        <div className="mt-2">
+          <Button size="sm" disabled={busy} onClick={doExport}>
+            导出迁移包
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold">② 导入迁移包</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          选择迁移包 JSON：已存在的记录跳过（合并语义，可重复执行）；新记录全量进。
+        </p>
+        <div className="mt-2">
+          <input
+            type="file"
+            accept=".json,application/json"
+            aria-label="迁移包文件"
+            className="text-xs"
+            disabled={busy}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) doImport(f)
+              e.target.value = ''
+            }}
+          />
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold">③ 远程拉取（A → 本机）</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          填 A 机地址与 A 机管理员密码：本机登录 A 拉取迁移包并落地。
+          密码仅本次请求使用，不落库。A 机需为可访问的 engram 实例。
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <input
+            className={`${inputCls} w-72`}
+            placeholder="http://a-host:8080"
+            aria-label="源机地址"
+            value={sourceUrl}
+            onChange={(e) => setSourceUrl(e.target.value)}
+          />
+          <input
+            className={`${inputCls} w-48`}
+            type="password"
+            placeholder="A 机管理员密码"
+            aria-label="源机管理员密码"
+            value={sourcePassword}
+            onChange={(e) => setSourcePassword(e.target.value)}
+          />
+          <Button
+            size="sm"
+            disabled={busy || !sourceUrl.trim() || !sourcePassword}
+            onClick={doPull}
+          >
+            拉取并导入
+          </Button>
+        </div>
+      </Card>
     </div>
   )
 }

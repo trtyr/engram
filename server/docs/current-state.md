@@ -13,7 +13,7 @@
 | cargo fmt --check | exit 0 |
 | cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
 | cargo test --workspace | 245 passed / 0 failed |
-| cargo run -q -p engram-api --bin openapi-dump | 100 路径 / 132 方法 |
+| cargo run -q -p engram-api --bin openapi-dump | 104 路径 / 136 方法 |
 
 ## 2026-08-30 基线以来的落地（按主题）
 

@@ -395,3 +395,24 @@ pub async fn delete_file(
     svc(&state).delete_file(&slug, &p.path).await.map_err(se)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// 技能导入闭环：吃 /skills/export 同构数据（含附属文件），slug 冲突跳过。
+/// 与 POST /skills/import（SKILL.md 文本粘贴）互补——本端点做迁移/合并。
+#[utoipa::path(post, path = "/skills/import-transfer", request_body = Object,
+    operation_id = "skills_import_transfer",
+    responses((status = 200, body = Object)))]
+pub async fn import_transfer(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(data): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_skills(&principal)?;
+    Ok(Json(
+        engram_core::transfer::import_skills_bundle(&state.pool, &data)
+            .await
+            .map_err(|e| match e {
+                engram_core::transfer::TransferError::BadRequest(m) => ApiError::BadRequest(m),
+                other => ApiError::Unavailable(other.to_string()),
+            })?,
+    ))
+}

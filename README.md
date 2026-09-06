@@ -70,7 +70,7 @@ flowchart LR
 | 🔒 | **敏感标记** | 医疗/感情/财务对话一个开关，检索/打包/导出默认排除 |
 | ⚖️ | **编辑分权** | AI 只写会话；改写语义内容是用户专属，改动留痕钉住 |
 | 🧹 | **一等清空** | deep purge 两阶段（arm 5 分钟冷却 → token 执行），agent 级彻底清场 |
-| 🧾 | **数据主权** | 全量导出；密钥 AES-GCM 加密落库 |
+| 🧾 | **数据主权** | 全系统一键导出/导入 + 远程拉取迁移（A→B）；密钥 AES-GCM 加密落库 |
 | 🚦 | **任务队列** | 一切长操作走 PG 队列（蒸馏/摄取/索引/同步），pending/running/dead 生命周期可见可恢复 |
 
 ## 🏗️ 技术形态
@@ -155,6 +155,20 @@ cd web && pnpm install && pnpm dev
 
 - 📐 产品事实与设计系统：[PRODUCT.md](PRODUCT.md) · [DESIGN.md](DESIGN.md)
 - 🧭 接手第一步读 [docs/current-state.md](docs/current-state.md)
+
+## 🔁 数据迁移
+
+```bash
+# A 机导出迁移包（手动方式：文件拷到 B 机导入）
+curl -H "Authorization: Bearer $ADMIN" http://a-host:8080/migrate/export -o transfer.json
+# B 机导入（冲突跳过，合并语义可重复执行）
+curl -X POST -H "Authorization: Bearer $ADMIN_B" -H "Content-Type: application/json"   --data-binary @transfer.json http://b-host:8080/migrate/import
+# 或 B 机一键远程拉取（认证：A 机管理员密码，仅请求期使用不落库）
+curl -X POST -H "Authorization: Bearer $ADMIN_B" -H "Content-Type: application/json"   -d '{"source_url":"http://a-host:8080","source_admin_password":"…"}' http://b-host:8080/migrate/pull
+```
+
+覆盖五域全部业务数据（用户记忆五表 + 实体关系 / 技能含附属文件 / Wiki 页面 / 项目记忆）；
+向量与 codegraph 索引为派生数据不迁移，导入端重建。控制台「设置 → 数据迁移」有同能力 UI。
 
 ## ✅ 门禁
 

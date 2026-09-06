@@ -6,6 +6,7 @@ pub mod health;
 pub mod jobs_api;
 pub mod llm_api;
 pub mod memory_api;
+pub mod migrate_api;
 pub mod project_api;
 pub mod search_api;
 pub mod skills_api;
@@ -61,6 +62,7 @@ use utoipa::OpenApi;
         codegraph_api::get_project, codegraph_api::delete_project,
         codegraph_api::index_project, codegraph_api::sync_project,
         codegraph_api::query, codegraph_api::status, codegraph_api::graph,
+        migrate_api::export_bundle, migrate_api::import_bundle, migrate_api::pull,
         project_api::list_types, project_api::create_project, project_api::list_projects,
         project_api::get_project, project_api::update_project, project_api::delete_project,
         project_api::batch_delete_projects,
@@ -69,6 +71,7 @@ use utoipa::OpenApi;
         skills_api::list_skills, skills_api::create_skill, skills_api::import_skills,
         skills_api::export_skills, skills_api::get_skill, skills_api::update_skill,
         skills_api::delete_skill, skills_api::list_revisions, skills_api::restore_revision,
+        skills_api::import_transfer,
         skills_api::list_files, skills_api::get_file, skills_api::put_file, skills_api::delete_file,
         skills_api::bundle,
     ),
@@ -335,6 +338,10 @@ pub fn router(state: AppState) -> Router {
                 .delete(skills_api::delete_file),
         )
         .route("/skills/export", get(skills_api::export_skills))
+        .route("/skills/import-transfer", post(skills_api::import_transfer))
+        .route("/migrate/export", get(migrate_api::export_bundle))
+        .route("/migrate/import", post(migrate_api::import_bundle))
+        .route("/migrate/pull", post(migrate_api::pull))
         .route(
             "/skills",
             post(skills_api::create_skill).get(skills_api::list_skills),
