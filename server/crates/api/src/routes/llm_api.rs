@@ -95,13 +95,14 @@ pub async fn create_provider(
 ) -> Result<(StatusCode, Json<ProviderDto>), ApiError> {
     require_llm(&principal)?;
 
-    // L1：校验（违规 400 带明细——不再让配置错误延迟到运行时爆发）
+    // L1：校验（违规 400 带明细——不再让配置错误延迟到运行时爆发）。
+    // base_url 先 trim：粘贴尾随空格是高频输入失误，自动纠正而非拒绝。
+    let base_url = req.base_url.trim().to_string();
     if req.name.trim().is_empty() {
         return Err(ApiError::BadRequest("name 不能为空".into()));
     }
-    let scheme_ok = req.base_url.starts_with("http://") || req.base_url.starts_with("https://");
-    let host_part = req
-        .base_url
+    let scheme_ok = base_url.starts_with("http://") || base_url.starts_with("https://");
+    let host_part = base_url
         .trim_start_matches("http://")
         .trim_start_matches("https://");
     if !scheme_ok
@@ -111,7 +112,7 @@ pub async fn create_provider(
     {
         return Err(ApiError::BadRequest(format!(
             "base_url 必须是 http(s):// 开头且含主机名（收到「{}」）",
-            req.base_url
+            base_url
         )));
     }
     if req.api_key.trim().is_empty() {
@@ -146,7 +147,7 @@ pub async fn create_provider(
         &state.pool,
         id,
         req.name.trim(),
-        &req.base_url,
+        &base_url,
         &enc,
         req.model_id.trim(),
         &req.capability,
@@ -172,7 +173,7 @@ pub async fn create_provider(
         Json(ProviderDto {
             id,
             name: req.name.trim().to_string(),
-            base_url: req.base_url,
+            base_url,
             model_id: req.model_id.trim().to_string(),
             capability: req.capability,
             is_default: req.is_default,
@@ -207,8 +208,9 @@ pub async fn update_provider(
 ) -> Result<Json<ProviderDto>, ApiError> {
     require_llm(&principal)?;
 
-    // 校验提供的字段（与 create 同规则）
-    if let Some(u) = &req.base_url {
+    // 校验提供的字段（与 create 同规则；trim 粘贴空白）
+    let base_url = req.base_url.as_ref().map(|u| u.trim().to_string());
+    if let Some(u) = base_url.as_deref() {
         let scheme_ok = u.starts_with("http://") || u.starts_with("https://");
         let host_part = u
             .trim_start_matches("http://")
@@ -251,7 +253,7 @@ pub async fn update_provider(
     let row = repo::update_provider_tx(
         &state.pool,
         id,
-        req.base_url.as_deref(),
+        base_url.as_deref(),
         enc_new.as_deref(),
         req.model_id.as_deref(),
         req.capability.as_deref(),
