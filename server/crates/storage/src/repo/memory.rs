@@ -677,7 +677,7 @@ pub async fn list_entities(pool: &PgPool, kind: Option<&str>) -> StoreResult<Vec
     Ok(sqlx::query_as::<_, EntityDto>(
         "SELECT e.id, e.name, e.kind, e.summary, count(ae.atom_id)::bigint AS atom_count, e.manually_edited, e.updated_at \
          FROM entities e LEFT JOIN atom_entities ae ON ae.entity_id = e.id \
-         WHERE e.merged_into IS NULL AND ($1::text IS NULL OR e.kind = $1) \
+         WHERE e.merged_into IS NULL AND e.archived_at IS NULL AND ($1::text IS NULL OR e.kind = $1) \
          GROUP BY e.id, e.name, e.kind, e.summary, e.manually_edited, e.updated_at \
          ORDER BY atom_count DESC, e.updated_at DESC",
     )
@@ -954,7 +954,8 @@ pub async fn entities_by_ids(pool: &PgPool, ids: &[Uuid]) -> StoreResult<Vec<Ent
     let rows = sqlx::query_as(
         "SELECT id, name, kind, summary, \
          (SELECT count(*) FROM atom_entities ae WHERE ae.entity_id = entities.id) AS atom_count, \
-         manually_edited, updated_at FROM entities WHERE id = ANY($1) AND merged_into IS NULL",
+         manually_edited, updated_at FROM entities WHERE id = ANY($1) AND merged_into IS NULL \
+           AND archived_at IS NULL",
     )
     .bind(ids)
     .fetch_all(pool)
@@ -1021,7 +1022,7 @@ pub async fn timeline(pool: &PgPool, limit: i64) -> StoreResult<Vec<TimelineEven
          FROM scenarios s \
          UNION ALL \
          SELECT e.id, e.created_at AS at, 'entity' AS kind, e.name \
-         FROM entities e WHERE e.merged_into IS NULL \
+         FROM entities e WHERE e.merged_into IS NULL AND e.archived_at IS NULL \
          ORDER BY at DESC LIMIT $1",
     )
     .bind(limit)
@@ -1083,4 +1084,29 @@ pub async fn list_sessions_meta(
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+/// D16：实体层级联——把「有挂链原子但全部非 active（被 void 会话遗忘）」的实体
+/// 打归档标记（archived_at），从列表/检索/图谱隐身；实体本身保留可审计。
+/// 手动创建、从未挂原子的实体不受影响。
+pub async fn archive_orphan_entities(pool: &PgPool) -> StoreResult<u64> {
+    let res = sqlx::query(
+        "UPDATE entities e SET archived_at = now() \
+         WHERE e.archived_at IS NULL AND e.merged_into IS NULL \
+           AND EXISTS (SELECT 1 FROM atom_entities ae WHERE ae.entity_id = e.id) \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM atom_entities ae JOIN atoms a ON a.id = ae.atom_id \
+             WHERE ae.entity_id = e.id AND a.status = 'active')",
+    )
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
+/// 蒸馏挂链（或手动挂原子）时复活归档实体：重新有活跃证据即回到可见层。
+pub async fn revive_entity(pool: &PgPool, entity_id: Uuid) -> StoreResult<()> {
+    sqlx::query("UPDATE entities SET archived_at = NULL WHERE id = $1 AND archived_at IS NOT NULL")
+        .bind(entity_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }

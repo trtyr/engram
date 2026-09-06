@@ -266,7 +266,7 @@ pub async fn search_entities(
     }
     let qset: std::collections::HashSet<String> = tokens.into_iter().collect();
     let rows: Vec<(Uuid, String, String, String)> = sqlx::query_as(
-        "SELECT id, name, kind, summary FROM entities WHERE merged_into IS NULL LIMIT 500",
+        "SELECT id, name, kind, summary FROM entities WHERE merged_into IS NULL AND archived_at IS NULL LIMIT 500",
     )
     .fetch_all(pool)
     .await?;

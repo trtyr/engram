@@ -425,6 +425,12 @@ async fn run_claimed(
                     .execute(pool)
                     .await
                     .map_err(|e| e.to_string())?;
+                    // 实体复活：蒸馏重新挂链被归档的同名实体 → 清标记回到可见层
+                    sqlx::query("UPDATE entities SET archived_at = NULL WHERE id = $1")
+                        .bind(eid)
+                        .execute(pool)
+                        .await
+                        .map_err(|e| e.to_string())?;
                     Ok::<(), String>(())
                 };
                 if let Err(e) = link.await {
