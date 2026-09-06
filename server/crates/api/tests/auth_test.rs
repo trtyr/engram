@@ -1256,7 +1256,14 @@ async fn openapi_snapshot() {
     assert_eq!(
         paths,
         vec![
+            "/auth/account",
+            "/auth/init",
             "/auth/login",
+            "/auth/sessions",
+            "/auth/sessions/revoke-others",
+            "/auth/sessions/{id}",
+            "/auth/status",
+            "/auth/username",
             "/codegraph/projects",
             "/codegraph/projects/{id}",
             "/codegraph/projects/{id}/graph",

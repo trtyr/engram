@@ -1,6 +1,8 @@
 # API
 
 > 2026-09-06 从当日代码 `openapi-dump` 活体导出，共 **104 路径 / 136 方法注册**（GET 57 · POST 53 · PUT 10 · PATCH 3 · DELETE 13）。
+>
+> 登录管理：POST /auth/login（**用户名+密码**，username 缺省 admin 向后兼容）· GET /auth/status（初始化态，无鉴权）· POST /auth/init（首次创建账号，无鉴权仅一次）· PUT /auth/account（改用户名/密码，改后自动吊销其他会话）· GET /auth/sessions（活跃会话列表，标记当前）· DELETE /auth/sessions/{id}（吊销指定）· POST /auth/sessions/revoke-others（吊销其他设备）· GET /auth/username（当前用户名）。密码 PBKDF2-HMAC-SHA256（120k 轮）落库 admin_account；env 密码仅作空表播种回退。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 八 scope：memory/wiki/codegraph/project/skills/llm/erase/cron）。

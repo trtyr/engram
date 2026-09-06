@@ -22,13 +22,19 @@ fn sha256_hex(input: &str) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// 登录：校验密码 → 颁发 opaque 会话 token（明文只返回一次）。
-pub async fn login(pool: &PgPool, password: &str, expect: &str) -> Result<String, ApiError> {
-    // 恒定时间比较（防时序侧信道；单用户场景仍按规范做）
-    let a = sha256_hex(password);
-    let b = sha256_hex(expect);
-    if !constant_time_eq(a.as_bytes(), b.as_bytes()) {
-        return Err(ApiError::Unauthorized("密码错误".into()));
+/// 登录：校验用户名 + 密码（账号表；空表回退 env 密码）→ 颁发 opaque 会话 token。
+/// 返回 (明文 token, token_hash)——token_hash 供「会话管理」标记当前会话。
+pub async fn login(
+    pool: &PgPool,
+    username: &str,
+    password: &str,
+    env_fallback: Option<&str>,
+) -> Result<(String, String), ApiError> {
+    let ok = engram_core::auth::verify_login(pool, username, password, env_fallback)
+        .await
+        .map_err(ApiError::Unavailable)?;
+    if !ok {
+        return Err(ApiError::Unauthorized("用户名或密码错误".into()));
     }
 
     let mut raw = [0u8; 32];
@@ -41,7 +47,7 @@ pub async fn login(pool: &PgPool, password: &str, expect: &str) -> Result<String
         .await
         .map_err(ApiError::from)?;
 
-    Ok(token)
+    Ok((token, hash))
 }
 
 /// 校验管理员会话 token。
@@ -192,15 +198,4 @@ fn auth_error(message: &str) -> Response {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
 }

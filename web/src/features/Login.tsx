@@ -2,7 +2,7 @@
  * 登录页 —— Engram 墨白正统。
  * 墨点星座（记忆节点母题，无彩化）+ 单字段登录；主题切换在右上。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Eye, EyeOff, KeyRound, Loader2 } from 'lucide-react'
 import { ApiError, api, setToken } from '@/lib/api'
@@ -54,6 +54,16 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
   const [show, setShow] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [initialized, setInitialized] = useState<boolean | null>(null)
+  const [username, setUsername] = useState('admin')
+  const [pw2, setPw2] = useState('')
+
+  useEffect(() => {
+    api
+      .get<{ initialized: boolean }>('/auth/status')
+      .then((r) => setInitialized(r.initialized))
+      .catch(() => setInitialized(true)) // 探测失败按已初始化处理（避免误入初始化态）
+  }, [])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -65,11 +75,34 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
     setBusy(true)
     setErr('')
     try {
-      const r = await api.post<{ token: string }>('/auth/login', { password: pw })
-      setToken(r.token)
+      if (initialized === false) {
+        // 初始化：创建管理员账号（首台部署 / 全新库）
+        if (pw.length < 8) {
+          setErr('密码至少 8 位')
+          setBusy(false)
+          return
+        }
+        if (pw !== pw2) {
+          setErr('两次输入的密码不一致')
+          setBusy(false)
+          return
+        }
+        const r = await api.post<{ token: string }>('/auth/init', {
+          username: username.trim(),
+          password: pw,
+        })
+        setToken(r.token)
+      } else {
+        const r = await api.post<{ token: string }>('/auth/login', {
+          username: username.trim(),
+          password: pw,
+        })
+        setToken(r.token)
+      }
       onAuthed()
     } catch (ex) {
-      if (ex instanceof ApiError && ex.status === 401) setErr('密码错误，请重试')
+      if (ex instanceof ApiError && ex.status === 401) setErr('用户名或密码错误，请重试')
+      else if (ex instanceof ApiError && ex.status === 409) setErr('账号已存在——刷新页面直接登录')
       else if (ex instanceof TypeError) setErr('无法连接服务，请稍后重试')
       else setErr(ex instanceof ApiError ? ex.message : '登录失败，请重试')
     } finally {
@@ -93,9 +126,31 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
           </div>
 
           <div className="mt-10 space-y-4">
+            {initialized === false && (
+              <p className="rounded-md border border-info/40 bg-info/5 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                首次使用：创建管理员账号（单用户）。该表单仅在账号不存在时出现。
+              </p>
+            )}
+            <div>
+              <label htmlFor="admin-username" className="mb-2 block text-sm font-medium">
+                用户名
+              </label>
+              <div className="relative">
+                <KeyRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  id="admin-username"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                  placeholder="用户名"
+                  className="h-10 w-full rounded-md border border-input bg-card pl-10 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-foreground/40"
+                />
+              </div>
+            </div>
             <div>
               <label htmlFor="admin-password" className="mb-2 block text-sm font-medium">
-                管理员密码
+                {initialized === false ? '设置密码' : '密码'}
               </label>
               <div className="relative">
                 <KeyRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -120,6 +175,23 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
               </div>
             </div>
 
+            {initialized === false && (
+              <div>
+                <label htmlFor="admin-password2" className="mb-2 block text-sm font-medium">
+                  确认密码
+                </label>
+                <input
+                  id="admin-password2"
+                  type="password"
+                  value={pw2}
+                  onChange={(e) => setPw2(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder="再输入一遍"
+                  className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-foreground/40"
+                />
+              </div>
+            )}
+
             {err && (
               <p role="alert" className="text-sm text-destructive">
                 {err}
@@ -128,7 +200,13 @@ export default function Login({ onAuthed }: { onAuthed: () => void }) {
 
             <Button type="submit" disabled={busy} className="h-10 w-full">
               {busy && <Loader2 className="animate-spin" />}
-              {busy ? '登录中…' : '登录'}
+              {busy
+                ? initialized === false
+                  ? '创建中…'
+                  : '登录中…'
+                : initialized === false
+                  ? '创建管理员账号'
+                  : '登录'}
             </Button>
           </div>
 

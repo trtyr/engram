@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-仓库收敛为单分支。Rust 侧全貌：**11 crates** 五域服务（memory / wiki / codegraph / project / skills）+ **五域 MCP 适配器**（独立 crate engram-mcp；`/mcp` 承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 45 工具，scope 分权 + 管理台开关，tools/list 按 key scope 过滤 + 动态资产清单织入描述）+ 持久化收口 `engram-storage::repo`（core/api src 层零 sqlx，双适配器共用 core 服务）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **245** 测试 / **32 迁移** / **30 业务表**。
+仓库收敛为单分支。Rust 侧全貌：**11 crates** 五域服务（memory / wiki / codegraph / project / skills）+ **五域 MCP 适配器**（独立 crate engram-mcp；`/mcp` 承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 45 工具，scope 分权 + 管理台开关，tools/list 按 key scope 过滤 + 动态资产清单织入描述）+ 持久化收口 `engram-storage::repo`（core/api src 层零 sqlx，双适配器共用 core 服务）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **248** 测试 / **33 迁移** / **31 业务表**（+admin_account 单行管理员账号）。
 
 ## 当日验证矩阵
 

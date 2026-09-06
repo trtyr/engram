@@ -32,6 +32,14 @@ async fn main() -> anyhow::Result<()> {
     let version = engram_storage::current_version(&pool).await?;
     tracing::info!(migration_version = ?version, "迁移就绪");
 
+    // 管理员账号播种：账号表为空且 env 密码已设 → username='admin' 播种（兼容旧部署）。
+    // env 未设时由登录页初始化表单创建账号——两者都不配则登录不可用（status 端点可见）。
+    match engram_core::auth::seed_account_if_empty(&pool, cfg.admin_password.as_deref()).await {
+        Ok(true) => tracing::info!("管理员账号已从 env 密码播种（username=admin）——可在设置页修改"),
+        Ok(false) => {}
+        Err(e) => tracing::warn!("管理员账号播种失败: {e}"),
+    }
+
     // P2：进程崩溃自愈——上次运行中被认领（processing）的会话此刻不可能有
     // extract 在跑，一律退回 pending，否则永远卡死（claim 只取 pending）。
     if let Ok(n) = engram_storage::repo::memory::reset_processing_sessions(&pool).await

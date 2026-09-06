@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-**五域 MCP + 分层收敛成型**：`/mcp` 一个端点承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 **45 工具**，按 key scope 分权（AI 看到的工具面与可调用集一致），管理台按域分组逐工具开点开看详情（描述/参数 Schema 与 tools/list 同源）。持久化全面收口 `engram-storage::repo`（core/api src 层零 sqlx），MCP 拆独立 crate（11 crates，与 HTTP 平级双适配器）。cargo **245** 测试 / vitest **55**（10 文件）/ 100 路径 / 132 方法 / 32 迁移 / 30 业务表。
+**五域 MCP + 分层收敛成型**：`/mcp` 一个端点承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 **45 工具**，按 key scope 分权（AI 看到的工具面与可调用集一致），管理台按域分组逐工具开点开看详情（描述/参数 Schema 与 tools/list 同源）。持久化全面收口 `engram-storage::repo`（core/api src 层零 sqlx），MCP 拆独立 crate（11 crates，与 HTTP 平级双适配器）。cargo **248** 测试 / vitest **59**（11 文件）/ 104 路径 / 136 方法 / 33 迁移 / 31 业务表（+管理员账号）。
 :8090 开发栈在跑（am_dev 库，数据由所有者主动清空后重建）。
 
 ## 当日验证矩阵（活体）

@@ -104,7 +104,7 @@ async fn project_types_template() {
     assert_eq!(dev["label"], "开发");
     assert_eq!(
         dev["default_categories"],
-        json!(["后端", "前端", "测试", "规划"])
+        json!(["后端", "前端", "测试", "部署", "规划"])
     );
     let research = arr
         .iter()
@@ -134,8 +134,8 @@ async fn project_full_journey() {
     assert_eq!(created["status"], "active", "新项目默认进行中");
     assert_eq!(
         created["categories"],
-        json!(["后端", "前端", "测试", "规划"]),
-        "dev 类型应预置四分类"
+        json!(["后端", "前端", "测试", "部署", "规划"]),
+        "dev 类型应预置五分类"
     );
     let project_id = created["id"].as_str().unwrap().to_string();
 
@@ -348,7 +348,7 @@ async fn project_full_journey() {
     assert_eq!(upd["description"], "第一版完成，暂停");
     assert_eq!(
         upd["categories"],
-        json!(["后端", "前端", "测试", "规划"]),
+        json!(["后端", "前端", "测试", "部署", "规划"]),
         "补丁式更新不应动分类"
     );
 

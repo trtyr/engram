@@ -10,7 +10,7 @@
 [![React](https://img.shields.io/badge/React_19-SPA-61DAFB?style=for-the-badge&logo=react&logoColor=black)](web/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_17-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](server/crates/storage/)
 [![MCP](https://img.shields.io/badge/MCP-五域_45_工具-8A2BE2?style=for-the-badge)](#-mcp-五域工具面)
-[![Tests](https://img.shields.io/badge/tests-245_cargo_·_55_vitest-16C784?style=for-the-badge)](#-门禁)
+[![Tests](https://img.shields.io/badge/tests-248_cargo_·_59_vitest-16C784?style=for-the-badge)](#-门禁)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=for-the-badge)](LICENSE)
 
 > **en·gram**（/ˈenɡræm/）*n.* 神经科学中的「记忆痕迹」——记忆在脑中留下的物理印记。
@@ -69,6 +69,7 @@ flowchart LR
 |:--|:--|:--|
 | 🔒 | **敏感标记** | 医疗/感情/财务对话一个开关，检索/打包/导出默认排除 |
 | ⚖️ | **编辑分权** | AI 只写会话；改写语义内容是用户专属，改动留痕钉住 |
+| 👤 | **账号与会话** | 管理员账号（用户名+密码 PBKDF2）+ 会话列表吊销；登录页首次使用引导创建账号 |
 | 🧹 | **一等清空** | deep purge 两阶段（arm 5 分钟冷却 → token 执行），agent 级彻底清场 |
 | 🧾 | **数据主权** | 全系统一键导出/导入 + 远程拉取迁移（A→B）；密钥 AES-GCM 加密落库 |
 | 🚦 | **任务队列** | 一切长操作走 PG 队列（蒸馏/摄取/索引/同步），pending/running/dead 生命周期可见可恢复 |

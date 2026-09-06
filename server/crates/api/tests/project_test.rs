@@ -82,7 +82,7 @@ async fn project_crud_flow() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    // 新建（type=dev → 默认四分类）
+    // 新建（type=dev → 默认五分类）
     let (st, v) = send(
         &app,
         "POST",
@@ -96,8 +96,8 @@ async fn project_crud_flow() {
     assert_eq!(v["type"], "dev");
     assert_eq!(
         v["categories"],
-        serde_json::json!(["后端", "前端", "测试", "规划"]),
-        "dev 类型默认四分类"
+        serde_json::json!(["后端", "前端", "测试", "部署", "规划"]),
+        "dev 类型默认五分类"
     );
 
     // 列表
@@ -144,14 +144,14 @@ async fn project_type_template_and_filter() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    // 类型模板：dev 4 分类 + research 6 分类
+    // 类型模板：dev 5 分类 + research 6 分类
     let (st, v) = send(&app, "GET", "/projects/types", &admin, None).await;
     assert_eq!(st, StatusCode::OK);
     let types = v.as_array().unwrap();
     assert_eq!(types.len(), 2);
     let dev = types.iter().find(|t| t["type"] == "dev").unwrap();
     assert_eq!(dev["label"], "开发");
-    assert_eq!(dev["default_categories"].as_array().unwrap().len(), 4);
+    assert_eq!(dev["default_categories"].as_array().unwrap().len(), 5);
     let research = types.iter().find(|t| t["type"] == "research").unwrap();
     assert_eq!(research["label"], "调研");
     assert_eq!(research["default_categories"].as_array().unwrap().len(), 6);
@@ -577,7 +577,7 @@ async fn project_rename_conflict_and_empty_name() {
         &admin,
         Some(serde_json::json!({
             "name":"改名-甲","status":"active","description":null,
-            "categories":["后端","前端","测试","规划"]
+            "categories":["后端","前端","测试","部署","规划"]
         })),
     )
     .await;
@@ -617,7 +617,7 @@ async fn project_rename_conflict_and_empty_name() {
         &admin,
         Some(serde_json::json!({
             "name":"改名-乙","status":"paused","description":"ok",
-            "categories":["后端","前端","测试","规划"]
+            "categories":["后端","前端","测试","部署","规划"]
         })),
     )
     .await;
@@ -826,7 +826,7 @@ async fn project_doc_category_validation() {
     // 把「后端」加回，再迁移 → 放行
     let (st, _) = send(
         &app, "PUT", &format!("/projects/{pid}"), &admin,
-        Some(serde_json::json!({"name":"分类校验","status":"active","description":null,"categories":["后端","前端","测试","规划"]})),
+        Some(serde_json::json!({"name":"分类校验","status":"active","description":null,"categories":["后端","前端","测试","部署","规划"]})),
     ).await;
     assert_eq!(st, StatusCode::OK);
     let (st, v) = send(

@@ -1,11 +1,11 @@
 /** Settings 域：LLM providers / 路由 / API keys / 节律。 */
 import { useEffect, useState } from 'react'
-import { api, type ApiKey, type Job, type Provider } from '@/lib/api'
+import { api, type AdminSessionDto, type ApiKey, type Job, type Provider } from '@/lib/api'
 import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls, relTime, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'providers' | 'routing' | 'keys' | 'rhythm' | 'danger' | 'migrate'
+type Tab = 'providers' | 'routing' | 'keys' | 'rhythm' | 'danger' | 'migrate' | 'account'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'routing', label: 'AI 功能' },
@@ -14,6 +14,7 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'rhythm', label: '节律' },
   { value: 'danger', label: '危险操作' },
   { value: 'migrate', label: '数据迁移' },
+  { value: 'account', label: '账号与会话' },
 ]
 
 const PURPOSES: { key: string; label: string; desc: string }[] = [
@@ -39,6 +40,220 @@ export default function Settings() {
       {tab === 'rhythm' && <RhythmPane />}
       {tab === 'danger' && <DangerZone />}
       {tab === 'migrate' && <MigratePane />}
+      {tab === 'account' && <AccountPane />}
+    </div>
+  )
+}
+
+/** 账号与会话（单用户管理）：改用户名/密码 + 活跃会话列表（吊销/吊销其他）。 */
+function AccountPane() {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [okMsg, setOkMsg] = useState('')
+  const [username, setUsername] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<AdminSessionDto[] | null>(null)
+
+  const [curPw, setCurPw] = useState('')
+  const [newUsername, setNewUsername] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [newPw2, setNewPw2] = useState('')
+
+  const loadSessions = () =>
+    api
+      .get<AdminSessionDto[]>('/auth/sessions')
+      .then(setSessions)
+      .catch((e) => setErr(e.message))
+
+  useEffect(() => {
+    api
+      .get<{ username: string }>('/auth/username')
+      .then((r) => setUsername(r.username))
+      .catch(() => {})
+    loadSessions()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function doChange() {
+    if (!curPw) {
+      setErr('请输入当前密码')
+      return
+    }
+    if (!newUsername.trim() && !newPw) {
+      setErr('新用户名与新密码至少填一项')
+      return
+    }
+    if (newPw && newPw.length < 8) {
+      setErr('新密码至少 8 位')
+      return
+    }
+    if (newPw && newPw !== newPw2) {
+      setErr('两次输入的新密码不一致')
+      return
+    }
+    setBusy(true)
+    try {
+      const r = await api.put<{ username: string; revoked_sessions: number }>('/auth/account', {
+        current_password: curPw,
+        new_username: newUsername.trim() || undefined,
+        new_password: newPw || undefined,
+      })
+      setOkMsg(
+        `已更新${newUsername.trim() ? `（用户名：${r.username}）` : ''}` +
+          (r.revoked_sessions > 0 ? `，吊销其他会话 ${r.revoked_sessions} 个` : ''),
+      )
+      setUsername(r.username)
+      setCurPw('')
+      setNewUsername('')
+      setNewPw('')
+      setNewPw2('')
+      setErr('')
+      loadSessions()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '修改失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doRevoke(id: string) {
+    if (!confirm(`吊销会话 ${id}？该设备下次请求需重新登录。`)) return
+    setBusy(true)
+    try {
+      await api.del(`/auth/sessions/${id}`)
+      setErr('')
+      loadSessions()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '吊销失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doRevokeOthers() {
+    if (!confirm('吊销除当前设备外的全部会话？')) return
+    setBusy(true)
+    try {
+      const r = await api.post<{ revoked: number }>('/auth/sessions/revoke-others')
+      setOkMsg(`已吊销其他会话 ${r.revoked} 个`)
+      setErr('')
+      loadSessions()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '吊销失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {err && <ErrorBox msg={err} />}
+      {okMsg && (
+        <Card className="border-success/30 bg-success/10 p-3 text-sm text-success">{okMsg}</Card>
+      )}
+
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold">修改账号</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          当前用户名：{username ?? '…'} · 单用户（唯一管理员）。修改需验证当前密码；
+          改密码后其他设备的会话自动吊销。
+        </p>
+        <div className="mt-3 space-y-3">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">当前密码</label>
+            <input
+              className={`${inputCls} w-64`}
+              type="password"
+              autoComplete="current-password"
+              aria-label="当前密码"
+              value={curPw}
+              onChange={(e) => setCurPw(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">新用户名（可选）</label>
+              <input
+                className={`${inputCls} w-64`}
+                aria-label="新用户名"
+                placeholder={username ?? ''}
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">新密码（可选，≥8 位）</label>
+              <input
+                className={`${inputCls} w-64`}
+                type="password"
+                autoComplete="new-password"
+                aria-label="新密码"
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">确认新密码</label>
+              <input
+                className={`${inputCls} w-64`}
+                type="password"
+                autoComplete="new-password"
+                aria-label="确认新密码"
+                value={newPw2}
+                onChange={(e) => setNewPw2(e.target.value)}
+              />
+            </div>
+          </div>
+          <Button size="sm" disabled={busy} onClick={doChange}>
+            保存修改
+          </Button>
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h3 className="text-sm font-semibold">活跃会话</h3>
+          <Button size="sm" variant="outline" disabled={busy} onClick={doRevokeOthers}>
+            吊销其他设备
+          </Button>
+        </div>
+        {sessions === null ? (
+          <Spinner />
+        ) : sessions.length === 0 ? (
+          <p className="px-4 py-4 text-xs text-muted-foreground">无活跃会话</p>
+        ) : (
+          <ul role="list" className="divide-y divide-border/60">
+            {sessions.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-xs">
+                <code className="font-mono text-muted-foreground">{s.id}…</code>
+                {s.current && (
+                  <span className="rounded bg-success/15 px-1.5 py-0.5 text-[10px] text-success">当前设备</span>
+                )}
+                <span className="text-muted-foreground">
+                  创建 {new Date(s.created_at).toLocaleString()}
+                </span>
+                <span className="text-muted-foreground">
+                  最近使用 {s.last_used_at ? new Date(s.last_used_at).toLocaleString() : '—'}
+                </span>
+                <span className="text-muted-foreground">过期 {new Date(s.expires_at).toLocaleString()}</span>
+                {!s.current && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="ml-auto"
+                    disabled={busy}
+                    onClick={() => doRevoke(s.id)}
+                  >
+                    吊销
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="border-t border-border bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground">
+          会话 7 天有效；吊销后该设备下次请求需重新登录。修改密码会自动吊销其他设备。
+        </p>
+      </Card>
     </div>
   )
 }

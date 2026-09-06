@@ -25,6 +25,9 @@ chrono.workspace = true
 utoipa.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
+pbkdf2.workspace = true
+rand.workspace = true
+hmac.workspace = true
 scraper.workspace = true   # URL 摄取提取 <title>（正文解析在 parsing crate）
 
 [dev-dependencies]

@@ -25,7 +25,9 @@ use utoipa::OpenApi;
         description = "单用户 AI 长期记忆平台。平台即工具：AI 通过本 API 操纵记忆。"),
     paths(
         health::health, health::ready,
-        auth_api::login_handler,
+        auth_api::login_handler, auth_api::status, auth_api::init_account,
+        auth_api::change_credentials, auth_api::list_sessions, auth_api::revoke_session,
+        auth_api::revoke_others, auth_api::username,
         jobs_api::list_jobs, jobs_api::get_job, jobs_api::get_job_events, jobs_api::revive_job,
         llm_api::create_provider, llm_api::list_providers, llm_api::test_provider,
         llm_api::update_provider, llm_api::delete_provider, llm_api::reencrypt_providers,
@@ -83,7 +85,22 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
         .route("/openapi.json", get(openapi_json))
-        .route("/auth/login", post(auth_api::login_handler));
+        .route("/auth/login", post(auth_api::login_handler))
+        .route("/auth/status", get(auth_api::status))
+        .route("/auth/username", get(auth_api::username))
+        .route("/auth/init", post(auth_api::init_account))
+        .route(
+            "/auth/account",
+            axum::routing::put(auth_api::change_credentials),
+        )
+        .route(
+            "/auth/sessions",
+            get(auth_api::list_sessions).post(auth_api::revoke_others),
+        )
+        .route(
+            "/auth/sessions/{id}",
+            axum::routing::delete(auth_api::revoke_session),
+        );
 
     let authed = Router::new()
         // MCP（用户记忆域工具面）：nest 在 authed 内 → 复用 Bearer 中间件，

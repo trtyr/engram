@@ -120,3 +120,65 @@ pub async fn delete_api_keys(pool: &PgPool, ids: &[Uuid]) -> StoreResult<u64> {
         .await?;
     Ok(res.rows_affected())
 }
+
+// ---------- 管理员账号（单用户；0033） ----------
+
+/// 账号行：(username, password_hash)。
+pub async fn get_admin_account(pool: &PgPool) -> StoreResult<Option<(String, String)>> {
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT username, password_hash FROM admin_account WHERE id = 1")
+            .fetch_optional(pool)
+            .await?;
+    Ok(row)
+}
+
+/// 创建/覆盖账号（单行 upsert）。
+pub async fn upsert_admin_account(
+    pool: &PgPool,
+    username: &str,
+    password_hash: &str,
+) -> StoreResult<()> {
+    sqlx::query(
+        "INSERT INTO admin_account (id, username, password_hash, updated_at) \
+         VALUES (1, $1, $2, now()) \
+         ON CONFLICT (id) DO UPDATE SET username = $1, password_hash = $2, updated_at = now()",
+    )
+    .bind(username)
+    .bind(password_hash)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+// ---------- 会话管理（列表 / 吊销） ----------
+
+/// 会话行：(token_hash, created_at, expires_at, last_used_at)。
+pub async fn list_admin_sessions(
+    pool: &PgPool,
+) -> StoreResult<Vec<(String, DateTime<Utc>, DateTime<Utc>, Option<DateTime<Utc>>)>> {
+    let rows = sqlx::query_as(
+        "SELECT token_hash, created_at, expires_at, last_used_at FROM admin_sessions \
+         WHERE expires_at > now() ORDER BY created_at DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// 吊销指定会话。返回生效行数。
+pub async fn delete_admin_session(pool: &PgPool, token_hash: &str) -> StoreResult<u64> {
+    let res = sqlx::query("DELETE FROM admin_sessions WHERE token_hash = $1")
+        .bind(token_hash)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
+}
+
+/// 吊销除指定会话外的全部会话（改密码后/「登出其他设备」）。
+pub async fn delete_other_admin_sessions(pool: &PgPool, keep_token_hash: &str) -> StoreResult<u64> {
+    let res = sqlx::query("DELETE FROM admin_sessions WHERE token_hash <> $1")
+        .bind(keep_token_hash)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
+}

@@ -314,6 +314,14 @@ export interface CgCliStatus {
   version: string | null
   pin: string
 }
+/** 管理员活跃会话（GET /auth/sessions） */
+export interface AdminSessionDto {
+  id: string
+  created_at: string
+  expires_at: string
+  last_used_at: string | null
+  current: boolean
+}
 /** 调用图归一结果（GET /codegraph/projects/{id}/graph）。mode: symbol=符号子图 / files=文件级全图 */
 export interface CgGraph {
   mode?: 'symbol' | 'files'
