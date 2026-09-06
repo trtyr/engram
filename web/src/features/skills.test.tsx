@@ -3,6 +3,7 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import Skills from './Skills'
 
 // ---- api mock ----
@@ -112,7 +113,7 @@ describe('Skills 技能页（双栏）', () => {
   })
 
   it('左目录 + 右阅读：自动选中第一个技能并渲染 Markdown 正文', async () => {
-    render(<Skills />)
+    render(<MemoryRouter><Skills /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('Deploy Check')).toBeTruthy())
     expect(screen.getByText('PR 审查')).toBeTruthy()
     expect(screen.getByText('review-pr')).toBeTruthy()
@@ -124,7 +125,7 @@ describe('Skills 技能页（双栏）', () => {
   })
 
   it('新建技能调用 POST /skills（标签拆分、空 slug 置 null）', async () => {
-    render(<Skills />)
+    render(<MemoryRouter><Skills /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('PR 审查')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: '新建' }))
@@ -142,7 +143,7 @@ describe('Skills 技能页（双栏）', () => {
   })
 
   it('启停切换调用 PUT /skills/{slug}', async () => {
-    render(<Skills />)
+    render(<MemoryRouter><Skills /></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole('button', { name: '停用' })).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: '停用' }))
@@ -152,7 +153,7 @@ describe('Skills 技能页（双栏）', () => {
   })
 
   it('目录切换选中：点 Deploy Check 后删除带确认', async () => {
-    render(<Skills />)
+    render(<MemoryRouter><Skills /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('Deploy Check')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: /Deploy Check/ }))
@@ -165,7 +166,7 @@ describe('Skills 技能页（双栏）', () => {
   })
 
   it('粘贴 SKILL.md 导入调用 POST /skills/import 并展示报告', async () => {
-    render(<Skills />)
+    render(<MemoryRouter><Skills /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('PR 审查')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: '导入' }))
@@ -185,7 +186,7 @@ describe('Skills 技能页（双栏）', () => {
   })
 
   it('搜索框输入触发带 ?q= 的请求', async () => {
-    render(<Skills />)
+    render(<MemoryRouter><Skills /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('PR 审查')).toBeTruthy())
 
     fireEvent.change(screen.getByLabelText('搜索技能'), { target: { value: '审查' } })
@@ -195,7 +196,7 @@ describe('Skills 技能页（双栏）', () => {
   })
 
   it('版本面板加载 revisions 并可回滚', async () => {
-    render(<Skills />)
+    render(<MemoryRouter><Skills /></MemoryRouter>)
     await waitFor(() => expect(screen.getByRole('button', { name: '版本' })).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: '版本' }))
@@ -209,7 +210,7 @@ describe('Skills 技能页（双栏）', () => {
   })
 
   it('附属文件区：索引展示 + 点击查看脚本内容 + 删除带确认', async () => {
-    render(<Skills />)
+    render(<MemoryRouter><Skills /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('附属文件')).toBeTruthy())
     await waitFor(() => expect(screen.getByText('scripts/check.py')).toBeTruthy())
     expect(screen.getByText('references/api.md')).toBeTruthy()

@@ -1,5 +1,8 @@
 /**
- * Wiki Markdown 渲染（Engram 排版）：mermaid 代码块 + [[wikilink]] 页内跳转。
+ * Markdown 全站渲染器（Engram 排版）：全量 markdown + mermaid 图 + 代码块 + 表格/引用，
+ * Wiki 场景额外支持 [[wikilink]] 页内跳转。
+ * - onNavigateSlug 可选：不传（项目 docs / 技能正文 / 附属文件等非 Wiki 场景）
+ *   时 wikilink 退化为纯文本样式
  * - 正文行长 70ch（可读性）；标题/表格/代码/引用走 Engram 发丝线语言
  * - mermaid 主题随当前 light/dark token 注入（theme:'base' + themeVariables），字体统一 Geist
  */
@@ -152,11 +155,13 @@ const WikiMarkdown = memo(function WikiMarkdown({
   onNavigateSlug,
 }: {
   content: string
-  onNavigateSlug: (slug: string) => void
+  /** Wiki 场景：点击 [[wikilink]] 跳转页面；不传则 wikilink 退化为纯文本（非 Wiki 场景） */
+  onNavigateSlug?: (slug: string) => void
 }) {
   const [, setSearch] = useSearchParams()
   const nav = useNavigate()
   const goto = (slug: string) => {
+    if (!onNavigateSlug) return
     setSearch({ page: slug }, { replace: false })
     onNavigateSlug(slug)
     nav(`/wiki?page=${encodeURIComponent(slug)}`)

@@ -5,7 +5,6 @@
  * 云部署语义——文件按路径寻址随库走，客户端取走后本地执行。
  */
 import { useCallback, useEffect, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
 import {
   api,
   type SkillFileInfoDto,
@@ -16,6 +15,7 @@ import {
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
+import WikiMarkdown from '@/components/WikiMarkdown'
 import { cn } from '@/lib/utils'
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -671,9 +671,7 @@ export default function Skills() {
                         {fileContent === null ? (
                           <Spinner label="加载文件…" />
                         ) : viewFile.endsWith('.md') ? (
-                          <div className="prose prose-sm max-w-none dark:prose-invert">
-                            <ReactMarkdown>{fileContent}</ReactMarkdown>
-                          </div>
+                          <WikiMarkdown content={fileContent} />
                         ) : (
                           <pre className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs leading-5">
                             {fileContent}
@@ -682,9 +680,7 @@ export default function Skills() {
                       </>
                     ) : (
                       <>
-                        <div className="prose prose-sm max-w-none dark:prose-invert">
-                          <ReactMarkdown>{detail.content}</ReactMarkdown>
-                        </div>
+                        <WikiMarkdown content={detail.content} />
 
                         {/* 附属文件（folder 形态） */}
                         <div className="mt-8 border-t border-border pt-4">

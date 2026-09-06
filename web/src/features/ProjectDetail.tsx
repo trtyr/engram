@@ -5,11 +5,11 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
 import { api, type ProjectDetailDto, type ProjectDocDto, type ProjectLocationDto } from '@/lib/api'
 import { Card, ErrorBox, Spinner } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
+import WikiMarkdown from '@/components/WikiMarkdown'
 
 const TYPE_LABEL: Record<string, string> = { dev: '开发', research: '调研' }
 const STATUS_LABEL: Record<string, string> = {
@@ -453,9 +453,7 @@ function DocPane({
               编辑
             </Button>
           </div>
-          <div className="prose prose-sm max-w-none dark:prose-invert">
-            <ReactMarkdown>{doc.content}</ReactMarkdown>
-          </div>
+          <WikiMarkdown content={doc.content} />
         </>
       )}
     </Card>

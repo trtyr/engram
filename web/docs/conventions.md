@@ -36,3 +36,12 @@
 
 - Conventional Commits 中文描述；按主题分块。
 - bundle 预算：初始 <350kB gzip；新重库必须进 lazy 边界。
+
+## 内容渲染统一（2026-09-06）
+
+- 文档型内容（项目 docs 正文 / SKILL.md / 技能附属 .md / Wiki 页面）一律用
+  `components/WikiMarkdown`：全量 markdown + mermaid（主题自适应）+ 代码块/表格（engram-prose）
+  + 可选 [[wikilink]]（Wiki 场景传 `onNavigateSlug`，其他场景不传时退化为纯文本样式）。
+- **纯文本白名单**（刻意不渲染，保持原样）：对话轮次原文、检索 snippet、
+  wiki_docs 分块切片、Memory 清单行内短句（就地双击编辑交互 + 蒸馏短句非文档）。
+- 附属文件预览：`.md` 走 WikiMarkdown；其他文本走等宽 pre。
