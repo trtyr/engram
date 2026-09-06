@@ -48,7 +48,7 @@ pub enum ApiError {
     Forbidden(String),
     /// 数据库故障（可重试）
     #[error("存储层暂时不可用")]
-    Database(#[source] sqlx::Error),
+    Database(#[source] engram_storage::StoreError),
     /// 依赖服务不可用（可重试）
     #[error("服务暂时不可用，请稍后重试")]
     Unavailable(String),
@@ -117,8 +117,8 @@ impl From<engram_llm::types::LlmError> for ApiError {
     }
 }
 
-impl From<sqlx::Error> for ApiError {
-    fn from(e: sqlx::Error) -> Self {
+impl From<engram_storage::StoreError> for ApiError {
+    fn from(e: engram_storage::StoreError) -> Self {
         ApiError::Database(e)
     }
 }

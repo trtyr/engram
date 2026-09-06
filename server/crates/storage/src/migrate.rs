@@ -12,7 +12,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateE
 }
 
 /// 当前已应用的迁移版本（就绪检查用）。空库返回 None。
-pub async fn current_version(pool: &PgPool) -> Result<Option<i64>, sqlx::Error> {
+pub async fn current_version(pool: &PgPool) -> crate::error::StoreResult<Option<i64>> {
     let row: Option<(Option<i64>,)> = sqlx::query_as("SELECT MAX(version) FROM _sqlx_migrations")
         .fetch_optional(pool)
         .await?;

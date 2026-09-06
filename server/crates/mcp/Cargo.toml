@@ -1,0 +1,24 @@
+[package]
+name = "engram-mcp"
+description = "MCP 适配器：四域工具面（用户记忆/项目记忆/技能/Wiki），与 HTTP API 平级"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+engram-cg-bridge.workspace = true
+engram-core.workspace = true
+engram-jobs.workspace = true
+engram-search.workspace = true
+engram-storage.workspace = true
+
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+utoipa.workspace = true

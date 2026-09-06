@@ -32,6 +32,9 @@
 | pdf-extract | 0.12.0 | PDF 解析 |
 | docx-rs | 0.4.22 | DOCX 解析 |
 | scraper | 0.23.1 | HTML 清洗 |
+| rmcp | 3.x | MCP 官方 Rust SDK（Streamable HTTP 服务端，engram-mcp） |
+| rusqlite（bundled） | 0.32 | 只读 codegraph 索引库（.codegraph/codegraph.db，文件级全图） |
+| zip | 2.x | 技能整包 bundle 导出 |
 
 ## 存储
 

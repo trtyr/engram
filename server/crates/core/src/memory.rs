@@ -1,4 +1,6 @@
 //! 记忆域服务：L0 写入/触发、检索、上下文包、L1 治理、L3 画像视图。
+//!
+//! 持久化在 `engram_storage::repo::memory`（本文件只保留校验、语义判定与编排）。
 
 use chrono::{DateTime, Utc};
 use engram_jobs::types::Job;
@@ -7,9 +9,10 @@ use engram_llm::ProviderRegistry;
 use engram_llm::types::Purpose;
 use engram_search::tokenize::tokenize;
 use engram_search::{SearchHit, search_atoms, search_scenarios};
+use engram_storage::repo::memory as repo;
+use engram_storage::{PgPool, StoreError};
 use serde::Serialize;
 use serde_json::json;
-use sqlx::PgPool;
 use uuid::Uuid;
 
 /// 记忆域错误（api 层转 ApiError）。
@@ -25,120 +28,18 @@ pub enum MemoryError {
     LlmNotConfigured(String),
 }
 
-impl From<sqlx::Error> for MemoryError {
-    fn from(e: sqlx::Error) -> Self {
+impl From<StoreError> for MemoryError {
+    fn from(e: StoreError) -> Self {
         MemoryError::Storage(e.to_string())
     }
 }
 
-// ---------- DTO（api 直接复用，utoipa schema） ----------
+// ---------- DTO（api 直接复用，utoipa schema；行类型在 storage，此处 re-export） ----------
 
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct SessionDto {
-    pub id: Uuid,
-    pub agent: String,
-    #[schema(value_type = Object)]
-    pub content: serde_json::Value,
-    pub distill_status: String,
-    /// 会话级敏感标记：蒸馏产物自动继承
-    pub sensitive: bool,
-    pub created_at: DateTime<Utc>,
-    /// 会话元数据（source=import 标记批量导入的历史；蒸馏据此过滤对方观点）
-    #[schema(value_type = Object)]
-    pub metadata: serde_json::Value,
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct AtomDto {
-    pub id: Uuid,
-    pub kind: String,
-    pub content: String,
-    pub confidence: f32,
-    pub status: String,
-    pub superseded_by: Option<Uuid>,
-    pub needs_review: bool,
-    /// P3 隐私标记：医疗/感情/财务类——默认不进检索与 context_pack，reveal 才可见
-    pub sensitive: bool,
-    pub hit_count: i32,
-    pub scenario_id: Option<Uuid>,
-    /// 事件时间（extract 以当天为锚把相对时间解析成绝对；created_at 只是记录时间）
-    pub occurred_at: Option<DateTime<Utc>>,
-    /// 有效期（到期事件可过滤/降权）
-    pub valid_until: Option<DateTime<Utc>>,
-    #[schema(value_type = Object)]
-    pub source_refs: serde_json::Value,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct ScenarioDto {
-    pub id: Uuid,
-    pub topic: String,
-    pub summary: String,
-    #[schema(value_type = Object)]
-    pub atom_refs: serde_json::Value,
-    pub version: i32,
-    pub updated_at: DateTime<Utc>,
-}
-
-/// 原子改写留痕（编辑能力：旧值 + 谁改的）。append-only，随原子级联删除。
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct AtomRevision {
-    pub id: Uuid,
-    pub atom_id: Uuid,
-    pub old_content: String,
-    pub old_kind: String,
-    pub old_confidence: f32,
-    pub edited_by: String,
-    pub created_at: DateTime<Utc>,
-}
-
-/// 实体摘要改写留痕（圈子强化：手编档案的轻量历史，复用原子 revisions 模式）。
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct EntityRevision {
-    pub id: Uuid,
-    pub entity_id: Uuid,
-    pub old_summary: String,
-    pub edited_by: String,
-    pub created_at: DateTime<Utc>,
-}
-
-/// 实体关系（迁移 0021）：有向类型化关系，图升级成知识图谱。
-#[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct EntityRelationDto {
-    pub id: Uuid,
-    pub from_id: Uuid,
-    pub to_id: Uuid,
-    pub rel_type: String,
-    pub weight: i32,
-    pub source: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-/// 全局记忆时间轴事件（原子/场景/实体按时间倒序合并）。
-#[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct TimelineEvent {
-    pub id: Uuid,
-    pub at: DateTime<Utc>,
-    /// atom | scenario | entity
-    pub kind: String,
-    pub content: String,
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct PersonaVersion {
-    pub id: Uuid,
-    pub aspect: String,
-    pub content: String,
-    #[schema(value_type = Object)]
-    pub evidence_refs: serde_json::Value,
-    pub version: i32,
-    pub prompt_version: Option<String>,
-    pub manually_edited: bool,
-    pub created_at: DateTime<Utc>,
-}
+pub use engram_storage::models::memory::{
+    AtomDto, AtomRevision, EntityDto, EntityRelationDto, EntityRevision, GraphEdge, PersonaVersion,
+    ScenarioDto, SessionDto, TimelineEvent,
+};
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ContextPack {
@@ -186,17 +87,6 @@ pub const REL_TYPES: [&str; 5] = [
     "related_to",
 ];
 
-#[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct EntityDto {
-    pub id: Uuid,
-    pub name: String,
-    pub kind: String,
-    pub summary: String,
-    pub atom_count: i64,
-    pub manually_edited: Option<bool>,
-    pub updated_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct EntityDetail {
     pub entity: EntityDto,
@@ -206,13 +96,6 @@ pub struct EntityDetail {
     pub neighbors: Vec<EntityDto>,
     /// 类型化关系（有向）：本实体作为 from 或 to 的关系
     pub relations: Vec<EntityRelationDto>,
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct GraphEdge {
-    pub a: Uuid,
-    pub b: Uuid,
-    pub weight: i64,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -286,28 +169,10 @@ fn validate_turns(arr: &[serde_json::Value]) -> Result<(), MemoryError> {
 }
 
 /// deep purge 核心（供 MemoryService 与 API 的 deep_purge 定时 job 复用）。
-pub async fn purge_deep_pool(pool: &sqlx::PgPool) -> Result<serde_json::Value, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    let counts: (i64, i64, i64, i64, i64) = sqlx::query_as(
-        "SELECT \
-            (SELECT count(*) FROM raw_sessions), \
-            (SELECT count(*) FROM atoms), \
-            (SELECT count(*) FROM entities WHERE merged_into IS NULL), \
-            (SELECT count(*) FROM scenarios), \
-            (SELECT count(*) FROM persona_aspects)",
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    sqlx::query(
-        "TRUNCATE atom_entities, entities, persona_aspects, scenarios, atoms, raw_sessions CASCADE",
-    )
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(serde_json::json!({
-        "sessions": counts.0, "atoms": counts.1, "entities": counts.2,
-        "scenarios": counts.3, "persona": counts.4,
-    }))
+pub async fn purge_deep_pool(
+    pool: &PgPool,
+) -> Result<serde_json::Value, engram_storage::StoreError> {
+    repo::purge_deep(pool).await
 }
 
 impl MemoryService {
@@ -346,16 +211,7 @@ impl MemoryService {
         } else {
             json!({})
         };
-        let row = sqlx::query_as::<_, SessionDto>(
-            "INSERT INTO raw_sessions (id, agent, content, sensitive, metadata) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-        )
-        .bind(id)
-        .bind(agent)
-        .bind(sqlx::types::Json(&turns))
-        .bind(sensitive)
-        .bind(sqlx::types::Json(&metadata))
-        .fetch_one(&self.pool)
-        .await?;
+        let row = repo::insert_session(&self.pool, id, agent, &turns, sensitive, &metadata).await?;
 
         match distill {
             "auto" => {
@@ -391,15 +247,7 @@ impl MemoryService {
             validate_turns(arr)?;
         }
         let id = Uuid::now_v7();
-        let row = sqlx::query_as::<_, SessionDto>(
-            "INSERT INTO raw_sessions (id, agent, content, metadata) VALUES ($1, $2, $3, $4) RETURNING *",
-        )
-        .bind(id)
-        .bind(agent)
-        .bind(sqlx::types::Json(&turns))
-        .bind(serde_json::json!({"source": "import"}))
-        .fetch_one(&self.pool)
-        .await?;
+        let row = repo::insert_session_import(&self.pool, id, agent, &turns).await?;
         match distill {
             "auto" => {
                 engram_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
@@ -497,9 +345,7 @@ impl MemoryService {
             return Err(MemoryError::BadRequest("追加至少一轮".into()));
         }
         validate_turns(arr)?;
-        let cur = sqlx::query_as::<_, SessionDto>("SELECT * FROM raw_sessions WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&self.pool)
+        let cur = repo::find_session(&self.pool, id)
             .await?
             .ok_or_else(|| MemoryError::NotFound(format!("会话 {id} 不存在")))?;
         if cur.distill_status != "pending" {
@@ -508,15 +354,12 @@ impl MemoryService {
                 cur.distill_status
             )));
         }
-        // P12：原子 jsonb 数组拼接——单语句在行级天然串行，并发 append 不丢更新
-        // （分立的读-改-写在池连接上无法持锁，后写会覆盖前写的合并结果）。
-        let row = sqlx::query_as::<_, SessionDto>(
-            "UPDATE raw_sessions SET content = content || $2, agent = COALESCE($3, agent) WHERE id = $1 RETURNING *",
+        let row = repo::append_session_update(
+            &self.pool,
+            id,
+            &serde_json::Value::Array(arr.to_vec()),
+            agent,
         )
-        .bind(id)
-        .bind(sqlx::types::Json(&serde_json::Value::Array(arr.to_vec())))
-        .bind(agent)
-        .fetch_one(&self.pool)
         .await?;
         // 追加同样走防抖：同窗口的追加与首写共用一个 extract 任务
         if distill == "auto" {
@@ -533,49 +376,26 @@ impl MemoryService {
         cursor: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<SessionDto>, MemoryError> {
-        Ok(sqlx::query_as::<_, SessionDto>(
-            "SELECT * FROM raw_sessions \
-             WHERE ($1::text IS NULL OR agent = $1) AND ($2::timestamptz IS NULL OR created_at < $2) \
-             ORDER BY created_at DESC LIMIT $3",
-        )
-        .bind(agent)
-        .bind(cursor)
-        .bind(limit.min(200))
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(repo::list_sessions(&self.pool, agent, cursor, limit.min(200)).await?)
     }
 
     pub async fn get_session(&self, id: Uuid) -> Result<SessionDto, MemoryError> {
-        sqlx::query_as::<_, SessionDto>("SELECT * FROM raw_sessions WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&self.pool)
+        repo::find_session(&self.pool, id)
             .await?
             .ok_or_else(|| MemoryError::NotFound(format!("会话 {id} 不存在")))
     }
 
     /// L0 擦除：删会话 + 引用它的 atoms 标记来源失效。
     pub async fn erase_session(&self, id: Uuid) -> Result<(), MemoryError> {
-        let affected = sqlx::query("DELETE FROM raw_sessions WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
+        let affected = repo::delete_session(&self.pool, id).await?;
         if affected == 0 {
             return Err(MemoryError::NotFound(format!("会话 {id} 不存在")));
         }
         // 来源失效标记：source_refs 里含该会话的原子加 erased 标记
-        let atoms: Vec<(Uuid, serde_json::Value)> =
-            sqlx::query_as("SELECT id, source_refs FROM atoms WHERE source_refs::text LIKE $1")
-                .bind(format!("%{id}%"))
-                .fetch_all(&self.pool)
-                .await?;
+        let atoms = repo::list_atom_refs_like(&self.pool, id).await?;
         for (aid, refs) in atoms {
             let marked = mark_erased(refs, id);
-            sqlx::query("UPDATE atoms SET source_refs = $2, updated_at = now() WHERE id = $1")
-                .bind(aid)
-                .bind(sqlx::types::Json(&marked))
-                .execute(&self.pool)
-                .await?;
+            repo::update_atom_source_refs(&self.pool, aid, &marked).await?;
         }
         Ok(())
     }
@@ -595,20 +415,9 @@ impl MemoryService {
     /// last_heartbeat 复用 jobs 审计行（kind=rhythm_heartbeat）；pending 统计扫
     /// raw_sessions 积压（cron 兜底蒸馏的对象）。
     pub async fn rhythm_status(&self) -> Result<serde_json::Value, MemoryError> {
-        let heartbeat: Option<(chrono::DateTime<chrono::Utc>, String)> = sqlx::query_as(
-            "SELECT created_at, payload->>'by' AS by FROM jobs \
-             WHERE kind = 'rhythm_heartbeat' ORDER BY created_at DESC LIMIT 1",
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-        let pending: (i64, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
-            "SELECT count(*), min(created_at) FROM raw_sessions WHERE distill_status = 'pending' \
-             AND COALESCE(metadata->>'distill','') <> 'off'",
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        let (count, oldest) = pending;
-        let age_secs = oldest.map(|t| (chrono::Utc::now() - t).num_seconds());
+        let heartbeat = repo::rhythm_last_heartbeat(&self.pool).await?;
+        let (count, oldest) = repo::session_backlog(&self.pool).await?;
+        let age_secs = oldest.map(|t| (Utc::now() - t).num_seconds());
         Ok(serde_json::json!({
             "last_heartbeat": heartbeat.as_ref().map(|h| h.0),
             "last_heartbeat_by": heartbeat.as_ref().map(|h| h.1.clone()),
@@ -627,19 +436,14 @@ impl MemoryService {
         cursor: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<AtomDto>, MemoryError> {
-        Ok(sqlx::query_as::<_, AtomDto>(
-            "SELECT * FROM atoms \
-             WHERE ($1::text IS NULL OR kind = $1) AND ($2::text IS NULL OR status = $2) \
-               AND ($3::bool IS NULL OR needs_review = $3) \
-               AND ($4::timestamptz IS NULL OR created_at < $4) \
-             ORDER BY created_at DESC LIMIT $5",
+        Ok(repo::list_atoms(
+            &self.pool,
+            kind,
+            status,
+            needs_review,
+            cursor,
+            limit.min(500),
         )
-        .bind(kind)
-        .bind(status)
-        .bind(needs_review)
-        .bind(cursor)
-        .bind(limit.min(500))
-        .fetch_all(&self.pool)
         .await?)
     }
 
@@ -667,14 +471,7 @@ impl MemoryService {
         // A4 幂等护栏：同 kind + 同内容（trim 后）的 active 原子已存在则直接返回它——
         // AI 重试/重复直写不会双份（2026-08-31 测试方实测两条一模一样的生日原子）。
         // 近重复的语义合并仍归 arbitrate/consolidate，这里只挡精确重复。
-        if let Some(existing) = sqlx::query_as::<_, AtomDto>(
-            "SELECT * FROM atoms WHERE kind = $1 AND content = $2 AND status = 'active' LIMIT 1",
-        )
-        .bind(kind)
-        .bind(text)
-        .fetch_optional(&self.pool)
-        .await?
-        {
+        if let Some(existing) = repo::find_active_atom(&self.pool, kind, text).await? {
             tracing::info!(atom_id = %existing.id, "直写命中已有同内容原子，幂等返回");
             return Ok(existing);
         }
@@ -683,21 +480,19 @@ impl MemoryService {
         let needs_review = confidence < 0.55;
         let id = Uuid::now_v7();
         let emb = self.try_embed(&[text.to_string()]).await;
-        let row = sqlx::query_as::<_, AtomDto>(
-            "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive, occurred_at, valid_until, source_refs, embedding, tsv) \
-             VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, '[]'::jsonb, $9, to_tsvector('simple', $10)) RETURNING *",
+        let row = repo::insert_atom(
+            &self.pool,
+            id,
+            kind,
+            text,
+            confidence,
+            needs_review,
+            sensitive,
+            occurred_at,
+            valid_until,
+            emb.and_then(|v| v.into_iter().next()),
+            &engram_search::tokenize::tsv_text(text),
         )
-        .bind(id)
-        .bind(kind)
-        .bind(text)
-        .bind(confidence)
-        .bind(needs_review)
-        .bind(sensitive)
-        .bind(occurred_at)
-        .bind(valid_until)
-        .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
-        .bind(engram_search::tokenize::tsv_text(text))
-        .fetch_one(&self.pool)
         .await?;
         Ok(row)
     }
@@ -720,9 +515,7 @@ impl MemoryService {
         // 编辑来源（"admin" / "key:名"）——改写语义时落 atom_revisions + 审计
         actor: &str,
     ) -> Result<AtomDto, MemoryError> {
-        let cur = sqlx::query_as::<_, AtomDto>("SELECT * FROM atoms WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&self.pool)
+        let cur = repo::find_atom(&self.pool, id)
             .await?
             .ok_or_else(|| MemoryError::NotFound(format!("原子 {id} 不存在")))?;
 
@@ -746,17 +539,15 @@ impl MemoryService {
             || new_kind != cur.kind
             || confidence.is_some_and(|c| (c - cur.confidence).abs() > f32::EPSILON);
         if rewrite {
-            sqlx::query(
-                "INSERT INTO atom_revisions (id, atom_id, old_content, old_kind, old_confidence, edited_by) \
-                 VALUES ($1, $2, $3, $4, $5, $6)",
+            repo::insert_atom_revision(
+                &self.pool,
+                Uuid::now_v7(),
+                id,
+                &cur.content,
+                &cur.kind,
+                cur.confidence,
+                actor,
             )
-            .bind(Uuid::now_v7())
-            .bind(id)
-            .bind(&cur.content)
-            .bind(&cur.kind)
-            .bind(cur.confidence)
-            .bind(actor)
-            .execute(&self.pool)
             .await?;
             self.audit(
                 "edit_atom",
@@ -779,26 +570,21 @@ impl MemoryService {
             None
         };
 
-        let row = sqlx::query_as::<_, AtomDto>(
-            "UPDATE atoms SET content = $2, confidence = $3, status = $4, kind = $12, needs_review = COALESCE($5, needs_review), \
-                 superseded_by = COALESCE($6, superseded_by), occurred_at = COALESCE($7, occurred_at), \
-                 valid_until = COALESCE($8, valid_until), sensitive = COALESCE($9, sensitive), \
-                 embedding = COALESCE($10, embedding), tsv = to_tsvector('simple', $11), updated_at = now() \
-             WHERE id = $1 RETURNING *",
+        let row = repo::update_atom_full(
+            &self.pool,
+            id,
+            &new_content,
+            new_conf,
+            new_status,
+            needs_review,
+            superseded_by,
+            occurred_at,
+            valid_until,
+            sensitive,
+            emb.and_then(|v| v.into_iter().next()),
+            &engram_search::tokenize::tsv_text(&new_content),
+            new_kind,
         )
-        .bind(id)
-        .bind(&new_content)
-        .bind(new_conf)
-        .bind(new_status)
-        .bind(needs_review)
-        .bind(superseded_by)
-        .bind(occurred_at)
-        .bind(valid_until)
-        .bind(sensitive)
-        .bind(emb.as_ref().and_then(|v| v.first()).map(|v| pgvector::Vector::from(v.clone())))
-        .bind(engram_search::tokenize::tsv_text(&new_content))
-        .bind(new_kind)
-        .fetch_one(&self.pool)
         .await?;
 
         // F4 治：归档或标敏感 → 受影响场景快照需要收敛重算（best-effort 异步，
@@ -825,39 +611,23 @@ impl MemoryService {
     // ---------- L2 / L3 ----------
 
     pub async fn list_scenarios(&self, limit: i64) -> Result<Vec<ScenarioDto>, MemoryError> {
-        Ok(sqlx::query_as::<_, ScenarioDto>(
-            "SELECT * FROM scenarios ORDER BY updated_at DESC LIMIT $1",
-        )
-        .bind(limit.min(200))
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(repo::list_scenarios(&self.pool, limit.min(200)).await?)
     }
 
     pub async fn get_scenario(&self, id: Uuid) -> Result<ScenarioDto, MemoryError> {
-        sqlx::query_as::<_, ScenarioDto>("SELECT * FROM scenarios WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&self.pool)
+        repo::find_scenario(&self.pool, id)
             .await?
             .ok_or_else(|| MemoryError::NotFound(format!("场景 {id} 不存在")))
     }
 
     /// 当前画像（每分面最新版）。
     pub async fn persona(&self) -> Result<Vec<PersonaVersion>, MemoryError> {
-        Ok(sqlx::query_as::<_, PersonaVersion>(
-            "SELECT DISTINCT ON (aspect) * FROM persona_aspects ORDER BY aspect, version DESC",
-        )
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(repo::persona_current(&self.pool).await?)
     }
 
     /// 分面版本历史。
     pub async fn persona_history(&self, aspect: &str) -> Result<Vec<PersonaVersion>, MemoryError> {
-        Ok(sqlx::query_as::<_, PersonaVersion>(
-            "SELECT * FROM persona_aspects WHERE aspect = $1 ORDER BY version DESC",
-        )
-        .bind(aspect)
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(repo::persona_history(&self.pool, aspect).await?)
     }
 
     /// 回滚分面到历史版本（以新版本号落地当前内容——历史不可变）。
@@ -872,22 +642,12 @@ impl MemoryService {
         if content.is_empty() || content.chars().count() > 4000 {
             return Err(MemoryError::BadRequest("分面内容需 1~4000 字".into()));
         }
-        let cur: Option<Option<i32>> =
-            sqlx::query_scalar("SELECT MAX(version) FROM persona_aspects WHERE aspect = $1")
-                .bind(aspect)
-                .fetch_optional(&self.pool)
-                .await?;
-        let next_v = cur.flatten().map(|v| v + 1).unwrap_or(1);
-        sqlx::query(
-            "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, manually_edited) \
-             VALUES ($1, $2, $3, '[]'::jsonb, $4, 'human', true)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(aspect)
-        .bind(content)
-        .bind(next_v)
-        .execute(&self.pool)
-        .await?;
+        let next_v = repo::persona_max_version(&self.pool, aspect)
+            .await?
+            .flatten()
+            .map(|v| v + 1)
+            .unwrap_or(1);
+        repo::insert_persona_pinned(&self.pool, Uuid::now_v7(), aspect, content, next_v).await?;
         self.audit(
             "edit_persona",
             json!({
@@ -902,13 +662,7 @@ impl MemoryService {
 
     /// 解除钉住：分面回归蒸馏管辖（下次 consolidate/退休可重写）。
     pub async fn persona_unpin(&self, aspect: &str, actor: &str) -> Result<(), MemoryError> {
-        sqlx::query(
-            "UPDATE persona_aspects SET manually_edited = false \
-             WHERE id IN (SELECT id FROM persona_aspects WHERE aspect = $1 ORDER BY version DESC LIMIT 1)",
-        )
-        .bind(aspect)
-        .execute(&self.pool)
-        .await?;
+        repo::persona_unpin(&self.pool, aspect).await?;
         self.audit(
             "edit_persona",
             json!({
@@ -921,12 +675,7 @@ impl MemoryService {
 
     /// 原子改写历史（新→旧）。
     pub async fn atom_revisions(&self, atom_id: Uuid) -> Result<Vec<AtomRevision>, MemoryError> {
-        Ok(sqlx::query_as::<_, AtomRevision>(
-            "SELECT * FROM atom_revisions WHERE atom_id = $1 ORDER BY created_at DESC",
-        )
-        .bind(atom_id)
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(repo::atom_revisions(&self.pool, atom_id).await?)
     }
 
     /// 实体摘要版本链（圈子强化）：手编档案的历史，最近在前。
@@ -934,12 +683,7 @@ impl MemoryService {
         &self,
         entity_id: Uuid,
     ) -> Result<Vec<EntityRevision>, MemoryError> {
-        Ok(sqlx::query_as::<_, EntityRevision>(
-            "SELECT * FROM entity_revisions WHERE entity_id = $1 ORDER BY created_at DESC",
-        )
-        .bind(entity_id)
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(repo::entity_revisions(&self.pool, entity_id).await?)
     }
 
     /// 实体关系列表（有向类型化；可选按实体过滤 from/to 两端）。
@@ -948,19 +692,8 @@ impl MemoryService {
         entity_id: Option<Uuid>,
     ) -> Result<Vec<EntityRelationDto>, MemoryError> {
         let rows = match entity_id {
-            Some(eid) => {
-                sqlx::query_as::<_, EntityRelationDto>(
-                    "SELECT * FROM entity_relations WHERE from_id = $1 OR to_id = $1 ORDER BY created_at DESC",
-                )
-                .bind(eid)
-                .fetch_all(&self.pool)
-                .await?
-            }
-            None => {
-                sqlx::query_as::<_, EntityRelationDto>("SELECT * FROM entity_relations ORDER BY created_at DESC")
-                    .fetch_all(&self.pool)
-                    .await?
-            }
+            Some(eid) => repo::entity_relations(&self.pool, eid).await?,
+            None => repo::list_relations(&self.pool).await?,
         };
         Ok(rows)
     }
@@ -984,29 +717,14 @@ impl MemoryService {
         }
         self.entity_row(from).await?;
         self.entity_row(to).await?;
-        let row = sqlx::query_as::<_, EntityRelationDto>(
-            "INSERT INTO entity_relations (id, from_id, to_id, rel_type, weight, source) \
-             VALUES ($1, $2, $3, $4, 1, $5) \
-             ON CONFLICT (from_id, to_id, rel_type) DO UPDATE SET weight = entity_relations.weight + 1, updated_at = now() \
-             RETURNING *",
-        )
-        .bind(Uuid::now_v7())
-        .bind(from)
-        .bind(to)
-        .bind(rel_type)
-        .bind(source)
-        .fetch_one(&self.pool)
-        .await?;
+        let row =
+            repo::insert_relation(&self.pool, Uuid::now_v7(), from, to, rel_type, source).await?;
         Ok(row)
     }
 
     /// 删关系。
     pub async fn delete_relation(&self, id: Uuid) -> Result<(), MemoryError> {
-        let n = sqlx::query("DELETE FROM entity_relations WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
+        let n = repo::delete_relation(&self.pool, id).await?;
         if n == 0 {
             return Err(MemoryError::NotFound(format!("关系 {id} 不存在")));
         }
@@ -1019,25 +737,10 @@ impl MemoryService {
         aspect: &str,
         actor: &str,
     ) -> Result<PersonaVersion, MemoryError> {
-        let cur: Option<(String, i32)> = sqlx::query_as(
-            "SELECT content, version FROM persona_aspects WHERE aspect = $1 ORDER BY version DESC LIMIT 1",
-        )
-        .bind(aspect)
-        .fetch_optional(&self.pool)
-        .await?;
-        let Some((content, v)) = cur else {
-            return Err(MemoryError::NotFound(format!("分面 {aspect} 不存在")));
-        };
-        sqlx::query(
-            "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, manually_edited) \
-             VALUES ($1, $2, $3, '[]'::jsonb, $4, 'human', true)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(aspect)
-        .bind(&content)
-        .bind(v + 1)
-        .execute(&self.pool)
-        .await?;
+        let (content, v) = repo::persona_latest(&self.pool, aspect)
+            .await?
+            .ok_or_else(|| MemoryError::NotFound(format!("分面 {aspect} 不存在")))?;
+        repo::insert_persona_pinned(&self.pool, Uuid::now_v7(), aspect, &content, v + 1).await?;
         self.audit(
             "edit_persona",
             json!({
@@ -1056,32 +759,24 @@ impl MemoryService {
         to_version: i32,
         actor: &str,
     ) -> Result<PersonaVersion, MemoryError> {
-        let target = sqlx::query_as::<_, PersonaVersion>(
-            "SELECT * FROM persona_aspects WHERE aspect = $1 AND version = $2",
-        )
-        .bind(aspect)
-        .bind(to_version)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| MemoryError::NotFound(format!("版本 {aspect}#{to_version} 不存在")))?;
+        let target = repo::persona_version(&self.pool, aspect, to_version)
+            .await?
+            .ok_or_else(|| MemoryError::NotFound(format!("版本 {aspect}#{to_version} 不存在")))?;
 
-        let cur: Option<Option<i32>> =
-            sqlx::query_scalar("SELECT MAX(version) FROM persona_aspects WHERE aspect = $1")
-                .bind(aspect)
-                .fetch_optional(&self.pool)
-                .await?;
-        let next_v = cur.flatten().map(|v| v + 1).unwrap_or(1);
+        let next_v = repo::persona_max_version(&self.pool, aspect)
+            .await?
+            .flatten()
+            .map(|v| v + 1)
+            .unwrap_or(1);
 
-        sqlx::query(
-            "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, manually_edited) \
-             VALUES ($1, $2, $3, $4::jsonb, $5, 'rollback', true)",
+        repo::insert_persona_rollback(
+            &self.pool,
+            Uuid::now_v7(),
+            aspect,
+            &target.content,
+            next_v,
+            &json!({"rollback_to": to_version}),
         )
-        .bind(Uuid::now_v7())
-        .bind(aspect)
-        .bind(&target.content)
-        .bind(sqlx::types::Json(&json!({"rollback_to": to_version})))
-        .bind(next_v)
-        .execute(&self.pool)
         .await?;
         // 回滚 = 人工钉住（蒸馏绕开，直到解锁）
         self.audit(
@@ -1100,72 +795,22 @@ impl MemoryService {
 
     /// 活体实体列表（按记忆密度降序）。
     pub async fn list_entities(&self, kind: Option<&str>) -> Result<Vec<EntityDto>, MemoryError> {
-        Ok(sqlx::query_as::<_, EntityDto>(
-            "SELECT e.id, e.name, e.kind, e.summary, count(ae.atom_id)::bigint AS atom_count, e.manually_edited, e.updated_at \
-             FROM entities e LEFT JOIN atom_entities ae ON ae.entity_id = e.id \
-             WHERE e.merged_into IS NULL AND ($1::text IS NULL OR e.kind = $1) \
-             GROUP BY e.id, e.name, e.kind, e.summary, e.manually_edited, e.updated_at \
-             ORDER BY atom_count DESC, e.updated_at DESC",
-        )
-        .bind(kind)
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(repo::list_entities(&self.pool, kind).await?)
     }
 
     async fn entity_row(&self, id: Uuid) -> Result<EntityDto, MemoryError> {
-        sqlx::query_as::<_, EntityDto>(
-            "SELECT e.id, e.name, e.kind, e.summary, count(ae.atom_id)::bigint AS atom_count, bool_or(e.manually_edited) AS manually_edited, e.updated_at \
-             FROM entities e LEFT JOIN atom_entities ae ON ae.entity_id = e.id \
-             WHERE e.id = $1 AND e.merged_into IS NULL \
-             GROUP BY e.id, e.name, e.kind, e.summary, e.manually_edited, e.updated_at",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| MemoryError::NotFound(format!("实体 {id} 不存在")))
+        repo::entity_row(&self.pool, id)
+            .await?
+            .ok_or_else(|| MemoryError::NotFound(format!("实体 {id} 不存在")))
     }
 
     /// 实体详情：画像摘要 + 相关原子时间线 + 相关场景。
     pub async fn get_entity(&self, id: Uuid) -> Result<EntityDetail, MemoryError> {
         let entity = self.entity_row(id).await?;
-        let atoms = sqlx::query_as::<_, AtomDto>(
-            "SELECT a.* FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
-             WHERE ae.entity_id = $1 ORDER BY a.created_at DESC LIMIT 200",
-        )
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
-        let scenarios = sqlx::query_as::<_, ScenarioDto>(
-            "SELECT DISTINCT ON (s.id) s.* FROM scenarios s \
-             JOIN atoms a ON a.scenario_id = s.id \
-             JOIN atom_entities ae ON ae.atom_id = a.id \
-             WHERE ae.entity_id = $1 LIMIT 50",
-        )
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
-        // 共现邻居：与当前实体共享原子的其他实体，按共现次数降序
-        let neighbors = sqlx::query_as::<_, EntityDto>(
-            "SELECT e.id, e.name, e.kind, e.summary, \
-                    (SELECT count(*) FROM atom_entities x WHERE x.entity_id = e.id)::bigint AS atom_count, \
-                    bool_or(e.manually_edited) AS manually_edited, e.updated_at \
-             FROM atom_entities ae \
-             JOIN entities e ON e.id = ae.entity_id \
-             WHERE ae.atom_id IN (SELECT atom_id FROM atom_entities WHERE entity_id = $1) \
-               AND ae.entity_id != $1 AND e.merged_into IS NULL \
-             GROUP BY e.id, e.name, e.kind, e.summary, e.manually_edited, e.updated_at \
-             ORDER BY count(*) DESC, e.updated_at DESC LIMIT 20",
-        )
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
-        // 类型化关系：本实体作为 from 或 to 的有向关系
-        let relations = sqlx::query_as::<_, EntityRelationDto>(
-            "SELECT * FROM entity_relations WHERE from_id = $1 OR to_id = $1 ORDER BY created_at DESC",
-        )
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
+        let atoms = repo::entity_atoms(&self.pool, id).await?;
+        let scenarios = repo::entity_scenarios(&self.pool, id).await?;
+        let neighbors = repo::entity_neighbors(&self.pool, id).await?;
+        let relations = repo::entity_relations(&self.pool, id).await?;
         Ok(EntityDetail {
             entity,
             atoms,
@@ -1192,35 +837,17 @@ impl MemoryService {
                 ENTITY_KINDS.join("/")
             )));
         }
-        let dup: Option<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM entities WHERE name = $1 AND kind = $2 AND merged_into IS NULL",
-        )
-        .bind(name)
-        .bind(kind)
-        .fetch_optional(&self.pool)
-        .await?;
+        let dup = repo::entity_id_by_name_kind(&self.pool, name, kind).await?;
         if dup.is_some() {
             return Err(MemoryError::BadRequest(format!(
                 "同名同类实体已存在：{name}"
             )));
         }
-        sqlx::query("INSERT INTO entities (id, name, kind, summary) VALUES ($1, $2, $3, $4)")
-            .bind(Uuid::now_v7())
-            .bind(name)
-            .bind(kind)
-            .bind(summary)
-            .execute(&self.pool)
-            .await?;
-        self.entity_row(
-            sqlx::query_scalar::<_, Uuid>(
-                "SELECT id FROM entities WHERE name = $1 AND kind = $2 AND merged_into IS NULL",
-            )
-            .bind(name)
-            .bind(kind)
-            .fetch_one(&self.pool)
-            .await?,
-        )
-        .await
+        repo::insert_entity(&self.pool, Uuid::now_v7(), name, kind, summary).await?;
+        let id = repo::entity_id_by_name_kind(&self.pool, name, kind)
+            .await?
+            .expect("刚插入的实体必能查到");
+        self.entity_row(id).await
     }
 
     pub async fn update_entity(
@@ -1236,53 +863,23 @@ impl MemoryService {
             if n.is_empty() || n.chars().count() > 60 {
                 return Err(MemoryError::BadRequest("实体名需 1~60 字".into()));
             }
-            sqlx::query("UPDATE entities SET name = $2, updated_at = now() WHERE id = $1 AND merged_into IS NULL")
-                .bind(id)
-                .bind(n)
-                .execute(&self.pool)
-                .await?;
+            repo::update_entity_name(&self.pool, id, n).await?;
             changed = true;
         }
         if let Some(s) = summary {
             // 版本链：旧摘要进 entity_revisions（轻量历史，复用原子 revisions 模式）
-            let old: Option<String> = sqlx::query_scalar(
-                "SELECT summary FROM entities WHERE id = $1 AND merged_into IS NULL",
-            )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
-            if let Some(old_summary) = old
+            if let Some(old_summary) = repo::entity_summary(&self.pool, id).await?
                 && old_summary != s
             {
-                sqlx::query(
-                    "INSERT INTO entity_revisions (id, entity_id, old_summary, edited_by) \
-                     VALUES ($1, $2, $3, $4)",
-                )
-                .bind(Uuid::now_v7())
-                .bind(id)
-                .bind(&old_summary)
-                .bind(actor)
-                .execute(&self.pool)
-                .await?;
+                repo::insert_entity_revision(&self.pool, Uuid::now_v7(), id, &old_summary, actor)
+                    .await?;
             }
-            sqlx::query(
-                "UPDATE entities SET summary = $2, manually_edited = true, updated_at = now() \
-                         WHERE id = $1 AND merged_into IS NULL",
-            )
-            .bind(id)
-            .bind(s)
-            .execute(&self.pool)
-            .await?;
+            repo::update_entity_summary(&self.pool, id, s).await?;
             changed = true;
         }
         if changed {
             // 用户手编实体档案 → 钉住（consolidate 档案重生成绕开）；审计
-            sqlx::query(
-                "UPDATE entities SET manually_edited = true WHERE id = $1 AND merged_into IS NULL",
-            )
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+            repo::pin_entity(&self.pool, id).await?;
             self.audit(
                 "edit_entity",
                 json!({
@@ -1295,16 +892,7 @@ impl MemoryService {
     }
 
     pub async fn delete_entity(&self, id: Uuid) -> Result<(), MemoryError> {
-        // 只有活体可删；删活体时连带清掉并入它的墓碑（merged_into 指向它）——
-        // 否则 FK(entities_merged_into_fkey) 拒绝删除。墓碑是合并的残迹，赢家没了它也不复活。
-        let n = sqlx::query(
-            "DELETE FROM entities WHERE ($1 IN (SELECT id FROM entities WHERE id = $1 AND merged_into IS NULL)) \
-             AND (id = $1 OR merged_into = $1)",
-        )
-        .bind(id)
-        .execute(&self.pool)
-        .await?
-        .rows_affected();
+        let n = repo::delete_entity(&self.pool, id).await?;
         if n == 0 {
             return Err(MemoryError::NotFound(format!("实体 {id} 不存在")));
         }
@@ -1320,28 +908,12 @@ impl MemoryService {
     /// 实体级遗忘（「把小王忘了」）：级联归档挂链 active 原子 → 摘链 → 删实体+墓碑。
     /// archived/superseded 等非 active 原子不动（本来就是历史）；人审候选一并归档。
     pub async fn forget_entity(&self, id: Uuid) -> Result<usize, MemoryError> {
-        let cur = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM entities WHERE id = $1 AND merged_into IS NULL",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let cur = repo::live_entity_id(&self.pool, id).await?;
         if cur.is_none() {
             return Err(MemoryError::NotFound(format!("实体 {id} 不存在或已合并")));
         }
-        let n = sqlx::query(
-            "UPDATE atoms SET status = 'archived', updated_at = now() \
-             WHERE status = 'active' AND id IN (SELECT atom_id FROM atom_entities WHERE entity_id = $1)",
-        )
-        .bind(id)
-        .execute(&self.pool)
-        .await?
-        .rows_affected() as usize;
-        // 摘链（atom_entities 随实体删除本会级联，这里显式删保持语义清晰）
-        sqlx::query("DELETE FROM atom_entities WHERE entity_id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        let n = repo::archive_atoms_by_entity(&self.pool, id).await? as usize;
+        repo::detach_entity_links(&self.pool, id).await?;
         self.delete_entity(id).await?;
         Ok(n)
     }
@@ -1356,11 +928,7 @@ impl MemoryService {
     ///   归档保留原文与原子（可审计、可恢复），检索/context 不再返回。
     /// - processing：仍拒绝（蒸馏 worker 持有中，稍后重试）。
     pub async fn void_session(&self, id: Uuid) -> Result<SessionDto, MemoryError> {
-        let status: Option<String> =
-            sqlx::query_scalar("SELECT distill_status FROM raw_sessions WHERE id = $1")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let status = repo::session_distill_status(&self.pool, id).await?;
         match status.as_deref() {
             None => return Err(MemoryError::NotFound(format!("会话 {id} 不存在"))),
             Some("processing") => {
@@ -1375,13 +943,7 @@ impl MemoryService {
             }
             _ => {}
         }
-        let row = sqlx::query_as::<_, SessionDto>(
-            "UPDATE raw_sessions SET distill_status = 'void' \
-             WHERE id = $1 AND distill_status IN ('pending','done') RETURNING *",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = repo::void_session_update(&self.pool, id).await?;
         let row = row.ok_or_else(|| {
             // 查询与更新之间的竞态兜底（状态刚被蒸馏 worker 抢走）
             MemoryError::BadRequest(format!(
@@ -1390,17 +952,7 @@ impl MemoryService {
         })?;
         // done 会话：级联归档其蒸馏产出的 active 原子（与 purge_agent 同口径）
         if status.as_deref() == Some("done") {
-            let archived = sqlx::query(
-                "UPDATE atoms SET status = 'archived', updated_at = now() \
-                 WHERE status = 'active' AND EXISTS ( \
-                    SELECT 1 FROM jsonb_array_elements(atoms.source_refs) e \
-                    WHERE e->>'session_id' = $1)",
-            )
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await
-            .map_err(MemoryError::from)?
-            .rows_affected();
+            let archived = repo::archive_atoms_by_session(&self.pool, &id.to_string()).await?;
             // 审计链：job 行记遗忘动作（与 purge/erase 同哲学）
             self.audit(
                 "session_void_cascade",
@@ -1417,25 +969,7 @@ impl MemoryService {
     /// 返回 (erased_sessions, archived_atoms)。顺序敏感：先归档原子（JOIN 会话判归属）
     /// 再删会话——删会话后 JOIN 不可判归属。
     pub async fn purge_agent(&self, agent: &str) -> Result<(i64, i64), MemoryError> {
-        let mut tx = self.pool.begin().await.map_err(MemoryError::from)?;
-        let archived = sqlx::query(
-            "UPDATE atoms SET status = 'archived', updated_at = now() \
-             WHERE status = 'active' AND EXISTS ( \
-                SELECT 1 FROM jsonb_array_elements(atoms.source_refs) e \
-                JOIN raw_sessions s ON s.id::text = e->>'session_id' \
-                WHERE s.agent = $1)",
-        )
-        .bind(agent)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        let erased = sqlx::query("DELETE FROM raw_sessions WHERE agent = $1")
-            .bind(agent)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
-        tx.commit().await.map_err(MemoryError::from)?;
-        Ok((erased as i64, archived as i64))
+        Ok(repo::purge_agent_tx(&self.pool, agent).await?)
     }
 
     /// F1/F2 deep purge（终极清空测试）：记忆域四层 + 实体链一键清空，单事务，
@@ -1465,49 +999,18 @@ impl MemoryService {
 
     /// 编辑/清空类审计：写一条已完成的 job 行（谁、何时、干了什么）——不可抵赖凭证。
     pub async fn audit(&self, kind: &str, payload: serde_json::Value) {
-        sqlx::query(
-            "INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, \
-             progress, started_at, finished_at) \
-             VALUES ($1, $2, $3, 'succeeded', 1, 1, $3, now(), now())",
-        )
-        .bind(Uuid::now_v7())
-        .bind(kind)
-        .bind(payload)
-        .execute(&self.pool)
-        .await
-        .ok();
+        repo::audit(&self.pool, kind, payload).await;
     }
 
     /// P4 全量导出（数据主权）：记忆域五表完整快照，JSON 随身带走。
     /// R4：sensitive 原子默认排除（隐私面不随导出扩大到文件系统），
     /// include_sensitive=true 显式包含——与检索 reveal 同权。
     pub async fn export(&self, include_sensitive: bool) -> Result<serde_json::Value, MemoryError> {
-        let sessions: Vec<SessionDto> =
-            sqlx::query_as("SELECT * FROM raw_sessions ORDER BY created_at")
-                .fetch_all(&self.pool)
-                .await?;
-        let atoms: Vec<AtomDto> = sqlx::query_as(if include_sensitive {
-            "SELECT * FROM atoms ORDER BY created_at"
-        } else {
-            "SELECT * FROM atoms WHERE NOT sensitive ORDER BY created_at"
-        })
-        .fetch_all(&self.pool)
-        .await?;
-        let scenarios: Vec<ScenarioDto> =
-            sqlx::query_as("SELECT * FROM scenarios ORDER BY created_at")
-                .fetch_all(&self.pool)
-                .await?;
-        let persona: Vec<PersonaVersion> =
-            sqlx::query_as("SELECT * FROM persona_aspects ORDER BY aspect, version")
-                .fetch_all(&self.pool)
-                .await?;
-        let entities: Vec<EntityDto> =
-            sqlx::query_as(
-                "SELECT id, name, kind, summary, \
-                 (SELECT count(*) FROM atom_entities ae WHERE ae.entity_id = entities.id) AS atom_count, \
-                 manually_edited, updated_at FROM entities WHERE merged_into IS NULL ORDER BY updated_at DESC",
-            )
-            .fetch_all(&self.pool).await?;
+        let sessions = repo::list_all_sessions(&self.pool).await?;
+        let atoms = repo::list_atoms_all(&self.pool, include_sensitive).await?;
+        let scenarios = repo::list_scenarios_all(&self.pool).await?;
+        let persona = repo::persona_all(&self.pool).await?;
+        let entities = repo::entities_for_export(&self.pool).await?;
         Ok(serde_json::json!({
             "format": "engram-memory-export",
             "version": 1,
@@ -1526,35 +1029,17 @@ impl MemoryService {
     /// 挂原子到实体（幂等）。
     pub async fn attach_atom(&self, entity_id: Uuid, atom_id: Uuid) -> Result<(), MemoryError> {
         self.entity_row(entity_id).await?;
-        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms WHERE id = $1")
-            .bind(atom_id)
-            .fetch_one(&self.pool)
-            .await?;
+        let n = repo::count_atom(&self.pool, atom_id).await?;
         if n == 0 {
             return Err(MemoryError::NotFound(format!("原子 {atom_id} 不存在")));
         }
-        sqlx::query(
-            "INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2) \
-             ON CONFLICT DO NOTHING",
-        )
-        .bind(atom_id)
-        .bind(entity_id)
-        .execute(&self.pool)
-        .await?;
-        sqlx::query("UPDATE entities SET updated_at = now() WHERE id = $1")
-            .bind(entity_id)
-            .execute(&self.pool)
-            .await?;
+        repo::attach_atom_link(&self.pool, atom_id, entity_id).await?;
+        repo::touch_entity(&self.pool, entity_id).await?;
         Ok(())
     }
 
     pub async fn detach_atom(&self, entity_id: Uuid, atom_id: Uuid) -> Result<(), MemoryError> {
-        let n = sqlx::query("DELETE FROM atom_entities WHERE atom_id = $1 AND entity_id = $2")
-            .bind(atom_id)
-            .bind(entity_id)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
+        let n = repo::detach_atom_link(&self.pool, atom_id, entity_id).await?;
         if n == 0 {
             return Err(MemoryError::NotFound(format!(
                 "原子 {atom_id} 未关联到实体 {entity_id}"
@@ -1570,43 +1055,14 @@ impl MemoryService {
         }
         self.entity_row(from).await?;
         self.entity_row(into).await?;
-        let moved = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO atom_entities (atom_id, entity_id) \
-             SELECT atom_id, $2 FROM atom_entities WHERE entity_id = $1 \
-             ON CONFLICT DO NOTHING RETURNING atom_id",
-        )
-        .bind(from)
-        .bind(into)
-        .fetch_all(&self.pool)
-        .await?
-        .len() as i64;
-        sqlx::query("DELETE FROM atom_entities WHERE entity_id = $1")
-            .bind(from)
-            .execute(&self.pool)
-            .await?;
-        sqlx::query("UPDATE entities SET merged_into = $2, updated_at = now() WHERE id = $1")
-            .bind(from)
-            .bind(into)
-            .execute(&self.pool)
-            .await?;
-        sqlx::query("UPDATE entities SET updated_at = now() WHERE id = $1")
-            .bind(into)
-            .execute(&self.pool)
-            .await?;
+        let moved = repo::merge_entities_tx(&self.pool, from, into).await?;
         Ok(moved)
     }
 
     /// 星系图：节点（活体实体 + 密度）+ 共现边。
     pub async fn entity_graph(&self) -> Result<EntityGraph, MemoryError> {
         let nodes = self.list_entities(None).await?;
-        let edges = sqlx::query_as::<_, GraphEdge>(
-            "SELECT ae1.entity_id AS a, ae2.entity_id AS b, count(*)::bigint AS weight \
-             FROM atom_entities ae1 \
-             JOIN atom_entities ae2 ON ae1.atom_id = ae2.atom_id AND ae1.entity_id < ae2.entity_id \
-             GROUP BY ae1.entity_id, ae2.entity_id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let edges = repo::cooccurrence_edges(&self.pool).await?;
         let relations = self.list_relations(None).await?;
         Ok(EntityGraph {
             nodes,
@@ -1617,33 +1073,12 @@ impl MemoryService {
 
     /// 全局记忆时间轴：原子（occurred_at 优先）/场景/实体按时间倒序合并。
     pub async fn timeline(&self, limit: i64) -> Result<Vec<TimelineEvent>, MemoryError> {
-        Ok(sqlx::query_as::<_, TimelineEvent>(
-            "SELECT a.id, COALESCE(a.occurred_at, a.created_at) AS at, 'atom' AS kind, a.content \
-             FROM atoms a WHERE a.status = 'active' AND NOT a.sensitive \
-             UNION ALL \
-             SELECT s.id, s.created_at AS at, 'scenario' AS kind, s.topic \
-             FROM scenarios s \
-             UNION ALL \
-             SELECT e.id, e.created_at AS at, 'entity' AS kind, e.name \
-             FROM entities e WHERE e.merged_into IS NULL \
-             ORDER BY at DESC LIMIT $1",
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(repo::timeline(&self.pool, limit).await?)
     }
 
     /// 记忆域缺失向量统计（重嵌修复入口的状态面）。
     pub async fn embedding_status(&self) -> Result<EmbeddingStatus, MemoryError> {
-        let atoms_missing: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM atoms WHERE status = 'active' AND embedding IS NULL",
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        let scenarios_missing: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM scenarios WHERE embedding IS NULL")
-                .fetch_one(&self.pool)
-                .await?;
+        let (atoms_missing, scenarios_missing) = repo::embedding_missing_counts(&self.pool).await?;
         Ok(EmbeddingStatus {
             atoms_missing,
             scenarios_missing,
@@ -1719,12 +1154,7 @@ impl MemoryService {
         }
         let pool = self.pool.clone();
         tokio::spawn(async move {
-            let sql = if table == "atoms" {
-                "UPDATE atoms SET hit_count = hit_count + 1 WHERE id = ANY($1)"
-            } else {
-                "UPDATE scenarios SET hit_count = hit_count + 1 WHERE id = ANY($1)"
-            };
-            if let Err(e) = sqlx::query(sql).bind(&ids).execute(&pool).await {
+            if let Err(e) = repo::bump_hit_counts(&pool, table, &ids).await {
                 tracing::warn!(error = %e, table, "hit_count 回写失败（不影响检索结果）");
             }
         });
@@ -1754,7 +1184,9 @@ impl MemoryService {
 
         // 实体：token 命中（名字加权）——主角先行
         let entities = if want_e {
-            engram_search::search_entities(&self.pool, query, max_items).await?
+            engram_search::search_entities(&self.pool, query, max_items)
+                .await
+                .map_err(StoreError::from)?
         } else {
             vec![]
         };
@@ -1768,12 +1200,15 @@ impl MemoryService {
                 from,
                 to,
             )
-            .await?
+            .await
+            .map_err(StoreError::from)?
         } else {
             vec![]
         };
         let l2 = if want_l2 {
-            search_scenarios(&self.pool, query, qv.as_deref(), max_items).await?
+            search_scenarios(&self.pool, query, qv.as_deref(), max_items)
+                .await
+                .map_err(StoreError::from)?
         } else {
             vec![]
         };
@@ -1864,7 +1299,9 @@ impl MemoryService {
         // 保底 1——此前 budget_items*2/5 在小预算下把场景挤成 0。
         let scenario_cap = (budget_items * 2 / 5).max(1).min(budget_items.max(1));
         let scenarios = if let Some(q) = query {
-            search_scenarios(&self.pool, q, qv.as_deref(), (scenario_cap as i64).max(3)).await?
+            search_scenarios(&self.pool, q, qv.as_deref(), (scenario_cap as i64).max(3))
+                .await
+                .map_err(StoreError::from)?
         } else {
             self.list_scenarios((scenario_cap as i64).max(3))
                 .await?
@@ -1910,14 +1347,7 @@ impl MemoryService {
         };
         let mut out_entities = Vec::new();
         if !entity_ids.is_empty() {
-            let rows: Vec<EntityDto> = sqlx::query_as(
-                "SELECT id, name, kind, summary, \
-                 (SELECT count(*) FROM atom_entities ae WHERE ae.entity_id = entities.id) AS atom_count, \
-                 manually_edited, updated_at FROM entities WHERE id = ANY($1) AND merged_into IS NULL",
-            )
-                    .bind(&entity_ids)
-                    .fetch_all(&self.pool)
-                    .await?;
+            let rows = repo::entities_by_ids(&self.pool, &entity_ids).await?;
             // 保持命中序（query 路径相关性优先；无 query 路径密度优先）
             let by_id: std::collections::HashMap<Uuid, EntityDto> =
                 rows.into_iter().map(|e| (e.id, e)).collect();
@@ -1947,18 +1377,15 @@ impl MemoryService {
                     None,
                     None,
                 )
-                .await?;
+                .await
+                .map_err(StoreError::from)?;
                 let ids: Vec<Uuid> = hits.iter().map(|h| h.id).collect();
                 if ids.is_empty() {
                     vec![]
                 } else {
                     let score_of: std::collections::HashMap<Uuid, f64> =
                         hits.iter().map(|h| (h.id, h.score)).collect();
-                    let mut fetched: Vec<AtomDto> =
-                        sqlx::query_as::<_, AtomDto>("SELECT * FROM atoms WHERE id = ANY($1)")
-                            .bind(&ids)
-                            .fetch_all(&self.pool)
-                            .await?;
+                    let mut fetched = repo::atoms_by_ids(&self.pool, &ids).await?;
                     // 过期原子不注入（phase-2）：valid_until 已过 = 真记性不递过期记忆
                     let now = chrono::Utc::now();
                     fetched.retain(|a| a.valid_until.map(|vu| vu > now).unwrap_or(true));
@@ -1974,16 +1401,7 @@ impl MemoryService {
                     fetched
                 }
             }
-            None => {
-                sqlx::query_as(
-                    "SELECT * FROM atoms WHERE status = 'active' AND NOT sensitive \
-                 AND (valid_until IS NULL OR valid_until > now()) \
-                 ORDER BY hit_count DESC, confidence DESC, created_at DESC LIMIT $1",
-                )
-                .bind(remaining as i64)
-                .fetch_all(&self.pool)
-                .await?
-            }
+            None => repo::recent_active_atoms(&self.pool, remaining as i64).await?,
         };
         let mut out_atoms = Vec::new();
         for a in atoms {
@@ -2004,11 +1422,7 @@ impl MemoryService {
 
         // 人审代问（议题三）：队列里的低置信项带给 AI——下次对话顺口确认一句，
         // atom-patch 回写，人审从「翻网页」变「一句话」。不计热度。
-        let pending_review: Vec<AtomDto> = sqlx::query_as(
-            "SELECT * FROM atoms WHERE needs_review AND status = 'active' AND NOT sensitive ORDER BY created_at DESC LIMIT 5",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let pending_review = repo::pending_review_atoms(&self.pool).await?;
 
         Ok(ContextPack {
             persona,

@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+engram-storage = { path = "../storage" }
 engram-jobs = { path = "../jobs" }
 engram-llm = { path = "../llm" }
 engram-search = { path = "../search" }
@@ -14,7 +15,6 @@ engram-parsing = { path = "../parsing" }
 engram-wiki-engine = { path = "../wiki-engine" }
 engram-cg-bridge = { path = "../cg-bridge" }
 
-sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
@@ -22,7 +22,6 @@ serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 chrono.workspace = true
-pgvector.workspace = true
 utoipa.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
@@ -30,5 +29,7 @@ scraper.workspace = true   # URL 摄取提取 <title>（正文解析在 parsing 
 
 [dev-dependencies]
 anyhow.workspace = true
-engram-storage = { path = "../storage" }
 tempfile = "3"
+# 测试夹具直连 PG 造数（src 层零 SQL；持久化收口 engram-storage::repo）
+sqlx.workspace = true
+pgvector.workspace = true

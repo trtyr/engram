@@ -640,7 +640,7 @@ async fn mcp_skills_tools_listed_with_domain() {
         "instructions 应包含技能域说明"
     );
 
-    // tools/list：6 个 skills_* 工具齐备，注解正确
+    // tools/list：8 个 skills_* 工具齐备，注解正确
     let (_, v) = mcp_rpc(&app, &key, rpc(2, "tools/list", json!({}))).await;
     let tools = expect_result(&v, "tools/list")["tools"]
         .as_array()
@@ -650,6 +650,8 @@ async fn mcp_skills_tools_listed_with_domain() {
     for expected in [
         "skills_list",
         "skills_get",
+        "skills_file_get",
+        "skills_file_put",
         "skills_create",
         "skills_update",
         "skills_delete",
@@ -689,7 +691,7 @@ async fn mcp_skills_tools_listed_with_domain() {
         .iter()
         .filter(|t| t["name"].as_str().unwrap_or("").starts_with("skills_"))
         .collect();
-    assert_eq!(skills_tools.len(), 6, "管理端点应展示 6 个 skills 工具");
+    assert_eq!(skills_tools.len(), 8, "管理端点应展示 8 个 skills 工具");
     assert!(
         skills_tools.iter().all(|t| t["domain"] == "skills"),
         "skills 工具应归 skills 域：{skills_tools:?}"

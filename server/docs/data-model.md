@@ -25,7 +25,8 @@
 | wiki | wiki_links | 页面间链接（from/to/weight） |
 | wiki | wiki_review_items | 人审队列 |
 | wiki | wiki_insight_dismissals | 洞察卡片 dismissing 记录 |
-| codegraph | cg_projects | 注册的代码库（path/source_uri/status/stats） |
+| codegraph | cg_projects | 注册的代码库（path/source_uri/status/stats；同源唯一） |
+| skills | skill_files | 技能附属文件（folder 形态：scripts/references 按 (skill_id, path) 唯一；0032） |
 | 项目 | projects | 项目本体（name/type[dev·research]/status/categories JSONB 分类列表可增删/frontmatter） |
 | 项目 | project_locations | 多主机位置（host/path/purpose，登记制纯元数据） |
 | 项目 | project_docs | 分类文档（category/title/content markdown/frontmatter） |

@@ -11,6 +11,9 @@ use engram_llm::crypto::KeyCipher;
 use engram_llm::provider::{LlmProvider, OpenAiCompatProvider, ProviderRegistry};
 use engram_llm::router::{PurposeRouter, RoutingTable};
 use engram_llm::types::{ChatMessage, ChatRequest, Purpose, UsageRecord};
+use engram_storage::StoreError;
+use engram_storage::repo::keys as keys_repo;
+use engram_storage::repo::llm as repo;
 
 use crate::auth::{Principal, create_api_key};
 use crate::error::ApiError;
@@ -81,11 +84,6 @@ pub struct ProviderDto {
     pub warning: Option<String>,
 }
 
-/// L1：UNIQUE 冲突判定（23505）——provider 重名是用户输入错误，应 400 而非 503。
-fn is_unique_violation(e: &sqlx::Error) -> bool {
-    matches!(e, sqlx::Error::Database(db) if db.code().as_deref() == Some("23505"))
-}
-
 /// 注册 LLM provider（key 加密落库）。L1：写入口全量校验；L3：默认唯一性事务降级。
 #[utoipa::path(post, path = "/settings/llm/providers",
     request_body = CreateProviderRequest,
@@ -143,40 +141,26 @@ pub async fn create_provider(
     let id = Uuid::now_v7();
 
     // L3：默认唯一性——is_default 时同事务降级存量默认；
-    // L1：UNIQUE 冲突（重名）映射 400（旧路径经 From<sqlx::Error> 变 503 retryable）
-    let mut tx = state.pool.begin().await?;
-    if req.is_default {
-        // 同 capability 的唯一默认（chat 与 embedding 各有一个默认）
-        sqlx::query(
-            "UPDATE llm_providers SET is_default = false WHERE is_default AND capability = $1",
-        )
-        .bind(&req.capability)
-        .execute(&mut *tx)
-        .await?;
-    }
-    let insert = sqlx::query(
-        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    // L1：UNIQUE 冲突（重名）映射 400（仓储层以 Conflict 标注）
+    if let Err(e) = repo::insert_provider_tx(
+        &state.pool,
+        id,
+        req.name.trim(),
+        &req.base_url,
+        &enc,
+        req.model_id.trim(),
+        &req.capability,
+        req.is_default,
     )
-    .bind(id)
-    .bind(req.name.trim())
-    .bind(&req.base_url)
-    .bind(&enc)
-    .bind(req.model_id.trim())
-    .bind(&req.capability)
-    .bind(req.is_default)
-    .execute(&mut *tx)
-    .await;
-    if let Err(e) = insert {
-        if is_unique_violation(&e) {
-            return Err(ApiError::BadRequest(format!(
-                "provider 名「{}」已存在",
-                req.name.trim()
-            )));
-        }
-        return Err(e.into());
+    .await
+    {
+        return Err(match e {
+            StoreError::Conflict(_) => {
+                ApiError::BadRequest(format!("provider 名「{}」已存在", req.name.trim()))
+            }
+            other => other.into(),
+        });
     }
-    tx.commit().await?;
 
     // L10：占位主密钥生效 → 响应带告示（不阻断但可感知；换真实密钥后需 re-encrypt）
     let warning = state.is_placeholder_master_key().then(|| {
@@ -263,56 +247,21 @@ pub async fn update_provider(
         None => None,
     };
 
-    let mut tx = state.pool.begin().await?;
-    if req.is_default == Some(true) {
-        // 同 capability 的唯一默认（capability 变更时用新值降级存量）
-        let cur_cap: Option<String> =
-            sqlx::query_scalar("SELECT capability FROM llm_providers WHERE id = $1")
-                .bind(id)
-                .fetch_optional(&state.pool)
-                .await?;
-        let new_cap = req
-            .capability
-            .clone()
-            .or(cur_cap)
-            .unwrap_or_else(|| "chat".to_string());
-        sqlx::query(
-            "UPDATE llm_providers SET is_default = false WHERE is_default AND capability = $2 AND id <> $1",
-        )
-        .bind(id)
-        .bind(&new_cap)
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    // COALESCE 逐字段更新；未提供的字段保持原值
-    let row = sqlx::query_as::<_, (Uuid, String, String, String, String, bool)>(
-        "UPDATE llm_providers SET \
-            base_url = COALESCE($2, base_url), \
-            api_key_encrypted = COALESCE($3, api_key_encrypted), \
-            model_id = COALESCE($4, model_id), \
-            capability = COALESCE($5, capability), \
-            is_default = COALESCE($6, is_default), \
-            updated_at = now() \
-         WHERE id = $1 \
-         RETURNING id, name, base_url, model_id, capability, is_default",
+    // COALESCE 逐字段更新；未提供的字段保持原值（默认唯一性事务在仓储内）
+    let row = repo::update_provider_tx(
+        &state.pool,
+        id,
+        req.base_url.as_deref(),
+        enc_new.as_deref(),
+        req.model_id.as_deref(),
+        req.capability.as_deref(),
+        req.is_default,
     )
-    .bind(id)
-    .bind(&req.base_url)
-    .bind(&enc_new)
-    .bind(&req.model_id)
-    .bind(&req.capability)
-    .bind(req.is_default)
-    .fetch_optional(&mut *tx)
     .await
-    .map_err(|e| {
-        if is_unique_violation(&e) {
-            ApiError::BadRequest("provider 名冲突".into())
-        } else {
-            e.into()
-        }
+    .map_err(|e| match e {
+        StoreError::Conflict(_) => ApiError::BadRequest("provider 名冲突".into()),
+        other => other.into(),
     })?;
-    tx.commit().await?;
 
     let Some((id, name, base_url, model_id, capability, is_default)) = row else {
         return Err(ApiError::NotFound(format!("provider {id} 不存在")));
@@ -342,12 +291,7 @@ pub async fn delete_provider(
 ) -> Result<StatusCode, ApiError> {
     require_llm(&principal)?;
 
-    let row: Option<(String, bool)> =
-        sqlx::query_as("SELECT name, is_default FROM llm_providers WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await?;
-    let Some((name, is_default)) = row else {
+    let Some((name, is_default)) = repo::get_provider_name_default(&state.pool, id).await? else {
         return Err(ApiError::NotFound(format!("provider {id} 不存在")));
     };
     if is_default {
@@ -371,10 +315,7 @@ pub async fn delete_provider(
         )));
     }
 
-    sqlx::query("DELETE FROM llm_providers WHERE id = $1")
-        .bind(id)
-        .execute(&state.pool)
-        .await?;
+    repo::delete_provider(&state.pool, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -405,10 +346,7 @@ pub async fn reencrypt_providers(
         .map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let new_cipher = cipher_from(&state)?;
 
-    let rows: Vec<(Uuid, Vec<u8>)> =
-        sqlx::query_as("SELECT id, api_key_encrypted FROM llm_providers ORDER BY created_at")
-            .fetch_all(&state.pool)
-            .await?;
+    let rows = repo::all_provider_keys(&state.pool).await?;
 
     // 先全部解密成功再落库（任一失败 = 旧密钥不对，整体 400 不做半截迁移）
     let mut reencoded: Vec<(Uuid, Vec<u8>)> = Vec::with_capacity(rows.len());
@@ -425,17 +363,7 @@ pub async fn reencrypt_providers(
         reencoded.push((*id, new_enc));
     }
 
-    let mut tx = state.pool.begin().await?;
-    for (id, enc) in &reencoded {
-        sqlx::query(
-            "UPDATE llm_providers SET api_key_encrypted = $2, updated_at = now() WHERE id = $1",
-        )
-        .bind(id)
-        .bind(enc)
-        .execute(&mut *tx)
-        .await?;
-    }
-    tx.commit().await?;
+    repo::update_provider_keys_tx(&state.pool, &reencoded).await?;
 
     Ok(Json(ReEncryptResult {
         re_encrypted: reencoded.len(),
@@ -449,12 +377,7 @@ pub async fn list_providers(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ProviderDto>>, ApiError> {
     require_llm(&principal)?;
-    type ProvRow = (Uuid, String, String, String, String, bool);
-    let rows: Vec<ProvRow> = sqlx::query_as(
-        "SELECT id, name, base_url, model_id, capability, is_default FROM llm_providers ORDER BY created_at",
-    )
-    .fetch_all(&state.pool)
-    .await?;
+    let rows = repo::list_providers(&state.pool).await?;
     Ok(Json(
         rows.into_iter()
             .map(
@@ -490,14 +413,9 @@ pub async fn test_provider(
     let cipher = cipher_from(&state)?;
     let registry = ProviderRegistry::new(state.pool.clone(), cipher.clone());
 
-    type Row = (String, String, Vec<u8>, String, String);
-    let row: Option<Row> = sqlx::query_as(
-        "SELECT name, base_url, api_key_encrypted, model_id, capability FROM llm_providers WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await?;
-    let Some((name, base_url, enc, model_id, capability)) = row else {
+    let Some((name, base_url, enc, model_id, capability)) =
+        repo::get_provider_full(&state.pool, id).await?
+    else {
         return Err(ApiError::NotFound(format!("provider {id} 不存在")));
     };
 
@@ -626,10 +544,7 @@ pub async fn suggest_routing(
     require_llm(&principal)?;
 
     // 读现有供应商
-    let providers: Vec<(String, String, String)> =
-        sqlx::query_as("SELECT name, model_id, capability FROM llm_providers ORDER BY name")
-            .fetch_all(&state.pool)
-            .await?;
+    let providers = repo::list_provider_name_model_cap(&state.pool).await?;
     if providers.is_empty() {
         return Err(ApiError::BadRequest(
             "没有可用的 LLM 供应商——请先在「供应商」注册至少一个 chat 供应商".into(),
@@ -771,12 +686,11 @@ pub async fn put_routing(
     ];
 
     // 一次取全部 provider（name → model_id，一个 provider 一个模型）
-    let providers: Vec<(String, String)> =
-        sqlx::query_as("SELECT name, model_id FROM llm_providers")
-            .fetch_all(&state.pool)
-            .await?;
     let provider_models: std::collections::HashMap<String, String> =
-        providers.into_iter().collect();
+        repo::list_provider_models(&state.pool)
+            .await?
+            .into_iter()
+            .collect();
 
     // L4：逐条校验，违规收集明细一次性返回（typo purpose/幽灵 provider/model 与 provider 不一致
     // 不再静默入库——旧路径落库后 resolve 静默跳过，用户以为在用路由实际全走默认）
@@ -902,33 +816,18 @@ pub async fn list_api_keys(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ApiKeyDto>>, ApiError> {
     require_admin(&principal)?;
-    type KeyRow = (
-        Uuid,
-        String,
-        String,
-        sqlx::types::Json<Vec<String>>,
-        chrono::DateTime<chrono::Utc>,
-        Option<chrono::DateTime<chrono::Utc>>,
-        Option<chrono::DateTime<chrono::Utc>>,
-    );
-    let rows: Vec<KeyRow> = sqlx::query_as(
-        "SELECT id, name, key_prefix, scopes, created_at, last_used_at, revoked_at FROM api_keys ORDER BY created_at DESC",
-    )
-    .fetch_all(&state.pool)
-    .await?;
+    let rows = keys_repo::list_api_keys(&state.pool).await?;
     Ok(Json(
         rows.into_iter()
-            .map(
-                |(id, name, key_prefix, scopes, created_at, last_used_at, revoked_at)| ApiKeyDto {
-                    id,
-                    name,
-                    key_prefix,
-                    scopes: scopes.0,
-                    created_at,
-                    last_used_at,
-                    revoked_at,
-                },
-            )
+            .map(|r| ApiKeyDto {
+                id: r.id,
+                name: r.name,
+                key_prefix: r.key_prefix,
+                scopes: r.scopes,
+                created_at: r.created_at,
+                last_used_at: r.last_used_at,
+                revoked_at: r.revoked_at,
+            })
             .collect(),
     ))
 }
@@ -941,11 +840,8 @@ pub async fn revoke_api_key(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     require_admin(&principal)?;
-    let result = sqlx::query("DELETE FROM api_keys WHERE id = $1")
-        .bind(id)
-        .execute(&state.pool)
-        .await?;
-    if result.rows_affected() == 0 {
+    let deleted = keys_repo::delete_api_key(&state.pool, id).await?;
+    if deleted == 0 {
         return Err(ApiError::NotFound(format!("API key {id} 不存在")));
     }
     Ok(StatusCode::NO_CONTENT)
@@ -974,11 +870,8 @@ pub async fn batch_revoke_api_keys(
     if req.ids.is_empty() {
         return Err(ApiError::BadRequest("ids 不能为空".into()));
     }
-    let result = sqlx::query("DELETE FROM api_keys WHERE id = ANY($1)")
-        .bind(&req.ids)
-        .execute(&state.pool)
-        .await?;
+    let revoked = keys_repo::delete_api_keys(&state.pool, &req.ids).await?;
     Ok(Json(BatchRevokeResult {
-        revoked: result.rows_affected() as usize,
+        revoked: revoked as usize,
     }))
 }

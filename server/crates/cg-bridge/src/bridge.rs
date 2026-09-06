@@ -80,6 +80,38 @@ pub struct CgProjectDto {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// CLI 可用性（GET /codegraph/status 响应）。
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct CliStatus {
+    pub available: bool,
+    pub version: Option<String>,
+    pub pin: String,
+}
+
+/// callers/callees --json 的条目（真实 schema 探测自 CLI 1.5.0；camelCase 原样映射）。
+#[derive(Debug, serde::Deserialize)]
+#[allow(non_snake_case)]
+pub(crate) struct CgSymbolRef {
+    name: String,
+    kind: String,
+    #[serde(default)]
+    filePath: String,
+    #[serde(default)]
+    startLine: i64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct CallersShape {
+    #[serde(default)]
+    callers: Vec<CgSymbolRef>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct CalleesShape {
+    #[serde(default)]
+    callees: Vec<CgSymbolRef>,
+}
+
 /// 桥接器。
 #[derive(Clone)]
 pub struct CgBridge {
@@ -133,6 +165,17 @@ impl CgBridge {
                 .await?;
         if existing.is_some() {
             return Err(CgError::BadRequest(format!("项目名 {name} 已存在")));
+        }
+        // 同一来源（路径/仓库）只许注册一次——避免同库多份索引
+        let dup: Option<(Uuid, String)> =
+            sqlx::query_as("SELECT id, name FROM cg_projects WHERE source_uri = $1")
+                .bind(source_uri)
+                .fetch_optional(&self.pool)
+                .await?;
+        if let Some((_, holder)) = dup {
+            return Err(CgError::BadRequest(format!(
+                "该来源已注册为项目 {holder}——同源一个索引，直接复用即可"
+            )));
         }
 
         let id = Uuid::now_v7();
@@ -205,7 +248,10 @@ impl CgBridge {
         self.ensure_version().await?;
 
         self.set_status(id, "indexing", None, None).await?;
-        match run_cli(&["init"], Some(Path::new(&proj.path)), TIMEOUT_INIT).await {
+        // 首次 init；已有 .codegraph 目录则全量重建（CLI 的 index 命令）
+        let marker = Path::new(&proj.path).join(".codegraph");
+        let cmd: &str = if marker.exists() { "index" } else { "init" };
+        match run_cli(&[cmd], Some(Path::new(&proj.path)), TIMEOUT_INIT).await {
             Ok(_) => {
                 let stats = self.read_stats(Path::new(&proj.path)).await;
                 self.set_status(id, "ready", stats.as_ref(), None).await?;
@@ -258,11 +304,20 @@ impl CgBridge {
         Ok(())
     }
 
+    /// 索引统计：CLI status --json 归一为前端契约 {files, symbols, edges, by_kind}。
+    /// （CLI 字段是 fileCount/nodeCount/edgeCount——此前直透导致前端恒显示 ?。）
     async fn read_stats(&self, path: &Path) -> Option<serde_json::Value> {
         let out = run_cli(&["status", "--json"], Some(path), TIMEOUT_QUERY)
             .await
             .ok()?;
-        serde_json::from_slice(&out.stdout).ok()
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+        Some(serde_json::json!({
+            "files": v.get("fileCount")?,
+            "symbols": v.get("nodeCount")?,
+            "edges": v.get("edgeCount")?,
+            "by_kind": v.get("nodesByKind").cloned().unwrap_or(serde_json::json!({})),
+            "last_indexed": v.get("lastIndexed").cloned().unwrap_or(serde_json::Value::Null),
+        }))
     }
 
     // ---------- 查询代理 ----------
@@ -348,6 +403,154 @@ impl CgBridge {
         }
     }
 
+    /// 删除项目：移除注册行；工作目录在本桥 root 之下（git clone 的）连目录一起清，
+    /// 本地路径项目不动用户的源码。返回是否删除了工作目录。
+    pub async fn delete(&self, id: Uuid) -> Result<bool, CgError> {
+        let proj = self.get(id).await?;
+        let removed = sqlx::query("DELETE FROM cg_projects WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if removed == 0 {
+            return Err(CgError::NotFound(format!("项目 {id} 不存在")));
+        }
+        let workdir = Path::new(&proj.path);
+        let ours = self
+            .root
+            .canonicalize()
+            .ok()
+            .and_then(|root| workdir.canonicalize().ok().map(|w| w.starts_with(&root)))
+            .unwrap_or(false);
+        if ours {
+            let _ = tokio::fs::remove_dir_all(workdir).await;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// CLI 可用性（前端状态条）：版本探测失败 = 不可用。
+    pub async fn cli_status(&self) -> CliStatus {
+        match self.detect_version().await {
+            Ok(v) => CliStatus {
+                available: true,
+                version: Some(v),
+                pin: CG_VERSION_PIN.into(),
+            },
+            Err(e) => CliStatus {
+                available: false,
+                version: None,
+                pin: format!("{}（不可用: {e}）", CG_VERSION_PIN),
+            },
+        }
+    }
+
+    /// 文件级全图：把全部跨文件依赖边按文件聚合（imports/calls/instantiates/references，
+    /// 排除 contains 与自环）。这是「整个项目的调用图」的正确粒度——符号级动辄几百节点不可读，
+    /// 文件级通常几十个节点正好。数据源：.codegraph/codegraph.db（只读打开，schema 随 pin 稳定）。
+    pub async fn full_graph(&self, id: Uuid) -> Result<serde_json::Value, CgError> {
+        let proj = self.get(id).await?;
+        if proj.status != "ready" {
+            return Err(CgError::BadRequest(format!(
+                "项目未就绪（{}）——先建索引",
+                proj.status
+            )));
+        }
+        let db_path = Path::new(&proj.path)
+            .join(".codegraph")
+            .join("codegraph.db");
+        if !db_path.exists() {
+            return Err(CgError::NotFound(format!(
+                "索引库不存在（{}）——重新建索引",
+                db_path.display()
+            )));
+        }
+        // 阻塞读小库（<10MB）：spawn_blocking 防占 worker
+        let db_str = db_path.to_string_lossy().into_owned();
+        let v = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, CgError> {
+            let conn = rusqlite::Connection::open_with_flags(
+                &db_str,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .map_err(|e| CgError::Parse(format!("索引库打开失败: {e}")))?;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT sf.path, tf.path, count(*) AS w FROM edges e                      JOIN nodes ns ON ns.id = e.source JOIN files sf ON sf.path = ns.file_path                      JOIN nodes nt ON nt.id = e.target JOIN files tf ON tf.path = nt.file_path                      WHERE sf.path != tf.path AND e.kind != 'contains'                      GROUP BY sf.path, tf.path ORDER BY w DESC",
+                )
+                .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?;
+            let rows: Vec<(String, String, i64)> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?
+                .collect::<Result<_, _>>()
+                .map_err(|e| CgError::Parse(format!("索引读取失败: {e}")))?;
+
+            let file_name = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
+            let mut nodes: Vec<serde_json::Value> = Vec::new();
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut edges = Vec::new();
+            for (from, to, w) in rows {
+                for p in [&from, &to] {
+                    if seen.insert(p.clone()) {
+                        nodes.push(serde_json::json!({
+                            "id": p, "name": file_name(p), "kind": "file", "role": "file",
+                        }));
+                    }
+                }
+                edges.push(serde_json::json!({
+                    "from": from, "to": to, "rel": "imports", "weight": w,
+                }));
+            }
+            Ok(serde_json::json!({
+                "mode": "files",
+                "files": nodes.len(),
+                "nodes": nodes,
+                "edges": edges,
+            }))
+        })
+        .await
+        .map_err(|e| CgError::Parse(format!("索引读取线程崩溃: {e}")))??;
+        Ok(v)
+    }
+
+    /// 调用图归一：符号为中心，callers/callees 展开成 nodes+edges 子图。
+    /// CLI 的 callers/callees 是扁平列表（{name,kind,filePath,startLine}）无显式边——
+    /// 中心与列表项连线即语义。节点 id 用 name@path:line 唯一化。
+    /// 某一侧（如无 caller）失败不拖垮整图，按空处理。
+    pub async fn graph(&self, id: Uuid, symbol: &str) -> Result<serde_json::Value, CgError> {
+        let proj = self.get(id).await?;
+        if proj.status != "ready" {
+            return Err(CgError::BadRequest(format!(
+                "项目未就绪（{}）——先建索引",
+                proj.status
+            )));
+        }
+        let path = Path::new(&proj.path);
+        self.ensure_version().await?;
+
+        let callers = run_cli(&["callers", symbol, "--json"], Some(path), TIMEOUT_QUERY).await;
+        let callees = run_cli(&["callees", symbol, "--json"], Some(path), TIMEOUT_QUERY).await;
+
+        let callers: Vec<CgSymbolRef> = match callers {
+            Ok(out) => serde_json::from_slice::<CallersShape>(&out.stdout)
+                .map(|s| s.callers)
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        let callees: Vec<CgSymbolRef> = match callees {
+            Ok(out) => serde_json::from_slice::<CalleesShape>(&out.stdout)
+                .map(|s| s.callees)
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        if callers.is_empty() && callees.is_empty() {
+            return Err(CgError::NotFound(format!(
+                "符号 {symbol:?} 无调用关系——确认名字正确且已建索引（可先用 query 搜索）"
+            )));
+        }
+
+        Ok(normalize_callgraph(symbol, &proj.name, &callers, &callees))
+    }
+
     /// 标记全部项目版本不匹配（CLI 升级后调用）。
     pub async fn mark_all_version_mismatch(&self, actual: &str) -> Result<u64, CgError> {
         let r = sqlx::query(
@@ -358,6 +561,49 @@ impl CgBridge {
         .await?;
         Ok(r.rows_affected())
     }
+}
+
+/// callers/callees 扁平列表 → nodes+edges 子图（纯函数，单测覆盖 schema 归一）。
+pub(crate) fn normalize_callgraph(
+    symbol: &str,
+    project_name: &str,
+    callers: &[CgSymbolRef],
+    callees: &[CgSymbolRef],
+) -> serde_json::Value {
+    let center_id = format!("{symbol}@{project_name}");
+    let mut nodes = vec![serde_json::json!({
+        "id": center_id, "name": symbol, "kind": "center", "role": "center",
+    })];
+    let mut edges = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    seen.insert(center_id.clone());
+    let mut push_side = |list: &[CgSymbolRef], role: &str, rel: &str, outbound: bool| {
+        for c in list {
+            let nid = format!("{}@{}:{}", c.name, c.filePath, c.startLine);
+            if seen.insert(nid.clone()) {
+                nodes.push(serde_json::json!({
+                    "id": nid, "name": c.name, "kind": c.kind,
+                    "filePath": c.filePath, "line": c.startLine, "role": role,
+                }));
+            }
+            let (from, to) = if outbound {
+                (center_id.clone(), nid)
+            } else {
+                (nid, center_id.clone())
+            };
+            edges.push(serde_json::json!({ "from": from, "to": to, "rel": rel }));
+        }
+    };
+    push_side(callers, "caller", "caller", false);
+    push_side(callees, "callee", "callee", true);
+    serde_json::json!({
+        "symbol": symbol,
+        "center": center_id,
+        "callers": callers.len(),
+        "callees": callees.len(),
+        "nodes": nodes,
+        "edges": edges,
+    })
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -372,6 +618,62 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// job 错误分类：超时/CLI 抖动 → Retryable 退避重试；存储抖动 → Retryable；其余 Permanent。
+fn classify(e: CgError) -> engram_jobs::types::JobError {
+    use engram_jobs::types::JobError;
+    match e {
+        CgError::Timeout(_, _) | CgError::CliUnavailable(_) => JobError::Retryable(e.to_string()),
+        CgError::Storage(m) => JobError::Retryable(format!("存储暂时不可用: {m}")),
+        other => JobError::Permanent(other.to_string()),
+    }
+}
+
+/// 注册 CodeGraph 域 job handlers（main 装配用）：cg_index / cg_sync。
+/// payload: {"project_id": uuid}。一切长操作走队列——索引不再阻塞 HTTP 10 分钟。
+pub fn register_handlers(
+    runner: engram_jobs::Runner,
+    bridge_root: std::path::PathBuf,
+) -> engram_jobs::Runner {
+    let root_index = bridge_root.clone();
+    runner
+        .register("cg_index", move |ctx| {
+            let root = root_index.clone();
+            async move {
+                let id: Uuid = ctx
+                    .job
+                    .payload
+                    .0
+                    .get("project_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| Uuid::parse_str(s).ok())
+                    .ok_or_else(|| {
+                        engram_jobs::types::JobError::Permanent("payload 缺 project_id".into())
+                    })?;
+                let bridge = CgBridge::new(ctx.pool().clone(), root);
+                let dto = bridge.index(id).await.map_err(classify)?;
+                Ok(serde_json::json!({"project_id": id, "status": dto.status}))
+            }
+        })
+        .register("cg_sync", move |ctx| {
+            let root = bridge_root.clone();
+            async move {
+                let id: Uuid = ctx
+                    .job
+                    .payload
+                    .0
+                    .get("project_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| Uuid::parse_str(s).ok())
+                    .ok_or_else(|| {
+                        engram_jobs::types::JobError::Permanent("payload 缺 project_id".into())
+                    })?;
+                let bridge = CgBridge::new(ctx.pool().clone(), root);
+                let dto = bridge.sync(id).await.map_err(classify)?;
+                Ok(serde_json::json!({"project_id": id, "status": dto.status}))
+            }
+        })
+}
+
 /// CLI 执行原语：spawn + 超时 + 错误归一（测试通过 `#[cfg(test)]` 注入模拟）。
 type CliOutput = std::process::Output;
 
@@ -380,9 +682,21 @@ async fn run_cli(
     cwd: Option<&Path>,
     timeout: Duration,
 ) -> Result<CliOutput, CgError> {
-    let mut cmd = tokio::process::Command::new("codegraph");
-    cmd.args(args)
-        .stdout(std::process::Stdio::piped())
+    // Windows：npm 全局安装的 CLI 是 .cmd shim，std/tokio 可直接 spawn .cmd
+    // （PATH 命中 shim；spawn 失败保持 CliUnavailable 语义，不经 cmd /C 以免污染错误分类）
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("codegraph.cmd");
+        c.args(args);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("codegraph");
+        c.args(args);
+        c
+    };
+    cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
@@ -439,5 +753,65 @@ mod tests {
         assert_eq!(QueryKind::from_str_opt("explore"), Some(QueryKind::Explore));
         assert_eq!(QueryKind::from_str_opt("impact"), Some(QueryKind::Impact));
         assert_eq!(QueryKind::from_str_opt("bogus"), None);
+    }
+
+    #[test]
+    fn callgraph_normalization_shapes() {
+        let callers = vec![CgSymbolRef {
+            name: "Wiki".into(),
+            kind: "function".into(),
+            filePath: "src/Wiki.tsx".into(),
+            startLine: 43,
+        }];
+        let callees = vec![
+            CgSymbolRef {
+                name: "api".into(),
+                kind: "constant".into(),
+                filePath: "src/api.ts".into(),
+                startLine: 74,
+            },
+            CgSymbolRef {
+                name: "api".into(),
+                kind: "constant".into(),
+                filePath: "src/api.ts".into(),
+                startLine: 74, // 与上一条完全同位：应去重
+            },
+        ];
+        let v = normalize_callgraph("load", "demo", &callers, &callees);
+        assert_eq!(v["center"], "load@demo");
+        assert_eq!(v["callers"], 1);
+        assert_eq!(v["callees"], 2);
+        let nodes = v["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 3, "center + caller + 去重后的 callee");
+        let edges = v["edges"].as_array().unwrap();
+        assert_eq!(edges.len(), 3, "caller→center 一条 + center→callee 两条");
+        assert_eq!(edges[0]["from"], "Wiki@src/Wiki.tsx:43");
+        assert_eq!(edges[0]["to"], "load@demo");
+        assert_eq!(edges[1]["from"], "load@demo");
+    }
+
+    #[test]
+    fn job_error_classification() {
+        use engram_jobs::types::JobError;
+        assert!(matches!(
+            classify(CgError::Timeout(30, "query".into())),
+            JobError::Retryable(_)
+        ));
+        assert!(matches!(
+            classify(CgError::CliUnavailable("spawn".into())),
+            JobError::Retryable(_)
+        ));
+        assert!(matches!(
+            classify(CgError::Storage("db".into())),
+            JobError::Retryable(_)
+        ));
+        assert!(matches!(
+            classify(CgError::NotFound("x".into())),
+            JobError::Permanent(_)
+        ));
+        assert!(matches!(
+            classify(CgError::BadRequest("y".into())),
+            JobError::Permanent(_)
+        ));
     }
 }

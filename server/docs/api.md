@@ -1,6 +1,6 @@
 # API
 
-> 2026-09-05 从当日代码 `openapi-dump` 活体导出，共 **95 路径 / 124 方法注册**（GET 51 · POST 50 · PUT 9 · PATCH 3 · DELETE 11）。
+> 2026-09-05 从当日代码 `openapi-dump` 活体导出，共 **100 路径 / 132 方法注册**（GET 56 · POST 50 · PUT 10 · PATCH 3 · DELETE 13）。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
 > token 两种：管理员会话 `ams_…`（POST /auth/login 签发）与 API Key `amk_…`（settings 域签发，
 > 八 scope：memory/wiki/codegraph/project/skills/llm/erase/cron）。
@@ -135,7 +135,7 @@
 | GET/POST | /settings/api-keys | API Key 列表 / 签发（scope；明文只在创建时返回一次）——admin-only |
 | POST | /settings/api-keys/{id}/revoke | 删除（admin-only；物理删除不留记录，删除后 401 走通用文案） |
 | POST | /settings/api-keys/batch-revoke | 批量删除（{ids}；物理删除，返回 {revoked}） |
-| GET/PUT | /settings/mcp | MCP 服务信息 / 配置更新（服务总开关 + 工具粒度开关 disabled_tools；admin-only）——工具面本体在 **POST /mcp**（Streamable HTTP JSON-RPC，非 OpenAPI 路径；复用 Bearer 认证，四域 38 工具按 scope 分权：memory 九 + project 15 + skills 六 + wiki 八；关闭时 503） |
+| GET/PUT | /settings/mcp | MCP 服务信息 / 配置更新（服务总开关 + 工具粒度开关 disabled_tools；admin-only）——工具面本体在 **POST /mcp**（Streamable HTTP JSON-RPC，非 OpenAPI 路径；复用 Bearer 认证，五域 45 工具按 scope 分权：memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五；关闭时 503） |
 
 ## 错误文案三问规范（2026-08-31 起）
 

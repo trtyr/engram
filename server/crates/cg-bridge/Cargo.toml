@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+engram-jobs = { path = "../jobs" }
 sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -15,6 +16,8 @@ serde_json.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 utoipa.workspace = true
+# 读 codegraph 自管索引（.codegraph/codegraph.db，schema 随 CLI pin 1.5.0 稳定）
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 anyhow.workspace = true

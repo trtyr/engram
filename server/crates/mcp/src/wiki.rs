@@ -1,4 +1,4 @@
-//! MCP Wiki 域工具面：参数结构 + 错误桥 + 实现辅助。
+//! MCP Wiki 域工具面：参数结构 + 错误桥 + 实现辅助（engram-mcp 内部模块）。
 //!
 //! `#[tool]` 方法必须落在 `mcp.rs` 的 `#[tool_router]` impl 块内（rmcp 宏只收集
 //! 该块内标注的方法），这里只放参数结构与可复用的实现细节，保持 mcp.rs 可读。
@@ -6,8 +6,8 @@
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::Principal;
-use crate::mcp::mcp_err;
+use crate::mcp_err;
+use engram_core::auth::Principal;
 
 /// WikiError → MCP 错误码（与 wiki_api.rs 的 we() 同语义）。
 pub fn from_wiki(e: engram_core::wiki::WikiError) -> rmcp::ErrorData {
@@ -30,7 +30,7 @@ pub fn require_wiki(principal: &Principal) -> Result<(), rmcp::ErrorData> {
     }
 }
 
-pub fn svc(state: &crate::state::AppState) -> engram_core::wiki::WikiService {
+pub fn svc(state: &engram_core::state::AppState) -> engram_core::wiki::WikiService {
     engram_core::wiki::WikiService::new(state.pool.clone(), state.registry())
 }
 

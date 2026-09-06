@@ -35,6 +35,13 @@
 - 189 用例全绿是合并前提；测试用 PG 由 CI 的 pgvector service 提供。
 - MockLlm.sent_user 可断言"LLM 实际看到什么"（提示词行为测试）。
 
+## 分层约定（2026-09-05 分层收敛后）
+
+- **SQL 收口**：领域表的业务面读写唯一出现在 `engram-storage::repo`（行类型在
+  `engram-storage::models`）；core/api/mcp 的 src 层零 sqlx 引用。事务边界归 repo 函数。
+- **双适配器**：HTTP（engram-api）与 MCP（engram-mcp）平级，业务语义在 core。
+- 流水线 crate（distill / wiki-engine / llm / search / jobs）拥有各自管道内部的 SQL。
+
 ## Git 与提交
 
 - 单 main 分支直推；Conventional Commits（`fix:`/`feat:`/`docs:`/`ci:`/`perf:`…，中文描述）。

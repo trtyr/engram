@@ -23,7 +23,7 @@ entities（记忆坐标系）          人物/项目/主题/群组/地点——�
 
 - **知识库**：文档上传→解析（pdf/docx/html/md/txt）→分块→embedding（pgvector）→语义检索
 - **LLM Wiki**：多源摄取→LLM 分析（实体/主题/链接）→页面生成→版本演进→链接图谱+社区发现
-- **CodeGraph**：注册代码库→codegraph CLI 索引→结构化查询（cg-bridge 桥接）
+- **CodeGraph**：注册代码库→codegraph CLI 1.5.0 异步索引（任务队列）→结构化查询 + 调用图/文件依赖全图（cg-bridge 桥接 + 归一层）
 
 横切设施：任务队列（jobs，带重试/事件流水/revive/cancelled）、LLM 网关（多 provider 加密密钥+路由表+用量记账）、
 统一跨域检索（/search 融合记忆/知识/Wiki/实体四域）。
@@ -34,8 +34,9 @@ entities（记忆坐标系）          人物/项目/主题/群组/地点——�
 ## 整体形状
 
 ```
-┌─────────────────────────── engram-api (bin) ───────────────────────────┐
+┌──────────────── engram-api (bin)：HTTP + MCP 双适配器装配 ─────────────────┐
 │  axum Router                                                                │
+│  ├─ /mcp：engram-mcp 五域工具面（rmcp Streamable HTTP，scope 分权）          │
 │  ├─ 公开: /health /ready /openapi.json /auth/login                          │
 │  ├─ Bearer 认证层（admin 会话 ams_ / api key amk_；/jobs 对 text/html 分流 SPA）│
 │  └─ 9 个域路由: auth / memory / wiki / codegraph / project / jobs /         │

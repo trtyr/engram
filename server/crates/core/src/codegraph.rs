@@ -2,4 +2,4 @@
 //!
 //! 依赖方向：api → core → cg-bridge。
 
-pub use engram_cg_bridge::{CgBridge, CgError, CgProjectDto, QueryKind};
+pub use engram_cg_bridge::{CgBridge, CgError, CgProjectDto, CliStatus, QueryKind};

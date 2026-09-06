@@ -6,7 +6,7 @@
 //! 使跨域分数可比，融合后按分数降序截断。
 
 use engram_llm::ProviderRegistry;
-use sqlx::PgPool;
+use engram_storage::PgPool;
 use uuid::Uuid;
 
 use crate::memory::MemoryService;
@@ -36,8 +36,8 @@ pub enum UnifiedError {
     Storage(String),
 }
 
-impl From<sqlx::Error> for UnifiedError {
-    fn from(e: sqlx::Error) -> Self {
+impl From<engram_storage::StoreError> for UnifiedError {
+    fn from(e: engram_storage::StoreError) -> Self {
         UnifiedError::Storage(e.to_string())
     }
 }
@@ -83,7 +83,11 @@ impl UnifiedSearch {
             mem.search(query, &["l1", "l2"], per_domain, true, false, None, None),
             know.search(query, per_domain),
             wiki.search(query, per_domain),
-            engram_search::search_entities(&self.pool, query, per_domain),
+            async {
+                engram_search::search_entities(&self.pool, query, per_domain)
+                    .await
+                    .map_err(engram_storage::StoreError::from)
+            },
         );
 
         let mut merged: Vec<UnifiedHit> = Vec::new();

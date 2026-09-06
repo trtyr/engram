@@ -3,10 +3,13 @@
 //! 技能 = slug 唯一 + frontmatter（name/description/tags）+ markdown 正文的可复用指令包。
 //! 语义字段每次变更前留版本快照（skill_revisions，保留最近 50 版），可回滚。
 //! 批量导入直接吃 SKILL.md 全文（frontmatter 容错解析），迁移现有技能库零改写。
+//!
+//! 持久化在 `engram_storage::repo::skills`（本文件只保留校验、冲突语义与编排；
+//! 快照+变更的事务整体落在 repo 的 `*_tx` 函数内）。
 
-use chrono::{DateTime, Utc};
+use engram_storage::StoreError;
+use engram_storage::repo::skills as repo;
 use serde::Serialize;
-use sqlx::PgPool;
 use uuid::Uuid;
 
 /// 技能域错误（api 层转 ApiError）。
@@ -22,14 +25,14 @@ pub enum SkillsError {
     Storage(String),
 }
 
-impl From<sqlx::Error> for SkillsError {
-    fn from(e: sqlx::Error) -> Self {
+impl From<StoreError> for SkillsError {
+    fn from(e: StoreError) -> Self {
         SkillsError::Storage(e.to_string())
     }
 }
 
 /// 版本快照保留上限（防膨胀；更老的自动淘汰）。
-pub const MAX_REVISIONS: i32 = 50;
+pub use engram_storage::repo::skills::MAX_REVISIONS;
 
 // ---------- frontmatter 容错解析 ----------
 
@@ -191,51 +194,9 @@ pub fn valid_slug(slug: &str) -> bool {
     slug.len() <= 80 && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-// ---------- DTO ----------
+// ---------- DTO（持久化模型在 storage，此处 re-export 保持路径兼容） ----------
 
-/// 列表/导入/概览用摘要（不含正文——列表与仪表盘不必拖全量指令）。
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct SkillSummaryDto {
-    pub id: Uuid,
-    pub slug: String,
-    pub name: String,
-    pub description: String,
-    pub tags: Vec<String>,
-    pub enabled: bool,
-    pub source: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-/// 详情（含 markdown 正文）。
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct SkillDto {
-    pub id: Uuid,
-    pub slug: String,
-    pub name: String,
-    pub description: String,
-    pub content: String,
-    pub tags: Vec<String>,
-    pub enabled: bool,
-    pub source: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-/// 版本快照。
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct SkillRevisionDto {
-    pub id: Uuid,
-    pub skill_id: Uuid,
-    pub rev: i32,
-    pub name: String,
-    pub description: String,
-    pub content: String,
-    pub tags: Vec<String>,
-    /// create=初始版 / update=变更前快照 / restore=回滚前的现状快照
-    pub origin: String,
-    pub created_at: DateTime<Utc>,
-}
+pub use engram_storage::models::skills::{SkillDto, SkillRevisionDto, SkillSummaryDto};
 
 /// 批量导入的单条结果（逐条成败互不阻断）。
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -257,16 +218,82 @@ pub struct SkillImportReport {
     pub items: Vec<SkillImportItem>,
 }
 
-const SUMMARY_COLS: &str =
-    "id, slug, name, description, tags, enabled, source, created_at, updated_at";
-const FULL_COLS: &str =
-    "id, slug, name, description, content, tags, enabled, source, created_at, updated_at";
-const REV_COLS: &str = "id, skill_id, rev, name, description, content, tags, origin, created_at";
+// ---------- 附属文件（folder 形态） ----------
+
+/// 单文件内容上限（256 KiB 字符——脚本/参考资料的合理量级）。
+pub const SKILL_FILE_MAX_CHARS: usize = 262_144;
+
+/// 单技能附属文件数上限。
+pub const SKILL_FILES_MAX: usize = 64;
+
+/// 附属文件索引条目（不含内容）。
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct SkillFileInfoDto {
+    /// 相对路径（/ 分隔，如 scripts/run.py）
+    pub path: String,
+    /// 内容字节数
+    pub size: i64,
+}
+
+/// 导出条目里的附属文件（含内容）。
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct SkillFileEntryDto {
+    pub path: String,
+    pub content: String,
+}
+
+/// 导出条目：技能本体 + 附属文件（folder 形态完整带走）。
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct SkillExportDto {
+    #[serde(flatten)]
+    pub skill: SkillDto,
+    pub files: Vec<SkillFileEntryDto>,
+}
+
+/// 把技能还原成 SKILL.md 文本（frontmatter + 正文）——bundle 整包导出用。
+/// 与 parse_frontmatter 同一契约：import → export 往返不丢 name/description/slug/tags。
+pub fn render_skill_md(s: &SkillDto) -> String {
+    let mut out = String::from(
+        "---
+",
+    );
+    out.push_str(&format!(
+        "name: {}
+",
+        s.name
+    ));
+    if !s.description.is_empty() {
+        out.push_str(&format!(
+            "description: {}
+",
+            s.description
+        ));
+    }
+    out.push_str(&format!(
+        "slug: {}
+",
+        s.slug
+    ));
+    if !s.tags.is_empty() {
+        out.push_str(&format!(
+            "tags: {}
+",
+            s.tags.join(", ")
+        ));
+    }
+    out.push_str(
+        "---
+
+",
+    );
+    out.push_str(&s.content);
+    out
+}
 
 // ---------- Service ----------
 
 pub struct SkillsService {
-    pool: PgPool,
+    pool: engram_storage::PgPool,
 }
 
 /// 新建参数束（create_skill 入参 > 7 个会触发 clippy::too_many_arguments，收拢成结构体）。
@@ -281,16 +308,6 @@ pub struct NewSkill<'a> {
     pub source: &'a str,
 }
 
-/// 版本快照内容束（insert_revision 入参收拢）。
-struct Snapshot<'a> {
-    skill_id: Uuid,
-    name: &'a str,
-    description: &'a str,
-    content: &'a str,
-    tags: &'a [String],
-    origin: &'a str,
-}
-
 /// 新建/更新的可选语义字段（None = 不动）。
 #[derive(Debug, Default, Clone)]
 pub struct SkillPatch {
@@ -302,7 +319,7 @@ pub struct SkillPatch {
 }
 
 impl SkillsService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: engram_storage::PgPool) -> Self {
         Self { pool }
     }
 
@@ -338,76 +355,30 @@ impl SkillsService {
         }
     }
 
-    async fn insert_revision(
-        &self,
-        tx: &mut sqlx::PgConnection,
-        snap: Snapshot<'_>,
-    ) -> Result<(), SkillsError> {
-        sqlx::query(
-            "INSERT INTO skill_revisions (id, skill_id, rev, name, description, content, tags, origin) \
-             VALUES ($1, $2, (SELECT COALESCE(MAX(rev), 0) + 1 FROM skill_revisions WHERE skill_id = $2), \
-                     $3, $4, $5, $6, $7)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(snap.skill_id)
-        .bind(snap.name)
-        .bind(snap.description)
-        .bind(snap.content)
-        .bind(snap.tags)
-        .bind(snap.origin)
-        .execute(&mut *tx)
-        .await?;
-        // 淘汰超限旧版（保留最近 MAX_REVISIONS 版）
-        sqlx::query(
-            "DELETE FROM skill_revisions WHERE skill_id = $1 \
-             AND rev <= (SELECT MAX(rev) FROM skill_revisions WHERE skill_id = $1) - $2",
-        )
-        .bind(snap.skill_id)
-        .bind(MAX_REVISIONS)
-        .execute(&mut *tx)
-        .await?;
-        Ok(())
-    }
-
     pub async fn create_skill(&self, s: NewSkill<'_>) -> Result<SkillDto, SkillsError> {
         Self::validate_name(s.name)?;
         let name = s.name.trim();
         let slug = Self::resolve_slug(s.slug, s.name)?;
         let id = Uuid::now_v7();
-        let mut tx = self.pool.begin().await?;
-        let res = sqlx::query(
-            "INSERT INTO skills (id, slug, name, description, content, tags, enabled, source) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
-             ON CONFLICT (slug) DO NOTHING",
-        )
-        .bind(id)
-        .bind(&slug)
-        .bind(name)
-        .bind(s.description.trim())
-        .bind(s.content)
-        .bind(s.tags)
-        .bind(s.enabled)
-        .bind(s.source)
-        .execute(&mut *tx)
-        .await?;
-        if res.rows_affected() == 0 {
-            return Err(SkillsError::Conflict(format!(
-                "slug「{slug}」已被占用——slug 唯一，请换 slug 或直接更新已有技能"
-            )));
-        }
-        self.insert_revision(
-            &mut tx,
-            Snapshot {
-                skill_id: id,
+        let inserted = repo::create_skill_tx(
+            &self.pool,
+            repo::NewSkillRow {
+                id,
+                slug: &slug,
                 name,
                 description: s.description.trim(),
                 content: s.content,
                 tags: s.tags,
-                origin: "create",
+                enabled: s.enabled,
+                source: s.source,
             },
         )
         .await?;
-        tx.commit().await?;
+        if inserted == 0 {
+            return Err(SkillsError::Conflict(format!(
+                "slug「{slug}」已被占用——slug 唯一，请换 slug 或直接更新已有技能"
+            )));
+        }
         self.get_skill(&slug).await
     }
 
@@ -421,31 +392,15 @@ impl SkillsService {
         // 三条件常驻 + 显式类型：避免条件拼接造成参数序号空洞（PG 推不出未引用参数的类型）
         let pattern = q.map(|q| format!("%{}%", q.trim()));
         let tag_vec = tag.map(|t| vec![t.to_string()]);
-        let rows = sqlx::query_as::<_, SkillSummaryDto>(&format!(
-            "SELECT {SUMMARY_COLS} FROM skills \
-             WHERE ($1::text IS NULL OR name ILIKE $1 OR description ILIKE $1) \
-             AND ($2::text[] IS NULL OR tags @> $2) \
-             AND ($3::bool IS NULL OR enabled = $3) \
-             ORDER BY updated_at DESC"
-        ))
-        .bind(pattern)
-        .bind(tag_vec)
-        .bind(enabled)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows)
+        Ok(repo::list_skills(&self.pool, pattern, tag_vec, enabled).await?)
     }
 
     pub async fn get_skill(&self, slug: &str) -> Result<SkillDto, SkillsError> {
-        sqlx::query_as::<_, SkillDto>(&format!("SELECT {FULL_COLS} FROM skills WHERE slug = $1"))
-            .bind(slug)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| {
-                SkillsError::NotFound(format!(
-                    "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"
-                ))
-            })
+        repo::get_skill(&self.pool, slug).await?.ok_or_else(|| {
+            SkillsError::NotFound(format!(
+                "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"
+            ))
+        })
     }
 
     /// 语义字段更新：先快照现状（origin=update），再落变更；enabled-only 不留版本。
@@ -459,54 +414,34 @@ impl SkillsService {
             || patch.description.is_some()
             || patch.content.is_some()
             || patch.tags.is_some();
-        let mut tx = self.pool.begin().await?;
-        if semantic_change {
-            self.insert_revision(
-                &mut tx,
-                Snapshot {
-                    skill_id: current.id,
-                    name: &current.name,
-                    description: &current.description,
-                    content: &current.content,
-                    tags: &current.tags,
-                    origin: "update",
-                },
-            )
-            .await?;
-        }
-        let res = sqlx::query(
-            "UPDATE skills SET \
-                name = COALESCE($2, name), \
-                description = COALESCE($3, description), \
-                content = COALESCE($4, content), \
-                tags = COALESCE($5, tags), \
-                enabled = COALESCE($6, enabled), \
-                updated_at = now() \
-             WHERE id = $1",
-        )
-        .bind(current.id)
-        .bind(patch.name.as_deref().map(str::trim))
-        .bind(patch.description.as_deref().map(str::trim))
-        .bind(patch.content.as_deref())
-        .bind(&patch.tags)
-        .bind(patch.enabled)
-        .execute(&mut *tx)
-        .await?;
-        if res.rows_affected() == 0 {
+        let snapshot = semantic_change.then(|| repo::SkillSnapshot {
+            skill_id: current.id,
+            name: &current.name,
+            description: &current.description,
+            content: &current.content,
+            tags: &current.tags,
+            origin: "update",
+        });
+        let patch_data = repo::SkillPatchData {
+            name: patch.name.as_deref().map(str::trim),
+            description: patch.description.as_deref().map(str::trim),
+            content: patch.content.as_deref(),
+            tags: &patch.tags,
+            enabled: patch.enabled,
+        };
+        let updated =
+            repo::update_skill_tx(&self.pool, current.id, snapshot.as_ref(), &patch_data).await?;
+        if updated == 0 {
             return Err(SkillsError::NotFound(format!(
                 "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"
             )));
         }
-        tx.commit().await?;
         self.get_skill(slug).await
     }
 
     pub async fn delete_skill(&self, slug: &str) -> Result<bool, SkillsError> {
-        let res = sqlx::query("DELETE FROM skills WHERE slug = $1")
-            .bind(slug)
-            .execute(&self.pool)
-            .await?;
-        if res.rows_affected() == 0 {
+        let deleted = repo::delete_skill(&self.pool, slug).await?;
+        if deleted == 0 {
             return Err(SkillsError::NotFound(format!(
                 "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"
             )));
@@ -579,10 +514,7 @@ impl SkillsService {
                 tags.push(t.clone());
             }
         }
-        let exists = sqlx::query_as::<_, (Uuid,)>("SELECT id FROM skills WHERE slug = $1")
-            .bind(&slug)
-            .fetch_optional(&self.pool)
-            .await;
+        let exists = repo::exists_slug(&self.pool, &slug).await;
         match exists {
             Err(e) => make_err(e.into()),
             Ok(Some(_)) => {
@@ -642,22 +574,143 @@ impl SkillsService {
     }
 
     /// 全量导出（含正文，按 slug 排序——数据主权：技能库随时整体带走）。
-    pub async fn export_skills(&self) -> Result<Vec<SkillDto>, SkillsError> {
-        Ok(
-            sqlx::query_as::<_, SkillDto>(&format!("SELECT {FULL_COLS} FROM skills ORDER BY slug"))
-                .fetch_all(&self.pool)
-                .await?,
-        )
+    /// 单技能导出（bundle 整包用）：本体 + 全部附属文件。
+    pub async fn export_one(&self, slug: &str) -> Result<SkillExportDto, SkillsError> {
+        let skill = self.get_skill(slug).await?;
+        let files = repo::skill_file_contents(&self.pool, skill.id)
+            .await?
+            .into_iter()
+            .map(|(path, content)| SkillFileEntryDto { path, content })
+            .collect();
+        Ok(SkillExportDto { skill, files })
+    }
+
+    /// 全量导出（含附属文件——folder 形态整体带走，数据主权）。
+    pub async fn export_skills(&self) -> Result<Vec<SkillExportDto>, SkillsError> {
+        let mut files_by_skill: std::collections::HashMap<Uuid, Vec<SkillFileEntryDto>> =
+            std::collections::HashMap::new();
+        for (sid, path, content) in repo::skill_files_all(&self.pool).await? {
+            files_by_skill
+                .entry(sid)
+                .or_default()
+                .push(SkillFileEntryDto { path, content });
+        }
+        Ok(repo::export_skills(&self.pool)
+            .await?
+            .into_iter()
+            .map(|skill| SkillExportDto {
+                files: files_by_skill.remove(&skill.id).unwrap_or_default(),
+                skill,
+            })
+            .collect())
+    }
+
+    // ---------- 附属文件（folder 形态：scripts/ / references/ / assets/…） ----------
+    //
+    // skill = 文件夹：SKILL.md 本体在 content；附属文件按相对路径寻址。
+    // 云部署语义：文件是「内容」不是「文件系统位置」——MCP 按路径下发，
+    // AI 客户端取走后本地执行；服务端永不执行任何上传代码。
+    //
+    // 三种消费形态（按需取用，不一股脑拉全量）：
+    // ① 纯文本 → skills_get 直接读（不落盘）；② 只要一个文件 →
+    // GET /skills/{slug}/file?path=…&raw=1 单文件直下；③ 整个文件夹 →
+    // GET /skills/{slug}/bundle（zip 整包）。
+
+    /// 附属文件索引（path + 字节大小，按 path 排序）。
+    pub async fn list_files(&self, slug: &str) -> Result<Vec<SkillFileInfoDto>, SkillsError> {
+        let s = self.get_skill(slug).await?;
+        Ok(repo::list_skill_files(&self.pool, s.id)
+            .await?
+            .into_iter()
+            .map(|(path, size)| SkillFileInfoDto { path, size })
+            .collect())
+    }
+
+    /// 读一个附属文件全文。
+    pub async fn get_file(&self, slug: &str, path: &str) -> Result<String, SkillsError> {
+        Self::validate_file_path(path)?;
+        let s = self.get_skill(slug).await?;
+        repo::get_skill_file(&self.pool, s.id, path.trim())
+            .await?
+            .ok_or_else(|| {
+                SkillsError::NotFound(format!(
+                    "文件 {path:?} 不存在——先看文件索引确认路径（注意大小写）"
+                ))
+            })
+    }
+
+    /// 写（upsert）一个附属文件。返回 (path, size 字节)。
+    pub async fn put_file(
+        &self,
+        slug: &str,
+        path: &str,
+        content: &str,
+    ) -> Result<(String, i64), SkillsError> {
+        Self::validate_file_path(path)?;
+        let path = path.trim();
+        if content.chars().count() > SKILL_FILE_MAX_CHARS {
+            return Err(SkillsError::BadRequest(format!(
+                "文件内容超长：上限 {} 字符",
+                SKILL_FILE_MAX_CHARS
+            )));
+        }
+        let s = self.get_skill(slug).await?;
+        let existing = repo::list_skill_files(&self.pool, s.id).await?;
+        if existing.len() >= SKILL_FILES_MAX && !existing.iter().any(|(p, _)| p == path) {
+            return Err(SkillsError::BadRequest(format!(
+                "附属文件数达上限（{} 个）——清理不用的文件后再加",
+                SKILL_FILES_MAX
+            )));
+        }
+        repo::put_skill_file(&self.pool, Uuid::now_v7(), s.id, path, content).await?;
+        repo::touch_skill(&self.pool, s.id).await?;
+        Ok((path.to_string(), content.len() as i64))
+    }
+
+    /// 删除一个附属文件。
+    pub async fn delete_file(&self, slug: &str, path: &str) -> Result<(), SkillsError> {
+        Self::validate_file_path(path)?;
+        let s = self.get_skill(slug).await?;
+        let n = repo::delete_skill_file(&self.pool, s.id, path.trim()).await?;
+        if n == 0 {
+            return Err(SkillsError::NotFound(format!("文件 {path:?} 不存在")));
+        }
+        repo::touch_skill(&self.pool, s.id).await?;
+        Ok(())
+    }
+
+    /// 相对路径校验：/ 分隔、禁止 .. 与绝对路径、禁止反斜杠、禁改 SKILL.md 本体。
+    fn validate_file_path(path: &str) -> Result<(), SkillsError> {
+        let p = path.trim();
+        if p.is_empty() {
+            return Err(SkillsError::BadRequest("path 不能为空".into()));
+        }
+        if p.len() > 200 {
+            return Err(SkillsError::BadRequest("path 过长（>200 字符）".into()));
+        }
+        if p.starts_with('/') || p.contains('\\') {
+            return Err(SkillsError::BadRequest(
+                "path 必须是相对路径且用 / 分隔（如 scripts/run.py、references/api.md）".into(),
+            ));
+        }
+        if p.split('/')
+            .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+        {
+            return Err(SkillsError::BadRequest(
+                "path 含空段或 . / .. 段——用规范相对路径（如 scripts/run.py）".into(),
+            ));
+        }
+        if p.eq_ignore_ascii_case("skill.md") {
+            return Err(SkillsError::BadRequest(
+                "SKILL.md 是技能本体（走 update 的 content），附属文件请用其他路径".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub async fn list_revisions(&self, slug: &str) -> Result<Vec<SkillRevisionDto>, SkillsError> {
         let skill = self.get_skill(slug).await?;
-        Ok(sqlx::query_as::<_, SkillRevisionDto>(&format!(
-            "SELECT {REV_COLS} FROM skill_revisions WHERE skill_id = $1 ORDER BY rev DESC"
-        ))
-        .bind(skill.id)
-        .fetch_all(&self.pool)
-        .await?)
+        Ok(repo::list_revisions(&self.pool, skill.id).await?)
     }
 
     /// 回滚到某个版本：先快照现状（origin=restore），再把目标版本内容落回本体。
@@ -667,22 +720,17 @@ impl SkillsService {
         revision_id: Uuid,
     ) -> Result<SkillDto, SkillsError> {
         let skill = self.get_skill(slug).await?;
-        let rev = sqlx::query_as::<_, SkillRevisionDto>(&format!(
-            "SELECT {REV_COLS} FROM skill_revisions WHERE id = $1 AND skill_id = $2"
-        ))
-        .bind(revision_id)
-        .bind(skill.id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| {
-            SkillsError::NotFound(format!(
-                "版本 {revision_id} 不存在——先查 {slug} 的版本列表取 id"
-            ))
-        })?;
-        let mut tx = self.pool.begin().await?;
-        self.insert_revision(
-            &mut tx,
-            Snapshot {
+        let rev = repo::get_revision(&self.pool, revision_id, skill.id)
+            .await?
+            .ok_or_else(|| {
+                SkillsError::NotFound(format!(
+                    "版本 {revision_id} 不存在——先查 {slug} 的版本列表取 id"
+                ))
+            })?;
+        repo::restore_revision_tx(
+            &self.pool,
+            skill.id,
+            &repo::SkillSnapshot {
                 skill_id: skill.id,
                 name: &skill.name,
                 description: &skill.description,
@@ -690,20 +738,9 @@ impl SkillsService {
                 tags: &skill.tags,
                 origin: "restore",
             },
+            &rev,
         )
         .await?;
-        sqlx::query(
-            "UPDATE skills SET name = $2, description = $3, content = $4, tags = $5, \
-             updated_at = now() WHERE id = $1",
-        )
-        .bind(skill.id)
-        .bind(&rev.name)
-        .bind(&rev.description)
-        .bind(&rev.content)
-        .bind(&rev.tags)
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
         self.get_skill(slug).await
     }
 }

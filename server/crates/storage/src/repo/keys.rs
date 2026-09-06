@@ -1,0 +1,122 @@
+//! 鉴权凭证仓储：admin_sessions（opaque 会话）+ api_keys（scope 化机器凭证）。
+//!
+//! SQL 从 api/auth.rs 收口而来；token 生成/哈希/恒定时间比较等密码学语义
+//! 留在调用方（api/mcp 层），这里只管存取。
+
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+use crate::PgPool;
+use crate::error::StoreResult;
+use crate::models::keys::ApiKeyRow;
+
+// ---------- 管理员会话 ----------
+
+pub async fn create_admin_session(
+    pool: &PgPool,
+    token_hash: &str,
+    expires_at: DateTime<Utc>,
+) -> StoreResult<()> {
+    sqlx::query("INSERT INTO admin_sessions (token_hash, expires_at) VALUES ($1, $2)")
+        .bind(token_hash)
+        .bind(expires_at)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// 校验管理员会话 token：返回过期时间（None = 不存在）。
+pub async fn find_admin_session_expiry(
+    pool: &PgPool,
+    token_hash: &str,
+) -> StoreResult<Option<DateTime<Utc>>> {
+    let row: Option<(DateTime<Utc>,)> =
+        sqlx::query_as("SELECT expires_at FROM admin_sessions WHERE token_hash = $1")
+            .bind(token_hash)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|(expires,)| expires))
+}
+
+/// 更新会话 last_used（失败不阻塞认证，调用方 best-effort）。
+pub async fn touch_admin_session(pool: &PgPool, token_hash: &str) -> StoreResult<()> {
+    sqlx::query("UPDATE admin_sessions SET last_used_at = now() WHERE token_hash = $1")
+        .bind(token_hash)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ---------- API key ----------
+
+pub async fn insert_api_key(
+    pool: &PgPool,
+    id: Uuid,
+    name: &str,
+    key_hash: &str,
+    key_prefix: &str,
+    scopes: &[String],
+) -> StoreResult<()> {
+    sqlx::query(
+        "INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(key_hash)
+    .bind(key_prefix)
+    .bind(sqlx::types::Json(scopes))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 按 hash 查有效 key（已吊销的不算）：返回 (key_id, name, scopes)。
+pub async fn find_api_key_by_hash(
+    pool: &PgPool,
+    key_hash: &str,
+) -> StoreResult<Option<(Uuid, String, Vec<String>)>> {
+    let row: Option<(Uuid, String, sqlx::types::Json<Vec<String>>)> = sqlx::query_as(
+        "SELECT id, name, scopes FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL",
+    )
+    .bind(key_hash)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(id, name, scopes)| (id, name, scopes.0)))
+}
+
+/// 更新 key last_used（失败不阻塞认证，调用方 best-effort）。
+pub async fn touch_api_key(pool: &PgPool, key_id: Uuid) -> StoreResult<()> {
+    sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
+        .bind(key_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// key 列表（永不含完整 key / hash）。
+pub async fn list_api_keys(pool: &PgPool) -> StoreResult<Vec<ApiKeyRow>> {
+    let rows = sqlx::query_as::<_, ApiKeyRow>(
+        "SELECT id, name, key_prefix, scopes, created_at, last_used_at, revoked_at FROM api_keys ORDER BY created_at DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// 删除 API key（物理删除，不留记录）。返回生效行数。
+pub async fn delete_api_key(pool: &PgPool, id: Uuid) -> StoreResult<u64> {
+    let res = sqlx::query("DELETE FROM api_keys WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
+}
+
+/// 批量删除 API key（物理删除）。返回实际删除数。
+pub async fn delete_api_keys(pool: &PgPool, ids: &[Uuid]) -> StoreResult<u64> {
+    let res = sqlx::query("DELETE FROM api_keys WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
+}

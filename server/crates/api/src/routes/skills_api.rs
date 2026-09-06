@@ -3,11 +3,13 @@
 //! 技能 = SKILL.md 形态的 AI 指令资产：slug 唯一、版本快照、批量导入、全量导出。
 
 use axum::Json;
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use engram_core::skills::{
-    SkillDto, SkillImportReport, SkillPatch, SkillRevisionDto, SkillSummaryDto, SkillsError,
-    SkillsService,
+    SkillDto, SkillExportDto, SkillFileInfoDto, SkillImportReport, SkillPatch, SkillRevisionDto,
+    SkillSummaryDto, SkillsError, SkillsService,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -161,11 +163,11 @@ pub async fn import_skills(
 
 /// 全量导出（含正文，数据主权：技能库随时整体带走）。
 #[utoipa::path(get, path = "/skills/export",
-    responses((status = 200, body = [SkillDto])))]
+    responses((status = 200, body = [SkillExportDto])))]
 pub async fn export_skills(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-) -> Result<Json<Vec<SkillDto>>, ApiError> {
+) -> Result<Json<Vec<SkillExportDto>>, ApiError> {
     require_skills(&principal)?;
     Ok(Json(svc(&state).export_skills().await.map_err(se)?))
 }
@@ -253,4 +255,143 @@ pub async fn restore_revision(
             .await
             .map_err(se)?,
     ))
+}
+
+// ---------- 附属文件（folder 形态：scripts/ / references/…） ----------
+
+#[derive(Deserialize, IntoParams)]
+pub struct SkillFileParams {
+    /// 相对路径（/ 分隔，如 scripts/run.py）
+    pub path: String,
+    /// raw=1 → 直接回文件本体（text/plain），curl -o 一条命令落盘（消费形态②：只要一个文件）
+    pub raw: Option<String>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct SkillFilePutRequest {
+    /// 相对路径（/ 分隔；禁止 .. 与绝对路径；SKILL.md 本体走技能更新）
+    pub path: String,
+    /// 文本内容
+    pub content: String,
+}
+
+/// 附属文件索引（path + 字节大小；SKILL.md 本体不在其中）。
+#[utoipa::path(get, path = "/skills/{slug}/files", params(("slug" = String, Path, description = "技能 slug")),
+    operation_id = "skills_files_list",
+    responses((status = 200, body = [SkillFileInfoDto])))]
+pub async fn list_files(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<SkillFileInfoDto>>, ApiError> {
+    require_skills(&principal)?;
+    Ok(Json(svc(&state).list_files(&slug).await.map_err(se)?))
+}
+
+/// 读一个附属文件全文。
+#[utoipa::path(get, path = "/skills/{slug}/file", params(("slug" = String, Path), SkillFileParams),
+    operation_id = "skills_file_get",
+    responses((status = 200, body = SkillExportDto)))]
+pub async fn get_file(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(p): Query<SkillFileParams>,
+) -> Result<Response, ApiError> {
+    require_skills(&principal)?;
+    let content = svc(&state).get_file(&slug, &p.path).await.map_err(se)?;
+    if p.raw.is_some() {
+        // 消费形态②：单文件直下——curl -s ".../file?path=…&raw=1" -o 文件名
+        let name = p.path.rsplit('/').next().unwrap_or("file");
+        return Ok(Response::builder()
+            .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{name}\""),
+            )
+            .body(Body::from(content))
+            .unwrap());
+    }
+    Ok(Json(engram_core::skills::SkillFileEntryDto {
+        path: p.path,
+        content,
+    })
+    .into_response())
+}
+
+/// 整包拉取（消费形态③）：skill = 文件夹 → 一个 zip（SKILL.md + scripts/ + references/…）。
+/// 客户端两条命令落盘即可执行：
+///   curl -s -H "Authorization: Bearer $KEY" {base}/skills/{slug}/bundle -o s.zip
+///   tar -xf s.zip（bsdtar 直接解 zip；或 unzip -o s.zip）
+/// 路径在写入侧已校验（禁 .. / 绝对路径 / 反斜杠），zip-slip 不可能。
+#[utoipa::path(get, path = "/skills/{slug}/bundle", params(("slug" = String, Path, description = "技能 slug")),
+    operation_id = "skills_bundle",
+    responses((status = 200, content_type = "application/zip")))]
+pub async fn bundle(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Response, ApiError> {
+    require_skills(&principal)?;
+    let e = svc(&state).export_one(&slug).await.map_err(se)?;
+    let io_err = |e: std::io::Error| ApiError::Internal(anyhow::anyhow!(e.to_string()));
+    let zip_err = |e: zip::result::ZipError| ApiError::Internal(anyhow::anyhow!(e.to_string()));
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zw = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default();
+        zw.start_file("SKILL.md", opts).map_err(zip_err)?;
+        std::io::Write::write_all(
+            &mut zw,
+            engram_core::skills::render_skill_md(&e.skill).as_bytes(),
+        )
+        .map_err(io_err)?;
+        for f in &e.files {
+            zw.start_file(&f.path, opts).map_err(zip_err)?;
+            std::io::Write::write_all(&mut zw, f.content.as_bytes()).map_err(io_err)?;
+        }
+        zw.finish().map_err(zip_err)?;
+    }
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/zip")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}.zip\"", e.skill.slug),
+        )
+        .body(Body::from(buf.into_inner()))
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))
+}
+
+/// 写（upsert）一个附属文件；返回 path 与字节数。
+#[utoipa::path(put, path = "/skills/{slug}/file", params(("slug" = String, Path)),
+    request_body = SkillFilePutRequest,
+    operation_id = "skills_file_put",
+    responses((status = 200, body = SkillFileInfoDto)))]
+pub async fn put_file(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Json(req): Json<SkillFilePutRequest>,
+) -> Result<Json<SkillFileInfoDto>, ApiError> {
+    require_skills(&principal)?;
+    let (path, size) = svc(&state)
+        .put_file(&slug, &req.path, &req.content)
+        .await
+        .map_err(se)?;
+    Ok(Json(SkillFileInfoDto { path, size }))
+}
+
+/// 删除一个附属文件。
+#[utoipa::path(delete, path = "/skills/{slug}/file", params(("slug" = String, Path), SkillFileParams),
+    operation_id = "skills_file_delete",
+    responses((status = 204)))]
+pub async fn delete_file(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(p): Query<SkillFileParams>,
+) -> Result<StatusCode, ApiError> {
+    require_skills(&principal)?;
+    svc(&state).delete_file(&slug, &p.path).await.map_err(se)?;
+    Ok(StatusCode::NO_CONTENT)
 }

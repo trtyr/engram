@@ -34,17 +34,10 @@ async fn main() -> anyhow::Result<()> {
 
     // P2：进程崩溃自愈——上次运行中被认领（processing）的会话此刻不可能有
     // extract 在跑，一律退回 pending，否则永远卡死（claim 只取 pending）。
-    if let Ok(n) = sqlx::query(
-        "UPDATE raw_sessions SET distill_status = 'pending' WHERE distill_status = 'processing'",
-    )
-    .execute(&pool)
-    .await
-        && n.rows_affected() > 0
+    if let Ok(n) = engram_storage::repo::memory::reset_processing_sessions(&pool).await
+        && n > 0
     {
-        tracing::info!(
-            n = n.rows_affected(),
-            "启动自愈：processing 会话退回 pending"
-        );
+        tracing::info!(n, "启动自愈：processing 会话退回 pending");
     }
 
     // 4. 任务 runner：注册蒸馏链 + 知识摄取 handler
@@ -69,6 +62,10 @@ async fn main() -> anyhow::Result<()> {
             Ok(counts)
         }
     });
+    let runner = engram_cg_bridge::register_handlers(
+        runner,
+        std::path::PathBuf::from(&cfg.data_dir).join("codegraph"),
+    );
     let runner = engram_core::wiki_docs::register_handlers(
         runner,
         engram_llm::ProviderRegistry::new(

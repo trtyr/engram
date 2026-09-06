@@ -14,13 +14,14 @@ path = "src/lib.rs"
 
 [dependencies]
 engram-storage.workspace = true
+engram-mcp.workspace = true
 engram-jobs.workspace = true
 engram-llm.workspace = true
 engram-core.workspace = true
 engram-distill.workspace = true
 engram-search.workspace = true
+engram-cg-bridge.workspace = true
 
-sqlx.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tower-http = { workspace = true, features = ["fs"] }
@@ -37,8 +38,10 @@ uuid.workspace = true
 chrono.workspace = true
 sha2.workspace = true
 rand.workspace = true
-rmcp.workspace = true
-schemars.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 tower.workspace = true
+tempfile = "3"
+# 测试夹具直连 PG 造数（src 层零 SQL；持久化收口 engram-storage::repo）
+sqlx.workspace = true

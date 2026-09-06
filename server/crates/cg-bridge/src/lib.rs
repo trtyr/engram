@@ -5,4 +5,4 @@
 
 pub mod bridge;
 
-pub use bridge::{CgBridge, CgError, CgProjectDto, QueryKind};
+pub use bridge::{CgBridge, CgError, CgProjectDto, CliStatus, QueryKind, register_handlers};

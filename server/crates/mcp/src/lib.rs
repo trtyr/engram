@@ -1,6 +1,7 @@
-//! MCP（Model Context Protocol）服务端：多域工具面（用户记忆 / 项目记忆 / 技能 / Wiki，逐域扩展）。
+//! MCP（Model Context Protocol）适配器：四域工具面（用户记忆 / 项目记忆 / 技能 / Wiki）。
 //!
-//! 官方 Rust SDK（rmcp）Streamable HTTP 传输，宿主于 engram-server 的 `/mcp` 端点。
+//! 官方 Rust SDK（rmcp）Streamable HTTP 传输，由 api 装配到 engram-server 的 `/mcp` 端点。
+//! 与 HTTP 路由平级的第二适配器：同一套 core 服务与 scope 分权，独立成 crate。
 //! 单服务器多域：工具名前缀即域（memory_* / wiki_*，管理台按域分组），
 //! 各域工具在调用时检查各自 scope。鉴权复用 Bearer 中间件（amk_ key / ams_ 会话）：
 //! 每个工具调用请求都过 `bearer_auth`，Principal 已注入 request extensions；
@@ -28,10 +29,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::auth::Principal;
-use crate::mcp_wiki as wiki;
-use crate::state::AppState;
+pub mod wiki;
+
 use axum::response::IntoResponse;
+use engram_core::auth::Principal;
+use engram_core::state::AppState;
 
 /// 错误桥：把本模块的错误统一成 MCP ErrorData。
 pub(crate) fn mcp_err(code: ErrorCode, msg: impl Into<String>) -> rmcp::ErrorData {
@@ -88,6 +90,7 @@ fn tool_scope(name: &str) -> &'static str {
         Some("project") => "project",
         Some("skills") => "skills",
         Some("wiki") => "wiki",
+        Some("codegraph") => "codegraph",
         _ => "memory",
     }
 }
@@ -123,6 +126,54 @@ fn from_skills(e: engram_core::skills::SkillsError) -> rmcp::ErrorData {
         SkillsError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
         SkillsError::Storage(m) => rmcp::ErrorData::internal_error(m, None),
     }
+}
+
+/// CgError → MCP 错误码。
+fn from_cg(e: engram_cg_bridge::CgError) -> rmcp::ErrorData {
+    use engram_cg_bridge::CgError;
+    match e {
+        CgError::NotFound(m) => rmcp::ErrorData::resource_not_found(m, None),
+        CgError::BadRequest(m) | CgError::VersionMismatch { need: m, got: _ } => {
+            rmcp::ErrorData::invalid_params(m, None)
+        }
+        other => rmcp::ErrorData::internal_error(other.to_string(), None),
+    }
+}
+
+/// CodeGraph 桥（root 与 api 层同一约定：data_dir/codegraph）。
+fn cg_svc(state: &AppState) -> engram_cg_bridge::CgBridge {
+    engram_cg_bridge::CgBridge::new(state.pool.clone(), state.data_dir.join("codegraph"))
+}
+
+fn require_codegraph(principal: &Principal) -> Result<(), rmcp::ErrorData> {
+    if principal.has_scope("codegraph") {
+        Ok(())
+    } else {
+        Err(mcp_err(
+            ErrorCode::INVALID_REQUEST,
+            "缺少 codegraph scope——请用带 codegraph scope 的 amk_ key 连接 MCP",
+        ))
+    }
+}
+
+/// 项目寻址：名字优先（AI 友好），uuid 亦可。
+async fn cg_resolve(state: &AppState, project: &str) -> Result<uuid::Uuid, rmcp::ErrorData> {
+    let bridge = cg_svc(state);
+    if let Ok(id) = uuid::Uuid::parse_str(project) {
+        bridge.get(id).await.map_err(from_cg)?;
+        return Ok(id);
+    }
+    let rows = bridge.list().await.map_err(from_cg)?;
+    rows.iter()
+        .find(|r| r.name == project)
+        .map(|r| r.id)
+        .ok_or_else(|| {
+            let known: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+            mcp_err(
+                ErrorCode::RESOURCE_NOT_FOUND,
+                format!("项目 {project:?} 不存在——已注册：{}", known.join("、")),
+            )
+        })
 }
 
 /// 从工具调用上下文取 HTTP 请求里的 Principal（bearer_auth 已认证并注入）。
@@ -564,10 +615,72 @@ pub struct SkillsListParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CgRegisterParams {
+    /// 项目名（唯一，如 engram-server）
+    #[schemars(description = "项目名（唯一，如 engram-server）。")]
+    pub name: String,
+    /// 本地绝对路径或 git URL
+    #[schemars(description = "本地绝对路径（如 D:\\Code\\Rust\\engram）或 git URL。")]
+    pub source_uri: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CgNameParams {
+    /// 项目名（codegraph_list 里的 name；也接受 id）
+    #[schemars(description = "项目名（codegraph_list 返回的 name；也接受 uuid）。")]
+    pub project: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CgQueryParams {
+    /// 项目名（codegraph_list 里的 name；也接受 id）
+    #[schemars(description = "项目名（codegraph_list 返回的 name；也接受 uuid）。")]
+    pub project: String,
+    /// explore | search | node | callers | callees | impact
+    #[schemars(
+        description = "查询类型：search=搜符号, explore=区域总览(markdown), node=符号详情(markdown), callers=谁调用它, callees=它调用谁, impact=改动影响面。"
+    )]
+    pub kind: String,
+    /// 查询文本或符号名
+    #[schemars(
+        description = "查询文本（search/explore）或符号名（node/callers/callees/impact）。"
+    )]
+    pub target: String,
+    /// explore→max-files；impact→depth
+    #[schemars(description = "可选：explore 的 max-files 或 impact 的 depth。")]
+    pub depth: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SkillsGetParams {
     /// 技能 slug（kebab-case 标识）
     #[schemars(description = "技能 slug（来自 skills_list 的返回，如 review-pr）。")]
     pub slug: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsFileGetParams {
+    /// 技能 slug（来自 skills_list 的返回）
+    #[schemars(description = "技能 slug（来自 skills_list 的返回）。")]
+    pub slug: String,
+    /// 附属文件相对路径（来自 skills_get 返回的 files 索引）
+    #[schemars(description = "附属文件相对路径（/ 分隔，如 scripts/run.py、references/api.md）。")]
+    pub path: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsFilePutParams {
+    /// 技能 slug（来自 skills_list 的返回）
+    #[schemars(description = "技能 slug（来自 skills_list 的返回）。")]
+    pub slug: String,
+    /// 附属文件相对路径（/ 分隔；禁止 .. 与绝对路径；SKILL.md 本体走 skills_update）
+    #[schemars(
+        description = "附属文件相对路径（/ 分隔，如 scripts/run.py）。禁止 .. 与绝对路径；SKILL.md 本体走 skills_update。"
+    )]
+    pub path: String,
+    /// 文件文本内容（脚本/参考资料/模板）
+    #[schemars(description = "文件文本内容（脚本/参考资料/模板）。同路径重复写 = 覆盖更新。")]
+    pub content: String,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -1108,10 +1221,10 @@ impl EngramMcpServer {
             .await
             .map_err(from_project)?;
         let mut v = serde_json::to_value(&detail).unwrap_or(serde_json::json!({}));
-        if let Some(category) = &gp.category {
-            if let Some(docs) = v["docs"].as_array_mut() {
-                docs.retain(|d| d["category"] == json!(category));
-            }
+        if let Some(category) = &gp.category
+            && let Some(docs) = v["docs"].as_array_mut()
+        {
+            docs.retain(|d| d["category"] == json!(category));
         }
         let include_content = gp.include_content.unwrap_or(false);
         if let Some(docs) = v["docs"].as_array_mut() {
@@ -1616,6 +1729,12 @@ impl EngramMcpServer {
     /// 读取一个技能全文（正文即指令——照做即可复用该技能）。
     ///
     /// 何时用：skills_list 命中候选后，取全文执行；或用户点名某个技能时。
+    /// 消费形态指南（按需选通道，不要一股脑拉全量）：
+    /// ① 纯文本技能 → 本工具读正文即完事；② 需要某个附属文件（脚本/参考资料）→
+    /// skills_file_get 看内容，要落盘就 HTTP 直下：curl -s -H "Authorization: Bearer $KEY"
+    /// "{本服务origin}/skills/{slug}/file?path=…&raw=1" -o 文件名；
+    /// ③ 需要整个文件夹（SKILL.md+scripts+references）→
+    /// curl -s -H "Authorization: Bearer $KEY" "{origin}/skills/{slug}/bundle" -o s.zip && tar -xf s.zip。
     #[tool(
         name = "skills_get",
         annotations(
@@ -1638,7 +1757,245 @@ impl EngramMcpServer {
             .get_skill(&params.0.slug)
             .await
             .map_err(from_skills)?;
-        ok_json(serde_json::to_value(&s).unwrap_or(serde_json::json!({})))
+        // folder 形态：附属文件索引随详情下发（AI 据此用 skills_file_get 取脚本/参考资料）
+        let files = self
+            .skills_svc()
+            .list_files(&params.0.slug)
+            .await
+            .map_err(from_skills)?;
+        let mut v = serde_json::to_value(&s).unwrap_or(serde_json::json!({}));
+        v["files"] = serde_json::to_value(&files).unwrap_or(serde_json::json!([]));
+        ok_json(v)
+    }
+
+    /// 读取技能附属文件（scripts/ / references/ 等按路径寻址的文件）。
+    ///
+    /// 何时用：SKILL.md（skills_get 的 content）里引用了 scripts/xxx.py、
+    /// references/api.md 等相对路径时——取到的是文件内容，脚本由客户端本地执行
+    /// （服务端只存内容，永不代执行）。
+    /// 只需要一个文件且要落盘时，HTTP 直下比逐文件调本工具更快：
+    /// curl -s -H "Authorization: Bearer $KEY" "{本服务origin}/skills/{slug}/file?path=…&raw=1" -o 文件名
+    /// （需要整个文件夹时用整包：curl … "{origin}/skills/{slug}/bundle" -o s.zip && tar -xf s.zip）
+    #[tool(
+        name = "skills_file_get",
+        annotations(
+            title = "读取技能文件",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn skills_file_get(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsFileGetParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        let content = self
+            .skills_svc()
+            .get_file(&params.0.slug, &params.0.path)
+            .await
+            .map_err(from_skills)?;
+        ok_json(serde_json::json!({
+            "slug": params.0.slug,
+            "path": params.0.path,
+            "content": content,
+        }))
+    }
+
+    /// 写（upsert）技能附属文件：沉淀技能时把脚本/参考资料一并入库。
+    ///
+    /// 何时用：skills_create 之后补充 scripts/、references/ 等文件；
+    /// 同路径重复写 = 覆盖更新。SKILL.md 本体走 skills_update 的 content。
+    #[tool(
+        name = "skills_file_put",
+        annotations(
+            title = "写入技能文件",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn skills_file_put(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsFilePutParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        let (path, size) = self
+            .skills_svc()
+            .put_file(&params.0.slug, &params.0.path, &params.0.content)
+            .await
+            .map_err(from_skills)?;
+        ok_json(serde_json::json!({
+            "slug": params.0.slug,
+            "path": path,
+            "size": size,
+        }))
+    }
+
+    // ---------- 代码图谱域工具（codegraph scope） ----------
+
+    /// 列出代码图谱项目（注册状态、索引统计）。
+    ///
+    /// 何时用：想探索/查询某个代码库前，先看注册了哪些项目、哪个 ready；
+    /// 没有 → codegraph_register 注册（本地路径或 git URL）再 codegraph_index。
+    #[tool(
+        name = "codegraph_list",
+        annotations(
+            title = "列出图谱项目",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn codegraph_list(
+        &self,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_codegraph(&p)?;
+        let rows = cg_svc(&self.state).list().await.map_err(from_cg)?;
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+    }
+
+    /// 注册代码图谱项目（本地绝对路径或 git URL）。
+    ///
+    /// 何时用：想让 AI 理解某个代码库的结构与调用关系时。注册后须 codegraph_index
+    /// 建索引（异步 job，稍等片刻再 codegraph_list 确认 ready）。
+    #[tool(
+        name = "codegraph_register",
+        annotations(
+            title = "注册图谱项目",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn codegraph_register(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<CgRegisterParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_codegraph(&p)?;
+        let row = cg_svc(&self.state)
+            .register(&params.0.name, &params.0.source_uri)
+            .await
+            .map_err(from_cg)?;
+        ok_json(serde_json::to_value(&row).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 建索引/重建索引（异步 job——返回 job_id，稍后 codegraph_list 看状态）。
+    ///
+    /// 何时用：注册后首次建索引；或代码大改后需要重建。小改动用 codegraph_sync 即可。
+    #[tool(
+        name = "codegraph_index",
+        annotations(
+            title = "建图谱索引",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn codegraph_index(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<CgNameParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_codegraph(&p)?;
+        let id = cg_resolve(&self.state, &params.0.project).await?;
+        let job = engram_jobs::JobQueue::new(self.state.pool.clone())
+            .enqueue(
+                engram_jobs::JobTemplate::new("cg_index")
+                    .with_payload(serde_json::json!({"project_id": id})),
+            )
+            .await
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, format!("入队失败: {e}")))?;
+        ok_json(serde_json::json!({
+            "project": params.0.project, "job_id": job.id, "status": "queued",
+            "hint": "索引异步执行（首次可能数分钟）——稍后 codegraph_list 确认 ready",
+        }))
+    }
+
+    /// 增量同步索引（代码小改动后刷新；异步 job）。
+    ///
+    /// 何时用：项目 ready 后代码有小改动，不想全量重建时。
+    #[tool(
+        name = "codegraph_sync",
+        annotations(
+            title = "同步图谱索引",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn codegraph_sync(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<CgNameParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_codegraph(&p)?;
+        let id = cg_resolve(&self.state, &params.0.project).await?;
+        let job = engram_jobs::JobQueue::new(self.state.pool.clone())
+            .enqueue(
+                engram_jobs::JobTemplate::new("cg_sync")
+                    .with_payload(serde_json::json!({"project_id": id})),
+            )
+            .await
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, format!("入队失败: {e}")))?;
+        ok_json(serde_json::json!({
+            "project": params.0.project, "job_id": job.id, "status": "queued",
+        }))
+    }
+
+    /// 代码图谱查询：search 符号 / explore 区域 / node 符号详情 /
+    /// callers / callees / impact 影响面。
+    ///
+    /// 何时用：读陌生代码前先 search/explore；改代码前用 callers/impact 评估影响面；
+    /// 深入一个函数用 node。
+    #[tool(
+        name = "codegraph_query",
+        annotations(
+            title = "图谱查询",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn codegraph_query(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<CgQueryParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_codegraph(&p)?;
+        let kind = engram_cg_bridge::QueryKind::from_str_opt(&params.0.kind).ok_or_else(|| {
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "未知查询类型 {}——explore/search/node/callers/callees/impact",
+                    params.0.kind
+                ),
+            )
+        })?;
+        let id = cg_resolve(&self.state, &params.0.project).await?;
+        let v = cg_svc(&self.state)
+            .query(id, kind, &params.0.target, params.0.depth)
+            .await
+            .map_err(from_cg)?;
+        ok_json(v)
     }
 
     /// 沉淀新技能：把本次对话中验证有效的做法固化成可复用指令包。
@@ -2166,6 +2523,16 @@ impl ServerHandler for EngramMcpServer {
                     .is_none_or(|p| p.has_scope(tool_scope(t.name.as_ref())))
             })
             .collect();
+        // 动态描述：发现能力长在工具面上——云端资产清单织进工具描述（见 tools_catalog 段）
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        let catalogs = ToolCatalogs::for_tools(&self.state.pool, &names).await;
+        let tools = tools
+            .into_iter()
+            .map(|t| {
+                let extra = catalogs.extra_for(t.name.as_ref());
+                with_dynamic_description(t, extra)
+            })
+            .collect();
         let supports_cache_hints = context
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
@@ -2229,6 +2596,191 @@ pub fn service(state: AppState) -> StreamableHttpService<EngramMcpServer, LocalS
     )
 }
 
+// ---------- 动态工具描述（发现能力长在工具面上） ----------
+//
+// 云端资产（技能/项目）的清单随库内容即时变化，AI 的发现通道只有 tools/list——
+// 把「当前有什么可用」直接织进工具描述（Claude Code Skill 工具同款思路），
+// 用户不需要在提示词里维护路由清单。tools/list 与控制台 /settings/mcp 同源拼装，
+// 管理台看到的描述就是 AI 实际收到的描述。
+
+/// 单工具动态清单条数上限（防清单膨胀无限挤占 AI 上下文；超出部分提示用工具查全量）。
+const CATALOG_ITEM_CAP: usize = 40;
+
+/// skills_list 动态段：枚举启用技能（slug：name/description）。
+/// 云部署后的技能发现入口——库里有什么，AI 连上来第一眼就看到。
+async fn skills_catalog(pool: &engram_storage::PgPool) -> Option<String> {
+    let rows = engram_storage::repo::skills::list_skills(pool, None, None, Some(true))
+        .await
+        .ok()?;
+    if rows.is_empty() {
+        return None;
+    }
+    let mut lines: Vec<String> = rows
+        .iter()
+        .take(CATALOG_ITEM_CAP)
+        .map(|s| {
+            let desc = if s.description.trim().is_empty() {
+                s.name.as_str()
+            } else {
+                s.description.as_str()
+            };
+            format!("- {}：{}", s.slug, desc)
+        })
+        .collect();
+    if rows.len() > CATALOG_ITEM_CAP {
+        lines.push(format!(
+            "…其余 {} 个请调用本工具查看完整清单",
+            rows.len() - CATALOG_ITEM_CAP
+        ));
+    }
+    Some(format!(
+        "【当前可用技能 {} 个】（命中候选后用 skills_get 取全文照做）\n{}",
+        rows.len(),
+        lines.join("\n")
+    ))
+}
+
+/// project_list 动态段：枚举项目（name/类型/状态/描述）。
+/// project_get / project_doc_* 都按项目名寻址——清单进描述可省一次列表往返。
+async fn projects_catalog(pool: &engram_storage::PgPool) -> Option<String> {
+    let rows = engram_storage::repo::project::list_projects(pool, None)
+        .await
+        .ok()?;
+    if rows.is_empty() {
+        return None;
+    }
+    let mut lines: Vec<String> = rows
+        .iter()
+        .take(CATALOG_ITEM_CAP)
+        .map(|p| {
+            let desc = p.description.as_deref().unwrap_or("").trim();
+            let desc = if desc.is_empty() {
+                String::new()
+            } else {
+                let head: String = desc.chars().take(80).collect();
+                format!("：{head}")
+            };
+            format!(
+                "- {}（{}·{}）{}",
+                p.name,
+                engram_core::project::type_label(&p.r#type),
+                p.status,
+                desc
+            )
+        })
+        .collect();
+    if rows.len() > CATALOG_ITEM_CAP {
+        lines.push(format!(
+            "…其余 {} 个请调用本工具查看完整清单",
+            rows.len() - CATALOG_ITEM_CAP
+        ));
+    }
+    Some(format!(
+        "【当前项目 {} 个】（project_get / project_doc_* 支持按 name 寻址）\n{}",
+        rows.len(),
+        lines.join("\n")
+    ))
+}
+
+/// codegraph_list 动态段：项目清单（name·状态·规模）。
+/// AI 连上即知道有哪些代码库可查、哪个 ready。
+async fn codegraph_catalog(pool: &engram_storage::PgPool) -> Option<String> {
+    let rows = engram_cg_bridge::CgBridge::new(pool.clone(), cg_root_from_env())
+        .list()
+        .await
+        .ok()?;
+    if rows.is_empty() {
+        return None;
+    }
+    let lines: Vec<String> = rows
+        .iter()
+        .take(CATALOG_ITEM_CAP)
+        .map(|p| {
+            let scale = p
+                .stats
+                .as_ref()
+                .and_then(|s| {
+                    let f = s.get("files")?.as_i64()?;
+                    let n = s.get("symbols")?.as_i64()?;
+                    Some(format!("{f} 文件/{n} 符号"))
+                })
+                .unwrap_or_else(|| "未索引".into());
+            format!("- {}（{}）{}", p.name, p.status, scale)
+        })
+        .collect();
+    Some(format!(
+        "【已注册代码库 {} 个】（codegraph_query 按 name 查询）
+{}",
+        rows.len(),
+        lines.join(
+            "
+"
+        )
+    ))
+}
+
+/// MCP 工具面的 codegraph 工作目录：与 api 同约定（AGENT_MEMORY_DATA_DIR/codegraph）。
+fn cg_root_from_env() -> std::path::PathBuf {
+    std::path::Path::new(
+        &std::env::var("AGENT_MEMORY_DATA_DIR").unwrap_or_else(|_| "./data".into()),
+    )
+    .join("codegraph")
+}
+
+/// 按本次工具面实际包含的工具惰性取动态清单（工具不在面内就不查库）。
+struct ToolCatalogs {
+    skills: Option<String>,
+    projects: Option<String>,
+    codegraph: Option<String>,
+}
+
+impl ToolCatalogs {
+    async fn for_tools(pool: &engram_storage::PgPool, names: &[&str]) -> Self {
+        let skills = if names.contains(&"skills_list") {
+            skills_catalog(pool).await
+        } else {
+            None
+        };
+        let projects = if names.contains(&"project_list") {
+            projects_catalog(pool).await
+        } else {
+            None
+        };
+        let codegraph = if names.contains(&"codegraph_list") {
+            codegraph_catalog(pool).await
+        } else {
+            None
+        };
+        Self {
+            skills,
+            projects,
+            codegraph,
+        }
+    }
+
+    fn extra_for(&self, name: &str) -> Option<&str> {
+        match name {
+            "skills_list" => self.skills.as_deref(),
+            "project_list" => self.projects.as_deref(),
+            "codegraph_list" => self.codegraph.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+/// 把动态清单段拼到工具描述尾部（tools/list 与控制台共用）。
+fn with_dynamic_description(mut t: rmcp::model::Tool, extra: Option<&str>) -> rmcp::model::Tool {
+    if let Some(extra) = extra {
+        let base = t
+            .description
+            .as_ref()
+            .map(|d| d.to_string())
+            .unwrap_or_default();
+        t.description = Some(std::borrow::Cow::Owned(format!("{base}\n\n{extra}")));
+    }
+    t
+}
+
 // ---------- MCP 配置（settings KV 单行：服务开关 + 工具粒度开关） ----------
 
 /// MCP 配置（settings 表 key=`mcp`，jsonb）。缺省 = 全开。
@@ -2256,31 +2808,18 @@ impl Default for McpConfig {
 const MCP_SETTINGS_KEY: &str = "mcp";
 
 /// 读配置（行缺失 → 全开缺省；坏 JSON 按缺省处理，不让配置损坏打死端点）。
-pub async fn load_config(pool: &sqlx::PgPool) -> McpConfig {
-    let row: Option<(sqlx::types::Json<McpConfig>,)> =
-        sqlx::query_as("SELECT value FROM settings WHERE key = $1")
-            .bind(MCP_SETTINGS_KEY)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
-    row.map(|(j,)| j.0).unwrap_or_default()
+pub async fn load_config(pool: &engram_storage::PgPool) -> McpConfig {
+    engram_storage::repo::settings::get_json::<McpConfig>(pool, MCP_SETTINGS_KEY)
+        .await
+        .unwrap_or_default()
 }
 
 /// 写配置（settings KV upsert）。
 pub async fn save_config(
-    pool: &sqlx::PgPool,
+    pool: &engram_storage::PgPool,
     cfg: &McpConfig,
-) -> Result<(), crate::error::ApiError> {
-    sqlx::query(
-        "INSERT INTO settings (key, value) VALUES ($1, $2)
-         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()",
-    )
-    .bind(MCP_SETTINGS_KEY)
-    .bind(sqlx::types::Json(cfg))
-    .execute(pool)
-    .await
-    .map_err(|e| crate::error::ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+) -> engram_storage::StoreResult<()> {
+    engram_storage::repo::settings::put_json(pool, MCP_SETTINGS_KEY, cfg).await?;
     Ok(())
 }
 
@@ -2307,8 +2846,9 @@ pub async fn gate(
     next.run(req).await
 }
 
-// ---------- 管理端点（Web 控制台用） ----------
+// ---------- 服务信息（Web 控制台「MCP」页用；HTTP handler 在 api 层） ----------
 
+/// MCP 工具条目（控制台工具清单）。
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct McpToolInfo {
     pub name: String,
@@ -2317,8 +2857,12 @@ pub struct McpToolInfo {
     pub description: String,
     pub read_only: Option<bool>,
     pub destructive: Option<bool>,
+    /// 参数 JSON Schema（tools/list 的 inputSchema 同源；控制台详情展示用）
+    #[schema(value_type = Object)]
+    pub parameters: serde_json::Value,
 }
 
+/// MCP 服务信息。
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct McpInfo {
     /// MCP 端点路径（相对服务根）
@@ -2336,18 +2880,36 @@ pub struct McpInfo {
     pub tools: Vec<McpToolInfo>,
 }
 
-async fn build_info(pool: &sqlx::PgPool) -> McpInfo {
-    let cfg = load_config(pool).await;
-    let router = EngramMcpServer::tool_router();
-    let tools = router
+/// 已知工具名清单（控制台配置校验用）。
+pub fn tool_catalog() -> Vec<String> {
+    EngramMcpServer::tool_router()
         .list_all()
         .into_iter()
-        .map(|t| McpToolInfo {
-            name: t.name.to_string(),
-            domain: t.name.split('_').next().unwrap_or("other").to_string(),
-            description: t.description.as_deref().unwrap_or("").to_string(),
-            read_only: t.annotations.as_ref().and_then(|a| a.read_only_hint),
-            destructive: t.annotations.as_ref().and_then(|a| a.destructive_hint),
+        .map(|t| t.name.to_string())
+        .collect()
+}
+
+/// 汇总服务信息（开关状态 + 工具清单）。与 tools/list 同源：控制台看到的描述
+/// 就是 AI 实际收到的描述（含动态资产清单段）。
+pub async fn build_info(pool: &engram_storage::PgPool) -> McpInfo {
+    let cfg = load_config(pool).await;
+    let router = EngramMcpServer::tool_router();
+    let all = router.list_all();
+    let names: Vec<&str> = all.iter().map(|t| t.name.as_ref()).collect();
+    let catalogs = ToolCatalogs::for_tools(pool, &names).await;
+    let tools = all
+        .into_iter()
+        .map(|t| {
+            let extra = catalogs.extra_for(t.name.as_ref());
+            let t = with_dynamic_description(t, extra);
+            McpToolInfo {
+                name: t.name.to_string(),
+                domain: t.name.split('_').next().unwrap_or("other").to_string(),
+                description: t.description.as_deref().unwrap_or("").to_string(),
+                read_only: t.annotations.as_ref().and_then(|a| a.read_only_hint),
+                destructive: t.annotations.as_ref().and_then(|a| a.destructive_hint),
+                parameters: serde_json::to_value(&*t.input_schema).unwrap_or(serde_json::json!({})),
+            }
         })
         .collect();
     McpInfo {
@@ -2360,62 +2922,4 @@ async fn build_info(pool: &sqlx::PgPool) -> McpInfo {
         instructions: SERVER_INSTRUCTIONS.into(),
         tools,
     }
-}
-
-/// MCP 服务信息（Web 控制台「MCP」页：端点、协议版本、开关状态、工具清单）。
-#[utoipa::path(get, path = "/settings/mcp",
-    responses((status = 200, body = McpInfo)))]
-pub async fn settings_mcp(
-    principal: axum::Extension<Principal>,
-    axum::extract::State(state): axum::extract::State<AppState>,
-) -> Result<axum::Json<McpInfo>, crate::error::ApiError> {
-    if !matches!(principal.0, Principal::Admin) {
-        return Err(crate::error::ApiError::Forbidden("仅限管理员".into()));
-    }
-    Ok(axum::Json(build_info(&state.pool).await))
-}
-
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-pub struct McpConfigUpdate {
-    /// 服务总开关
-    pub enabled: Option<bool>,
-    /// 停用工具全量清单（覆盖式；空数组 = 全部启用）。未知工具名 400。
-    pub disabled_tools: Option<Vec<String>>,
-}
-
-/// 更新 MCP 配置（服务开关 / 工具粒度开关）。
-#[utoipa::path(put, path = "/settings/mcp",
-    request_body = McpConfigUpdate,
-    responses((status = 200, body = McpInfo), (status = 400, body = crate::error::ErrorEnvelope)))]
-pub async fn settings_mcp_update(
-    principal: axum::Extension<Principal>,
-    axum::extract::State(state): axum::extract::State<AppState>,
-    axum::Json(req): axum::Json<McpConfigUpdate>,
-) -> Result<axum::Json<McpInfo>, crate::error::ApiError> {
-    if !matches!(principal.0, Principal::Admin) {
-        return Err(crate::error::ApiError::Forbidden("仅限管理员".into()));
-    }
-    let mut cfg = load_config(&state.pool).await;
-    if let Some(enabled) = req.enabled {
-        cfg.enabled = enabled;
-    }
-    if let Some(disabled) = req.disabled_tools {
-        // 工具名校验：停用一个不存在的名字多半是调用方笔误，宁可 400
-        let known: Vec<String> = EngramMcpServer::tool_router()
-            .list_all()
-            .into_iter()
-            .map(|t| t.name.to_string())
-            .collect();
-        for name in &disabled {
-            if !known.contains(name) {
-                return Err(crate::error::ApiError::BadRequest(format!(
-                    "未知工具 {name:?}——可用：{}",
-                    known.join(", ")
-                )));
-            }
-        }
-        cfg.disabled_tools = disabled;
-    }
-    save_config(&state.pool, &cfg).await?;
-    Ok(axum::Json(build_info(&state.pool).await))
 }

@@ -3,10 +3,13 @@
 //! 设计：docs/plantree/plans/project-memory/（0005 三表模型、类型=分类模板）。
 //! 类型模板是代码常量（三表决策不建第四表），新建项目时复制进 projects.categories，
 //! 之后项目级自由增删。
+//!
+//! 持久化在 `engram_storage::repo::project`（本文件只保留校验、冲突语义与编排）。
 
 use chrono::{DateTime, Utc};
+use engram_storage::repo::project as repo;
+use engram_storage::{PgPool, StoreError};
 use serde::Serialize;
-use sqlx::PgPool;
 use uuid::Uuid;
 
 /// 项目域错误（api 层转 ApiError）。
@@ -22,9 +25,12 @@ pub enum ProjectError {
     Storage(String),
 }
 
-impl From<sqlx::Error> for ProjectError {
-    fn from(e: sqlx::Error) -> Self {
-        ProjectError::Storage(e.to_string())
+impl From<StoreError> for ProjectError {
+    fn from(e: StoreError) -> Self {
+        match e {
+            StoreError::Conflict(_) => ProjectError::Conflict("唯一约束冲突".into()),
+            StoreError::Sql(e) => ProjectError::Storage(e.to_string()),
+        }
     }
 }
 
@@ -57,49 +63,9 @@ pub struct ProjectTypeDto {
     pub default_categories: Vec<String>,
 }
 
-// ---------- DTO ----------
+// ---------- DTO（持久化模型在 storage，此处 re-export 保持路径兼容） ----------
 
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct ProjectDto {
-    pub id: Uuid,
-    pub name: String,
-    pub r#type: String,
-    pub status: String,
-    pub description: Option<String>,
-    #[sqlx(json)]
-    pub categories: Vec<String>,
-    #[schema(value_type = Object)]
-    pub frontmatter: serde_json::Value,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct ProjectLocationDto {
-    pub id: Uuid,
-    pub project_id: Uuid,
-    pub ip: String,
-    pub host: String,
-    pub os: String,
-    pub path: String,
-    pub purpose: Option<String>,
-    pub sort_order: i32,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct ProjectDocDto {
-    pub id: Uuid,
-    pub project_id: Uuid,
-    pub category: String,
-    pub title: String,
-    pub content: String,
-    #[schema(value_type = Object)]
-    pub frontmatter: serde_json::Value,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
+pub use engram_storage::models::project::{ProjectDocDto, ProjectDto, ProjectLocationDto};
 
 /// 文档行检索命中（grep 式定位：行号 + 原文行；配合 read_doc_lines 区间精读）。
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -134,13 +100,6 @@ pub struct ProjectDetailDto {
 pub struct ProjectService {
     pool: PgPool,
 }
-
-const PROJECT_COLS: &str =
-    "id, name, type, status, description, categories, frontmatter, created_at, updated_at";
-const LOCATION_COLS: &str =
-    "id, project_id, ip, host, os, path, purpose, sort_order, created_at, updated_at";
-const DOC_COLS: &str =
-    "id, project_id, category, title, content, frontmatter, created_at, updated_at";
 
 impl ProjectService {
     pub fn new(pool: PgPool) -> Self {
@@ -182,19 +141,9 @@ impl ProjectService {
             ProjectError::BadRequest(format!("未知项目类型: {type_}（支持 dev/research）"))
         })?;
         let id = Uuid::now_v7();
-        let res = sqlx::query(
-            "INSERT INTO projects (id, name, type, status, description, categories) \
-             VALUES ($1, $2, $3, 'active', $4, $5) \
-             ON CONFLICT (name) DO NOTHING",
-        )
-        .bind(id)
-        .bind(name)
-        .bind(type_)
-        .bind(description)
-        .bind(sqlx::types::Json(&categories))
-        .execute(&self.pool)
-        .await?;
-        if res.rows_affected() == 0 {
+        let inserted =
+            repo::insert_project(&self.pool, id, name, type_, description, &categories).await?;
+        if inserted == 0 {
             return Err(ProjectError::Conflict(format!(
                 "项目名「{name}」已存在——项目名唯一，请改名或复用已有项目（先 projects 列表确认）"
             )));
@@ -206,38 +155,13 @@ impl ProjectService {
         &self,
         type_filter: Option<&str>,
     ) -> Result<Vec<ProjectDto>, ProjectError> {
-        let rows = match type_filter {
-            Some(t) => sqlx::query_as::<_, ProjectDto>(&format!(
-                "SELECT {PROJECT_COLS} FROM projects WHERE type = $1 ORDER BY created_at DESC, name"
-            ))
-            .bind(t)
-            .fetch_all(&self.pool)
-            .await?,
-            None => {
-                sqlx::query_as::<_, ProjectDto>(&format!(
-                    "SELECT {PROJECT_COLS} FROM projects ORDER BY created_at DESC, name"
-                ))
-                .fetch_all(&self.pool)
-                .await?
-            }
-        };
-        Ok(rows)
+        Ok(repo::list_projects(&self.pool, type_filter).await?)
     }
 
     pub async fn get_project(&self, id: Uuid) -> Result<ProjectDetailDto, ProjectError> {
         let project = self.get_project_bare(id).await?;
-        let locations: Vec<ProjectLocationDto> = sqlx::query_as::<_, ProjectLocationDto>(&format!(
-            "SELECT {LOCATION_COLS} FROM project_locations WHERE project_id = $1 ORDER BY sort_order, created_at"
-        ))
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
-        let docs: Vec<ProjectDocDto> = sqlx::query_as::<_, ProjectDocDto>(&format!(
-            "SELECT {DOC_COLS} FROM project_docs WHERE project_id = $1 ORDER BY category, created_at"
-        ))
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
+        let locations = repo::list_locations(&self.pool, id).await?;
+        let docs = repo::list_docs(&self.pool, id).await?;
         Ok(ProjectDetailDto {
             id: project.id,
             name: project.name,
@@ -255,15 +179,11 @@ impl ProjectService {
 
     /// 按名精确定位项目 id（项目名唯一；MCP 工具的 name 寻址入口）。
     pub async fn project_id_by_name(&self, name: &str) -> Result<Uuid, ProjectError> {
-        sqlx::query_scalar::<_, Uuid>("SELECT id FROM projects WHERE name = $1")
-            .bind(name)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| {
-                ProjectError::NotFound(format!(
-                    "项目「{name}」不存在——先跑 projects 列表确认名字（可能已删除或写错）"
-                ))
-            })
+        repo::id_by_name(&self.pool, name).await?.ok_or_else(|| {
+            ProjectError::NotFound(format!(
+                "项目「{name}」不存在——先跑 projects 列表确认名字（可能已删除或写错）"
+            ))
+        })
     }
 
     pub async fn update_project(
@@ -281,29 +201,14 @@ impl ProjectService {
             return Err(ProjectError::BadRequest("项目名不能为空".to_string()));
         }
         // 改名撞唯一约束会以 sqlx 错误冒成 500，这里先查给出 409 语义
-        if let Some(holder) =
-            sqlx::query_scalar::<_, Uuid>("SELECT id FROM projects WHERE name = $1 AND id <> $2")
-                .bind(name)
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?
-        {
+        if let Some(holder) = repo::name_holder(&self.pool, name, id).await? {
             return Err(ProjectError::Conflict(format!(
                 "项目名「{name}」已被项目 {holder} 占用——项目名唯一，请改名"
             )));
         }
-        let res = sqlx::query(
-            "UPDATE projects SET name = $2, status = $3, description = $4, categories = $5, \
-             updated_at = now() WHERE id = $1",
-        )
-        .bind(id)
-        .bind(name)
-        .bind(status)
-        .bind(description)
-        .bind(sqlx::types::Json(categories))
-        .execute(&self.pool)
-        .await?;
-        if res.rows_affected() == 0 {
+        let updated =
+            repo::update_project(&self.pool, id, name, status, description, categories).await?;
+        if updated == 0 {
             return Err(ProjectError::NotFound(format!(
                 "项目 {id} 不存在——先跑 projects 列表确认 id（可能已删除或抄错）"
             )));
@@ -312,11 +217,8 @@ impl ProjectService {
     }
 
     pub async fn delete_project(&self, id: Uuid) -> Result<bool, ProjectError> {
-        let res = sqlx::query("DELETE FROM projects WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        if res.rows_affected() == 0 {
+        let deleted = repo::delete_project(&self.pool, id).await?;
+        if deleted == 0 {
             return Err(ProjectError::NotFound(format!(
                 "项目 {id} 不存在——先跑 projects 列表确认 id（可能已删除或抄错）"
             )));
@@ -330,19 +232,11 @@ impl ProjectService {
         ids: &[Uuid],
     ) -> Result<(usize, Vec<Uuid>), ProjectError> {
         // 先查存在集合，用于区分「删掉」与「本就不存在」
-        let existing: std::collections::HashSet<Uuid> =
-            sqlx::query_as::<_, (Uuid,)>("SELECT id FROM projects WHERE id = ANY($1)")
-                .bind(ids)
-                .fetch_all(&self.pool)
-                .await?
-                .into_iter()
-                .map(|(id,)| id)
-                .collect();
-        let res = sqlx::query("DELETE FROM projects WHERE id = ANY($1)")
-            .bind(ids)
-            .execute(&self.pool)
-            .await?;
-        let deleted = res.rows_affected() as usize;
+        let existing: std::collections::HashSet<Uuid> = repo::existing_ids(&self.pool, ids)
+            .await?
+            .into_iter()
+            .collect();
+        let deleted = repo::delete_projects(&self.pool, ids).await? as usize;
         let failed: Vec<Uuid> = ids
             .iter()
             .copied()
@@ -352,13 +246,7 @@ impl ProjectService {
     }
 
     async fn get_project_bare(&self, id: Uuid) -> Result<ProjectDto, ProjectError> {
-        sqlx::query_as::<_, ProjectDto>(&format!(
-            "SELECT {PROJECT_COLS} FROM projects WHERE id = $1"
-        ))
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| {
+        repo::get_project(&self.pool, id).await?.ok_or_else(|| {
             ProjectError::NotFound(format!(
                 "项目 {id} 不存在——先跑 projects 列表确认 id（可能已删除或抄错）"
             ))
@@ -378,19 +266,7 @@ impl ProjectService {
     ) -> Result<ProjectLocationDto, ProjectError> {
         self.get_project_bare(project_id).await?;
         let id = Uuid::now_v7();
-        sqlx::query(
-            "INSERT INTO project_locations (id, project_id, ip, host, os, path, purpose) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        )
-        .bind(id)
-        .bind(project_id)
-        .bind(ip)
-        .bind(host)
-        .bind(os)
-        .bind(path)
-        .bind(purpose)
-        .execute(&self.pool)
-        .await?;
+        repo::insert_location(&self.pool, id, project_id, ip, host, os, path, purpose).await?;
         self.get_location(id).await
     }
 
@@ -403,19 +279,8 @@ impl ProjectService {
         path: &str,
         purpose: Option<&str>,
     ) -> Result<ProjectLocationDto, ProjectError> {
-        let res = sqlx::query(
-            "UPDATE project_locations SET ip = $2, host = $3, os = $4, path = $5, purpose = $6, updated_at = now() \
-             WHERE id = $1",
-        )
-        .bind(id)
-        .bind(ip)
-        .bind(host)
-        .bind(os)
-        .bind(path)
-        .bind(purpose)
-        .execute(&self.pool)
-        .await?;
-        if res.rows_affected() == 0 {
+        let updated = repo::update_location(&self.pool, id, ip, host, os, path, purpose).await?;
+        if updated == 0 {
             return Err(ProjectError::NotFound(format!(
                 "位置 {id} 不存在——先 project-get <项目> 看 locations 列表取 id"
             )));
@@ -424,11 +289,8 @@ impl ProjectService {
     }
 
     pub async fn delete_location(&self, id: Uuid) -> Result<bool, ProjectError> {
-        let res = sqlx::query("DELETE FROM project_locations WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        if res.rows_affected() == 0 {
+        let deleted = repo::delete_location(&self.pool, id).await?;
+        if deleted == 0 {
             return Err(ProjectError::NotFound(format!(
                 "位置 {id} 不存在——先 project-get <项目> 看 locations 列表取 id"
             )));
@@ -437,13 +299,7 @@ impl ProjectService {
     }
 
     pub async fn get_location(&self, id: Uuid) -> Result<ProjectLocationDto, ProjectError> {
-        sqlx::query_as::<_, ProjectLocationDto>(&format!(
-            "SELECT {LOCATION_COLS} FROM project_locations WHERE id = $1"
-        ))
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| {
+        repo::get_location(&self.pool, id).await?.ok_or_else(|| {
             ProjectError::NotFound(format!(
                 "位置 {id} 不存在——先 project-get <项目> 看 locations 列表取 id"
             ))
@@ -476,19 +332,9 @@ impl ProjectService {
             return Err(Self::category_error(category, &project.categories));
         }
         let id = Uuid::now_v7();
-        let res = sqlx::query(
-            "INSERT INTO project_docs (id, project_id, category, title, content) \
-             VALUES ($1, $2, $3, $4, $5) \
-             ON CONFLICT (project_id, category, title) DO NOTHING",
-        )
-        .bind(id)
-        .bind(project_id)
-        .bind(category)
-        .bind(title)
-        .bind(content)
-        .execute(&self.pool)
-        .await?;
-        if res.rows_affected() == 0 {
+        let inserted =
+            repo::insert_doc(&self.pool, id, project_id, category, title, content).await?;
+        if inserted == 0 {
             return Err(ProjectError::Conflict(format!(
                 "文档「{title}」在分类「{category}」下已存在——同项目同分类 title 唯一，请 doc-update 已有文档或改 title"
             )));
@@ -511,17 +357,8 @@ impl ProjectService {
                 return Err(Self::category_error(category, &project.categories));
             }
         }
-        let res = sqlx::query(
-            "UPDATE project_docs SET category = $2, title = $3, content = $4, updated_at = now() \
-             WHERE id = $1",
-        )
-        .bind(id)
-        .bind(category)
-        .bind(title)
-        .bind(content)
-        .execute(&self.pool)
-        .await?;
-        if res.rows_affected() == 0 {
+        let updated = repo::update_doc(&self.pool, id, category, title, content).await?;
+        if updated == 0 {
             return Err(ProjectError::NotFound(format!(
                 "文档 {id} 不存在——先 project-get <项目> 看 docs 列表取 id"
             )));
@@ -530,11 +367,8 @@ impl ProjectService {
     }
 
     pub async fn delete_doc(&self, id: Uuid) -> Result<bool, ProjectError> {
-        let res = sqlx::query("DELETE FROM project_docs WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        if res.rows_affected() == 0 {
+        let deleted = repo::delete_doc(&self.pool, id).await?;
+        if deleted == 0 {
             return Err(ProjectError::NotFound(format!(
                 "文档 {id} 不存在——先 project-get <项目> 看 docs 列表取 id"
             )));
@@ -543,13 +377,7 @@ impl ProjectService {
     }
 
     pub async fn get_doc(&self, id: Uuid) -> Result<ProjectDocDto, ProjectError> {
-        sqlx::query_as::<_, ProjectDocDto>(&format!(
-            "SELECT {DOC_COLS} FROM project_docs WHERE id = $1"
-        ))
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| {
+        repo::get_doc(&self.pool, id).await?.ok_or_else(|| {
             ProjectError::NotFound(format!(
                 "文档 {id} 不存在——先 project-get <项目> 看 docs 列表取 id"
             ))
@@ -604,11 +432,7 @@ impl ProjectService {
             return Err(ProjectError::BadRequest("检索词不能为空".to_string()));
         }
         self.get_project_bare(project_id).await?;
-        let docs: Vec<(Uuid, String, String, String)> =
-            sqlx::query_as("SELECT id, title, category, content FROM project_docs WHERE project_id = $1 ORDER BY category, created_at")
-                .bind(project_id)
-                .fetch_all(&self.pool)
-                .await?;
+        let docs = repo::list_doc_contents(&self.pool, project_id).await?;
         let mut hits = Vec::new();
         let cap = limit.clamp(1, 500) as usize;
         for (id, title, category, content) in docs {

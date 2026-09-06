@@ -31,7 +31,7 @@ use utoipa::OpenApi;
         llm_api::get_routing, llm_api::put_routing, llm_api::suggest_routing, llm_api::usage,
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
         llm_api::batch_revoke_api_keys,
-        crate::mcp::settings_mcp, crate::mcp::settings_mcp_update,
+        crate::mcp_admin::settings_mcp, crate::mcp_admin::settings_mcp_update,
         memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
         memory_api::erase_session, memory_api::append_session, memory_api::import_session, memory_api::void_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
@@ -58,8 +58,9 @@ use utoipa::OpenApi;
         wiki_api::archive_query, wiki_api::list_sources, wiki_api::delete_source,
         wiki_api::insights, wiki_api::dismiss_insight, wiki_api::reset_insights,
         codegraph_api::register_project, codegraph_api::list_projects,
-        codegraph_api::get_project, codegraph_api::index_project,
-        codegraph_api::sync_project, codegraph_api::query,
+        codegraph_api::get_project, codegraph_api::delete_project,
+        codegraph_api::index_project, codegraph_api::sync_project,
+        codegraph_api::query, codegraph_api::status, codegraph_api::graph,
         project_api::list_types, project_api::create_project, project_api::list_projects,
         project_api::get_project, project_api::update_project, project_api::delete_project,
         project_api::batch_delete_projects,
@@ -68,6 +69,8 @@ use utoipa::OpenApi;
         skills_api::list_skills, skills_api::create_skill, skills_api::import_skills,
         skills_api::export_skills, skills_api::get_skill, skills_api::update_skill,
         skills_api::delete_skill, skills_api::list_revisions, skills_api::restore_revision,
+        skills_api::list_files, skills_api::get_file, skills_api::put_file, skills_api::delete_file,
+        skills_api::bundle,
     ),
 )]
 pub(crate) struct ApiDoc;
@@ -85,8 +88,8 @@ pub fn router(state: AppState) -> Router {
         // gate 在 Bearer 之内、MCP 之前——服务总开关关闭时对已认证客户端也 503
         .merge(
             Router::new()
-                .nest_service("/mcp", crate::mcp::service(state.clone()))
-                .route_layer(from_fn_with_state(state.clone(), crate::mcp::gate)),
+                .nest_service("/mcp", engram_mcp::service(state.clone()))
+                .route_layer(from_fn_with_state(state.clone(), engram_mcp::gate)),
         )
         .route("/jobs", get(jobs_api::list_jobs))
         .route("/jobs/{id}", get(jobs_api::get_job))
@@ -130,7 +133,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/settings/mcp",
-            get(crate::mcp::settings_mcp).put(crate::mcp::settings_mcp_update),
+            get(crate::mcp_admin::settings_mcp).put(crate::mcp_admin::settings_mcp_update),
         )
         .route("/llm/usage", get(llm_api::usage))
         .route("/memory/sessions/import", post(memory_api::import_session))
@@ -276,7 +279,12 @@ pub fn router(state: AppState) -> Router {
             "/codegraph/projects",
             post(codegraph_api::register_project).get(codegraph_api::list_projects),
         )
-        .route("/codegraph/projects/{id}", get(codegraph_api::get_project))
+        .route("/codegraph/status", get(codegraph_api::status))
+        .route(
+            "/codegraph/projects/{id}",
+            get(codegraph_api::get_project).delete(codegraph_api::delete_project),
+        )
+        .route("/codegraph/projects/{id}/graph", get(codegraph_api::graph))
         .route(
             "/codegraph/projects/{id}/index",
             post(codegraph_api::index_project),
@@ -318,6 +326,14 @@ pub fn router(state: AppState) -> Router {
         )
         // 技能域：import/export 先于 {slug}，避免被当作 slug 解析
         .route("/skills/import", post(skills_api::import_skills))
+        .route("/skills/{slug}/files", get(skills_api::list_files))
+        .route("/skills/{slug}/bundle", get(skills_api::bundle))
+        .route(
+            "/skills/{slug}/file",
+            get(skills_api::get_file)
+                .put(skills_api::put_file)
+                .delete(skills_api::delete_file),
+        )
         .route("/skills/export", get(skills_api::export_skills))
         .route(
             "/skills",

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/api",
     "crates/core",
+    "crates/mcp",
     "crates/storage",
     "crates/llm",
     "crates/jobs",
@@ -23,6 +24,7 @@ repository = "https://github.com/trtyr/engram"
 # 内部 crates
 engram-api = { path = "crates/api" }
 engram-core = { path = "crates/core" }
+engram-mcp = { path = "crates/mcp" }
 engram-storage = { path = "crates/storage" }
 engram-llm = { path = "crates/llm" }
 engram-jobs = { path = "crates/jobs" }
@@ -75,6 +77,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 aes-gcm = "0.10"
 sha2 = "0.10"
 rand = "0.9"
+
+# 文档解析（wiki 文档域）
+zip = { version = "2", default-features = false, features = ["deflate"] }  # 技能整包 bundle
 
 # 检索
 jieba-rs = "0.4"

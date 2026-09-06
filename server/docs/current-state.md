@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-三 feat 分支已并入 main，仓库收敛为单分支。Rust 侧全貌：五域服务（memory / wiki / codegraph / project / skills）+ **四域 MCP 工具面**（`/mcp` 承载 memory 九 + project 15 + skills 六 + wiki 八共 38 工具，scope 分权 + 管理台开关，tools/list 按 key scope 过滤）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **234** 测试（40 套件）/ **31 迁移** / **29 业务表**。
+仓库收敛为单分支。Rust 侧全貌：**11 crates** 五域服务（memory / wiki / codegraph / project / skills）+ **五域 MCP 适配器**（独立 crate engram-mcp；`/mcp` 承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 45 工具，scope 分权 + 管理台开关，tools/list 按 key scope 过滤 + 动态资产清单织入描述）+ 持久化收口 `engram-storage::repo`（core/api src 层零 sqlx，双适配器共用 core 服务）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **245** 测试 / **32 迁移** / **30 业务表**。
 
 ## 当日验证矩阵
 
@@ -12,8 +12,8 @@
 |---|---|
 | cargo fmt --check | exit 0 |
 | cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
-| cargo test --workspace | 234 passed / 0 failed（40 套件） |
-| cargo run -q -p engram-api --bin openapi-dump | 95 路径 / 124 方法（GET 51/POST 50/PUT 9/PATCH 3/DELETE 11） |
+| cargo test --workspace | 245 passed / 0 failed |
+| cargo run -q -p engram-api --bin openapi-dump | 100 路径 / 132 方法 |
 
 ## 2026-08-30 基线以来的落地（按主题）
 
@@ -42,6 +42,9 @@
 | 位置元数据 | 0027 project_locations.ip/os（多主机登记） | 270faab |
 | 项目域唯一约束 | 0028 name/doc title UNIQUE + Conflict 409 + 错误文案三问 | dffdd9a |
 | 产品更名 Engram | 仓库 trtyr/engram + 10 crate engram-* + 品牌面 + 根 README | 23cbdbb |
+| **持久化分层收敛** | SQL 全量收口 engram-storage::repo（8 域仓储 145+ 函数；core/api src 零 sqlx）；engram-mcp 独立 crate（11 crates，与 HTTP 平级双适配器）；Principal/AppState 上移 core；jobs 加 admin 管理面模块 | 本轮（无 commit 仓库） |
+| **技能 = 文件夹 + 三层消费** | 0032 skill_files（(skill_id,path) 唯一 + 路径校验）；skills_get 带 files 索引；MCP +2 skills_file_get/put；HTTP raw 单文件直下 + bundle 整包 zip（SKILL.md frontmatter 还原）；工具描述织入消费形态指南 | 本轮 |
+| **CodeGraph 重做** | index/sync 接任务队列（202 入队废除同步 10min）；DELETE/status/graph 三端点；graph 双模式（无 symbol=文件级全图 rusqlite 只读聚合 / 带 symbol=callers+callees 子图归一）；MCP +5 codegraph_*（45 工具五域）；Windows .cmd spawn 修复；stats 字段归一修复；同源查重 | 本轮 |
 
 ## 当日落地：级联删除审计凭证
 

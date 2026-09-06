@@ -62,6 +62,18 @@ cargo run -q -p engram-api --bin openapi-dump > openapi.json
 codegraph CLI `@colbymchenry/codegraph@1.5.0` + git）。`deploy/docker-compose.yml` 为完整栈。
 开发期不维护本地 compose（CI docker job 负责构建验证）。
 
+### 本地 codegraph CLI（代码图谱域依赖）
+
+```bash
+npm install -g @colbymchenry/codegraph@1.5.0   # 版本必须等于 pin（bridge 版本守卫拒绝其他版本）
+```
+
+- Windows：npm 装的是 `.cmd` shim，服务端 spawn 已适配；**engram-server 进程的 PATH
+  必须含 npm 全局目录**（`%APPDATA%
+pm`），否则 `GET /codegraph/status` 报不可用。
+- 页面状态条（代码图谱页顶部）实时反映 CLI 可用性与版本。
+- Docker 镜像已内置 CLI，无需额外安装。
+
 ## 备份
 
 `scripts/backup.sh`：pg_dump + 数据卷备份/恢复。

@@ -6,47 +6,15 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use chrono::{Duration, Utc};
+use engram_storage::PgPool;
+use engram_storage::repo::keys as repo;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 
-/// 资产域 scope。
-pub const SCOPES: [&str; 8] = [
-    "memory",
-    "wiki",
-    "codegraph",
-    "project",
-    "skills",
-    "llm",
-    "erase",
-    "cron",
-];
-
-/// 已认证主体。
-#[derive(Debug, Clone)]
-pub enum Principal {
-    /// 管理员（Web UI 会话，全权限）
-    Admin,
-    /// API key 机器主体（限 scopes）
-    ApiKey {
-        key_id: Uuid,
-        name: String,
-        scopes: Vec<String>,
-    },
-}
-
-impl Principal {
-    /// 是否拥有某 scope（Admin 恒真）。
-    pub fn has_scope(&self, scope: &str) -> bool {
-        match self {
-            Principal::Admin => true,
-            Principal::ApiKey { scopes, .. } => scopes.iter().any(|s| s == scope),
-        }
-    }
-}
+pub use engram_core::auth::{Principal, SCOPES};
 
 fn sha256_hex(input: &str) -> String {
     let mut h = Sha256::new();
@@ -69,10 +37,7 @@ pub async fn login(pool: &PgPool, password: &str, expect: &str) -> Result<String
     let hash = sha256_hex(&token);
     let expires = Utc::now() + Duration::days(7);
 
-    sqlx::query("INSERT INTO admin_sessions (token_hash, expires_at) VALUES ($1, $2)")
-        .bind(&hash)
-        .bind(expires)
-        .execute(pool)
+    repo::create_admin_session(pool, &hash, expires)
         .await
         .map_err(ApiError::from)?;
 
@@ -82,20 +47,13 @@ pub async fn login(pool: &PgPool, password: &str, expect: &str) -> Result<String
 /// 校验管理员会话 token。
 pub async fn validate_admin_session(pool: &PgPool, token: &str) -> Result<bool, ApiError> {
     let hash = sha256_hex(token);
-    let row: Option<(chrono::DateTime<Utc>,)> =
-        sqlx::query_as("SELECT expires_at FROM admin_sessions WHERE token_hash = $1")
-            .bind(&hash)
-            .fetch_optional(pool)
-            .await
-            .map_err(ApiError::from)?;
-    match row {
-        Some((expires,)) if expires > Utc::now() => {
+    let expires = repo::find_admin_session_expiry(pool, &hash)
+        .await
+        .map_err(ApiError::from)?;
+    match expires {
+        Some(expires) if expires > Utc::now() => {
             // 更新 last_used（失败不阻塞）
-            let _ =
-                sqlx::query("UPDATE admin_sessions SET last_used_at = now() WHERE token_hash = $1")
-                    .bind(&hash)
-                    .execute(pool)
-                    .await;
+            let _ = repo::touch_admin_session(pool, &hash).await;
             Ok(true)
         }
         _ => Ok(false),
@@ -117,17 +75,9 @@ pub async fn create_api_key(
     rand::rng().fill_bytes(&mut raw);
     let key = format!("amk_{}", hex(&raw));
     let id = Uuid::now_v7();
-    sqlx::query(
-        "INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes) VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(id)
-    .bind(name)
-    .bind(sha256_hex(&key))
-    .bind(&key[..12])
-    .bind(sqlx::types::Json(&scopes))
-    .execute(pool)
-    .await
-    .map_err(ApiError::from)?;
+    repo::insert_api_key(pool, id, name, &sha256_hex(&key), &key[..12], &scopes)
+        .await
+        .map_err(ApiError::from)?;
     Ok((id, key))
 }
 
@@ -188,23 +138,16 @@ async fn authenticate(pool: &PgPool, token: &str) -> Result<Option<Principal>, A
     // 2) API key（amk_ 前缀）
     if token.starts_with("amk_") {
         let hash = sha256_hex(token);
-        let row: Option<(Uuid, String, sqlx::types::Json<Vec<String>>)> = sqlx::query_as(
-            "SELECT id, name, scopes FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL",
-        )
-        .bind(&hash)
-        .fetch_optional(pool)
-        .await
-        .map_err(ApiError::from)?;
-        if let Some((key_id, name, scopes)) = row {
+        if let Some((key_id, name, scopes)) = repo::find_api_key_by_hash(pool, &hash)
+            .await
+            .map_err(ApiError::from)?
+        {
             // 更新 last_used（失败不阻塞）
-            let _ = sqlx::query("UPDATE api_keys SET last_used_at = now() WHERE id = $1")
-                .bind(key_id)
-                .execute(pool)
-                .await;
+            let _ = repo::touch_api_key(pool, key_id).await;
             return Ok(Some(Principal::ApiKey {
                 key_id,
                 name,
-                scopes: scopes.0,
+                scopes,
             }));
         }
     }

@@ -10,10 +10,11 @@ server/
 ├── migrations/             # 21 个 SQL 迁移（0001 起，含 CREATE EXTENSION vector）
 └── crates/
     ├── api/                # HTTP 门面（axum + utoipa + rust-embed）——唯一二进制出口
-    ├── core/               # 领域类型与共享原语
-    ├── storage/            # sqlx 仓储层（PgPool、迁移、各表 CRUD）
+    ├── mcp/                # MCP 适配器（rmcp Streamable HTTP）：五域工具面，与 HTTP 平级
+    ├── core/               # 领域服务与编排（memory/project/skills/wiki_docs/unified）+ auth/state
+    ├── storage/            # 仓储层：持久化模型（models）+ 领域表业务面 SQL 唯一收口（repo）
     ├── llm/                # LLM 网关：provider 管理、密钥加密、路由表、用量记账
-    ├── jobs/               # 任务队列：入队/轮询/重试/死信/事件流水
+    ├── jobs/               # 任务队列：入队/轮询/重试/死信/事件流水 + 管理面读写（admin）
     ├── distill/            # 记忆蒸馏流水线（L0→L1 提取、仲裁、组织、画像）
     ├── wiki-engine/        # LLM Wiki：摄取、分析、生成、lint、图谱、洞察
     ├── cg-bridge/          # CodeGraph 桥接（调用外部 codegraph CLI 索引代码库）
@@ -24,14 +25,24 @@ server/
 ## 依赖方向（谁用谁）
 
 ```text
-api ──▶ 全部域 crate（distill / wiki-engine / cg-bridge / search）──▶ core
-  └─────────────────────────▶ storage（仓储）──▶ core
-distill / wiki-engine ──▶ llm（网关调用）──▶ core
-jobs ──▶ core（被各域 crate 用作异步执行器）
+api ──▶ core（服务/编排）──▶ storage（仓储）──▶ DB
+  ├─▶ engram-mcp（MCP 适配器）──▶ core + storage
+  └─▶ 域流水线 crate（distill / wiki-engine / cg-bridge / search / llm / jobs）
+distill / wiki-engine ──▶ llm（网关调用）
+jobs ──▶ storage（测试）；各域 crate 经 JobQueue 用作异步执行器
 ```
 
-规则：`core` 不依赖任何兄弟 crate；`api` 是唯一允许"什么都依赖"的门面；
-域 crate 之间不横向 import（wiki-engine 不 use distill）。
+规则（2026-09-05 分层收敛后）：
+- **SQL 收口**：领域表的业务面读写唯一出现在 `engram-storage::repo`（行类型在
+  `engram-storage::models`）；`core` 与 `api`/`mcp` 的 src 层零 sqlx 引用
+  （core/api 仅测试夹具保留 sqlx dev-dependency 直连 PG 造数）。
+- **双适配器**：HTTP（api）与 MCP（engram-mcp）平级，各自只做协议壳
+  （鉴权、DTO、错误桥），业务语义都在 core；共用 `engram_core::auth::Principal`
+  与 `engram_core::state::AppState`。
+- **事务边界归仓储**：跨语句事务（快照+更新、purge、合并）整体封装在 repo 函数内。
+- 流水线 crate（distill / wiki-engine / llm / search / jobs）按既有设计拥有
+  各自管道内部的 SQL（job 处理器 / 检索只读路径 / 路由表），后续可按同模式收敛。
+- 域 crate 之间不横向 import（wiki-engine 不 use distill）。
 
 ## api crate 内部（门面细图）
 
@@ -40,9 +51,10 @@ crates/api/src/
 ├── main.rs                 # 启动：配置→PgPool→迁移→路由→监听
 ├── lib.rs                  # 组装（集成测试入口）
 ├── config.rs               # 环境变量解析（见 run-and-deploy.md）
-├── state.rs                # AppState { pool }
-├── auth.rs                 # Bearer 中间件：ams_/amk_ 认证（八 scope；删除 key 不留记录（401 走通用文案））；
+├── state.rs                # AppState re-export（定义在 core::state，api/mcp 共用）
+├── auth.rs                 # Bearer 中间件：ams_/amk_ 认证（Principal/SCOPES 定义在 core::auth）；
 │                           #   /jobs + Accept:text/html → SPA 分流（2026-08-30 新增）
+├── mcp_admin.rs            # /settings/mcp 管理端点 HTTP 壳（工具面在 engram-mcp）
 ├── error.rs                # ApiError（code/retryable，统一 JSON 错误体）
 ├── web_assets.rs           # rust-embed 托管 web/dist（编译期要求目录存在）
 ├── bin/openapi-dump.rs     # 导出 OpenAPI JSON 的工具二进制

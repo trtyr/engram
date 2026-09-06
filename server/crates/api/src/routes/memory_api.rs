@@ -421,15 +421,9 @@ pub async fn purge_agent(
         // P-C 后悔药先于确认短语：取消是安全方向，不该要危险确认
         if let Some(job_id) = req.cancel {
             // 后悔药：取消 armed job
-            let n = sqlx::query(
-                "UPDATE jobs SET status = 'cancelled', finished_at = now() \
-                 WHERE id = $1 AND kind = 'deep_purge' AND status = 'pending'",
-            )
-            .bind(job_id)
-            .execute(&state.pool.clone())
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?
-            .rows_affected();
+            let n = engram_jobs::admin::cancel_pending_deep_purge(&state.pool, job_id)
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
             if n == 0 {
                 return Err(ApiError::BadRequest(
                     "取消失败：job 不存在或已执行/已取消".into(),
@@ -451,14 +445,9 @@ pub async fn purge_agent(
         // token = 立即执行；cancel = 后悔药。job 本身就是审计链。
         if let Some(token) = req.token {
             // 阶段二：确认执行——校验 armed job 存在且未执行，跳过剩余冷却
-            let armed: Option<(Uuid, serde_json::Value)> = sqlx::query_as(
-                "SELECT id, payload FROM jobs \
-                 WHERE id = $1 AND kind = 'deep_purge' AND status = 'pending' AND payload->>'phase' = 'armed'",
-            )
-            .bind(token)
-            .fetch_optional(&state.pool.clone())
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+            let armed = engram_jobs::admin::find_armed_deep_purge(&state.pool, token)
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
             let Some((job_id, mut payload)) = armed else {
                 return Err(ApiError::BadRequest(
                     "token 无效或已过期（armed 状态 5 分钟，到期自动执行或已被取消/执行）".into(),
@@ -466,16 +455,9 @@ pub async fn purge_agent(
             };
             let counts = svc(&state).purge_deep().await.map_err(me)?;
             payload["executed_by"] = serde_json::json!(source);
-            sqlx::query(
-                "UPDATE jobs SET status = 'succeeded', payload = $2, progress = $3, \
-                 started_at = now(), finished_at = now() WHERE id = $1",
-            )
-            .bind(job_id)
-            .bind(&payload)
-            .bind(&counts)
-            .execute(&state.pool.clone())
-            .await
-            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+            engram_jobs::admin::complete_deep_purge(&state.pool, job_id, &payload, &counts)
+                .await
+                .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
             return Ok(Json(counts));
         }
 
@@ -1078,7 +1060,9 @@ pub async fn search_entities_handler(
 ) -> Result<Json<Vec<SearchHit>>, ApiError> {
     require_memory(&principal)?;
     Ok(Json(
-        search_entities(&state.pool, &p.q, p.limit.unwrap_or(20)).await?,
+        search_entities(&state.pool, &p.q, p.limit.unwrap_or(20))
+            .await
+            .map_err(|e| ApiError::Database(engram_storage::StoreError::Sql(e)))?,
     ))
 }
 

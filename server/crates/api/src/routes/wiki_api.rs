@@ -192,17 +192,9 @@ pub async fn list_proposals(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<JobEvent>>, ApiError> {
     require_wiki(&principal)?;
-    let rows = sqlx::query_as::<_, JobEvent>(
-        r#"SELECT t.* FROM (
-             SELECT DISTINCT ON (e.job_id) e.*
-             FROM jobs j JOIN job_events e ON e.job_id = j.id
-             WHERE j.kind = 'wiki_generate' AND e.message LIKE '%提案%'
-             ORDER BY e.job_id, e.id DESC
-           ) t ORDER BY t.id DESC LIMIT 50"#,
-    )
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+    let rows = engram_jobs::admin::latest_wiki_proposals(&state.pool)
+        .await
+        .map_err(|e| ApiError::Unavailable(e.to_string()))?;
     Ok(Json(rows))
 }
 

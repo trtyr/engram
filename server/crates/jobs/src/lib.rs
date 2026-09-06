@@ -3,6 +3,7 @@
 //!
 //! 设计文档：docs/plantree/plans/engram-platform/topics/jobs-system.md
 
+pub mod admin;
 pub mod queue;
 pub mod runner;
 pub mod types;
