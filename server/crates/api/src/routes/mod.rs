@@ -7,6 +7,7 @@ pub mod jobs_api;
 pub mod llm_api;
 pub mod memory_api;
 pub mod migrate_api;
+pub mod todos_api;
 pub mod project_api;
 pub mod search_api;
 pub mod skills_api;
@@ -66,6 +67,8 @@ use utoipa::OpenApi;
         codegraph_api::index_project, codegraph_api::sync_project,
         codegraph_api::query, codegraph_api::status, codegraph_api::graph,
         migrate_api::export_bundle, migrate_api::import_bundle, migrate_api::pull,
+        todos_api::list_todos, todos_api::create_todo, todos_api::get_todo,
+        todos_api::update_todo, todos_api::delete_todo, todos_api::export_todos,
         project_api::list_types, project_api::create_project, project_api::list_projects,
         project_api::get_project, project_api::update_project, project_api::delete_project,
         project_api::batch_delete_projects,
@@ -364,6 +367,17 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/skills/export", get(skills_api::export_skills))
         .route("/skills/import-transfer", post(skills_api::import_transfer))
+        .route(
+            "/todos",
+            get(todos_api::list_todos).post(todos_api::create_todo),
+        )
+        .route(
+            "/todos/{id}",
+            get(todos_api::get_todo)
+                .put(todos_api::update_todo)
+                .delete(todos_api::delete_todo),
+        )
+        .route("/todos/export", get(todos_api::export_todos))
         .route("/migrate/export", get(migrate_api::export_bundle))
         .route("/migrate/import", post(migrate_api::import_bundle))
         .route("/migrate/pull", post(migrate_api::pull))

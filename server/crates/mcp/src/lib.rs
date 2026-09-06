@@ -92,6 +92,7 @@ fn tool_scope(name: &str) -> &'static str {
         Some("wiki") => "wiki",
         Some("codegraph") => "codegraph",
         Some("llm") => "llm",
+        Some("todos") | Some("todo") => "todos",
         _ => "memory",
     }
 }
@@ -126,6 +127,37 @@ fn from_skills(e: engram_core::skills::SkillsError) -> rmcp::ErrorData {
         SkillsError::Conflict(m) => rmcp::ErrorData::invalid_params(m, None),
         SkillsError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
         SkillsError::Storage(m) => rmcp::ErrorData::internal_error(m, None),
+    }
+}
+
+fn require_todos(principal: &Principal) -> Result<(), rmcp::ErrorData> {
+    if principal.has_scope("todos") {
+        Ok(())
+    } else {
+        Err(mcp_err(
+            ErrorCode::INVALID_REQUEST,
+            "缺少 todos scope——请用带 todos scope 的 amk_ key 连接 MCP",
+        ))
+    }
+}
+
+fn todo_svc(state: &AppState) -> engram_core::todos::TodoService {
+    engram_core::todos::TodoService::new(state.pool.clone())
+}
+
+fn parse_flex_dt(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.with_timezone(&chrono::Utc))
+}
+
+/// TodoError → MCP 错误码。
+fn from_todo(e: engram_core::todos::TodoError) -> rmcp::ErrorData {
+    use engram_core::todos::TodoError;
+    match e {
+        TodoError::NotFound(m) => rmcp::ErrorData::resource_not_found(m, None),
+        TodoError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
+        TodoError::Storage(m) => rmcp::ErrorData::internal_error(m, None),
     }
 }
 
@@ -219,6 +251,76 @@ fn ok_json(v: serde_json::Value) -> Result<CallToolResult, rmcp::ErrorData> {
 // ---------- 工具参数 ----------
 
 /// memory_context / memory_search 公共可选参数里的时间串直接用 String（ISO8601）。
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TodoAddParams {
+    /// 一句话标题（必填）
+    #[schemars(description = "一句话标题（必填，≤200 字）。")]
+    pub title: String,
+    /// 详情（可选 markdown）
+    #[schemars(description = "详情（可选 markdown）。")]
+    pub body: Option<String>,
+    /// low | normal | high（缺省 normal）
+    #[schemars(description = "优先级：low/normal/high，缺省 normal。")]
+    pub priority: Option<String>,
+    /// 自由标签
+    #[schemars(description = "自由标签（如 学习/系统操作/问题排查）。")]
+    pub tags: Option<Vec<String>>,
+    /// 截止时间（ISO8601，可选）
+    #[schemars(description = "可选截止时间（ISO8601）。")]
+    pub due_at: Option<String>,
+    /// 相关项目名提示（纯文本备注，不绑定）
+    #[schemars(description = "可选：相关项目名提示（纯文本备注，不绑定项目）。")]
+    pub project_hint: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TodoListParams {
+    /// open | done | archived（缺省全部，open 优先展示）
+    #[schemars(description = "可选状态过滤：open/done/archived。缺省全部（open 优先）。")]
+    pub status: Option<String>,
+    /// low | normal | high
+    #[schemars(description = "可选优先级过滤。")]
+    pub priority: Option<String>,
+    /// 标签过滤
+    #[schemars(description = "可选标签过滤。")]
+    pub tag: Option<String>,
+    /// 标题/正文子串
+    #[schemars(description = "可选子串过滤（标题或正文）。")]
+    pub q: Option<String>,
+    /// 条数上限（缺省 50）
+    #[schemars(description = "条数上限（缺省 50）。")]
+    pub limit: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TodoIdParams {
+    /// 待办 id（todo_list 返回）
+    #[schemars(description = "待办 id（todo_list 返回）。")]
+    pub id: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TodoUpdateParams {
+    /// 待办 id（todo_list 返回）
+    #[schemars(description = "待办 id（todo_list 返回）。")]
+    pub id: String,
+    /// 新标题（可选）
+    #[schemars(description = "可选新标题。")]
+    pub title: Option<String>,
+    /// 新详情（可选）
+    #[schemars(description = "可选新详情。")]
+    pub body: Option<String>,
+    /// low | normal | high
+    #[schemars(description = "可选优先级：low/normal/high。")]
+    pub priority: Option<String>,
+    /// open | done | archived
+    #[schemars(description = "可选状态：open/done/archived。")]
+    pub status: Option<String>,
+    /// 截止时间（ISO8601，可选）
+    #[schemars(description = "可选截止时间（ISO8601）。")]
+    pub due_at: Option<String>,
+}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ContextParams {
@@ -2505,6 +2607,184 @@ impl EngramMcpServer {
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::json!({ "deleted": params.0.slug, "ok": deleted }))
+    }
+
+    // ---------- 待办域工具（todos scope；第七域） ----------
+
+    /// 快速记一条待办（灵感/学习计划/系统操作/问题排查——不绑定项目）。
+    #[tool(
+        name = "todo_add",
+        annotations(
+            title = "记待办",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn todo_add(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TodoAddParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let tp = params.0;
+        let dto = todo_svc(&self.state)
+            .create(
+                &tp.title,
+                tp.body.as_deref().unwrap_or(""),
+                tp.priority.as_deref().unwrap_or("normal"),
+                tp.tags.as_deref().unwrap_or(&[]),
+                tp.due_at.as_deref().and_then(parse_flex_dt),
+                tp.project_hint.as_deref(),
+            )
+            .await
+            .map_err(from_todo)?;
+        ok_json(serde_json::to_value(&dto).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 待办列表（open 优先；status/priority/tag/q 过滤）。
+    #[tool(
+        name = "todo_list",
+        annotations(
+            title = "待办列表",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn todo_list(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TodoListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let lp = params.0;
+        let rows = todo_svc(&self.state)
+            .list(
+                lp.status.as_deref(),
+                lp.priority.as_deref(),
+                lp.tag.as_deref(),
+                lp.q.as_deref(),
+                lp.limit.unwrap_or(50),
+            )
+            .await
+            .map_err(from_todo)?;
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+    }
+
+    /// 待办详情。
+    #[tool(
+        name = "todo_get",
+        annotations(
+            title = "待办详情",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn todo_get(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TodoIdParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let id = Uuid::parse_str(&params.0.id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "id 不是合法 UUID"))?;
+        let dto = todo_svc(&self.state).get(id).await.map_err(from_todo)?;
+        ok_json(serde_json::to_value(&dto).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 标记待办完成（done_at 自动记录）。
+    #[tool(
+        name = "todo_done",
+        annotations(
+            title = "完成待办",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn todo_done(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TodoIdParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let id = Uuid::parse_str(&params.0.id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "id 不是合法 UUID"))?;
+        let dto = todo_svc(&self.state)
+            .update(id, None, None, None, Some("done"), None, None, None)
+            .await
+            .map_err(from_todo)?;
+        ok_json(serde_json::to_value(&dto).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 更新待办（标题/详情/优先级/状态，部分字段 None 不动）。
+    #[tool(
+        name = "todo_update",
+        annotations(
+            title = "更新待办",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn todo_update(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TodoUpdateParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let id = Uuid::parse_str(&params.0.id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "id 不是合法 UUID"))?;
+        let dto = todo_svc(&self.state)
+            .update(
+                id,
+                params.0.title.as_deref(),
+                params.0.body.as_deref(),
+                params.0.priority.as_deref(),
+                params.0.status.as_deref(),
+                params.0.due_at.as_deref().and_then(parse_flex_dt).map(Some),
+                None,
+                None,
+            )
+            .await
+            .map_err(from_todo)?;
+        ok_json(serde_json::to_value(&dto).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 删除待办（物理删除；归档语义走 todo_update status=archived）。
+    #[tool(
+        name = "todo_delete",
+        annotations(
+            title = "删除待办",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn todo_delete(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TodoIdParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let id = Uuid::parse_str(&params.0.id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "id 不是合法 UUID"))?;
+        todo_svc(&self.state).delete(id).await.map_err(from_todo)?;
+        ok_json(serde_json::json!({ "deleted": params.0.id }))
     }
 }
 

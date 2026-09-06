@@ -85,6 +85,72 @@ pub async fn export_projects(pool: &PgPool) -> StoreResult<(Vec<Value>, Vec<Valu
     Ok((projects, locations, docs))
 }
 
+/// 待办全量（0035）。
+pub async fn export_todos(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(t) FROM todos t ORDER BY (t.status = 'open') DESC, t.updated_at DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// 导入待办（id 冲突跳过）。返回 (imported, skipped)。
+pub async fn import_todos(pool: &PgPool, items: &[Value]) -> StoreResult<(usize, usize)> {
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    for v in items {
+        let res = sqlx::query(
+            "INSERT INTO todos (id, title, body, status, priority, tags, due_at, project_hint, done_at, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10, $11) ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(
+            v.get("id")
+                .and_then(|x| x.as_str())
+                .and_then(|s| Uuid::parse_str(s).ok()),
+        )
+        .bind(v.get("title").and_then(|x| x.as_str()).unwrap_or(""))
+        .bind(v.get("body").and_then(|x| x.as_str()).unwrap_or(""))
+        .bind(v.get("status").and_then(|x| x.as_str()).unwrap_or("open"))
+        .bind(v.get("priority").and_then(|x| x.as_str()).unwrap_or("normal"))
+        .bind(
+            v.get("tags")
+                .and_then(|x| x.as_array())
+                .map(|a| a.iter().filter_map(|t| t.as_str()).collect::<Vec<_>>())
+                .unwrap_or_default(),
+        )
+        .bind(
+            v.get("due_at")
+                .and_then(|x| x.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
+        )
+        .bind(v.get("project_hint").and_then(|x| x.as_str()))
+        .bind(
+            v.get("done_at")
+                .and_then(|x| x.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
+        )
+        .bind(
+            v.get("created_at")
+                .and_then(|x| x.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
+        )
+        .bind(
+            v.get("updated_at")
+                .and_then(|x| x.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
+        )
+        .execute(pool)
+        .await?;
+        if res.rows_affected() > 0 {
+            imported += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+    Ok((imported, skipped))
+}
+
 /// 技能全量：[(skill 行, files 行)]。
 pub async fn export_skills_with_files(pool: &PgPool) -> StoreResult<Vec<(Value, Vec<Value>)>> {
     let skills: Vec<Value> = sqlx::query_scalar("SELECT to_jsonb(s) FROM skills s ORDER BY s.slug")
@@ -378,3 +444,21 @@ pub async fn import_project_doc(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     .await?;
     Ok(res.rows_affected() > 0)
 }
+
+// ---------- 待办域（0035） ----------
+
+/// 待办导出行。
+pub type TodoExportRow = (
+    Uuid,
+    String,
+    String,
+    String,
+    String,
+    Vec<String>,
+    Option<DateTime<Utc>>,
+    Option<String>,
+    Option<DateTime<Utc>>,
+    DateTime<Utc>,
+    DateTime<Utc>,
+);
+

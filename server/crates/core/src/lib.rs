@@ -10,6 +10,7 @@ pub mod memory;
 pub mod project;
 pub mod skills;
 pub mod state;
+pub mod todos;
 pub mod transfer;
 pub mod unified;
 pub mod wiki;
