@@ -4,7 +4,8 @@
 
 ## 一句话状态
 
-仓库收敛为单分支。Rust 侧全貌：**11 crates** 五域服务（memory / wiki / codegraph / project / skills）+ **五域 MCP 适配器**（独立 crate engram-mcp；`/mcp` 承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 45 工具，scope 分权 + 管理台开关，tools/list 按 key scope 过滤 + 动态资产清单织入描述）+ 持久化收口 `engram-storage::repo`（core/api src 层零 sqlx，双适配器共用 core 服务）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **248** 测试 / **33 迁移** / **31 业务表**（+admin_account 单行管理员账号）。MCP 黑盒测试报告（zcode，90+ 调用）14 缺陷修复：D1 蒸馏未配 LLM 显式报错、D2 doc_update COALESCE 部分更新、D3 技能文件路径冒号拒绝、D4/D8 wiki 写页重算 links+frontmatter.title 同步、D5 archive 双保险幂等、D6 sessions 列表摘要、D7 frontmatter 块列表 tags、D9/D10 codegraph/wiki 删除工具、D13 空 target 拒绝、D14 MCP +2 llm 工具（45→49）。
+仓库收敛为单分支。Rust 侧全貌：**11 crates** 五域服务（memory / wiki / codegraph / project / skills）+ **五域 MCP 适配器**（独立 crate engram-mcp；`/mcp` 承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 45 工具，scope 分权 + 管理台开关，tools/list 按 key scope 过滤 + 动态资产清单织入描述）+ 持久化收口 `engram-storage::repo`（core/api src 层零 sqlx，双适配器共用 core 服务）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **250** 测试 / **34 迁移** / **31 业务表**（+admin_account 单行管理员账号、entities.archived_at 实体归档标记）。
+**MCP 黑盒测试战役收尾**（zcode 五轮黑盒 + 六轮回归，90+ 真实调用）：16 项发现全部收口——D1 蒸馏静默失败（base_url /v1 双重约定 404 根因，normalize_base_url 规范化 + 未配 LLM manual 显式报错带 Web UI 引导）、D2 并发丢字段（COALESCE 部分更新）、D3 技能路径冒号绕过、D4/D5/D8 wiki 链接索引/幂等/title 同步（含 /wiki/links/rebuild 存量回填）、D6 sessions 元数据列表、D7 YAML 块列表 tags、D9/D10 删除工具、D11 织入去重三态、D13 空 target、D15 遗忘级联到 L2/L3、D16 遗忘级联到实体层（archived_at + 复活）；D12 上游 CLI 局限、D14 按用户决定不补 MCP 配置工具（D1 报错已带 Web UI 引导，闭案）。蒸馏全链路实测：manual 写会话 5s 出原子，质量佳。MCP 黑盒测试报告（zcode，90+ 调用）14 缺陷修复：D1 蒸馏未配 LLM 显式报错、D2 doc_update COALESCE 部分更新、D3 技能文件路径冒号拒绝、D4/D8 wiki 写页重算 links+frontmatter.title 同步、D5 archive 双保险幂等、D6 sessions 列表摘要、D7 frontmatter 块列表 tags、D9/D10 codegraph/wiki 删除工具、D13 空 target 拒绝、D14 MCP +2 llm 工具（45→49）。
 
 ## 当日验证矩阵
 
