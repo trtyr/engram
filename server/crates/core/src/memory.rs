@@ -987,6 +987,18 @@ impl MemoryService {
                 json!({"session": id.to_string(), "archived_atoms": archived as i64}),
             )
             .await;
+            // D15：L2 级联——被遗忘原子所在的场景收敛（全 archived 成员的场景解散），
+            // 与 F4（单原子归档触发）同一机制，保证「遗忘」后 L2 即时干净
+            if archived > 0 {
+                self.queue
+                    .enqueue(
+                        JobTemplate::new("organize_scenarios")
+                            .with_payload(json!({ "converge_only": true }))
+                            .with_idempotency_key(format!("void-converge-{id}")),
+                    )
+                    .await
+                    .ok();
+            }
         }
         Ok(row)
     }
