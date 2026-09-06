@@ -113,13 +113,15 @@ impl TodoService {
         let id = Uuid::now_v7();
         repo::insert(
             &self.pool,
-            id,
-            title,
-            body.trim(),
-            priority,
-            tags,
-            due_at,
-            project_hint.map(str::trim).filter(|s| !s.is_empty()),
+            &engram_storage::repo::todos::NewTodo {
+                id,
+                title,
+                body: body.trim(),
+                priority,
+                tags,
+                due_at,
+                project_hint: project_hint.map(str::trim).filter(|s| !s.is_empty()),
+            },
         )
         .await?;
         self.get(id).await
@@ -198,13 +200,15 @@ impl TodoService {
         let n = repo::update(
             &self.pool,
             id,
-            title,
-            body,
-            priority,
-            status,
-            due_at,
-            project_hint,
-            tags,
+            &engram_storage::repo::todos::TodoPatch {
+                title,
+                body,
+                priority,
+                status,
+                due_at,
+                project_hint,
+                tags,
+            },
         )
         .await?;
         if n == 0 {

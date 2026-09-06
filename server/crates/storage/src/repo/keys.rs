@@ -182,3 +182,25 @@ pub async fn delete_other_admin_sessions(pool: &PgPool, keep_token_hash: &str) -
         .await?;
     Ok(res.rows_affected())
 }
+
+/// 编辑已有 API key：名称/scope 部分更新（None 不动）。
+/// scope 是安全边界——变更即时生效（bearer_auth 每请求查库），无需吊销重签。
+pub async fn update_api_key(
+    pool: &PgPool,
+    id: Uuid,
+    name: Option<&str>,
+    scopes: Option<&[String]>,
+) -> StoreResult<u64> {
+    let res = sqlx::query(
+        "UPDATE api_keys SET \
+           name = COALESCE($2, name), \
+           scopes = COALESCE($3::jsonb, scopes) \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(scopes)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}

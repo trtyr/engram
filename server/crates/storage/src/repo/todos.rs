@@ -6,43 +6,27 @@ use uuid::Uuid;
 use crate::PgPool;
 use crate::error::StoreResult;
 
-/// 待办行（sqlx FromRow 由调用方按需 derive；此处返回元组避免重复结构体）。
-pub type TodoTuple = (
-    Uuid,
-    String,
-    String,
-    String,
-    String,
-    Vec<String>,
-    Option<DateTime<Utc>>,
-    Option<String>,
-    Option<DateTime<Utc>>,
-    DateTime<Utc>,
-    DateTime<Utc>,
-);
+pub struct NewTodo<'a> {
+    pub id: Uuid,
+    pub title: &'a str,
+    pub body: &'a str,
+    pub priority: &'a str,
+    pub tags: &'a [String],
+    pub due_at: Option<DateTime<Utc>>,
+    pub project_hint: Option<&'a str>,
+}
 
-const COLS: &str = "id, title, body, status, priority, tags, due_at, project_hint, done_at, created_at, updated_at";
-
-pub async fn insert(
-    pool: &PgPool,
-    id: Uuid,
-    title: &str,
-    body: &str,
-    priority: &str,
-    tags: &[String],
-    due_at: Option<DateTime<Utc>>,
-    project_hint: Option<&str>,
-) -> StoreResult<()> {
+pub async fn insert(pool: &PgPool, t: &NewTodo<'_>) -> StoreResult<()> {
     sqlx::query(
         "INSERT INTO todos (id, title, body, status, priority, tags, due_at, project_hint)          VALUES ($1, $2, $3, 'open', $4, $5, $6, $7)",
     )
-    .bind(id)
-    .bind(title)
-    .bind(body)
-    .bind(priority)
-    .bind(tags)
-    .bind(due_at)
-    .bind(project_hint)
+    .bind(t.id)
+    .bind(t.title)
+    .bind(t.body)
+    .bind(t.priority)
+    .bind(t.tags)
+    .bind(t.due_at)
+    .bind(t.project_hint)
     .execute(pool)
     .await?;
     Ok(())
@@ -79,28 +63,28 @@ pub async fn get(pool: &PgPool, id: Uuid) -> StoreResult<Option<TodoTuple>> {
 }
 
 /// 更新：COALESCE 部分更新（None 不动）；status 变更时同步 done_at。
-pub async fn update(
-    pool: &PgPool,
-    id: Uuid,
-    title: Option<&str>,
-    body: Option<&str>,
-    priority: Option<&str>,
-    status: Option<&str>,
-    due_at: Option<Option<DateTime<Utc>>>,
-    project_hint: Option<Option<&str>>,
-    tags: Option<&[String]>,
-) -> StoreResult<u64> {
+pub struct TodoPatch<'a> {
+    pub title: Option<&'a str>,
+    pub body: Option<&'a str>,
+    pub priority: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub due_at: Option<Option<DateTime<Utc>>>,
+    pub project_hint: Option<Option<&'a str>>,
+    pub tags: Option<&'a [String]>,
+}
+
+pub async fn update(pool: &PgPool, id: Uuid, p: &TodoPatch<'_>) -> StoreResult<u64> {
     let res = sqlx::query(
         "UPDATE todos SET             title = COALESCE($2, title),             body = COALESCE($3, body),             priority = COALESCE($4, priority),             status = COALESCE($5, status),             due_at = COALESCE($6, due_at),             project_hint = COALESCE($7, project_hint),             tags = COALESCE($8::text[], tags),             done_at = CASE WHEN $5 = 'done' THEN now() WHEN $5 = 'open' THEN NULL ELSE done_at END,             updated_at = now()          WHERE id = $1",
     )
     .bind(id)
-    .bind(title)
-    .bind(body)
-    .bind(priority)
-    .bind(status)
-    .bind(due_at)
-    .bind(project_hint)
-    .bind(tags)
+    .bind(p.title)
+    .bind(p.body)
+    .bind(p.priority)
+    .bind(p.status)
+    .bind(p.due_at)
+    .bind(p.project_hint)
+    .bind(p.tags)
     .execute(pool)
     .await?;
     Ok(res.rows_affected())
@@ -160,3 +144,18 @@ pub async fn search_open(
     .await?;
     Ok(rows)
 }
+
+/// 列表/单查的行类型。
+pub type TodoTuple = (
+    Uuid,
+    String,
+    String,
+    String,
+    String,
+    Vec<String>,
+    Option<DateTime<Utc>>,
+    Option<String>,
+    Option<DateTime<Utc>>,
+    DateTime<Utc>,
+    DateTime<Utc>,
+);
