@@ -816,8 +816,7 @@ function Keys() {
                 onChange={() => toggleScope(s)}
                 label={s}
               >
-                <span className="font-mono text-xs">{s}</span>
-                <span className="text-muted-foreground">{label}</span>
+                {label}
               </Checkbox>
             ))}
           </div>
@@ -878,7 +877,9 @@ function Keys() {
                     </td>
                     <td className={`${tableCls.td} font-medium`}>{k.name}</td>
                     <td className={`${tableCls.td} font-mono`}>{k.key_prefix}…</td>
-                    <td className={`${tableCls.td} font-mono text-xs text-muted-foreground`}>{k.scopes.join(', ')}</td>
+                    <td className={`${tableCls.td} text-xs text-muted-foreground`}>
+                      {k.scopes.map((s) => SCOPE_LABELS[s] ?? s).join('、')}
+                    </td>
                     <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(k.created_at)}</td>
                     <td className={`${tableCls.td} text-muted-foreground`}>
                       {k.last_used_at ? fmtTime(k.last_used_at) : '—'}
