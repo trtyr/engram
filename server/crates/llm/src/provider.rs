@@ -552,6 +552,9 @@ pub async fn fetch_model_ids(
     base_url: &str,
     api_key: &str,
 ) -> Result<Vec<String>, crate::types::LlmError> {
+    // 粘贴的地址/密钥常带尾随空白或换行——header 值被污染会直接 401
+    let base_url = base_url.trim();
+    let api_key = api_key.trim();
     use crate::types::LlmError;
     let base = base_url.trim_end_matches('/');
     // 双路径回退：用户填的 base_url 可能不带 /v1（如 https://api.xx.com），
@@ -570,7 +573,7 @@ pub async fn fetch_model_ids(
     let resp = if resp.status() == reqwest::StatusCode::NOT_FOUND && !base.ends_with("/v1") {
         // 404 回退：试 {base}/v1/models
         client
-            .get(&format!("{base}/v1/models"))
+            .get(format!("{base}/v1/models"))
             .header("Authorization", format!("Bearer {api_key}"))
             .send()
             .await
@@ -580,9 +583,16 @@ pub async fn fetch_model_ids(
     };
     let status = resp.status();
     if !status.is_success() {
+        // 按状态分类，避免误导（401 是 Key 错误，不是端点不支持）
+        let hint = match status.as_u16() {
+            401 | 403 => "认证失败——请检查 API Key 是否正确",
+            404 => "供应商可能不支持 /models 列表——请手动输入模型 ID",
+            _ => "供应商返回错误——请稍后重试或手动输入模型 ID",
+        };
         return Err(LlmError::Permanent(format!(
-            "HTTP {}——供应商可能不支持 /models 列表，请手动输入模型 ID",
-            status.as_u16()
+            "HTTP {}——{}",
+            status.as_u16(),
+            hint
         )));
     }
     let v: serde_json::Value = resp

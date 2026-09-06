@@ -502,7 +502,7 @@ function Providers() {
                   try {
                     const r = await api.post<{ models: string[] }>('/settings/llm/providers/models', {
                       base_url: form.base_url,
-                      api_key: form.api_key || undefined,
+                      api_key: form.api_key.trim() || undefined,
                       provider_id: editingId ?? undefined,
                     })
                     setModelOptions(r.models)
