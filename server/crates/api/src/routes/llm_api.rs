@@ -819,19 +819,7 @@ pub async fn list_api_keys(
 ) -> Result<Json<Vec<ApiKeyDto>>, ApiError> {
     require_admin(&principal)?;
     let rows = keys_repo::list_api_keys(&state.pool).await?;
-    Ok(Json(
-        rows.into_iter()
-            .map(|r| ApiKeyDto {
-                id: r.id,
-                name: r.name,
-                key_prefix: r.key_prefix,
-                scopes: r.scopes,
-                created_at: r.created_at,
-                last_used_at: r.last_used_at,
-                revoked_at: r.revoked_at,
-            })
-            .collect(),
-    ))
+    Ok(Json(rows.into_iter().map(key_dto).collect()))
 }
 
 /// 删除 API key（物理删除，不留记录）。
@@ -857,6 +845,69 @@ pub struct BatchRevokeRequest {
 #[derive(Serialize, ToSchema)]
 pub struct BatchRevokeResult {
     pub revoked: usize,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateApiKeyRequest {
+    /// 新名称（不传保持不变）
+    pub name: Option<String>,
+    /// 新 scope 全量集合（不传保持不变；传 [] 即清空全部权限）
+    pub scopes: Option<Vec<String>>,
+}
+
+fn key_dto(r: engram_storage::models::keys::ApiKeyRow) -> ApiKeyDto {
+    ApiKeyDto {
+        id: r.id,
+        name: r.name,
+        key_prefix: r.key_prefix,
+        scopes: r.scopes,
+        created_at: r.created_at,
+        last_used_at: r.last_used_at,
+        revoked_at: r.revoked_at,
+    }
+}
+
+/// 编辑已有 API key：改名 / 调整 scope（全量替换，即时生效——bearer 每请求查库，无需吊销重签）。
+#[utoipa::path(put, path = "/settings/api-keys/{id}",
+    request_body = UpdateApiKeyRequest,
+    responses(
+        (status = 200, body = ApiKeyDto),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)))]
+pub async fn update_api_key(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateApiKeyRequest>,
+) -> Result<Json<ApiKeyDto>, ApiError> {
+    require_admin(&principal)?;
+    if let Some(name) = req.name.as_deref() {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 64 {
+            return Err(ApiError::BadRequest("名称需 1~64 字符".into()));
+        }
+    }
+    if let Some(scopes) = &req.scopes {
+        for s in scopes {
+            if !crate::auth::SCOPES.contains(&s.as_str()) {
+                return Err(ApiError::BadRequest(format!("未知 scope: {s}")));
+            }
+        }
+    }
+    let n = keys_repo::update_api_key(
+        &state.pool,
+        id,
+        req.name.as_deref().map(str::trim),
+        req.scopes.as_deref(),
+    )
+    .await?;
+    if n == 0 {
+        return Err(ApiError::NotFound(format!("API key {id} 不存在")));
+    }
+    let row = keys_repo::get_api_key(&state.pool, id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("API key {id} 不存在")))?;
+    Ok(Json(key_dto(row)))
 }
 
 /// 批量删除 API key（物理删除，返回实际删除数）。

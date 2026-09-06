@@ -194,13 +194,25 @@ pub async fn update_api_key(
     let res = sqlx::query(
         "UPDATE api_keys SET \
            name = COALESCE($2, name), \
-           scopes = COALESCE($3::jsonb, scopes) \
+           scopes = COALESCE($3, scopes) \
          WHERE id = $1",
     )
     .bind(id)
     .bind(name)
-    .bind(scopes)
+    .bind(scopes.map(sqlx::types::Json))
     .execute(pool)
     .await?;
     Ok(res.rows_affected())
+}
+
+/// 按 id 查 key（编辑后回显用；永不含完整 key / hash）。
+pub async fn get_api_key(pool: &PgPool, id: Uuid) -> StoreResult<Option<ApiKeyRow>> {
+    let row: Option<ApiKeyRow> = sqlx::query_as(
+        "SELECT id, name, key_prefix, scopes, created_at, last_used_at, revoked_at \
+         FROM api_keys WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
 }

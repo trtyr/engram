@@ -766,6 +766,11 @@ function Keys() {
   const [name, setName] = useState('')
   const [scopes, setScopes] = useState<Set<string>>(new Set(['memory']))
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [editing, setEditing] = useState<ApiKey | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editScopes, setEditScopes] = useState<Set<string>>(new Set())
+  const [editBusy, setEditBusy] = useState(false)
+  const [editMsg, setEditMsg] = useState('')
   const load = () => api.get<ApiKey[]>('/settings/api-keys').then(setRows).catch(() => {})
   const active = rows?.filter((k) => !k.revoked_at) ?? []
   const allSelected = active.length > 0 && active.every((k) => selected.has(k.id))
@@ -781,6 +786,35 @@ function Keys() {
     if (next.has(s)) next.delete(s)
     else next.add(s)
     setScopes(next)
+  }
+  const startEdit = (k: ApiKey) => {
+    setEditing(k)
+    setEditName(k.name)
+    setEditScopes(new Set(k.scopes))
+    setEditMsg('')
+  }
+  const toggleEditScope = (s: string) => {
+    const next = new Set(editScopes)
+    if (next.has(s)) next.delete(s)
+    else next.add(s)
+    setEditScopes(next)
+  }
+  const saveEdit = async () => {
+    if (!editing) return
+    setEditBusy(true)
+    setEditMsg('')
+    try {
+      await api.put<ApiKey>(`/settings/api-keys/${editing.id}`, {
+        name: editName.trim(),
+        scopes: [...editScopes],
+      })
+      setEditing(null)
+      load()
+    } catch (ex) {
+      setEditMsg(ex instanceof Error ? ex.message : '保存失败')
+    } finally {
+      setEditBusy(false)
+    }
   }
   useEffect(() => {
     load()
@@ -829,6 +863,48 @@ function Keys() {
         <Card className="border-success/30 bg-success/10 p-4">
           <p className="text-xs text-muted-foreground">新 key（只显示这一次，给 AI 客户端用）：</p>
           <code className="mt-1.5 block break-all font-mono text-sm">{newKey}</code>
+        </Card>
+      )}
+      {editing && (
+        <Card className="border-primary/30 p-4">
+          <h3 className="text-sm font-semibold">编辑密钥「{editing.name}」</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            scope 调整即时生效，无需重签；key 前缀 {editing.key_prefix}… 不变。
+          </p>
+          <form
+            className="mt-3 flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              saveEdit()
+            }}
+          >
+            <label htmlFor="edit-key-name" className="text-sm font-medium">名称</label>
+            <input
+              id="edit-key-name"
+              className={`${inputCls} w-48`}
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+            />
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2" role="group" aria-label="编辑 scope">
+              {Object.entries(SCOPE_LABELS).map(([s, label]) => (
+                <Checkbox
+                  key={s}
+                  checked={editScopes.has(s)}
+                  onChange={() => toggleEditScope(s)}
+                  label={s}
+                >
+                  {label}
+                </Checkbox>
+              ))}
+            </div>
+            <Button size="sm" type="submit" disabled={editBusy || editScopes.size === 0}>
+              保存
+            </Button>
+            <Button size="sm" variant="ghost" type="button" onClick={() => setEditing(null)}>
+              取消
+            </Button>
+          </form>
+          {editMsg && <p className="mt-2 text-xs text-destructive">{editMsg}</p>}
         </Card>
       )}
       {rows === null ? (
@@ -885,17 +961,23 @@ function Keys() {
                       {k.last_used_at ? fmtTime(k.last_used_at) : '—'}
                     </td>
                     <td className={`${tableCls.td} text-right`}>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={async () => {
-                          if (!confirm(`删除 key「${k.name}」？使用它的 AI 将立即失权。`)) return
-                          await api.post(`/settings/api-keys/${k.id}/revoke`)
-                          load()
-                        }}
-                      >
-                        删除
-                      </Button>
+                      <div className="flex justify-end gap-1.5">
+                        <Button variant="outline" size="sm" onClick={() => startEdit(k)}>
+                          编辑
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={async () => {
+                            if (!confirm(`删除 key「${k.name}」？使用它的 AI 将立即失权。`)) return
+                            await api.post(`/settings/api-keys/${k.id}/revoke`)
+                            if (editing?.id === k.id) setEditing(null)
+                            load()
+                          }}
+                        >
+                          删除
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

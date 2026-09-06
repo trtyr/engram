@@ -34,7 +34,7 @@ use utoipa::OpenApi;
         llm_api::update_provider, llm_api::delete_provider, llm_api::reencrypt_providers,
         llm_api::get_routing, llm_api::put_routing, llm_api::suggest_routing, llm_api::usage,
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
-        llm_api::batch_revoke_api_keys, llm_api::fetch_models,
+        llm_api::batch_revoke_api_keys, llm_api::update_api_key, llm_api::fetch_models,
         crate::mcp_admin::settings_mcp, crate::mcp_admin::settings_mcp_update,
         memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
         memory_api::erase_session, memory_api::append_session, memory_api::import_session, memory_api::void_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
@@ -150,6 +150,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/settings/api-keys",
             post(llm_api::create_api_key_handler).get(llm_api::list_api_keys),
+        )
+        .route(
+            "/settings/api-keys/{id}",
+            axum::routing::put(llm_api::update_api_key),
         )
         .route(
             "/settings/api-keys/{id}/revoke",

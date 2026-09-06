@@ -358,6 +358,168 @@ async fn deleted_api_key_gets_generic_401() {
     );
 }
 
+/// 编辑已有 API key：改名 + scope 全量替换（ABCD → AB / ABCDE 即此语义），即时生效无需重签。
+#[tokio::test]
+async fn api_key_edit_name_and_scopes() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // 建 key：memory + wiki
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::from(
+                    r#"{"name":"edit-me","scopes":["memory","wiki"]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let id = body["id"].as_str().unwrap().to_string();
+    let key = body["key"].as_str().unwrap().to_string();
+
+    let put = |app: &Router, id: &str, token: &str, body: &str| {
+        app.clone().oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/settings/api-keys/{id}"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+    };
+    let get_pages = |app: &Router, token: &str| {
+        app.clone().oneshot(
+            Request::builder()
+                .uri("/wiki/pages")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+    };
+
+    // 收权：memory+wiki → memory-only（明文 key 不变）
+    let resp = put(
+        &app,
+        &id,
+        &admin,
+        r#"{"name":"edited","scopes":["memory"]}"#,
+    )
+    .await
+    .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "编辑应成功");
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["name"], "edited");
+    assert_eq!(body["scopes"], serde_json::json!(["memory"]));
+
+    // 收权即时生效：wiki 域 403
+    let resp = get_pages(&app, &key).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN, "收权后 wiki 域应 403");
+
+    // 扩权：加回 wiki（AB → ABCDE）→ wiki 域 200
+    let resp = put(&app, &id, &admin, r#"{"scopes":["memory","wiki"]}"#)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = get_pages(&app, &key).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "扩权后 wiki 域应 200");
+
+    // 仅改名：scopes 保持不动
+    let resp = put(&app, &id, &admin, r#"{"name":"renamed"}"#)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["name"], "renamed");
+    assert_eq!(body["scopes"], serde_json::json!(["memory", "wiki"]));
+
+    // 非管理员（amk_ key）不可编辑 → 403
+    let resp = put(&app, &id, &key, r#"{"scopes":["memory"]}"#)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    // 未知 scope → 400；不存在的 id → 404
+    let resp = put(&app, &id, &admin, r#"{"scopes":["nope"]}"#)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let resp = put(&app, &Uuid::now_v7().to_string(), &admin, r#"{"name":"x"}"#)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+/// 浏览器硬刷新 /todos（Accept: text/html）→ SPA 页；JSON 客户端同路径照常认证（D-001 补遗）。
+#[tokio::test]
+async fn todos_spa_navigation_bypasses_auth() {
+    let (app, _pg) = app().await;
+
+    // 浏览器导航（无 Bearer、Accept: text/html）→ 回 SPA，绝不 401 JSON
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/todos")
+                .header("accept", "text/html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert_ne!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "SPA 导航绝不应 401"
+    );
+    assert!(
+        content_type.contains("text/html"),
+        "应回 SPA 页，实得 content-type: {content_type}"
+    );
+
+    // API 客户端（Accept: application/json，无凭证）→ 照常 401
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/todos")
+                .header("accept", "application/json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
 /// llm scope 的 amk_ key 可管 provider/路由/连通测试/用量（2026-08-31 方向：
 /// 除 amk_ 管理外平台能力全暴露给 AI）；api-keys 管理与 re-encrypt 仍仅管理员。
 #[tokio::test]
@@ -1326,6 +1488,7 @@ async fn openapi_snapshot() {
             "/search",
             "/settings/api-keys",
             "/settings/api-keys/batch-revoke",
+            "/settings/api-keys/{id}",
             "/settings/api-keys/{id}/revoke",
             "/settings/llm/providers",
             "/settings/llm/providers/models",
