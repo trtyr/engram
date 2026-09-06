@@ -361,9 +361,14 @@ pub async fn update_doc(
     let s = svc(&state);
     owned_doc(&s, id, doc_id).await?;
     Ok(Json(
-        s.update_doc(doc_id, &req.category, &req.title, &req.content)
-            .await
-            .map_err(pe)?,
+        s.update_doc(
+            doc_id,
+            Some(&req.category),
+            Some(&req.title),
+            Some(&req.content),
+        )
+        .await
+        .map_err(pe)?,
     ))
 }
 

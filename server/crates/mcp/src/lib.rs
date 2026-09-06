@@ -34,6 +34,7 @@ pub mod wiki;
 use axum::response::IntoResponse;
 use engram_core::auth::Principal;
 use engram_core::state::AppState;
+use engram_llm::provider::LlmProvider;
 
 /// 错误桥：把本模块的错误统一成 MCP ErrorData。
 pub(crate) fn mcp_err(code: ErrorCode, msg: impl Into<String>) -> rmcp::ErrorData {
@@ -91,6 +92,7 @@ fn tool_scope(name: &str) -> &'static str {
         Some("skills") => "skills",
         Some("wiki") => "wiki",
         Some("codegraph") => "codegraph",
+        Some("llm") => "llm",
         _ => "memory",
     }
 }
@@ -138,6 +140,21 @@ fn from_cg(e: engram_cg_bridge::CgError) -> rmcp::ErrorData {
         }
         other => rmcp::ErrorData::internal_error(other.to_string(), None),
     }
+}
+
+fn require_llm(principal: &Principal) -> Result<(), rmcp::ErrorData> {
+    if principal.has_scope("llm") {
+        Ok(())
+    } else {
+        Err(mcp_err(
+            ErrorCode::INVALID_REQUEST,
+            "缺少 llm scope——请用带 llm scope 的 amk_ key 连接 MCP",
+        ))
+    }
+}
+
+fn from_storage(e: engram_storage::StoreError) -> rmcp::ErrorData {
+    rmcp::ErrorData::internal_error(e.to_string(), None)
 }
 
 /// CodeGraph 桥（root 与 api 层同一约定：data_dir/codegraph）。
@@ -615,6 +632,16 @@ pub struct SkillsListParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct LlmNoParams {}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct LlmTestParams {
+    /// 供应商名（llm_providers 返回的 name）
+    #[schemars(description = "供应商名（llm_providers 返回的 name）。")]
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CgRegisterParams {
     /// 项目名（唯一，如 engram-server）
     #[schemars(description = "项目名（唯一，如 engram-server）。")]
@@ -949,7 +976,23 @@ impl EngramMcpServer {
             .list_sessions(lp.agent.as_deref(), cursor, lp.limit.unwrap_or(50))
             .await
             .map_err(from_memory)?;
-        ok_json(serde_json::to_value(&sessions).unwrap_or(serde_json::json!([])))
+        // D6：列表是浏览场景——正文截断为摘要（全文走 memory_get_session）
+        let mut rows = serde_json::to_value(&sessions).unwrap_or(serde_json::json!([]));
+        if let Some(arr) = rows.as_array_mut() {
+            for it in arr {
+                if let Some(turns) = it.get_mut("content").and_then(|c| c.as_array_mut()) {
+                    let total = turns.len();
+                    if total > 3 {
+                        turns.truncate(3);
+                        turns.push(serde_json::json!({
+                            "speaker": "system",
+                            "text": format!("…共 {total} 轮，其余 {} 轮见 memory_get_session", total - 3),
+                        }));
+                    }
+                }
+            }
+        }
+        ok_json(rows)
     }
 
     /// 读取一个 L0 原始会话全文（逐轮对话原文）。
@@ -1651,15 +1694,14 @@ impl EngramMcpServer {
         let dp = params.0;
         let id = Uuid::parse_str(&dp.doc_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "doc_id 不是合法 UUID"))?;
-        let current = self.svc_project().get_doc(id).await.map_err(from_project)?;
-        // 分类只在换分类时由 service 校验（保留被移除分类下的存量文档原地编辑能力）
+        // 部分更新直传 Option：SQL 层 COALESCE——并发各字段互不覆盖（D2 修复）
         let doc = self
             .svc_project()
             .update_doc(
                 id,
-                &dp.category.unwrap_or(current.category),
-                &dp.title.unwrap_or(current.title),
-                &dp.content.unwrap_or(current.content),
+                dp.category.as_deref(),
+                dp.title.as_deref(),
+                dp.content.as_deref(),
             )
             .await
             .map_err(from_project)?;
@@ -1981,6 +2023,12 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_codegraph(&p)?;
+        if params.0.target.trim().is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "target 不能为空——先用 kind=search 搜符号，再对具体符号做 callers/impact",
+            ));
+        }
         let kind = engram_cg_bridge::QueryKind::from_str_opt(&params.0.kind).ok_or_else(|| {
             mcp_err(
                 ErrorCode::INVALID_PARAMS,
@@ -1996,6 +2044,141 @@ impl EngramMcpServer {
             .await
             .map_err(from_cg)?;
         ok_json(v)
+    }
+
+    // ---------- LLM 配置域工具（llm scope；D14：AI 自助配置闭环的读+测半环） ----------
+
+    /// 列出 LLM 供应商（只读，永不含密钥）：名称/地址/模型/能力/是否默认。
+    ///
+    /// 何时用：写会话报「LLM 未配置」时先看有没有供应商；或配置前盘点现状。
+    /// 配置/修改走 Web UI 或 HTTP /settings/llm/*。
+    #[tool(
+        name = "llm_providers",
+        annotations(
+            title = "列出 LLM 供应商",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn llm_providers(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        _params: Parameters<LlmNoParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_llm(&p)?;
+        let rows = engram_storage::repo::llm::list_providers(&self.state.pool)
+            .await
+            .map_err(from_storage)?;
+        let rows: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|(id, name, base_url, model_id, capability, is_default)| {
+                serde_json::json!({
+                    "id": id, "name": name, "base_url": base_url,
+                    "model_id": model_id, "capability": capability, "is_default": is_default,
+                })
+            })
+            .collect();
+        ok_json(serde_json::json!({
+            "providers": rows,
+            "note": "无供应商或蒸馏失败时：请管理员在 Web UI「设置 → AI 功能」配置（写入不开放给 MCP，避免误配）",
+        }))
+    }
+
+    /// LLM 供应商连通测试：1-token 探测（chat）。
+    ///
+    /// 何时用：配置后确认可用；写会话报 LLM 错误时排查是否供应商侧问题。
+    #[tool(
+        name = "llm_provider_test",
+        annotations(
+            title = "测试 LLM 供应商连通",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn llm_provider_test(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<LlmTestParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_llm(&p)?;
+        let hex = self
+            .state
+            .master_key
+            .as_ref()
+            .map(|m| m.0.clone())
+            .ok_or_else(|| {
+                mcp_err(
+                    ErrorCode::INTERNAL_ERROR,
+                    "服务端未配置主密钥（AGENT_MEMORY_MASTER_KEY）——无法解密供应商密钥做连通测试",
+                )
+            })?;
+        let cipher = engram_llm::crypto::KeyCipher::from_hex_master(&hex)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+        let registry = engram_llm::provider::ProviderRegistry::new(self.state.pool.clone(), cipher);
+        // get 内部完成解密校验：能拿到 provider = 密钥可用
+        let (provider, model_id) = registry.get(&params.0.name).await.map_err(|e| {
+            mcp_err(
+                ErrorCode::RESOURCE_NOT_FOUND,
+                format!("供应商 {:?} 不存在或不可用：{}", params.0.name, e),
+            )
+        })?;
+        let req = engram_llm::types::ChatRequest {
+            model: model_id.clone(),
+            messages: vec![engram_llm::types::ChatMessage::user("ping")],
+            temperature: None,
+            json_mode: false,
+            max_tokens: Some(1),
+        };
+        match provider.chat(req).await {
+            Ok(r) => ok_json(serde_json::json!({
+                "name": params.0.name,
+                "ok": true,
+                "latency_ms": r.latency_ms,
+                "model": r.model,
+                "note": "连通正常（chat 1-token 探测）",
+            })),
+            Err(e) => ok_json(serde_json::json!({
+                "name": params.0.name,
+                "ok": false,
+                "error": e.to_string(),
+                "note": "供应商侧返回错误——检查密钥/额度/模型名",
+            })),
+        }
+    }
+
+    /// 注销代码图谱项目（删除注册与索引；不可逆——本地路径项目的源码不动）。
+    ///
+    /// 何时用：项目已完结/注册错了。按 name 或 id 注销。
+    #[tool(
+        name = "codegraph_delete",
+        annotations(
+            title = "注销图谱项目",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn codegraph_delete(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<CgNameParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_codegraph(&p)?;
+        let id = cg_resolve(&self.state, &params.0.project).await?;
+        let workdir_removed = cg_svc(&self.state).delete(id).await.map_err(from_cg)?;
+        ok_json(serde_json::json!({
+            "deleted": params.0.project,
+            "workdir_removed": workdir_removed,
+            "note": "git clone 的工作目录已一并删除；本地路径项目仅移除注册，源码未动",
+        }))
     }
 
     /// 沉淀新技能：把本次对话中验证有效的做法固化成可复用指令包。
@@ -2441,6 +2624,33 @@ impl EngramMcpServer {
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 删除 Wiki 页面（不可逆——连带清理双向 wikilinks）。
+    ///
+    /// 何时用：页面作废/测试数据清理。只对明确表达的删除请求使用。
+    #[tool(
+        name = "wiki_delete_page",
+        annotations(
+            title = "删除 Wiki 页面",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_delete_page(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiDeletePageParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let deleted = wiki::svc(&self.state)
+            .delete_page(&params.0.slug)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::json!({ "deleted": params.0.slug, "ok": deleted }))
     }
 }
 

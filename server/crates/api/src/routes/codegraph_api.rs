@@ -176,6 +176,11 @@ pub async fn query(
     require_cg(&principal)?;
     let kind = QueryKind::from_str_opt(&req.kind)
         .ok_or_else(|| ApiError::BadRequest(format!("未知查询类型: {}", req.kind)))?;
+    if req.target.trim().is_empty() {
+        return Err(ApiError::BadRequest(
+            "target 不能为空——先用 kind=search 搜符号，再对具体符号做 callers/impact".into(),
+        ));
+    }
     let v = bridge(&state)
         .query(id, kind, &req.target, req.depth)
         .await

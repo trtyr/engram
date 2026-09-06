@@ -342,16 +342,19 @@ impl ProjectService {
         self.get_doc(id).await
     }
 
+    /// 部分更新：None 字段保持原值（并发安全——SQL 层 COALESCE，无读-改-写窗口）。
     pub async fn update_doc(
         &self,
         id: Uuid,
-        category: &str,
-        title: &str,
-        content: &str,
+        category: Option<&str>,
+        title: Option<&str>,
+        content: Option<&str>,
     ) -> Result<ProjectDocDto, ProjectError> {
         // 分类只在「换到别的分类」时校验——分类被项目方移除后，存量文档仍可原地编辑
         let current = self.get_doc(id).await?;
-        if category != current.category {
+        if let Some(category) = category
+            && category != current.category
+        {
             let project = self.get_project_bare(current.project_id).await?;
             if !project.categories.iter().any(|c| c == category) {
                 return Err(Self::category_error(category, &project.categories));

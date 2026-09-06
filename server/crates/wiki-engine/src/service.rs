@@ -213,26 +213,29 @@ impl WikiService {
         via: Option<&str>,
     ) -> Result<WikiPageDto, WikiError> {
         if !crate::markup::is_valid_slug(slug) {
-            return Err(WikiError::BadRequest("slug 非法".into()));
+            return Err(WikiError::BadRequest(
+                "slug 非法：仅允许字母/数字/-/_/·，≤80 字符，不含空格与路径分隔符".into(),
+            ));
         }
         // 新建时的 frontmatter：title/sources + via（若有）
         let mut fm_insert = serde_json::json!({"title": title, "sources": []});
         if let Some(v) = via {
             fm_insert["via"] = serde_json::json!(v);
         }
-        // 更新时的 via 合并块：无 via 则空对象（保持原 frontmatter 不动）
-        let fm_merge = via
-            .map(|v| serde_json::json!({ "via": v }).to_string())
-            .unwrap_or_else(|| "{}".into());
+        // 更新时的 frontmatter 合并块：title 恒同步（graph 节点标题依赖，D8）+
+        // via（若有）——|| 合并只覆盖指定键，sources 等其余键保留
+        let mut fm_merge_obj = serde_json::json!({ "title": title });
+        if let Some(v) = via {
+            fm_merge_obj["via"] = serde_json::json!(v);
+        }
+        let fm_merge = fm_merge_obj.to_string();
         let row = sqlx::query_as::<_, WikiPageDto>(
             "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
              VALUES ($1, $2, $3, 'concept', COALESCE($4, ''), $5, $6::jsonb, 'human', 1, to_tsvector('simple', $7)) \
              ON CONFLICT (slug) DO UPDATE SET \
                 title = $3, content = $5, origin = 'human', \
                 folder = COALESCE($4, wiki_pages.folder), \
-                frontmatter = CASE WHEN $8::jsonb = '{}'::jsonb \
-                    THEN wiki_pages.frontmatter \
-                    ELSE wiki_pages.frontmatter || $8::jsonb END, \
+                frontmatter = wiki_pages.frontmatter || $8::jsonb, \
                 version = wiki_pages.version + 1, updated_at = now(), \
                 tsv = to_tsvector('simple', $7) \
              RETURNING *",
@@ -247,6 +250,24 @@ impl WikiService {
         .bind(fm_merge)
         .fetch_one(&self.pool)
         .await?;
+
+        // D4：落页后重算本页 wikilinks——graph/孤页检测与 lint 同源（此前
+        // put_page 不写 wiki_links，AI 写页的互链对图与 lint 不可见）
+        sqlx::query("DELETE FROM wiki_links WHERE from_slug = $1")
+            .bind(slug)
+            .execute(&self.pool)
+            .await?;
+        for target in crate::markup::extract_wikilinks(content) {
+            sqlx::query(
+                "INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, 3.0) \
+                 ON CONFLICT (from_slug, to_slug) DO NOTHING",
+            )
+            .bind(slug)
+            .bind(&target)
+            .execute(&self.pool)
+            .await
+            .ok();
+        }
         Ok(row)
     }
 
@@ -489,10 +510,13 @@ impl WikiService {
         // W-13（2026-09-04）：同 title 已存档 → 幂等跳过（契约「重复→skipped」），
         // 不再落页 version+1 + 再摄取烧 LLM。
         let slug = format!("query-{title}");
-        let exists: Option<Uuid> = sqlx::query_scalar("SELECT id FROM wiki_pages WHERE slug = $1")
-            .bind(&slug)
-            .fetch_optional(&self.pool)
-            .await?;
+        // D5：slug 或 title 任一命中即幂等跳过（此前仅 slug 检查，title 尾随差异漏网 → 覆盖旧答案）
+        let exists: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM wiki_pages WHERE slug = $1 OR title = $2")
+                .bind(&slug)
+                .bind(title)
+                .fetch_optional(&self.pool)
+                .await?;
         if exists.is_some() {
             return Ok(true);
         }
@@ -506,7 +530,7 @@ impl WikiService {
         sqlx::query(
             "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
              VALUES ($1, $2, $3, 'queries', '查询', $4, $5, 'human', 1, to_tsvector('simple', $6)) \
-             ON CONFLICT (slug) DO UPDATE SET content = $4, version = wiki_pages.version + 1, updated_at = now()",
+             ON CONFLICT (slug) DO NOTHING",
         )
         .bind(Uuid::now_v7())
         .bind(&slug)
@@ -520,6 +544,24 @@ impl WikiService {
         // 2) 再摄取（实体概念网络吸收本次问答内容）
         let (_, skipped) = crate::ingest::enqueue_ingest(&self.queue, title, &content).await?;
         Ok(skipped)
+    }
+
+    /// 删除页面（D10：MCP wiki_delete_page / HTTP DELETE /wiki/pages/{slug}）——
+    /// 连带清理双向 wikilinks（图与孤页检测不留幽灵边）。
+    pub async fn delete_page(&self, slug: &str) -> Result<bool, WikiError> {
+        let n = sqlx::query("DELETE FROM wiki_pages WHERE slug = $1")
+            .bind(slug)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        if n == 0 {
+            return Err(WikiError::NotFound(format!("页面 {slug} 不存在")));
+        }
+        sqlx::query("DELETE FROM wiki_links WHERE from_slug = $1 OR to_slug = $1")
+            .bind(slug)
+            .execute(&self.pool)
+            .await?;
+        Ok(true)
     }
 
     // ---------- 级联删除 ----------

@@ -9,7 +9,7 @@
 [![Rust](https://img.shields.io/badge/Rust-axum-DEA584?style=for-the-badge&logo=rust&logoColor=white)](server/)
 [![React](https://img.shields.io/badge/React_19-SPA-61DAFB?style=for-the-badge&logo=react&logoColor=black)](web/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_17-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](server/crates/storage/)
-[![MCP](https://img.shields.io/badge/MCP-五域_45_工具-8A2BE2?style=for-the-badge)](#-mcp-五域工具面)
+[![MCP](https://img.shields.io/badge/MCP-五域_49_工具-8A2BE2?style=for-the-badge)](#-mcp-五域工具面)
 [![Tests](https://img.shields.io/badge/tests-248_cargo_·_59_vitest-16C784?style=for-the-badge)](#-门禁)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=for-the-badge)](LICENSE)
 
@@ -98,15 +98,16 @@ flowchart LR
 ## 🔌 MCP 五域工具面
 
 engram-server 内置 MCP 服务端（官方 Rust SDK `rmcp`，Streamable HTTP）。
-**一个 `/mcp` 端点，五个域 45 个工具**，按 key 的 scope 分权——AI 看到的工具面与它实际能调用的完全一致：
+**一个 `/mcp` 端点，五个域 49 个工具**，按 key 的 scope 分权——AI 看到的工具面与它实际能调用的完全一致：
 
 | 域 | scope | 工具 |
 |:--|:--|:--|
 | 💬 用户记忆 | `memory` | `memory_context`（冷启动上下文包）· `search` · `list_atoms` · `list_sessions` · `get_session` · `write_session` · `append_session` · `forget` · `entities` |
 | 🧩 项目记忆 | `project` | `project_list/get/create/update/delete/…` · `location_*` · `doc_add/get/search/update/delete`（共 15） |
 | 🪄 技能 | `skills` | `skills_list/get/create/update/delete/import` + `skills_file_get/put`（附属文件按路径读写，脚本由客户端本地执行） |
+| 🧩 LLM 配置 | `llm` | `llm_providers`（供应商只读清单）· `llm_provider_test`（1-token 连通探测）——写入仍走 Web/HTTP，避免 AI 误配 |
 | 🕸️ Wiki | `wiki` | `wiki_search`（混合检索+purpose）· `list_pages` · `get_page` · `write_page` · `ingest` · `archive_query` · `graph` · `lint` |
-| 🗺️ 代码图谱 | `codegraph` | `codegraph_list`（动态项目清单）· `register` · `index` · `sync`（三者走任务队列）· `query`（search/explore/node/callers/callees/impact） |
+| 🗺️ 代码图谱 | `codegraph` | `codegraph_list`（动态项目清单）· `register` · `index` · `sync`（三者走任务队列）· `query` · `delete` |
 
 控制台「MCP」页 = 服务总开关（关闭即整体 503）+ 逐域逐工具开关（停用即对 AI 隐身 + 调用拒绝）；
 MCP 专用密钥在「设置 → API 密钥」签发，scope 选择器按需勾选。

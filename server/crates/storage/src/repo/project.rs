@@ -267,15 +267,18 @@ pub async fn insert_doc(
     Ok(res.rows_affected())
 }
 
+/// 部分更新（COALESCE）：None 字段保持原值——消除读-改-写并发丢字段窗口
+/// （MCP 黑盒测试 D2：两个并发 update 各改不同字段时后者曾整行覆盖前者）。
 pub async fn update_doc(
     pool: &PgPool,
     id: Uuid,
-    category: &str,
-    title: &str,
-    content: &str,
+    category: Option<&str>,
+    title: Option<&str>,
+    content: Option<&str>,
 ) -> StoreResult<u64> {
     let res = sqlx::query(
-        "UPDATE project_docs SET category = $2, title = $3, content = $4, updated_at = now() \
+        "UPDATE project_docs SET category = COALESCE($2, category), title = COALESCE($3, title), \
+         content = COALESCE($4, content), updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)

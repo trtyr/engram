@@ -90,12 +90,9 @@ pub fn parse_frontmatter(content: &str) -> (FrontmatterMeta, String) {
         return (meta, content.to_string());
     };
     let fm_block = &body_start[..close_rel];
-    // 闭合行之后的内容是正文（跳过闭合行的行尾）
+    // 闭合行之后的内容是正文（跳过闭合行的行尾 + 全部前导空行——不残留进正文）
     let after = &body_start[close_rel + 4..];
-    let body = after
-        .strip_prefix('\n')
-        .or_else(|| after.strip_prefix("\r\n"))
-        .unwrap_or(after);
+    let body = after.trim_start_matches(['\n', '\r']);
 
     let lines: Vec<&str> = fm_block.lines().collect();
     let mut i = 0;
@@ -688,9 +685,11 @@ impl SkillsService {
         if p.len() > 200 {
             return Err(SkillsError::BadRequest("path 过长（>200 字符）".into()));
         }
-        if p.starts_with('/') || p.contains('\\') {
+        if p.starts_with('/') || p.contains('\\') || p.contains(':') {
             return Err(SkillsError::BadRequest(
-                "path 必须是相对路径且用 / 分隔（如 scripts/run.py、references/api.md）".into(),
+                "path 必须是相对路径且用 / 分隔（如 scripts/run.py、references/api.md）；\\
+                 不允许盘符/冒号（Windows 备用数据流风险）"
+                    .into(),
             ));
         }
         if p.split('/')

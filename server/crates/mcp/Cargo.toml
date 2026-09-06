@@ -9,6 +9,7 @@ license.workspace = true
 engram-cg-bridge.workspace = true
 engram-core.workspace = true
 engram-jobs.workspace = true
+engram-llm.workspace = true
 engram-search.workspace = true
 engram-storage.workspace = true
 

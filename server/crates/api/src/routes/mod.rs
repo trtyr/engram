@@ -273,7 +273,9 @@ pub fn router(state: AppState) -> Router {
         .route("/wiki/pages", get(wiki_api::list_pages))
         .route(
             "/wiki/pages/{slug}",
-            get(wiki_api::get_page).put(wiki_api::put_page),
+            get(wiki_api::get_page)
+                .put(wiki_api::put_page)
+                .delete(wiki_api::delete_page),
         )
         .route("/wiki/graph", get(wiki_api::graph))
         .route("/wiki/lint", post(wiki_api::lint))

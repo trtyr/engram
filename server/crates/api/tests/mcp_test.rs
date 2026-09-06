@@ -941,6 +941,7 @@ async fn wiki_mcp_tools_listed() {
         "wiki_archive_query",
         "wiki_graph",
         "wiki_lint",
+        "wiki_delete_page",
     ] {
         assert!(
             names.contains(&expected),
@@ -981,7 +982,7 @@ async fn wiki_mcp_tools_listed() {
         .iter()
         .filter(|t| t["domain"] == "wiki")
         .collect();
-    assert_eq!(wiki_tools.len(), 8, "管理台应展示 8 个 wiki 工具");
+    assert_eq!(wiki_tools.len(), 9, "管理台应展示 9 个 wiki 工具");
     // instructions 应覆盖两个域
     assert!(
         info["instructions"]

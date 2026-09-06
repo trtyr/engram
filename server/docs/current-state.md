@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-仓库收敛为单分支。Rust 侧全貌：**11 crates** 五域服务（memory / wiki / codegraph / project / skills）+ **五域 MCP 适配器**（独立 crate engram-mcp；`/mcp` 承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 45 工具，scope 分权 + 管理台开关，tools/list 按 key scope 过滤 + 动态资产清单织入描述）+ 持久化收口 `engram-storage::repo`（core/api src 层零 sqlx，双适配器共用 core 服务）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **248** 测试 / **33 迁移** / **31 业务表**（+admin_account 单行管理员账号）。
+仓库收敛为单分支。Rust 侧全貌：**11 crates** 五域服务（memory / wiki / codegraph / project / skills）+ **五域 MCP 适配器**（独立 crate engram-mcp；`/mcp` 承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 45 工具，scope 分权 + 管理台开关，tools/list 按 key scope 过滤 + 动态资产清单织入描述）+ 持久化收口 `engram-storage::repo`（core/api src 层零 sqlx，双适配器共用 core 服务）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **248** 测试 / **33 迁移** / **31 业务表**（+admin_account 单行管理员账号）。MCP 黑盒测试报告（zcode，90+ 调用）14 缺陷修复：D1 蒸馏未配 LLM 显式报错、D2 doc_update COALESCE 部分更新、D3 技能文件路径冒号拒绝、D4/D8 wiki 写页重算 links+frontmatter.title 同步、D5 archive 双保险幂等、D6 sessions 列表摘要、D7 frontmatter 块列表 tags、D9/D10 codegraph/wiki 删除工具、D13 空 target 拒绝、D14 MCP +2 llm 工具（45→49）。
 
 ## 当日验证矩阵
 

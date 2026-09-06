@@ -407,3 +407,16 @@ pub async fn reset_insights(
     svc(&state).insight_reset().await.map_err(we)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// 删除页面（连带清理双向 wikilinks；不可逆）。
+#[utoipa::path(delete, path = "/wiki/pages/{slug}",
+    responses((status = 204), (status = 404, body = crate::error::ErrorEnvelope)))]
+pub async fn delete_page(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+) -> Result<axum::http::StatusCode, ApiError> {
+    require_wiki(&principal)?;
+    svc(&state).delete_page(&slug).await.map_err(we)?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}

@@ -898,6 +898,7 @@ dependencies = [
  "engram-cg-bridge",
  "engram-core",
  "engram-jobs",
+ "engram-llm",
  "engram-search",
  "engram-storage",
  "rmcp",

@@ -48,7 +48,7 @@ fn me(e: MemoryError) -> ApiError {
         MemoryError::NotFound(m) => ApiError::NotFound(m),
         MemoryError::BadRequest(m) => ApiError::BadRequest(m),
         MemoryError::Storage(m) => ApiError::Unavailable(m),
-        MemoryError::LlmNotConfigured(m) => ApiError::Unavailable(m),
+        MemoryError::LlmNotConfigured(m) => ApiError::BadRequest(format!("LLM 未配置——{m}")),
     }
 }
 

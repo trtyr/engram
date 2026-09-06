@@ -118,3 +118,11 @@ pub struct WikiArchiveQueryParams {
     #[schemars(description = "最终回答（值得沉淀的版本，不要贴过程流水账）。")]
     pub answer: String,
 }
+
+/// 删除 Wiki 页面参数。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiDeletePageParams {
+    /// 页面 slug（wiki_list_pages 返回的 slug）
+    #[schemars(description = "要删除的页面 slug（wiki_list_pages 返回）。不可逆。")]
+    pub slug: String,
+}

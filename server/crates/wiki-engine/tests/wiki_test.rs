@@ -415,8 +415,9 @@ async fn lint_reports_dead_links_and_orphans() {
     wiki.put_page("引用页", "R", "产品是 [[Engram]]。", None, None)
         .await
         .unwrap();
-    // 手动建链接表（put_page 不自动建边——模拟 ingest 后状态）
-    sqlx::query("INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ('正常页A','正常页B',3.0), ('正常页B','正常页A',3.0), ('带死链','不存在的页面',3.0)")
+    // 手动建链接表（put_page 现已自动重算本页 wikilinks；此处补齐测试所需的其他边，
+    // ON CONFLICT 跳过与自动重算重叠的边）
+    sqlx::query("INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ('正常页A','正常页B',3.0), ('正常页B','正常页A',3.0), ('带死链','不存在的页面',3.0) ON CONFLICT (from_slug, to_slug) DO NOTHING")
         .execute(&pool)
         .await
         .unwrap();
