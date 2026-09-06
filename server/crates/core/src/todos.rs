@@ -43,20 +43,6 @@ pub struct TodoDto {
     pub updated_at: DateTime<Utc>,
 }
 
-type Tuple = (
-    Uuid,
-    String,
-    String,
-    String,
-    String,
-    Vec<String>,
-    Option<DateTime<Utc>>,
-    Option<String>,
-    Option<DateTime<Utc>>,
-    DateTime<Utc>,
-    DateTime<Utc>,
-);
-
 fn to_dto(t: engram_storage::repo::todos::TodoTuple) -> TodoDto {
     TodoDto {
         id: t.0,
@@ -169,6 +155,7 @@ impl TodoService {
     }
 
     /// 更新（部分字段，None 不动）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
         id: Uuid,
