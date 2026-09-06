@@ -36,7 +36,7 @@ impl From<StoreError> for ProjectError {
 
 /// 类型模板：type → 预设分类列表（0005：开发四分类 / 调研六分类）。
 pub const PROJECT_TYPES: &[(&str, &[&str])] = &[
-    ("dev", &["后端", "前端", "测试", "规划"]),
+    ("dev", &["后端", "前端", "测试", "部署", "规划"]),
     (
         "research",
         &["待查", "线索", "资料", "结论", "疑点", "证伪"],
