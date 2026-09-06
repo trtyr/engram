@@ -554,6 +554,8 @@ pub async fn fetch_model_ids(
 ) -> Result<Vec<String>, crate::types::LlmError> {
     use crate::types::LlmError;
     let base = base_url.trim_end_matches('/');
+    // 双路径回退：用户填的 base_url 可能不带 /v1（如 https://api.xx.com），
+    // 先试 {base}/models，404 再试 {base}/v1/models
     let url = format!("{base}/models");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -565,6 +567,17 @@ pub async fn fetch_model_ids(
         .send()
         .await
         .map_err(|e| LlmError::Permanent(format!("连接失败: {e}")))?;
+    let resp = if resp.status() == reqwest::StatusCode::NOT_FOUND && !base.ends_with("/v1") {
+        // 404 回退：试 {base}/v1/models
+        client
+            .get(&format!("{base}/v1/models"))
+            .header("Authorization", format!("Bearer {api_key}"))
+            .send()
+            .await
+            .map_err(|e| LlmError::Permanent(format!("连接失败: {e}")))?
+    } else {
+        resp
+    };
     let status = resp.status();
     if !status.is_success() {
         return Err(LlmError::Permanent(format!(

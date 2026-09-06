@@ -413,6 +413,7 @@ function Providers() {
   const [testMsg, setTestMsg] = useState<Record<string, string>>({})
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
+  const [modelErr, setModelErr] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const load = () => api.get<Provider[]>('/settings/llm/providers').then(setRows).catch((e) => setErr(e.message))
@@ -497,6 +498,7 @@ function Providers() {
                 title="从供应商拉取可用模型列表（OpenAI 兼容 GET /models）；拉取失败可手动输入"
                 onClick={async () => {
                   setFetchingModels(true)
+                  setModelErr('')
                   try {
                     const r = await api.post<{ models: string[] }>('/settings/llm/providers/models', {
                       base_url: form.base_url,
@@ -505,7 +507,7 @@ function Providers() {
                     })
                     setModelOptions(r.models)
                   } catch (ex) {
-                    setErr(ex instanceof Error ? ex.message : '拉取模型列表失败')
+                    setModelErr(ex instanceof Error ? ex.message : '拉取模型列表失败——请手动输入')
                   } finally {
                     setFetchingModels(false)
                   }
@@ -516,17 +518,29 @@ function Providers() {
             </div>
             <input
               id="prov-model"
-              list="provider-model-options"
               className={`${inputCls} w-full font-mono`}
-              placeholder="MiniMax-M3（可手动输入或点上方自动获取）"
+              placeholder="MiniMax-M3（可手动输入；填好地址和 Key 后可自动获取）"
               value={form.model_id}
               onChange={(e) => setForm({ ...form, model_id: e.target.value })}
             />
-            <datalist id="provider-model-options">
-              {modelOptions.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
+            {modelOptions.length > 0 && (
+              <select
+                className={`${selectCls} w-full`}
+                aria-label="从获取的模型列表选择"
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) setForm({ ...form, model_id: e.target.value })
+                }}
+              >
+                <option value="">— 从获取到的 {modelOptions.length} 个模型中选择 —</option>
+                {modelOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            )}
+            {modelErr && <p className="text-xs text-destructive">{modelErr}</p>}
           </div>
           <div className="space-y-1.5">
             <label htmlFor="prov-cap" className="block text-xs font-medium">类型</label>
