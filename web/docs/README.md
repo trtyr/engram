@@ -32,5 +32,5 @@
 cd web
 pnpm install --frozen-lockfile
 pnpm run lint && pnpm exec tsc --noEmit && pnpm test && pnpm run build
-# 全部 exit 0；lint 0 警告；vitest 53/53
+# 全部 exit 0；lint 0 警告；vitest 55/55
 ```

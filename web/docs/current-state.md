@@ -4,8 +4,8 @@
 
 ## 一句话状态
 
-vitest **53**（10 文件）/ oxlint 0 错误（11 既有警告）/ tsc 0 / build 0 / 入口 bundle **287.55 kB**（gzip 92.46，预算 350 内）。
-三 feat 分支并入后前端全貌：十页 SPA——技能页（第十页：列表/新建编辑/SKILL.md 导入导出/版本回滚）+ MCP 管理台（状态条 + 四域 Tabs 逐工具开关，域归属后端同源）+ 设置页 Keys tab（八 scope 签发）。仓库收敛单分支 main。
+vitest **55**（10 文件）/ oxlint 0 错误（12 既有警告）/ tsc 0 / build 0 / 入口 bundle **288.06 kB**（gzip ~92.6，预算 350 内）。
+前端全貌：十页 SPA——技能页（Wiki 式双栏：左目录 + 右 Markdown 阅读/编辑/版本回滚 + 附属文件区 + 单文件/整包下载）+ 代码图谱页（CLI 状态条 + 异步索引自动轮询 + 调用图弹窗：文件级全图/符号子图双模式 sigma 渲染）+ MCP 管理台（状态条 + 五域 Tabs 逐工具开关 + 点击行展开描述/参数 Schema，与 tools/list 同源）+ 设置页 Keys tab（八 scope 签发）。仓库收敛单分支 main。
 
 ## 2026-08-30 基线以来的前端大事记
 
@@ -36,6 +36,8 @@ vitest **53**（10 文件）/ oxlint 0 错误（11 既有警告）/ tsc 0 / buil
 | pnpm test | 45 passed / 9 文件 |
 | pnpm run build | exit 0；入口 285.60 kB（gzip 91.81） |
 | CI（f8e1031） | e2e + CI FAIL（支出限额，未启动） |
+
+16. **技能页双栏 + 附属文件 + 下载 / 代码图谱重做 / MCP 管理台详情**（2026-09-05）：技能页改 Wiki 式双栏（左目录 + 右 Markdown 阅读/编辑 + 版本回滚 + 附属文件区 scripts/references + 单文件下载 + 整包下载 zip）；代码图谱页重做（CLI 状态条、异步索引自动轮询、删除按钮、调用图弹窗——空输入=文件级依赖全图/输符号=调用子图，sigma + forceatlas2 渲染 + hover 邻居高亮）；MCP 管理台点击工具行展开完整描述 + 参数 Schema（与 AI 收到的 tools/list 同源，含动态资产清单段）。验证：vitest 55（10 文件）/ lint / tsc / build 全绿。
 
 ## 已知前端未了项
 

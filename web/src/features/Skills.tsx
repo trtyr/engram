@@ -1,10 +1,22 @@
-/** 技能域（第六域）：SKILL.md 形态 AI 技能的资产管理——列表/检索/新建/导入/导出/启停/版本回滚。 */
-import { useEffect, useState } from 'react'
+/**
+ * 技能域（第六域）：Wiki 式双栏浏览——左侧技能目录（独立滚动）+ 右侧 Markdown 阅读与治理。
+ * 顶部菜单栏：搜索 / 状态筛选 / 导出 / 导入 / 新建。
+ * folder 形态：skill = 文件夹（SKILL.md 本体 + scripts/ references/ 等附属文件），
+ * 云部署语义——文件按路径寻址随库走，客户端取走后本地执行。
+ */
+import { useCallback, useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { api, type SkillImportReport, type SkillRevisionDto, type SkillSummaryDto } from '@/lib/api'
+import {
+  api,
+  type SkillFileInfoDto,
+  type SkillImportReport,
+  type SkillRevisionDto,
+  type SkillSummaryDto,
+} from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 const SOURCE_LABEL: Record<string, string> = {
   manual: '手建',
@@ -12,7 +24,18 @@ const SOURCE_LABEL: Record<string, string> = {
   mcp: 'MCP',
 }
 
-type Panel = null | 'create' | 'import' | { view: string } | { edit: string } | { revs: string }
+type PaneMode = 'read' | 'edit' | 'revs'
+
+/** 完整详情（含正文）+ 附属文件索引。 */
+interface SkillDetail {
+  slug: string
+  name: string
+  description: string
+  content: string
+  tags: string[]
+  enabled: boolean
+  source: string
+}
 
 export default function Skills() {
   const [rows, setRows] = useState<SkillSummaryDto[] | null>(null)
@@ -20,8 +43,17 @@ export default function Skills() {
   const [enabledFilter, setEnabledFilter] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [panel, setPanel] = useState<Panel>(null)
+  const [panel, setPanel] = useState<null | 'create' | 'import'>(null)
   const [importReport, setImportReport] = useState<SkillImportReport | null>(null)
+
+  // 双栏：左侧目录选中项 → 右侧阅读
+  const [selected, setSelected] = useState<string | null>(null)
+  const [detail, setDetail] = useState<SkillDetail | null>(null)
+  const [files, setFiles] = useState<SkillFileInfoDto[] | null>(null)
+  const [mode, setMode] = useState<PaneMode>('read')
+  const [viewFile, setViewFile] = useState<string | null>(null)
+  const [fileContent, setFileContent] = useState<string | null>(null)
+  const [detailErr, setDetailErr] = useState('')
 
   // 新建表单
   const [name, setName] = useState('')
@@ -34,7 +66,7 @@ export default function Skills() {
   const [importText, setImportText] = useState('')
   const [overwrite, setOverwrite] = useState(false)
 
-  // 编辑表单（按 slug 展开）
+  // 编辑表单
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editTags, setEditTags] = useState('')
@@ -43,6 +75,11 @@ export default function Skills() {
   // 版本列表（按 slug 缓存）
   const [revs, setRevs] = useState<Record<string, SkillRevisionDto[]>>({})
 
+  // 附属文件上传表单
+  const [filePath, setFilePath] = useState('')
+  const [fileText, setFileText] = useState('')
+  const [fileForm, setFileForm] = useState(false)
+
   const query = [
     q.trim() && `q=${encodeURIComponent(q.trim())}`,
     enabledFilter && `enabled=${enabledFilter}`,
@@ -50,25 +87,123 @@ export default function Skills() {
     .filter(Boolean)
     .join('&')
 
-  const load = () =>
-    api
-      .get<SkillSummaryDto[]>(`/skills${query ? `?${query}` : ''}`)
-      .then((r) => {
-        setRows(r)
-        setErr('')
-      })
-      .catch((e) => setErr(e.message))
+  const load = useCallback(
+    (keepSelection = true) =>
+      api
+        .get<SkillSummaryDto[]>(`/skills${query ? `?${query}` : ''}`)
+        .then((r) => {
+          setRows(r)
+          setErr('')
+          // 选中项被删/被过滤 → 清空；空列表 → 清空
+          setSelected((cur) => {
+            if (!keepSelection) return cur
+            if (cur && r.some((s) => s.slug === cur)) return cur
+            return r[0]?.slug ?? null
+          })
+        })
+        .catch((e) => setErr(e.message)),
+    [query],
+  )
 
   useEffect(() => {
     load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query])
+  }, [load])
+
+  // 选中变化 → 拉详情与文件索引
+  useEffect(() => {
+    if (!selected) {
+      setDetail(null)
+      setFiles(null)
+      return
+    }
+    let alive = true
+    setDetailErr('')
+    Promise.all([
+      api.get<SkillDetail>(`/skills/${selected}`),
+      api.get<SkillFileInfoDto[]>(`/skills/${selected}/files`),
+    ])
+      .then(([s, fs]) => {
+        if (!alive) return
+        setDetail(s)
+        setFiles(fs)
+      })
+      .catch((e) => {
+        if (!alive) return
+        setDetailErr(e instanceof Error ? e.message : '详情加载失败')
+      })
+    return () => {
+      alive = false
+    }
+  }, [selected])
+
+  function startEdit(slug: string) {
+    if (!detail || detail.slug !== slug) return
+    setEditName(detail.name)
+    setEditDescription(detail.description)
+    setEditTags(detail.tags.join(', '))
+    setEditContent(detail.content)
+    setMode('edit')
+  }
+
+  async function doEdit(slug: string) {
+    if (!editName.trim()) return
+    setBusy(true)
+    try {
+      await api.put(`/skills/${slug}`, {
+        name: editName.trim(),
+        description: editDescription.trim(),
+        content: editContent,
+        tags: editTags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+      })
+      setMode('read')
+      setErr('')
+      await load()
+      // 重拉详情
+      const s = await api.get<SkillDetail>(`/skills/${slug}`)
+      setDetail(s)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doToggle(slug: string, enabled: boolean) {
+    setBusy(true)
+    try {
+      await api.put(`/skills/${slug}`, { enabled })
+      setErr('')
+      await load()
+      if (detail?.slug === slug) setDetail({ ...detail, enabled })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '操作失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doDelete(slug: string) {
+    if (!confirm(`删除技能「${slug}」？附属文件与版本快照一并删除，不可恢复。`)) return
+    setBusy(true)
+    try {
+      await api.del(`/skills/${slug}`)
+      setSelected(null)
+      setDetail(null)
+      setMode('read')
+      setErr('')
+      load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '删除失败')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function doCreate() {
     if (!name.trim()) return
     setBusy(true)
     try {
-      await api.post('/skills', {
+      const created = await api.post<{ slug: string }>('/skills', {
         name: name.trim(),
         slug: slug.trim() || null,
         description: description.trim(),
@@ -82,7 +217,9 @@ export default function Skills() {
       setContent('')
       setPanel(null)
       setErr('')
-      load()
+      await load(false)
+      if (created?.slug) setSelected(created.slug)
+      setMode('read')
     } catch (e) {
       setErr(e instanceof Error ? e.message : '新建失败')
     } finally {
@@ -101,7 +238,11 @@ export default function Skills() {
       setImportReport(report)
       setImportText('')
       setErr('')
-      load()
+      await load(false)
+      if (report.items.length > 0) {
+        const ok = report.items.find((i) => i.slug)
+        if (ok?.slug) setSelected(ok.slug)
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : '导入失败')
     } finally {
@@ -127,69 +268,8 @@ export default function Skills() {
     }
   }
 
-  async function doToggle(slug: string, enabled: boolean) {
-    setBusy(true)
-    try {
-      await api.put(`/skills/${slug}`, { enabled })
-      setErr('')
-      load()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '操作失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function doDelete(slug: string) {
-    if (!confirm(`删除技能「${slug}」？版本快照一并删除，不可恢复。`)) return
-    setBusy(true)
-    try {
-      await api.del(`/skills/${slug}`)
-      setPanel(null)
-      setErr('')
-      load()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '删除失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function startEdit(slug: string) {
-    // 编辑需要正文——先取详情再展开
-    api.get<Required<Pick<SkillSummaryDto, 'slug'>> & { name: string; description: string; content: string; tags: string[] }>(
-      `/skills/${slug}`,
-    ).then((s) => {
-      setEditName(s.name)
-      setEditDescription(s.description)
-      setEditTags(s.tags.join(', '))
-      setEditContent(s.content)
-      setPanel({ edit: slug })
-    }).catch((e) => setErr(e.message))
-  }
-
-  async function doEdit(slug: string) {
-    if (!editName.trim()) return
-    setBusy(true)
-    try {
-      await api.put(`/skills/${slug}`, {
-        name: editName.trim(),
-        description: editDescription.trim(),
-        content: editContent,
-        tags: editTags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
-      })
-      setPanel(null)
-      setErr('')
-      load()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '保存失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function showRevs(slug: string) {
-    setPanel({ revs: slug })
+    setMode('revs')
     try {
       const list = await api.get<SkillRevisionDto[]>(`/skills/${slug}/revisions`)
       setRevs((prev) => ({ ...prev, [slug]: list }))
@@ -203,7 +283,9 @@ export default function Skills() {
     try {
       await api.post(`/skills/${slug}/revisions/${revId}/restore`, {})
       setErr('')
-      load()
+      await load()
+      const s = await api.get<SkillDetail>(`/skills/${slug}`)
+      setDetail(s)
       showRevs(slug)
     } catch (e) {
       setErr(e instanceof Error ? e.message : '回滚失败')
@@ -212,47 +294,140 @@ export default function Skills() {
     }
   }
 
-  async function showView(slug: string) {
-    setPanel({ view: slug })
+  // ---------- 附属文件操作 ----------
+
+  async function reloadFiles(slug: string) {
+    try {
+      setFiles(await api.get<SkillFileInfoDto[]>(`/skills/${slug}/files`))
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '文件索引加载失败')
+    }
+  }
+
+  async function saveBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  /** 消费形态②：单文件直下（raw）。 */
+  async function downloadFile(slug: string, path: string) {
+    setBusy(true)
+    try {
+      const blob = await api.download(`/skills/${slug}/file?path=${encodeURIComponent(path)}&raw=1`)
+      await saveBlob(blob, path.split('/').pop() ?? 'file')
+      setErr('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '下载失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 消费形态③：整包下载（SKILL.md + 全部附属文件，zip）。 */
+  async function downloadBundle(slug: string) {
+    setBusy(true)
+    try {
+      const blob = await api.download(`/skills/${slug}/bundle`)
+      await saveBlob(blob, `${slug}.zip`)
+      setErr('')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '整包下载失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function openFile(slug: string, path: string) {
+    try {
+      const f = await api.get<SkillFileEntryLike>(`/skills/${slug}/file?path=${encodeURIComponent(path)}`)
+      setFileContent(f.content)
+      setViewFile(path)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '文件读取失败')
+    }
+  }
+
+  async function doPutFile(slug: string) {
+    const p = filePath.trim()
+    if (!p) return
+    setBusy(true)
+    try {
+      await api.put(`/skills/${slug}/file`, { path: p, content: fileText })
+      setFilePath('')
+      setFileText('')
+      setFileForm(false)
+      setErr('')
+      await reloadFiles(slug)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '文件保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doDeleteFile(slug: string, path: string) {
+    if (!confirm(`删除附属文件「${path}」？`)) return
+    setBusy(true)
+    try {
+      await api.del(`/skills/${slug}/file?path=${encodeURIComponent(path)}`)
+      setErr('')
+      if (viewFile === path) {
+        setViewFile(null)
+        setFileContent(null)
+      }
+      await reloadFiles(slug)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '文件删除失败')
+    } finally {
+      setBusy(false)
+    }
   }
 
   if (err && !rows) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
 
+  const bounded = panel === null
+
   return (
-    <div className="space-y-5">
-      <PageHeader title="技能" desc="技能第六域：SKILL.md 形态的可复用指令包——可导入、可检索、可版本回滚，MCP 六工具对 AI 开放。">
-        <input
-          className={`${inputCls} w-48`}
-          placeholder="搜名称/描述…"
-          aria-label="搜索技能"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <select
-          className={selectCls}
-          aria-label="启用状态筛选"
-          value={enabledFilter}
-          onChange={(e) => setEnabledFilter(e.target.value)}
-        >
-          <option value="">全部状态</option>
-          <option value="true">已启用</option>
-          <option value="false">已停用</option>
-        </select>
-        <Button size="sm" onClick={() => doExport()} disabled={busy}>
-          导出
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => setPanel(panel === 'import' ? null : 'import')}>
-          导入
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => setPanel(panel === 'create' ? null : 'create')}>
-          新建
-        </Button>
-      </PageHeader>
+    <div className={cn('flex flex-col gap-4', bounded && 'lg:h-[calc(100vh-3rem)]')}>
+      <div className="shrink-0">
+        <PageHeader title="技能" desc="技能第六域：文件夹形态的可复用指令包（SKILL.md + 脚本/参考资料），MCP 八工具对 AI 开放。">
+          <input
+            className={`${inputCls} w-48`}
+            placeholder="搜名称/描述…"
+            aria-label="搜索技能"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <select
+            className={selectCls}
+            aria-label="启用状态筛选"
+            value={enabledFilter}
+            onChange={(e) => setEnabledFilter(e.target.value)}
+          >
+            <option value="">全部状态</option>
+            <option value="true">已启用</option>
+            <option value="false">已停用</option>
+          </select>
+          <Button size="sm" onClick={() => doExport()} disabled={busy}>
+            导出
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setPanel(panel === 'import' ? null : 'import')}>
+            导入
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setPanel(panel === 'create' ? null : 'create')}>
+            新建
+          </Button>
+        </PageHeader>
+      </div>
 
       {/* 新建面板 */}
       {panel === 'create' && (
-        <Card className="space-y-2 p-4">
+        <Card className="shrink-0 space-y-2 p-4">
           <div className="flex flex-wrap gap-2">
             <input
               className={`${inputCls} w-56`}
@@ -285,7 +460,7 @@ export default function Skills() {
           </div>
           <textarea
             className={`${inputCls} h-40 w-full font-mono`}
-            placeholder="技能正文（markdown）——写清这个技能做什么、怎么做、何时用"
+            placeholder="SKILL.md 正文（markdown）——写清这个技能做什么、怎么做、何时用；脚本/参考资料创建后从右栏添加文件"
             aria-label="技能正文"
             value={content}
             onChange={(e) => setContent(e.target.value)}
@@ -303,7 +478,7 @@ export default function Skills() {
 
       {/* 导入面板 */}
       {panel === 'import' && (
-        <Card className="space-y-2 p-4">
+        <Card className="shrink-0 space-y-2 p-4">
           <p className="text-xs text-muted-foreground">
             粘贴 SKILL.md 全文（frontmatter 容错解析：name / description / slug / tags）。批量导入走 API POST /skills/import。
           </p>
@@ -345,163 +520,331 @@ export default function Skills() {
 
       {err && <ErrorBox msg={err} />}
 
-      {rows.length === 0 ? (
-        <Empty text="暂无技能——粘贴 SKILL.md 导入，或用 MCP tools/call skills_create 沉淀" />
-      ) : (
-        <div className="grid gap-3 md:grid-cols-2">
-          {rows.map((s) => (
-            <Card key={s.slug} className="p-4">
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`truncate font-medium ${s.enabled ? '' : 'text-muted-foreground line-through'}`}>
-                      {s.name}
-                    </span>
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-                      {s.slug}
-                    </span>
-                    <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                      {SOURCE_LABEL[s.source] ?? s.source}
-                    </span>
-                    <span
-                      className={`shrink-0 whitespace-nowrap text-xs ${s.enabled ? 'text-emerald-600' : 'text-muted-foreground'}`}
+      {/* 双栏：目录 + 阅读（有面板打开时退到自然流） */}
+      <div className={cn('flex min-h-0 flex-1 flex-col gap-4 lg:flex-row', !bounded && 'min-h-[60vh]')}>
+        {/* 左栏：技能目录（独立滚动） */}
+        <Card className={cn('w-full shrink-0 overflow-hidden lg:w-72', bounded && 'min-h-0')}>
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <h3 className="text-sm font-semibold">技能目录</h3>
+            <p className="font-mono text-xs text-muted-foreground">{rows.length}</p>
+          </div>
+          {rows.length === 0 ? (
+            <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+              暂无技能——粘贴 SKILL.md 导入，或用 MCP skills_create 沉淀
+            </p>
+          ) : (
+            <nav aria-label="技能目录" className={cn('overflow-y-auto', bounded && 'max-h-[calc(100vh-12rem)]')}>
+              <ul role="list">
+                {rows.map((s) => (
+                  <li key={s.slug}>
+                    <button
+                      type="button"
+                      aria-current={selected === s.slug}
+                      onClick={() => {
+                        setSelected(s.slug)
+                        setMode('read')
+                        setViewFile(null)
+                        setFileContent(null)
+                      }}
+                      className={cn(
+                        'w-full border-b border-border/60 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-muted/40',
+                        selected === s.slug && 'bg-muted',
+                      )}
                     >
-                      ● {s.enabled ? '启用' : '停用'}
-                    </span>
-                  </div>
-                  {s.description && (
-                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{s.description}</p>
-                  )}
-                  {s.tags.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {s.tags.map((t) => (
+                      <p className="flex items-center gap-2">
                         <span
-                          key={t}
-                          className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                          aria-hidden="true"
+                          className={cn(
+                            'size-1.5 shrink-0 rounded-full',
+                            s.enabled ? 'bg-success' : 'bg-muted-foreground/40',
+                          )}
+                        />
+                        <span
+                          className={cn(
+                            'min-w-0 flex-1 truncate text-sm',
+                            !s.enabled && 'text-muted-foreground line-through',
+                          )}
                         >
+                          {s.name}
+                        </span>
+                      </p>
+                      <p className="mt-0.5 flex items-center gap-1.5 pl-3.5">
+                        <code className="font-mono text-[11px] text-muted-foreground">{s.slug}</code>
+                        <span className="rounded border border-border px-1 text-[10px] leading-3.5 text-muted-foreground">
+                          {SOURCE_LABEL[s.source] ?? s.source}
+                        </span>
+                      </p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          )}
+        </Card>
+
+        {/* 右栏：阅读 / 编辑 / 版本 */}
+        <div className={cn('flex min-h-[45vh] flex-1 flex-col lg:min-h-0', !bounded && 'min-h-[60vh]')}>
+          {!selected || !detail ? (
+            <Card className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
+              {detailErr ? (
+                <ErrorBox msg={detailErr} />
+              ) : selected && !detail ? (
+                <Spinner label="加载详情…" />
+              ) : (
+                <Empty text="从左侧目录选一个技能开始阅读；SKILL.md 里引用的脚本/参考资料在右下「附属文件」区" />
+              )}
+            </Card>
+          ) : (
+            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {/* 阅读头：名称 + 元信息 + 治理动作 */}
+              <div className="shrink-0 border-b border-border px-4 py-2.5 md:px-6">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2
+                      className={cn(
+                        'text-base font-semibold',
+                        !detail.enabled && 'text-muted-foreground line-through',
+                      )}
+                    >
+                      {detail.name}
+                    </h2>
+                    <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <code className="font-mono">{detail.slug}</code>
+                      <span className="rounded border border-border px-1.5 py-0.5">
+                        {SOURCE_LABEL[detail.source] ?? detail.source}
+                      </span>
+                      <span className={detail.enabled ? 'text-emerald-600' : ''}>● {detail.enabled ? '启用' : '停用'}</span>
+                      {(detail.tags ?? []).map((t) => (
+                        <span key={t} className="rounded border border-border px-1.5 py-0.5">
                           {t}
                         </span>
                       ))}
-                    </div>
-                  )}
-                </div>
-                <div className="flex shrink-0 flex-col gap-1">
-                  <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => (panel && typeof panel === 'object' && 'view' in panel && panel.view === s.slug ? setPanel(null) : showView(s.slug))}>
-                      查看
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => setMode('read')} disabled={mode === 'read'}>
+                      阅读
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => startEdit(s.slug)}>
+                    <Button size="sm" variant="ghost" onClick={() => startEdit(detail.slug)} disabled={mode === 'edit'}>
                       编辑
                     </Button>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => doToggle(s.slug, !s.enabled)} disabled={busy}>
-                      {s.enabled ? '停用' : '启用'}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => (panel && typeof panel === 'object' && 'revs' in panel && panel.revs === s.slug ? setPanel(null) : showRevs(s.slug))}>
+                    <Button size="sm" variant="ghost" onClick={() => showRevs(detail.slug)} disabled={mode === 'revs'}>
                       版本
                     </Button>
-                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => doDelete(s.slug)}>
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => doToggle(detail.slug, !detail.enabled)}>
+                      {detail.enabled ? '停用' : '启用'}
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => doDelete(detail.slug)}>
                       删除
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      title="整包下载：SKILL.md + scripts/ + references/（zip）"
+                      onClick={() => downloadBundle(detail.slug)}
+                    >
+                      整包下载
+                    </Button>
                   </div>
                 </div>
+                {detail.description && <p className="mt-1 text-xs text-muted-foreground">{detail.description}</p>}
               </div>
 
-              {/* 正文预览 */}
-              {panel && typeof panel === 'object' && 'view' in panel && panel.view === s.slug && (
-                <ViewPane slug={s.slug} />
-              )}
+              {/* 正文区（独立滚动） */}
+              <div className="min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable] md:p-6">
+                {mode === 'read' && (
+                  <div className="mx-auto w-full max-w-4xl">
+                    {viewFile !== null ? (
+                      <>
+                        <button
+                          type="button"
+                          className="mb-3 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => {
+                            setViewFile(null)
+                            setFileContent(null)
+                          }}
+                        >
+                          ← 返回 SKILL.md
+                        </button>
+                        <h3 className="mb-2 font-mono text-xs text-muted-foreground">{viewFile}</h3>
+                        {fileContent === null ? (
+                          <Spinner label="加载文件…" />
+                        ) : viewFile.endsWith('.md') ? (
+                          <div className="prose prose-sm max-w-none dark:prose-invert">
+                            <ReactMarkdown>{fileContent}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <pre className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs leading-5">
+                            {fileContent}
+                          </pre>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="prose prose-sm max-w-none dark:prose-invert">
+                          <ReactMarkdown>{detail.content}</ReactMarkdown>
+                        </div>
 
-              {/* 编辑面板 */}
-              {panel && typeof panel === 'object' && 'edit' in panel && panel.edit === s.slug && (
-                <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
-                  <div className="flex flex-wrap gap-2">
-                    <input
-                      className={`${inputCls} w-56`}
-                      aria-label="编辑技能名"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                    />
-                    <input
-                      className={`${inputCls} flex-1`}
-                      placeholder="描述"
-                      aria-label="编辑技能描述"
-                      value={editDescription}
-                      onChange={(e) => setEditDescription(e.target.value)}
-                    />
-                    <input
-                      className={`${inputCls} w-48`}
-                      placeholder="标签（逗号分隔）"
-                      aria-label="编辑技能标签"
-                      value={editTags}
-                      onChange={(e) => setEditTags(e.target.value)}
-                    />
+                        {/* 附属文件（folder 形态） */}
+                        <div className="mt-8 border-t border-border pt-4">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold">
+                              附属文件
+                              <span className="ml-2 font-mono text-xs text-muted-foreground">
+                                {files?.length ?? '…'}
+                              </span>
+                            </h3>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setFileForm((v) => !v)}
+                            >
+                              {fileForm ? '收起' : '添加文件'}
+                            </Button>
+                          </div>
+                          <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                            skill = 文件夹：脚本（scripts/）、参考资料（references/）按相对路径随技能入库；
+                            文件是内容不是执行体——AI 经 MCP 按路径取走后在客户端本地运行。
+                          </p>
+                          {fileForm && (
+                            <div className="mt-2 space-y-2 rounded-md border border-border p-3">
+                              <input
+                                className={`${inputCls} w-72 font-mono`}
+                                placeholder="相对路径，如 scripts/check.py"
+                                aria-label="文件路径"
+                                value={filePath}
+                                onChange={(e) => setFilePath(e.target.value)}
+                              />
+                              <textarea
+                                className={`${inputCls} h-28 w-full font-mono`}
+                                placeholder="文件内容（文本）"
+                                aria-label="文件内容"
+                                value={fileText}
+                                onChange={(e) => setFileText(e.target.value)}
+                              />
+                              <Button size="sm" disabled={busy || !filePath.trim()} onClick={() => doPutFile(detail.slug)}>
+                                保存文件
+                              </Button>
+                            </div>
+                          )}
+                          {files === null ? (
+                            <Spinner label="加载文件…" />
+                          ) : files.length === 0 ? (
+                            <p className="mt-2 text-xs text-muted-foreground">暂无附属文件</p>
+                          ) : (
+                            <ul role="list" className="mt-2 space-y-1">
+                              {files.map((f) => (
+                                <li
+                                  key={f.path}
+                                  className="flex items-center gap-3 rounded border border-border/60 px-2 py-1.5"
+                                >
+                                  <code className="min-w-0 flex-1 truncate font-mono text-xs">{f.path}</code>
+                                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                                    {f.size} B
+                                  </span>
+                                  <Button size="sm" variant="ghost" onClick={() => openFile(detail.slug, f.path)}>
+                                    查看
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={busy}
+                                    onClick={() => downloadFile(detail.slug, f.path)}
+                                  >
+                                    下载
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    disabled={busy}
+                                    onClick={() => doDeleteFile(detail.slug, f.path)}
+                                  >
+                                    删除文件
+                                  </Button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <textarea
-                    className={`${inputCls} h-40 w-full font-mono`}
-                    aria-label="编辑技能正文"
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" disabled={busy} onClick={() => doEdit(s.slug)}>
-                      保存
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setPanel(null)}>
-                      取消
-                    </Button>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {/* 版本面板 */}
-              {panel && typeof panel === 'object' && 'revs' in panel && panel.revs === s.slug && (
-                <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
-                  {(revs[s.slug] ?? []).length === 0 ? (
-                    <p className="text-xs text-muted-foreground">加载中…</p>
-                  ) : (
-                    (revs[s.slug] ?? []).map((r) => (
-                      <div key={r.id} className="flex items-center gap-2 text-xs">
-                        <span className="font-mono text-muted-foreground">v{r.rev}</span>
-                        <span className="rounded bg-muted px-1 text-[11px] text-muted-foreground">{r.origin}</span>
-                        <span className="min-w-0 flex-1 truncate text-muted-foreground">{r.description || r.name}</span>
-                        <span className="font-mono text-muted-foreground/60">
-                          {new Date(r.created_at).toLocaleDateString()}
-                        </span>
-                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => doRestore(s.slug, r.id)}>
-                          回滚
-                        </Button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
+                {mode === 'edit' && (
+                  <div className="mx-auto w-full max-w-4xl space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        className={`${inputCls} w-56`}
+                        aria-label="编辑技能名"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                      />
+                      <input
+                        className={`${inputCls} flex-1`}
+                        placeholder="描述"
+                        aria-label="编辑技能描述"
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                      />
+                      <input
+                        className={`${inputCls} w-48`}
+                        placeholder="标签（逗号分隔）"
+                        aria-label="编辑技能标签"
+                        value={editTags}
+                        onChange={(e) => setEditTags(e.target.value)}
+                      />
+                    </div>
+                    <textarea
+                      className={`${inputCls} h-64 w-full font-mono`}
+                      aria-label="编辑技能正文"
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" disabled={busy} onClick={() => doEdit(detail.slug)}>
+                        保存
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setMode('read')}>
+                        取消
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {mode === 'revs' && (
+                  <div className="mx-auto w-full max-w-4xl space-y-2">
+                    {(revs[detail.slug] ?? []).length === 0 ? (
+                      <p className="text-xs text-muted-foreground">加载中…</p>
+                    ) : (
+                      (revs[detail.slug] ?? []).map((r) => (
+                        <div key={r.id} className="flex items-center gap-2 text-xs">
+                          <span className="font-mono text-muted-foreground">v{r.rev}</span>
+                          <span className="rounded bg-muted px-1 text-[11px] text-muted-foreground">{r.origin}</span>
+                          <span className="min-w-0 flex-1 truncate text-muted-foreground">{r.description || r.name}</span>
+                          <span className="font-mono text-muted-foreground/60">
+                            {new Date(r.created_at).toLocaleDateString()}
+                          </span>
+                          <Button size="sm" variant="ghost" disabled={busy} onClick={() => doRestore(detail.slug, r.id)}>
+                            回滚
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </Card>
-          ))}
+          )}
         </div>
-      )}
+      </div>
     </div>
   )
 }
 
-/** 正文预览（react-markdown，与项目详情同一排版约定）。 */
-function ViewPane({ slug }: { slug: string }) {
-  const [content, setContent] = useState<string | null>(null)
-  const [err, setErr] = useState('')
-  useEffect(() => {
-    api
-      .get<{ content: string }>(`/skills/${slug}`)
-      .then((s) => setContent(s.content))
-      .catch((e) => setErr(e.message))
-  }, [slug])
-  if (err) return <ErrorBox msg={err} />
-  if (content === null) return <Spinner label="加载正文…" />
-  return (
-    <div className="mt-3 border-t border-border/60 pt-3">
-      <div className="prose prose-sm max-w-none dark:prose-invert">
-        <ReactMarkdown>{content}</ReactMarkdown>
-      </div>
-    </div>
-  )
+/** 文件读取响应（GET /skills/{slug}/file?path=…）。 */
+interface SkillFileEntryLike {
+  path: string
+  content: string
 }

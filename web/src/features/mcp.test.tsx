@@ -23,6 +23,14 @@ const mcpInfo = () => ({
       description: '装载用户记忆上下文包。\n何时用：会话开始。',
       read_only: true,
       destructive: false,
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '可选：相关性查询词。' },
+          budget_items: { type: 'integer', description: '各层条数预算，默认 20。' },
+        },
+        required: [],
+      },
     },
     {
       name: 'memory_write_session',
@@ -30,6 +38,7 @@ const mcpInfo = () => ({
       description: '写入一段对话到 L0 会话。',
       read_only: false,
       destructive: false,
+      parameters: { type: 'object', properties: {}, required: [] },
     },
     {
       name: 'memory_forget',
@@ -37,6 +46,7 @@ const mcpInfo = () => ({
       description: '遗忘会话。',
       read_only: false,
       destructive: true,
+      parameters: { type: 'object', properties: {}, required: [] },
     },
     {
       name: 'wiki_search',
@@ -44,6 +54,7 @@ const mcpInfo = () => ({
       description: '检索 Wiki（FTS + 向量，带 purpose）。',
       read_only: true,
       destructive: false,
+      parameters: { type: 'object', properties: {}, required: [] },
     },
     {
       name: 'wiki_write_page',
@@ -51,6 +62,7 @@ const mcpInfo = () => ({
       description: '写入 / 更新 Wiki 页面（AI 通道）。',
       read_only: false,
       destructive: false,
+      parameters: { type: 'object', properties: {}, required: [] },
     },
   ],
 })
@@ -99,6 +111,28 @@ describe('Mcp 管理页', () => {
     expect(screen.getByText('破坏性')).toBeTruthy()
     expect(screen.getAllByRole('switch').length).toBe(3)
     expect(screen.getByText(/启用 3\/3/)).toBeTruthy()
+  })
+
+  it('工具详情：点击行展开完整描述与参数 Schema，再点收起', async () => {
+    render(<Mcp />)
+    await waitFor(() => screen.getByText('memory_context'))
+
+    // 默认收起；点击展开
+    expect(screen.queryByText('工具描述')).toBeNull()
+    fireEvent.click(screen.getByText('memory_context'))
+    expect(screen.getByText('工具描述')).toBeTruthy()
+    expect(screen.getByText(/装载用户记忆上下文包/)).toBeTruthy()
+    expect(screen.getByText('参数')).toBeTruthy()
+    expect(screen.getByText('query')).toBeTruthy()
+    expect(screen.getByText('可选：相关性查询词。')).toBeTruthy()
+    expect(screen.getByText('原始 JSON Schema')).toBeTruthy()
+    // 切换到另一工具：旧详情收起、新详情展开（互斥）
+    fireEvent.click(screen.getByText('memory_forget'))
+    expect(screen.getByText('遗忘会话。')).toBeTruthy()
+    expect(screen.queryByText(/装载用户记忆上下文包/)).toBeNull()
+    // 再点同一行收起
+    fireEvent.click(screen.getByText('memory_forget'))
+    expect(screen.queryByText('工具描述')).toBeNull()
   })
 
   it('总开关：关闭 → PUT enabled=false；再开 → PUT enabled=true', async () => {

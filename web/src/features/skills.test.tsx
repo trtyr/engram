@@ -1,5 +1,5 @@
 /**
- * 技能列表页测试：渲染列表 / 新建 / 启停 / 删除确认 / 导入 / 搜索过滤。
+ * 技能页测试（Wiki 式双栏）：目录渲染 / 新建 / 启停 / 删除确认 / 导入 / 搜索 / 版本 / 附属文件。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -31,6 +31,10 @@ const state = {
       updated_at: '2026-09-05T00:00:00Z',
     },
   ],
+  files: [
+    { path: 'references/api.md', size: 128 },
+    { path: 'scripts/check.py', size: 64 },
+  ],
 }
 const calls: { get: string[]; post: [string, unknown][]; put: [string, unknown][]; del: string[] } = {
   get: [],
@@ -45,6 +49,10 @@ vi.mock('@/lib/api', () => {
       calls.get.push(p)
       if (p === '/skills/review-pr') {
         return { ...state.rows[0], content: '# 审查步骤\n1. 读 diff' }
+      }
+      if (p === '/skills/review-pr/files') return state.files
+      if (p === '/skills/review-pr/file?path=scripts%2Fcheck.py') {
+        return { path: 'scripts/check.py', content: "print('hi')" }
       }
       if (p === '/skills/review-pr/revisions') {
         return [
@@ -61,6 +69,12 @@ vi.mock('@/lib/api', () => {
           },
         ]
       }
+      if (p === '/skills/deploy-check') return { ...state.rows[1], content: '# 清单' }
+      if (p === '/skills/deploy-check/files') return []
+      if (p === '/skills/new-skill') {
+        return { slug: 'new-skill', name: '新技能', description: '', content: '', tags: [], enabled: true, source: 'manual' }
+      }
+      if (p === '/skills/new-skill/files') return []
       return state.rows
     }),
     post: vi.fn(async (p: string, b?: unknown) => {
@@ -87,7 +101,7 @@ vi.mock('@/lib/api', () => {
 
 import { api } from '@/lib/api'
 
-describe('Skills 技能列表页', () => {
+describe('Skills 技能页（双栏）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     calls.get.length = 0
@@ -97,13 +111,16 @@ describe('Skills 技能列表页', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
   })
 
-  it('渲染技能列表（名称/slug/来源/启停状态）', async () => {
+  it('左目录 + 右阅读：自动选中第一个技能并渲染 Markdown 正文', async () => {
     render(<Skills />)
-    await waitFor(() => expect(screen.getByText('PR 审查')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Deploy Check')).toBeTruthy())
+    expect(screen.getByText('PR 审查')).toBeTruthy()
     expect(screen.getByText('review-pr')).toBeTruthy()
-    expect(screen.getByText('Deploy Check')).toBeTruthy()
+    expect(screen.getByText('技能目录')).toBeTruthy()
+    // 自动选中第一个 → 详情加载 + 正文渲染
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'PR 审查' })).toBeTruthy())
     expect(screen.getByText('● 启用')).toBeTruthy()
-    expect(screen.getByText('● 停用')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('读 diff')).toBeTruthy())
   })
 
   it('新建技能调用 POST /skills（标签拆分、空 slug 置 null）', async () => {
@@ -126,7 +143,7 @@ describe('Skills 技能列表页', () => {
 
   it('启停切换调用 PUT /skills/{slug}', async () => {
     render(<Skills />)
-    await waitFor(() => expect(screen.getByText('PR 审查')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: '停用' })).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: '停用' }))
     await waitFor(() => {
@@ -134,11 +151,13 @@ describe('Skills 技能列表页', () => {
     })
   })
 
-  it('删除带确认，确认后调用 DELETE', async () => {
+  it('目录切换选中：点 Deploy Check 后删除带确认', async () => {
     render(<Skills />)
     await waitFor(() => expect(screen.getByText('Deploy Check')).toBeTruthy())
 
-    fireEvent.click(screen.getAllByRole('button', { name: '删除' })[1])
+    fireEvent.click(screen.getByRole('button', { name: /Deploy Check/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '删除' })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => {
       expect(api.del).toHaveBeenCalledWith('/skills/deploy-check')
     })
@@ -177,9 +196,9 @@ describe('Skills 技能列表页', () => {
 
   it('版本面板加载 revisions 并可回滚', async () => {
     render(<Skills />)
-    await waitFor(() => expect(screen.getByText('PR 审查')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: '版本' })).toBeTruthy())
 
-    fireEvent.click(screen.getAllByRole('button', { name: '版本' })[0])
+    fireEvent.click(screen.getByRole('button', { name: '版本' }))
     await waitFor(() => expect(screen.getByText('v1')).toBeTruthy())
     expect(api.get).toHaveBeenCalledWith('/skills/review-pr/revisions')
 
@@ -187,5 +206,25 @@ describe('Skills 技能列表页', () => {
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith('/skills/review-pr/revisions/r1/restore', {})
     })
+  })
+
+  it('附属文件区：索引展示 + 点击查看脚本内容 + 删除带确认', async () => {
+    render(<Skills />)
+    await waitFor(() => expect(screen.getByText('附属文件')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('scripts/check.py')).toBeTruthy())
+    expect(screen.getByText('references/api.md')).toBeTruthy()
+    expect(screen.getByText('128 B')).toBeTruthy()
+
+    // 删除文件带确认（索引按 path 排序，references/api.md 是第一个）
+    fireEvent.click(screen.getAllByRole('button', { name: '删除文件' })[0])
+    await waitFor(() => {
+      expect(api.del).toHaveBeenCalledWith('/skills/review-pr/file?path=references%2Fapi.md')
+    })
+    expect(confirm).toHaveBeenCalled()
+
+    // 查看脚本（GET file?path=…；索引按 path 排序，scripts/check.py 是第二个）
+    fireEvent.click(screen.getAllByRole('button', { name: '查看' })[1])
+    await waitFor(() => expect(screen.getByText("print('hi')")).toBeTruthy())
+    expect(screen.getByText('← 返回 SKILL.md')).toBeTruthy()
   })
 })

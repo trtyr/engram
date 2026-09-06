@@ -77,6 +77,27 @@ export const api = {
   put: <T>(p: string, b?: unknown) => req<T>('PUT', p, b),
   patch: <T>(p: string, b?: unknown) => req<T>('PATCH', p, b),
   del: <T>(p: string) => req<T>('DELETE', p),
+  /** 二进制下载（带鉴权；401 走统一过期事件）。返回 blob 交调用方触发保存。 */
+  download: async (p: string): Promise<Blob> => {
+    const headers: Record<string, string> = {}
+    if (getToken()) headers.authorization = `Bearer ${getToken()}`
+    const resp = await fetch(`${BASE}${p}`, { headers })
+    if (resp.status === 401) {
+      const hadToken = !!getToken()
+      clearToken()
+      if (hadToken) window.dispatchEvent(new CustomEvent('engram-auth-expired'))
+      throw new ApiError(401, 'unauthorized', '未认证', false)
+    }
+    if (!resp.ok) {
+      let msg = `HTTP ${resp.status}`
+      try {
+        const e = await resp.json()
+        msg = e.error?.message ?? msg
+      } catch { /* 保底 */ }
+      throw new ApiError(resp.status, 'download_failed', msg, false)
+    }
+    return resp.blob()
+  },
   upload: async <T>(p: string, file: File): Promise<T> => {
     const fd = new FormData()
     fd.append('file', file)
@@ -275,10 +296,34 @@ export interface CgProject {
   path: string
   source_uri: string
   status: string
-  stats: Record<string, number> | null
+  stats: CgStats | null
   error: string | null
   created_at: string
   last_synced_at: string | null
+}
+export interface CgStats {
+  files?: number
+  symbols?: number
+  edges?: number
+  by_kind?: Record<string, number>
+  last_indexed?: string | null
+}
+/** CLI 可用性（GET /codegraph/status） */
+export interface CgCliStatus {
+  available: boolean
+  version: string | null
+  pin: string
+}
+/** 调用图归一结果（GET /codegraph/projects/{id}/graph）。mode: symbol=符号子图 / files=文件级全图 */
+export interface CgGraph {
+  mode?: 'symbol' | 'files'
+  symbol?: string
+  center?: string
+  callers?: number
+  callees?: number
+  files?: number
+  nodes: { id: string; name: string; kind: string; role: string; filePath?: string; line?: number }[]
+  edges: { from: string; to: string; rel: string; weight?: number }[]
 }
 export interface Provider {
   id: string
@@ -315,6 +360,8 @@ export interface McpToolInfo {
   description: string
   read_only: boolean | null
   destructive: boolean | null
+  /** 参数 JSON Schema（与 tools/list 的 inputSchema 同源） */
+  parameters: Record<string, unknown>
 }
 export interface McpInfo {
   endpoint: string
@@ -393,6 +440,17 @@ export interface ProjectTypeDto {
 }
 
 // ---- 技能域（第六域） ----
+
+/** 技能附属文件索引条目（folder 形态：scripts/ / references/…，不含内容） */
+export interface SkillFileInfoDto {
+  path: string
+  size: number
+}
+/** 技能附属文件（含内容） */
+export interface SkillFileEntryDto {
+  path: string
+  content: string
+}
 export interface SkillSummaryDto {
   id: string
   slug: string

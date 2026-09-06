@@ -16,11 +16,11 @@ Engram 控制台：把十页能力（一架梯子 + 一坐标系 + 五资产域 
 | /memory | 用户记忆 | **纯梯子五标签**：会话（默认）/原子/人审/场景/画像——计数内联，蒸馏脉冲只表"正在炼" |
 | /circle | **圈子** | 记忆坐标系独立页（2026-09-01 从 Memory tab 拆出）：左实体列表（搜索/类型过滤/密度排序/新建/合并）+ 右 sigma 共现图谱 + 实体档案（摘要可编/挂摘原子/时间线） |
 | /wiki | Wiki | **目录树**（folder 层级，Obsidian 式）+ Markdown 阅读/编辑 + 图谱独立视图（树/图切换）；文档=收件箱入口，洞察/Lint/提案/原料/目标=运维二级入口 |
-| /codegraph | CodeGraph | 项目注册→索引→结构化查询（面板化结果） |
+| /codegraph | CodeGraph | CLI 状态条 + 注册/异步索引（任务队列，indexing 自动轮询）+ 查询试验场 + **调用图弹窗**（空输入=文件级全图，输符号=调用子图；sigma 渲染） |
 | /projects | 项目 | 项目记忆第五域：列表（CRUD/多选/类型筛选）+ 详情（Wiki 式左树右内容：位置多主机 + 分类文档） |
-| /skills | 技能 | 技能第六域：列表（搜索/启停筛选）+ 新建/编辑 + SKILL.md 导入（frontmatter 容错）+ 全量导出 + 版本快照回滚 |
+| /skills | 技能 | 技能第六域：**Wiki 式双栏**（左目录 + 右 Markdown 阅读/编辑）+ 附属文件区（scripts/references 按路径入库，单文件下载）+ **整包下载**（zip）+ SKILL.md 导入（frontmatter 容错）+ 全量导出 + 版本快照回滚 |
 | /jobs | Jobs | 任务表、事件流水展开、死信 revive |
-| /mcp | MCP | 管理面：服务开关（关闭 = /mcp 503）+ 域 Tabs 逐域工具开关（停用 = 对 AI 隐身；域归属后端同源） |
+| /mcp | MCP | 管理面：服务开关（关闭 = /mcp 503）+ 五域 Tabs 逐域工具开关（停用 = 对 AI 隐身）+ **点击工具行展开完整描述与参数 Schema**（与 AI 收到的 tools/list 同源） |
 | /settings | Settings | Provider 管理（真 label 表单）、路由表、API Key、危险区（重加密 + **deep 清空两阶段**） |
 
 IA 语义：**用户记忆 = 一架梯子（蒸馏深度），圈子 = 一坐标系（按人/事横向切）**——
