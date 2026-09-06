@@ -30,7 +30,7 @@ web
   `POST /migrate/import`（冲突跳过合并语义，可重复执行）+
   `POST /migrate/pull`（B 机一键拉取 A 机，认证 = A 机管理员密码仅请求期使用）；
   派生数据（embedding/tsv/codegraph 索引）不迁移，导入端重建。全部 admin-only。
-- MCP 工具面（2026-09-06 定，49 工具六域）：工具描述是发现通道——`skills_list` / `project_list` 的描述动态织入库内资产清单（slug+description / 项目名+状态），与 tools/list 同源；控制台 MCP 页点击工具行展开完整描述 + 参数 Schema（管理台所见即 AI 所得）。
+- MCP 工具面（2026-09-06 定，渐进式发现六域）：六个领域各一个入口工具（memory/projects/skills/wiki/todos/codegraph），域内操作经 action 分发——L0 描述内嵌操作目录（常驻可见，动态资产清单沿用织入）+ L1 action="help" 按需取全域参数手册 + L2 错误自愈（未知操作报错列合法清单）；scope 分权（AI 看到的工具面=可调用集）；控制台 MCP 页两级开关（整域隐身 / 域内单操作停用，管理台所见即 AI 所得）。
 - Skill = 文件夹（2026-09-05 定）：SKILL.md 本体 + 附属文件（scripts/、references/…）按相对路径寻址。文件是「内容」不是「文件系统位置」——云端只存内容永不执行，客户端取走后在本地跑。三种消费形态按需选：① 纯文本 MCP 读（skills_get/file_get）② 单文件 HTTP 直下 `GET /skills/{slug}/file?path=…&raw=1` ③ 整包 `GET /skills/{slug}/bundle`（zip：SKILL.md+全部文件）；工具描述内嵌形态选择指南。
 - 后端 HTTP API（104 路径，OpenAPI 权威）已定型。
 - 技术栈保持：React 19 + TypeScript + Vite 8 + Tailwind 4 + pnpm（radix/shadcn 基件可用可弃）。

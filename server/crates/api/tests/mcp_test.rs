@@ -1,4 +1,6 @@
 //! MCP 端点集成测试：JSON-RPC 全链路（initialize → tools/list → tools/call）。
+//! 工具面为渐进式发现：六域各一个入口工具，域内操作经 action 分发
+//! （调用形态 {"name":"todos","arguments":{"action":"add",...}}）。
 //! 全链路：真 PG + 完整 router + Bearer 中间件 + rmcp Streamable HTTP 服务。
 
 mod support;
@@ -9,6 +11,22 @@ use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
 use support::{app, create_key, expect_result, login_token, mcp_rpc, rpc};
 use tower::util::ServiceExt;
+
+/// 域工具调用：action + 平铺参数（渐进式发现语法）。
+fn call(id: i64, tool: &str, action: &str, args: Value) -> Value {
+    let mut arguments = serde_json::Map::new();
+    arguments.insert("action".into(), json!(action));
+    if let Value::Object(map) = args {
+        for (k, v) in map {
+            arguments.insert(k, v);
+        }
+    }
+    rpc(
+        id,
+        "tools/call",
+        json!({"name": tool, "arguments": arguments}),
+    )
+}
 
 #[tokio::test]
 async fn mcp_unauthorized_without_credentials() {
@@ -74,8 +92,8 @@ async fn mcp_initialize_and_list_tools() {
         result["instructions"]
             .as_str()
             .unwrap_or("")
-            .contains("memory_context"),
-        "instructions 应包含使用时机说明"
+            .contains("渐进式发现"),
+        "instructions 应说明渐进式发现用法：{result}"
     );
 
     let (_, v) = mcp_rpc(&app, &key, rpc(2, "tools/list", json!({}))).await;
@@ -84,27 +102,30 @@ async fn mcp_initialize_and_list_tools() {
         .expect("tools 数组")
         .clone();
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    for expected in [
-        "memory_context",
-        "memory_search",
-        "memory_list_atoms",
-        "memory_list_sessions",
-        "memory_get_session",
-        "memory_write_session",
-        "memory_append_session",
-        "memory_forget",
-        "memory_entities",
-    ] {
-        assert!(
-            names.contains(&expected),
-            "tools/list 缺少 {expected}：{names:?}"
-        );
-    }
-    // 只读工具应带 readOnlyHint 注解
-    let search = tools.iter().find(|t| t["name"] == "memory_search").unwrap();
-    assert_eq!(search["annotations"]["readOnlyHint"], json!(true));
-    let forget = tools.iter().find(|t| t["name"] == "memory_forget").unwrap();
-    assert_eq!(forget["annotations"]["destructiveHint"], json!(true));
+    // memory-only key 恰好看到 memory 一个域工具（scope 过滤）
+    assert_eq!(
+        names,
+        vec!["memory"],
+        "memory-only key 应只见 memory 域工具"
+    );
+    let memory = &tools[0];
+    // 描述带操作目录（L0 发现层）：action 概览 + help 提示
+    let description = memory["description"].as_str().unwrap_or("");
+    assert!(
+        description.contains("action=\"help\"") || description.contains("help"),
+        "域工具描述应提示 help：{description}"
+    );
+    assert!(
+        description.contains("- search："),
+        "域工具描述应带操作目录：{description}"
+    );
+    // inputSchema：action 必填
+    assert!(
+        memory["inputSchema"]["properties"]["action"].is_object(),
+        "inputSchema 应有 action 属性"
+    );
+    // 域内含破坏性操作（forget）→ destructiveHint
+    assert_eq!(memory["annotations"]["destructiveHint"], json!(true));
 }
 
 #[tokio::test]
@@ -134,17 +155,15 @@ async fn mcp_tool_call_write_search_forget_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             2,
-            "tools/call",
+            "memory",
+            "write_session",
             json!({
-                "name": "memory_write_session",
-                "arguments": {
-                    "turns": [
-                        {"speaker": "user", "text": "我叫特让他也让，我在开发 Engram 记忆系统"},
-                        {"speaker": "assistant", "text": "好的，我记住了。"}
-                    ]
-                }
+                "turns": [
+                    {"speaker": "user", "text": "我叫特让他也让，我在开发 Engram 记忆系统"},
+                    {"speaker": "assistant", "text": "好的，我记住了。"}
+                ]
             }),
         ),
     )
@@ -159,16 +178,7 @@ async fn mcp_tool_call_write_search_forget_journey() {
     assert_eq!(session["agent"], "mcp-test", "agent 归因应取 key 名");
 
     // 上下文包（无蒸馏产物 → 各层为空但结构完整）
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        rpc(
-            4,
-            "tools/call",
-            json!({"name": "memory_context", "arguments": {}}),
-        ),
-    )
-    .await;
+    let (_, v) = mcp_rpc(&app, &key, call(4, "memory", "context", json!({}))).await;
     let out = expect_result(&v, "tools/call context");
     let content_text = out["content"][0]["text"].as_str().expect("文本内容");
     let pack: Value = serde_json::from_str(content_text).expect("ContextPack JSON");
@@ -179,13 +189,11 @@ async fn mcp_tool_call_write_search_forget_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             5,
-            "tools/call",
-            json!({
-                "name": "memory_forget",
-                "arguments": {"session_id": session_id, "mode": "void"}
-            }),
+            "memory",
+            "forget",
+            json!({"session_id": session_id, "mode": "void"}),
         ),
     )
     .await;
@@ -222,18 +230,16 @@ async fn mcp_tool_call_l0_read_chain() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             2,
-            "tools/call",
+            "memory",
+            "write_session",
             json!({
-                "name": "memory_write_session",
-                "arguments": {
-                    "distill": "off",
-                    "turns": [
-                        {"speaker": "user", "text": "我在开发 Engram 记忆系统"},
-                        {"speaker": "assistant", "text": "好的。"}
-                    ]
-                }
+                "distill": "off",
+                "turns": [
+                    {"speaker": "user", "text": "我在开发 Engram 记忆系统"},
+                    {"speaker": "assistant", "text": "好的。"}
+                ]
             }),
         ),
     )
@@ -245,16 +251,7 @@ async fn mcp_tool_call_l0_read_chain() {
     let session_id = session["id"].as_str().unwrap().to_string();
 
     // list_sessions 应看到它
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        rpc(
-            3,
-            "tools/call",
-            json!({"name": "memory_list_sessions", "arguments": {}}),
-        ),
-    )
-    .await;
+    let (_, v) = mcp_rpc(&app, &key, call(3, "memory", "list_sessions", json!({}))).await;
     let out = expect_result(&v, "tools/call list_sessions");
     let sessions: Value =
         serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -271,10 +268,11 @@ async fn mcp_tool_call_l0_read_chain() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             4,
-            "tools/call",
-            json!({"name": "memory_get_session", "arguments": {"session_id": session_id}}),
+            "memory",
+            "get_session",
+            json!({"session_id": session_id}),
         ),
     )
     .await;
@@ -286,16 +284,14 @@ async fn mcp_tool_call_l0_read_chain() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             5,
-            "tools/call",
+            "memory",
+            "append_session",
             json!({
-                "name": "memory_append_session",
-                "arguments": {
-                    "session_id": session_id,
-                    "distill": "off",
-                    "turns": [{"speaker": "user", "text": "补充一句"}]
-                }
+                "session_id": session_id,
+                "distill": "off",
+                "turns": [{"speaker": "user", "text": "补充一句"}]
             }),
         ),
     )
@@ -307,11 +303,7 @@ async fn mcp_tool_call_l0_read_chain() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
-            6,
-            "tools/call",
-            json!({"name": "memory_entities", "arguments": {"q": "Engram"}}),
-        ),
+        call(6, "memory", "entities", json!({"q": "Engram"})),
     )
     .await;
     expect_result(&v, "tools/call entities");
@@ -320,11 +312,7 @@ async fn mcp_tool_call_l0_read_chain() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
-            7,
-            "tools/call",
-            json!({"name": "memory_search", "arguments": {"query": "Engram"}}),
-        ),
+        call(7, "memory", "search", json!({"query": "Engram"})),
     )
     .await;
     expect_result(&v, "tools/call search");
@@ -335,7 +323,7 @@ async fn mcp_scope_enforcement() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    // 无 memory scope 的 key：能过认证，但工具面拒绝
+    // 无 memory scope 的 key：能过认证，但域工具拒绝
     let wiki_key = create_key(&app, &admin, &["wiki"]).await;
     let (status, v) = mcp_rpc(&app, &wiki_key, rpc(1, "tools/list", json!({}))).await;
     // tools/list 是协议能力（不含业务数据），放行
@@ -345,14 +333,7 @@ async fn mcp_scope_enforcement() {
     let (status, v) = mcp_rpc(
         &app,
         &wiki_key,
-        rpc(
-            2,
-            "tools/call",
-            json!({
-                "name": "memory_search",
-                "arguments": {"query": "test"}
-            }),
-        ),
+        call(2, "memory", "search", json!({"query": "test"})),
     )
     .await;
     assert_eq!(
@@ -396,13 +377,11 @@ async fn mcp_scope_enforcement() {
     let (_, v) = mcp_rpc(
         &app,
         &mem_key,
-        rpc(
+        call(
             3,
-            "tools/call",
-            json!({
-                "name": "memory_forget",
-                "arguments": {"session_id": session_id, "mode": "erase"}
-            }),
+            "memory",
+            "forget",
+            json!({"session_id": session_id, "mode": "erase"}),
         ),
     )
     .await;
@@ -418,13 +397,11 @@ async fn mcp_scope_enforcement() {
     let (_, v) = mcp_rpc(
         &app,
         &mem_key,
-        rpc(
+        call(
             4,
-            "tools/call",
-            json!({
-                "name": "memory_forget",
-                "arguments": {"session_id": session_id, "mode": "void"}
-            }),
+            "memory",
+            "forget",
+            json!({"session_id": session_id, "mode": "void"}),
         ),
     )
     .await;
@@ -458,7 +435,13 @@ async fn mcp_admin_info_endpoint() {
     assert_eq!(info["enabled"], json!(true), "缺省配置应全开");
     assert_eq!(info["disabled_tools"], json!([]));
     let tools = info["tools"].as_array().expect("工具清单");
-    assert!(tools.len() >= 9, "工具清单应与 MCP 层同源：{}", tools.len());
+    assert_eq!(tools.len(), 6, "应为六个域工具：{}", tools.len());
+    let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();
+    assert_eq!(
+        memory["actions"].as_array().unwrap().len(),
+        9,
+        "memory 域应展示 9 个操作：{memory}"
+    );
 
     // 非 admin 拒绝
     let key = create_key(&app, &admin, &["memory"]).await;
@@ -540,17 +523,17 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     let admin = login_token(&app).await;
     let key = create_key(&app, &admin, &["memory"]).await;
 
-    // 停用 write_session
+    // 停用 memory.write_session（action 级开关）
     let (status, info) = put_mcp_config(
         &app,
         &admin,
-        json!({"disabled_tools": ["memory_write_session"]}),
+        json!({"disabled_tools": ["memory.write_session"]}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(info["disabled_tools"], json!(["memory_write_session"]));
+    assert_eq!(status, StatusCode::OK, "action 键应通过校验：{info}");
+    assert_eq!(info["disabled_tools"], json!(["memory.write_session"]));
 
-    // tools/list 对 AI 隐身（9 → 8；scope 过滤后 memory-only key 只见 memory 域九工具）
+    // 域工具本身仍在 tools/list（工具级隐身只对整域停用生效）
     let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
     let result = expect_result(&v, "tools/list");
     let names: Vec<String> = result["tools"]
@@ -559,20 +542,27 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .iter()
         .filter_map(|t| t["name"].as_str().map(String::from))
         .collect();
-    assert_eq!(names.len(), 8, "停用工具不应出现在 tools/list：{names:?}");
-    assert!(!names.contains(&"memory_write_session".to_string()));
+    assert_eq!(names, vec!["memory"], "域工具应保留：{names:?}");
+    // 描述目录里 write_session 应隐身
+    let description = result["tools"][0]["description"].as_str().unwrap_or("");
+    assert!(
+        !description.contains("- write_session："),
+        "停用操作应从目录隐身：{description}"
+    );
+    assert!(
+        description.contains("- search："),
+        "其余操作不受影响：{description}"
+    );
 
     // tools/call 直接拒绝
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             2,
-            "tools/call",
-            json!({
-                "name": "memory_write_session",
-                "arguments": {"turns": [{"speaker": "user", "text": "x"}]}
-            }),
+            "memory",
+            "write_session",
+            json!({"turns": [{"speaker": "user", "text": "x"}]}),
         ),
     )
     .await;
@@ -581,35 +571,96 @@ async fn mcp_tool_toggle_hides_and_rejects() {
             .as_str()
             .unwrap_or("")
             .contains("已停用"),
-        "停用工具调用应报错：{v}"
+        "停用操作调用应报错：{v}"
     );
 
-    // 未知工具名 400（防笔误）
+    // help 手册同步隐身
+    let (_, v) = mcp_rpc(&app, &key, call(3, "memory", "help", json!({}))).await;
+    let out = expect_result(&v, "help");
+    let manual: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    let actions: Vec<&str> = manual["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|a| a["action"].as_str())
+        .collect();
+    assert_eq!(actions.len(), 8, "停用操作应从手册隐身：{actions:?}");
+    assert!(!actions.contains(&"write_session"));
+
+    // 未知键 400（防笔误）
     let (status, _) =
         put_mcp_config(&app, &admin, json!({"disabled_tools": ["memory_bogus"]})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
-    // 恢复全开 → 工具回归
+    // 恢复全开 → 操作回归
     let (status, info) = put_mcp_config(&app, &admin, json!({"disabled_tools": []})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(info["disabled_tools"], json!([]));
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
-            3,
-            "tools/call",
-            json!({
-                "name": "memory_write_session",
-                "arguments": {"distill": "off", "turns": [{"speaker": "user", "text": "回归测试"}]}
-            }),
+        call(
+            4,
+            "memory",
+            "write_session",
+            json!({"distill": "off", "turns": [{"speaker": "user", "text": "回归测试"}]}),
         ),
     )
     .await;
     expect_result(&v, "恢复后 write_session");
 }
 
-// ---------- 技能域（skills_*）----------
+// ---------- 渐进式发现（help / 未知 action / 坏参数自愈） ----------
+
+#[tokio::test]
+async fn mcp_progressive_discovery_help_and_unknown_action() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["todos"]).await;
+
+    // tools/list：todos-only key 恰见一个域工具，描述带操作目录
+    let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
+    let result = expect_result(&v, "tools/list");
+    let names: Vec<&str> = result["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+    assert_eq!(names, vec!["todos"]);
+
+    // help：一轮取回全域操作手册（含参数 schema）
+    let (_, v) = mcp_rpc(&app, &key, call(2, "todos", "help", json!({}))).await;
+    let out = expect_result(&v, "help");
+    let manual: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(manual["domain"], "todos");
+    let actions = manual["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 6, "todos 应有 6 个操作：{manual}");
+    let add = actions.iter().find(|a| a["action"] == "add").unwrap();
+    assert!(
+        add["parameters"]["properties"]["title"].is_object(),
+        "手册应含 add 的参数 schema：{add}"
+    );
+    assert_eq!(add["destructive"], json!(false));
+    let del = actions.iter().find(|a| a["action"] == "delete").unwrap();
+    assert_eq!(del["destructive"], json!(true));
+
+    // 未知 action → 报错即发现（列合法操作 + help 提示）
+    let (_, v) = mcp_rpc(&app, &key, call(3, "todos", "nope", json!({}))).await;
+    let msg = v["error"]["message"].as_str().unwrap_or("");
+    assert!(msg.contains("nope"), "报错应回显未知操作：{v}");
+    assert!(msg.contains("add"), "报错应列合法操作：{v}");
+    assert!(msg.contains("help"), "报错应提示 help：{v}");
+
+    // 坏参数 → 报错指向 help（自愈）
+    let (_, v) = mcp_rpc(&app, &key, call(4, "todos", "add", json!({}))).await;
+    let msg = v["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("todos.add") && msg.contains("help"),
+        "坏参数报错应带操作名与 help 提示：{v}"
+    );
+}
+
+// ---------- 技能域（skills）----------
 
 #[tokio::test]
 async fn mcp_skills_tools_listed_with_domain() {
@@ -636,38 +687,47 @@ async fn mcp_skills_tools_listed_with_domain() {
         .unwrap_or("")
         .to_string();
     assert!(
-        instructions.contains("skills_list"),
-        "instructions 应包含技能域说明"
+        instructions.contains("skills 域用法"),
+        "instructions 应包含技能域说明：{instructions}"
     );
 
-    // tools/list：8 个 skills_* 工具齐备，注解正确
+    // tools/list：skills-only key 只见 skills 域工具，描述带 8 操作目录
     let (_, v) = mcp_rpc(&app, &key, rpc(2, "tools/list", json!({}))).await;
-    let tools = expect_result(&v, "tools/list")["tools"]
+    let result = expect_result(&v, "tools/list");
+    let names: Vec<&str> = result["tools"]
         .as_array()
         .unwrap()
-        .clone();
-    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    for expected in [
-        "skills_list",
-        "skills_get",
-        "skills_file_get",
-        "skills_file_put",
-        "skills_create",
-        "skills_update",
-        "skills_delete",
-        "skills_import",
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["skills"],
+        "skills-only key 应只见 skills 域工具"
+    );
+    let description = result["tools"][0]["description"].as_str().unwrap_or("");
+    for action in [
+        "- list：",
+        "- get：",
+        "- file_get：",
+        "- file_put：",
+        "- create：",
+        "- update：",
+        "- delete：",
+        "- import：",
     ] {
         assert!(
-            names.contains(&expected),
-            "tools/list 缺少 {expected}：{names:?}"
+            description.contains(action),
+            "目录缺 {action}：{description}"
         );
     }
-    let list = tools.iter().find(|t| t["name"] == "skills_list").unwrap();
-    assert_eq!(list["annotations"]["readOnlyHint"], json!(true));
-    let del = tools.iter().find(|t| t["name"] == "skills_delete").unwrap();
-    assert_eq!(del["annotations"]["destructiveHint"], json!(true));
+    // delete 是破坏性操作，目录应标注
+    assert!(
+        description.contains("【破坏性】"),
+        "破坏性操作应标注：{description}"
+    );
 
-    // 管理端点：skills 工具归 skills 域（前端管理台按此自动分组）
+    // 管理端点：skills 域工具下挂 8 个操作（前端管理台按此自动分组）
     let admin = login_token(&app).await;
     let resp = app
         .clone()
@@ -689,12 +749,13 @@ async fn mcp_skills_tools_listed_with_domain() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|t| t["name"].as_str().unwrap_or("").starts_with("skills_"))
+        .filter(|t| t["domain"] == "skills")
         .collect();
-    assert_eq!(skills_tools.len(), 8, "管理端点应展示 8 个 skills 工具");
-    assert!(
-        skills_tools.iter().all(|t| t["domain"] == "skills"),
-        "skills 工具应归 skills 域：{skills_tools:?}"
+    assert_eq!(skills_tools.len(), 1, "管理端点应展示 1 个 skills 域工具");
+    assert_eq!(
+        skills_tools[0]["actions"].as_array().unwrap().len(),
+        8,
+        "skills 域应展示 8 个操作"
     );
 }
 
@@ -707,23 +768,21 @@ async fn mcp_skills_crud_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             1,
-            "tools/call",
+            "skills",
+            "create",
             json!({
-                "name": "skills_create",
-                "arguments": {
-                    "name": "PR 审查",
-                    "slug": "review-pr",
-                    "description": "审查 Rust PR 的固定流程",
-                    "content": "# 审查步骤\n1. 读 diff\n2. 跑 clippy",
-                    "tags": ["rust", "review"]
-                }
+                "name": "PR 审查",
+                "slug": "review-pr",
+                "description": "审查 Rust PR 的固定流程",
+                "content": "# 审查步骤\n1. 读 diff\n2. 跑 clippy",
+                "tags": ["rust", "review"]
             }),
         ),
     )
     .await;
-    let result = expect_result(&v, "skills_create");
+    let result = expect_result(&v, "skills create");
     assert!(
         result["content"][0]["text"]
             .as_str()
@@ -733,17 +792,8 @@ async fn mcp_skills_crud_journey() {
     );
 
     // list（q 命中）
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        rpc(
-            2,
-            "tools/call",
-            json!({"name": "skills_list", "arguments": {"q": "审查"}}),
-        ),
-    )
-    .await;
-    let result = expect_result(&v, "skills_list");
+    let (_, v) = mcp_rpc(&app, &key, call(2, "skills", "list", json!({"q": "审查"}))).await;
+    let result = expect_result(&v, "skills list");
     assert!(
         result["content"][0]["text"]
             .as_str()
@@ -756,15 +806,11 @@ async fn mcp_skills_crud_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
-            3,
-            "tools/call",
-            json!({"name": "skills_get", "arguments": {"slug": "review-pr"}}),
-        ),
+        call(3, "skills", "get", json!({"slug": "review-pr"})),
     )
     .await;
     assert!(
-        expect_result(&v, "skills_get")["content"][0]["text"]
+        expect_result(&v, "skills get")["content"][0]["text"]
             .as_str()
             .unwrap()
             .contains("读 diff")
@@ -774,17 +820,15 @@ async fn mcp_skills_crud_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             4,
-            "tools/call",
-            json!({
-                "name": "skills_update",
-                "arguments": {"slug": "review-pr", "content": "# 新流程", "enabled": false}
-            }),
+            "skills",
+            "update",
+            json!({"slug": "review-pr", "content": "# 新流程", "enabled": false}),
         ),
     )
     .await;
-    let updated = expect_result(&v, "skills_update");
+    let updated = expect_result(&v, "skills update");
     assert!(
         updated["content"][0]["text"]
             .as_str()
@@ -796,11 +840,7 @@ async fn mcp_skills_crud_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
-            5,
-            "tools/call",
-            json!({"name": "skills_list", "arguments": {"enabled": true}}),
-        ),
+        call(5, "skills", "list", json!({"enabled": true})),
     )
     .await;
     assert!(
@@ -815,19 +855,17 @@ async fn mcp_skills_crud_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             6,
-            "tools/call",
+            "skills",
+            "import",
             json!({
-                "name": "skills_import",
-                "arguments": {
-                    "content": "---\nname: Deploy Check\ndescription: 部署前检查清单\nslug: deploy-check\ntags: ops\n---\n# 检查清单\n- 健康检查\n- 回滚预案"
-                }
+                "content": "---\nname: Deploy Check\ndescription: 部署前检查清单\nslug: deploy-check\ntags: ops\n---\n# 检查清单\n- 健康检查\n- 回滚预案"
             }),
         ),
     )
     .await;
-    let imported = expect_result(&v, "skills_import");
+    let imported = expect_result(&v, "skills import");
     assert!(
         imported["content"][0]["text"]
             .as_str()
@@ -839,10 +877,11 @@ async fn mcp_skills_crud_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             7,
-            "tools/call",
-            json!({"name": "skills_update", "arguments": {"slug": "review-pr", "enabled": true}}),
+            "skills",
+            "update",
+            json!({"slug": "review-pr", "enabled": true}),
         ),
     )
     .await;
@@ -850,22 +889,14 @@ async fn mcp_skills_crud_journey() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
-            8,
-            "tools/call",
-            json!({"name": "skills_delete", "arguments": {"slug": "review-pr"}}),
-        ),
+        call(8, "skills", "delete", json!({"slug": "review-pr"})),
     )
     .await;
-    expect_result(&v, "skills_delete");
+    expect_result(&v, "skills delete");
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
-            9,
-            "tools/call",
-            json!({"name": "skills_get", "arguments": {"slug": "review-pr"}}),
-        ),
+        call(9, "skills", "get", json!({"slug": "review-pr"})),
     )
     .await;
     assert!(
@@ -882,16 +913,12 @@ async fn mcp_skills_scope_enforcement() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    // 只有 memory scope 的 key：tools/list 放行（协议能力），skills_* 调用被拒
+    // 只有 memory scope 的 key：tools/list 放行（协议能力），skills 域调用被拒
     let mem_key = create_key(&app, &admin, &["memory"]).await;
     let (_, v) = mcp_rpc(
         &app,
         &mem_key,
-        rpc(
-            1,
-            "tools/call",
-            json!({"name": "skills_create", "arguments": {"name": "x", "content": "y"}}),
-        ),
+        call(1, "skills", "create", json!({"name": "x", "content": "y"})),
     )
     .await;
     assert!(
@@ -902,16 +929,12 @@ async fn mcp_skills_scope_enforcement() {
         "无 skills scope 应被拒：{v}"
     );
 
-    // skills scope 的 key 调 memory_* 同样被拒（域间分权）
+    // skills scope 的 key 调 memory 域同样被拒（域间分权）
     let skills_key = create_key(&app, &admin, &["skills"]).await;
     let (_, v) = mcp_rpc(
         &app,
         &skills_key,
-        rpc(
-            2,
-            "tools/call",
-            json!({"name": "memory_search", "arguments": {"query": "test"}}),
-        ),
+        call(2, "memory", "search", json!({"query": "test"})),
     )
     .await;
     assert!(
@@ -919,9 +942,11 @@ async fn mcp_skills_scope_enforcement() {
             .as_str()
             .unwrap_or("")
             .contains("memory scope"),
-        "skills key 调记忆工具应被拒：{v}"
+        "skills key 调记忆域应被拒：{v}"
     );
 }
+
+// ---------- Wiki 域（wiki）----------
 
 #[tokio::test]
 async fn wiki_mcp_tools_listed() {
@@ -932,32 +957,27 @@ async fn wiki_mcp_tools_listed() {
     let result = expect_result(&v, "tools/list");
     let tools = result["tools"].as_array().expect("tools 数组");
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    for expected in [
-        "wiki_search",
-        "wiki_list_pages",
-        "wiki_get_page",
-        "wiki_write_page",
-        "wiki_ingest",
-        "wiki_archive_query",
-        "wiki_graph",
-        "wiki_lint",
-        "wiki_delete_page",
+    assert_eq!(names, vec!["wiki"], "wiki-only key 应只见 wiki 域工具");
+    // 描述目录：9 个操作齐备
+    let description = tools[0]["description"].as_str().unwrap_or("");
+    for action in [
+        "- search：",
+        "- list_pages：",
+        "- get_page：",
+        "- write_page：",
+        "- ingest：",
+        "- archive_query：",
+        "- graph：",
+        "- lint：",
+        "- delete_page：",
     ] {
         assert!(
-            names.contains(&expected),
-            "tools/list 缺少 {expected}：{names:?}"
+            description.contains(action),
+            "目录缺 {action}：{description}"
         );
     }
-    // 只读 wiki 工具应带 readOnlyHint；写工具不应带
-    let search = tools.iter().find(|t| t["name"] == "wiki_search").unwrap();
-    assert_eq!(search["annotations"]["readOnlyHint"], json!(true));
-    let write = tools
-        .iter()
-        .find(|t| t["name"] == "wiki_write_page")
-        .unwrap();
-    assert_eq!(write["annotations"]["readOnlyHint"], json!(false));
 
-    // 管理台信息与 MCP 层同源：wiki 域工具出现、domain 前缀正确
+    // 管理台信息与 MCP 层同源：wiki 域工具 + 9 操作
     let admin = login_token(&app).await;
     let resp = app
         .clone()
@@ -982,14 +1002,19 @@ async fn wiki_mcp_tools_listed() {
         .iter()
         .filter(|t| t["domain"] == "wiki")
         .collect();
-    assert_eq!(wiki_tools.len(), 9, "管理台应展示 9 个 wiki 工具");
+    assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
+    assert_eq!(
+        wiki_tools[0]["actions"].as_array().unwrap().len(),
+        9,
+        "wiki 域应展示 9 个操作"
+    );
 
-    // instructions 应覆盖两个域
+    // instructions 应覆盖 wiki 域
     assert!(
         info["instructions"]
             .as_str()
             .unwrap()
-            .contains("wiki_search")
+            .contains("wiki 域用法")
     );
 }
 
@@ -1002,21 +1027,19 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             1,
-            "tools/call",
+            "wiki",
+            "write_page",
             json!({
-                "name": "wiki_write_page",
-                "arguments": {
-                    "slug": "tokio-调度器",
-                    "title": "Tokio 调度器",
-                    "content": "# Tokio 调度器\n\n工作窃取式调度，参见 [[tokio-runtime]]。另有死链 [[not-exist-page]]。"
-                }
+                "slug": "tokio-调度器",
+                "title": "Tokio 调度器",
+                "content": "# Tokio 调度器\n\n工作窃取式调度，参见 [[tokio-runtime]]。另有死链 [[not-exist-page]]。"
             }),
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call wiki_write_page");
+    let out = expect_result(&v, "tools/call wiki write_page");
     assert!(
         !out["isError"].as_bool().unwrap_or(false),
         "写页不应报错：{out}"
@@ -1029,41 +1052,37 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             2,
-            "tools/call",
+            "wiki",
+            "write_page",
             json!({
-                "name": "wiki_write_page",
-                "arguments": {
-                    "slug": "tokio-runtime",
-                    "title": "Tokio Runtime",
-                    "content": "# Tokio Runtime\n\n多线程运行时，与 tokio 调度器协同。"
-                }
+                "slug": "tokio-runtime",
+                "title": "Tokio Runtime",
+                "content": "# Tokio Runtime\n\n多线程运行时，与 tokio 调度器协同。"
             }),
         ),
     )
     .await;
-    expect_result(&v, "tools/call wiki_write_page #2");
+    expect_result(&v, "tools/call wiki write_page #2");
 
     // 覆盖更新：同 slug 再写 → version +1
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             3,
-            "tools/call",
+            "wiki",
+            "write_page",
             json!({
-                "name": "wiki_write_page",
-                "arguments": {
-                    "slug": "tokio-runtime",
-                    "title": "Tokio Runtime",
-                    "content": "# Tokio Runtime\n\n更新后的正文。"
-                }
+                "slug": "tokio-runtime",
+                "title": "Tokio Runtime",
+                "content": "# Tokio Runtime\n\n更新后的正文。"
             }),
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call wiki_write_page 覆盖更新");
+    let out = expect_result(&v, "tools/call wiki write_page 覆盖更新");
     let updated: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(updated["version"], 2, "同 slug 覆盖应递增版本");
 
@@ -1071,30 +1090,17 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
-            4,
-            "tools/call",
-            json!({"name": "wiki_get_page", "arguments": {"slug": "tokio runtime"}}),
-        ),
+        call(4, "wiki", "get_page", json!({"slug": "tokio runtime"})),
     )
     .await;
-    let out = expect_result(&v, "tools/call wiki_get_page");
+    let out = expect_result(&v, "tools/call wiki get_page");
     let got: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(got["slug"], "tokio-runtime");
     assert!(got["content"].as_str().unwrap().contains("更新后的正文"));
 
     // 列表（瘦身：不带正文）
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        rpc(
-            5,
-            "tools/call",
-            json!({"name": "wiki_list_pages", "arguments": {}}),
-        ),
-    )
-    .await;
-    let out = expect_result(&v, "tools/call wiki_list_pages");
+    let (_, v) = mcp_rpc(&app, &key, call(5, "wiki", "list_pages", json!({}))).await;
+    let out = expect_result(&v, "tools/call wiki list_pages");
     let pages: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(
         pages.as_array().unwrap().len(),
@@ -1107,14 +1113,10 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
-            6,
-            "tools/call",
-            json!({"name": "wiki_search", "arguments": {"query": "tokio"}}),
-        ),
+        call(6, "wiki", "search", json!({"query": "tokio"})),
     )
     .await;
-    let out = expect_result(&v, "tools/call wiki_search");
+    let out = expect_result(&v, "tools/call wiki search");
     let result: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert!(result.get("purpose").is_some(), "检索应返回 purpose 字段");
     let hits = result["pages"].as_array().expect("pages 数组");
@@ -1124,17 +1126,8 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     );
 
     // 链接图：两个节点
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        rpc(
-            7,
-            "tools/call",
-            json!({"name": "wiki_graph", "arguments": {}}),
-        ),
-    )
-    .await;
-    let out = expect_result(&v, "tools/call wiki_graph");
+    let (_, v) = mcp_rpc(&app, &key, call(7, "wiki", "graph", json!({}))).await;
+    let out = expect_result(&v, "tools/call wiki graph");
     let graph: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(
         graph["nodes"].as_array().unwrap().len(),
@@ -1143,17 +1136,8 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     );
 
     // lint：应报出正文里的死链
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        rpc(
-            8,
-            "tools/call",
-            json!({"name": "wiki_lint", "arguments": {}}),
-        ),
-    )
-    .await;
-    let out = expect_result(&v, "tools/call wiki_lint");
+    let (_, v) = mcp_rpc(&app, &key, call(8, "wiki", "lint", json!({}))).await;
+    let out = expect_result(&v, "tools/call wiki lint");
     let report: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(report["checked_pages"], 2);
     assert!(
@@ -1169,21 +1153,19 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             9,
-            "tools/call",
+            "wiki",
+            "archive_query",
             json!({
-                "name": "wiki_archive_query",
-                "arguments": {
-                    "title": "tokio 调度原理",
-                    "question": "tokio 怎么调度任务？",
-                    "answer": "工作窃取式多队列调度。"
-                }
+                "title": "tokio 调度原理",
+                "question": "tokio 怎么调度任务？",
+                "answer": "工作窃取式多队列调度。"
             }),
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call wiki_archive_query");
+    let out = expect_result(&v, "tools/call wiki archive_query");
     let archived: Value =
         serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(
@@ -1195,21 +1177,19 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             10,
-            "tools/call",
+            "wiki",
+            "archive_query",
             json!({
-                "name": "wiki_archive_query",
-                "arguments": {
-                    "title": "tokio 调度原理",
-                    "question": "tokio 怎么调度任务？",
-                    "answer": "重复内容。"
-                }
+                "title": "tokio 调度原理",
+                "question": "tokio 怎么调度任务？",
+                "answer": "重复内容。"
             }),
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call wiki_archive_query 重复");
+    let out = expect_result(&v, "tools/call wiki archive_query 重复");
     let again: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(
         again["skipped"],
@@ -1221,17 +1201,15 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             11,
-            "tools/call",
-            json!({
-                "name": "wiki_ingest",
-                "arguments": {"title": "一份新文档", "text": "# 新文档\n\n正文内容供 LLM 织入。"}
-            }),
+            "wiki",
+            "ingest",
+            json!({"title": "一份新文档", "text": "# 新文档\n\n正文内容供 LLM 织入。"}),
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call wiki_ingest");
+    let out = expect_result(&v, "tools/call wiki ingest");
     let ingested: Value =
         serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(ingested["skipped"], json!(false), "新内容首次织入不应跳过");
@@ -1240,13 +1218,11 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             12,
-            "tools/call",
-            json!({
-                "name": "wiki_write_page",
-                "arguments": {"slug": "bad slug/路径", "title": "x", "content": "x"}
-            }),
+            "wiki",
+            "write_page",
+            json!({"slug": "bad slug/路径", "title": "x", "content": "x"}),
         ),
     )
     .await;
@@ -1264,16 +1240,12 @@ async fn wiki_mcp_scope_enforcement() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    // memory-only key 调 wiki 工具 → JSON-RPC 层拒绝（HTTP 200）
+    // memory-only key 调 wiki 域 → JSON-RPC 层拒绝（HTTP 200）
     let mem_key = create_key(&app, &admin, &["memory"]).await;
     let (status, v) = mcp_rpc(
         &app,
         &mem_key,
-        rpc(
-            1,
-            "tools/call",
-            json!({"name": "wiki_search", "arguments": {"query": "x"}}),
-        ),
+        call(1, "wiki", "search", json!({"query": "x"})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "业务拒绝在 JSON-RPC 错误层");
@@ -1285,16 +1257,12 @@ async fn wiki_mcp_scope_enforcement() {
         "应报缺少 wiki scope：{v}"
     );
 
-    // wiki-only key 调 memory 工具 → 拒绝（域间分权双向生效）
+    // wiki-only key 调 memory 域 → 拒绝（域间分权双向生效）
     let wiki_key = create_key(&app, &admin, &["wiki"]).await;
     let (_, v) = mcp_rpc(
         &app,
         &wiki_key,
-        rpc(
-            2,
-            "tools/call",
-            json!({"name": "memory_search", "arguments": {"query": "x"}}),
-        ),
+        call(2, "memory", "search", json!({"query": "x"})),
     )
     .await;
     assert!(
@@ -1309,15 +1277,11 @@ async fn wiki_mcp_scope_enforcement() {
     let (status, v) = mcp_rpc(
         &app,
         &wiki_key,
-        rpc(
-            3,
-            "tools/call",
-            json!({"name": "wiki_search", "arguments": {"query": "x"}}),
-        ),
+        call(3, "wiki", "search", json!({"query": "x"})),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    expect_result(&v, "wiki key 调 wiki_search");
+    expect_result(&v, "wiki key 调 wiki search");
 }
 
 #[tokio::test]
@@ -1326,44 +1290,45 @@ async fn wiki_mcp_tool_toggle_hides_and_rejects() {
     let admin = login_token(&app).await;
     let key = create_key(&app, &admin, &["wiki"]).await;
 
-    // 停用 wiki_write_page（管理台校验应认识 wiki 域工具名）
+    // 停用 wiki.write_page（管理台校验应认识 action 键）
     let (status, info) =
-        put_mcp_config(&app, &admin, json!({"disabled_tools": ["wiki_write_page"]})).await;
+        put_mcp_config(&app, &admin, json!({"disabled_tools": ["wiki.write_page"]})).await;
     assert_eq!(
         status,
         StatusCode::OK,
-        "wiki 工具名应通过管理台校验：{info}"
+        "wiki.write_page 应通过管理台校验：{info}"
     );
-    assert_eq!(info["disabled_tools"], json!(["wiki_write_page"]));
+    assert_eq!(info["disabled_tools"], json!(["wiki.write_page"]));
 
-    // tools/list 隐身
+    // 域工具保留，描述目录里 write_page 隐身
     let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
-    let names: Vec<String> = expect_result(&v, "tools/list")["tools"]
+    let result = expect_result(&v, "tools/list");
+    let names: Vec<String> = result["tools"]
         .as_array()
         .unwrap()
         .iter()
         .filter_map(|t| t["name"].as_str().map(String::from))
         .collect();
+    assert_eq!(names, vec!["wiki"], "域工具应保留：{names:?}");
+    let description = result["tools"][0]["description"].as_str().unwrap_or("");
     assert!(
-        !names.contains(&"wiki_write_page".to_string()),
-        "停用工具应隐身：{names:?}"
+        !description.contains("- write_page："),
+        "停用操作应从目录隐身：{description}"
     );
     assert!(
-        names.contains(&"wiki_search".to_string()),
-        "其余 wiki 工具不受影响"
+        description.contains("- search："),
+        "其余操作不受影响：{description}"
     );
 
     // tools/call 拒绝
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             2,
-            "tools/call",
-            json!({
-                "name": "wiki_write_page",
-                "arguments": {"slug": "x", "title": "x", "content": "x"}
-            }),
+            "wiki",
+            "write_page",
+            json!({"slug": "x", "title": "x", "content": "x"}),
         ),
     )
     .await;
@@ -1372,10 +1337,10 @@ async fn wiki_mcp_tool_toggle_hides_and_rejects() {
             .as_str()
             .unwrap_or("")
             .contains("已停用"),
-        "停用工具调用应报错：{v}"
+        "停用操作调用应报错：{v}"
     );
 
-    // 未知 wiki 工具名 → 管理台 400
+    // 未知键 → 管理台 400
     let (status, _) = put_mcp_config(&app, &admin, json!({"disabled_tools": ["wiki_bogus"]})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }

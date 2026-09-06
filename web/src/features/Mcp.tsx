@@ -136,16 +136,80 @@ function ParamList({ schema }: { schema: Record<string, unknown> }) {
   )
 }
 
-/** 工具详情（展开行）：完整描述（= AI tools/list 收到的内容，含动态清单段）+ 参数。 */
-function ToolDetail({ t }: { t: McpToolInfo }) {
+/** 工具详情（展开行）：完整描述（= AI tools/list 收到的内容）+ 域内操作（单操作开关）+ 调用信封。 */
+function ToolDetail({
+  t,
+  busy,
+  onToggleAction,
+}: {
+  t: McpToolInfo
+  busy: boolean
+  onToggleAction: (key: string, next: boolean) => void
+}) {
+  const [openAction, setOpenAction] = useState<string | null>(null)
   return (
     <div className="space-y-3 border-t border-border/60 bg-muted/20 px-3 py-3">
       <div>
         <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">工具描述</h4>
         <p className="mt-1 whitespace-pre-wrap text-xs leading-5">{t.description || '（无描述）'}</p>
       </div>
+      {t.actions.length > 0 && (
+        <div>
+          <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            域内操作（{t.actions.length}）——AI 调用形态 {'{'}
+            <code className="font-mono">"action": "…"</code>
+            {'}'}
+          </h4>
+          <ul role="list" className="mt-1 space-y-1.5">
+            {t.actions.map((a) => {
+              const key = `${t.name}.${a.action}`
+              const open = openAction === key
+              return (
+                <li key={key} className="rounded border border-border/60 bg-background">
+                  <div className="flex items-center gap-2 px-2 py-1.5">
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
+                      onClick={() => setOpenAction(open ? null : key)}
+                    >
+                      <code
+                        className={cn(
+                          'shrink-0 font-mono text-xs font-medium',
+                          a.disabled && 'text-muted-foreground/60 line-through',
+                        )}
+                      >
+                        {a.action}
+                      </code>
+                      {a.destructive && (
+                        <span className="shrink-0 rounded border border-destructive/40 px-1 font-mono text-[10px] leading-4 text-destructive">
+                          破坏性
+                        </span>
+                      )}
+                      <span className="min-w-0 truncate text-xs text-muted-foreground">{a.summary}</span>
+                    </button>
+                    <span className="shrink-0">
+                      <Switch
+                        checked={!a.disabled}
+                        disabled={busy}
+                        label={`${a.disabled ? '启用' : '停用'} ${key}`}
+                        onChange={(next) => onToggleAction(key, next)}
+                      />
+                    </span>
+                  </div>
+                  {open && (
+                    <div className="border-t border-border/60 px-2 py-2">
+                      <ParamList schema={a.parameters} />
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
       <div>
-        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">参数</h4>
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">调用信封参数</h4>
         <div className="mt-1">
           <ParamList schema={t.parameters} />
         </div>
@@ -159,8 +223,9 @@ const DOMAIN_LABELS: Record<string, string> = {
   memory: '用户记忆',
   wiki: 'Wiki',
   codegraph: '代码图谱',
-  project: '项目',
+  projects: '项目',
   skills: '技能',
+  todos: '待办',
 }
 
 export default function Mcp() {
@@ -207,6 +272,13 @@ export default function Mcp() {
   const currentDomain = domain || domains[0]?.[0] || ''
   const domainTools = domains.find(([d]) => d === currentDomain)?.[1] ?? []
   const domainDisabled = domainTools.filter((t) => info?.disabled_tools.includes(t.name)).length
+  // 操作级统计（渐进式发现：域工具下挂 actions）
+  const domainActionTotal = domainTools.reduce((n, t) => n + t.actions.length, 0)
+  const domainActionDisabled = domainTools.reduce(
+    (n, t) =>
+      n + t.actions.filter((a) => info?.disabled_tools.includes(`${t.name}.${a.action}`)).length,
+    0,
+  )
   const mcpUrl = info ? `${window.location.origin}${info.endpoint}` : null
 
   return (
@@ -258,7 +330,7 @@ export default function Mcp() {
                   items={domains.map(([d, tools]) => ({
                     value: d,
                     label: DOMAIN_LABELS[d] ?? d,
-                    count: tools.length,
+                    count: tools.reduce((n, t) => n + t.actions.length, 0),
                   }))}
                   value={currentDomain}
                   onChange={setDomain}
@@ -268,8 +340,9 @@ export default function Mcp() {
             <div className="flex items-center justify-between px-3 py-2">
               <h3 className="text-sm font-semibold">{DOMAIN_LABELS[currentDomain] ?? currentDomain}域工具</h3>
               <p className="font-mono text-xs text-muted-foreground" aria-live="polite">
-                启用 {domainTools.length - domainDisabled}/{domainTools.length}
-                {domainDisabled > 0 && ` · 停用 ${domainDisabled}`}
+                操作启用 {domainActionTotal - domainActionDisabled}/{domainActionTotal}
+                {domainActionDisabled > 0 && ` · 停用 ${domainActionDisabled}`}
+                {domainDisabled > 0 && ' · 整域停用'}
               </p>
             </div>
             <ul role="list">
@@ -320,14 +393,26 @@ export default function Mcp() {
                         />
                       </span>
                     </div>
-                    {open && <ToolDetail t={t} />}
+                    {open && (
+                      <ToolDetail
+                        t={t}
+                        busy={busy}
+                        onToggleAction={(key, next) =>
+                          putConfig({
+                            disabled_tools: next
+                              ? info.disabled_tools.filter((d) => d !== key)
+                              : [...info.disabled_tools, key],
+                          })
+                        }
+                      />
+                    )}
                   </li>
                 )
               })}
             </ul>
             <p className="border-t border-border bg-muted/30 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
-              点击工具行展开：完整描述（与 AI 收到的 tools/list 同源，含动态资产清单段）与参数
-              Schema。停用 = 对 AI 隐身（tools/list 不出现）且调用被拒；总开关关闭时整个 /mcp 拒绝连接。
+              域工具开关 = 整域对 AI 隐身；展开后可对域内单个操作拨杆（停用操作从 AI 的操作目录与
+              help 手册隐身，调用被拒）。点击操作行展开参数 Schema；总开关关闭时整个 /mcp 拒绝连接。
             </p>
           </Card>
         </>

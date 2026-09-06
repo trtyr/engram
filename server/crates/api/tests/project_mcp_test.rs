@@ -1,7 +1,7 @@
-//! 项目记忆域 MCP 工具集成测试：JSON-RPC 全链路（真 PG + 完整 router + rmcp）。
+//! 项目记忆域 MCP 集成测试：渐进式发现语法（{"name":"projects","arguments":{"action":…}}）。
 //!
-//! 覆盖：工具清单与 scope 过滤、建/查/改/删全旅程、位置与文档 CRUD、
-//! 补丁式更新语义、分类校验、改名冲突、批量删除、级联删除、工具停用开关。
+//! 覆盖：域工具清单与 scope 过滤、建/查/改/删全旅程、位置与文档 CRUD、
+//! 补丁式更新语义、分类校验、改名冲突、批量删除、级联删除、action 级停用开关。
 
 mod support;
 
@@ -9,28 +9,45 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
-use support::{
-    app, create_key, expect_result, login_token, mcp_call_json, mcp_initialize, mcp_rpc, rpc,
-};
+use support::{app, create_key, expect_result, login_token, mcp_initialize, mcp_rpc, rpc};
 use tower::util::ServiceExt;
 
-const PROJECT_TOOLS: [&str; 15] = [
-    "project_types",
-    "project_list",
-    "project_get",
-    "project_create",
-    "project_update",
-    "project_delete",
-    "project_batch_delete",
-    "project_location_add",
-    "project_location_update",
-    "project_location_delete",
-    "project_doc_add",
-    "project_doc_get",
-    "project_doc_search",
-    "project_doc_update",
-    "project_doc_delete",
-];
+/// 域工具调用参数：action + 平铺参数。
+fn call(id: i64, action: &str, args: Value) -> Value {
+    let mut arguments = serde_json::Map::new();
+    arguments.insert("action".into(), json!(action));
+    if let Value::Object(m) = args {
+        for (k, v) in m {
+            arguments.insert(k, v);
+        }
+    }
+    rpc(
+        id,
+        "tools/call",
+        json!({"name": "projects", "arguments": arguments}),
+    )
+}
+
+/// 成功路径快捷调用：返回 content[0].text 解析出的 JSON（isError 即 panic）。
+async fn act_json(app: &Router, auth: &str, action: &str, args: Value) -> Value {
+    let (_, v) = mcp_rpc(app, auth, call(2, action, args)).await;
+    let out = expect_result(&v, &format!("projects.{action}"));
+    assert!(
+        !out["isError"].as_bool().unwrap_or(false),
+        "projects.{action} 不应报错：{out}"
+    );
+    let text = out["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("projects.{action} 应返回文本内容：{out}"));
+    serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("projects.{action} 返回应是 JSON：{e}\n{text}"))
+}
+
+/// 原始响应快捷调用（错误路径断言用）。
+async fn act_raw(app: &Router, auth: &str, id: i64, action: &str, args: Value) -> Value {
+    let (_, v) = mcp_rpc(app, auth, call(id, action, args)).await;
+    v
+}
 
 async fn tool_names(app: &Router, auth: &str) -> Vec<String> {
     let (_, v) = mcp_rpc(app, auth, rpc(9, "tools/list", json!({}))).await;
@@ -52,44 +69,47 @@ async fn project_tools_listed_with_annotations() {
         info["instructions"]
             .as_str()
             .unwrap_or("")
-            .contains("project_get"),
+            .contains("projects 域用法"),
         "instructions 应包含项目记忆用法：{}",
         info["instructions"]
     );
 
+    // project scope 的 key 恰见 projects 一个域工具（scope 过滤）
     let names = tool_names(&app, &key).await;
-    for expected in PROJECT_TOOLS {
-        assert!(
-            names.contains(&expected.to_string()),
-            "缺少 {expected}：{names:?}"
-        );
-    }
-    // project scope 的 key 只见 project_*（scope 过滤），memory_* 不出现
-    assert!(
-        !names.iter().any(|n| n.starts_with("memory_")),
-        "project scope 不应看到 memory 工具：{names:?}"
+    assert_eq!(
+        names,
+        vec!["projects"],
+        "project scope 应只见 projects 域工具"
     );
 
-    // 只读/破坏性注解与实现一致
+    // 描述目录：15 个操作齐备，破坏性操作带标注
     let (_, v) = mcp_rpc(&app, &key, rpc(10, "tools/list", json!({}))).await;
-    let tools = expect_result(&v, "tools/list")["tools"]
-        .as_array()
+    let description = expect_result(&v, "tools/list")["tools"][0]["description"]
+        .as_str()
         .unwrap()
-        .clone();
-    let ann = |name: &str| {
-        tools
-            .iter()
-            .find(|t| t["name"] == name)
-            .unwrap_or_else(|| panic!("缺工具 {name}"))["annotations"]
-            .clone()
-    };
-    assert_eq!(ann("project_list")["readOnlyHint"], json!(true));
-    assert_eq!(ann("project_get")["readOnlyHint"], json!(true));
-    assert_eq!(ann("project_doc_get")["readOnlyHint"], json!(true));
-    assert_eq!(ann("project_create")["readOnlyHint"], json!(false));
-    assert_eq!(ann("project_delete")["destructiveHint"], json!(true));
-    assert_eq!(ann("project_doc_delete")["destructiveHint"], json!(true));
-    assert_eq!(ann("project_batch_delete")["destructiveHint"], json!(true));
+        .to_string();
+    for action in [
+        "- types：",
+        "- list：",
+        "- get：",
+        "- create：",
+        "- update：",
+        "- delete：",
+        "- batch_delete：",
+        "- location_add：",
+        "- doc_get：",
+        "- doc_search：",
+        "- doc_delete：",
+    ] {
+        assert!(
+            description.contains(action),
+            "目录缺 {action}：{description}"
+        );
+    }
+    assert!(
+        description.contains("- delete：【破坏性】"),
+        "破坏性操作应标注：{description}"
+    );
 }
 
 #[tokio::test]
@@ -98,7 +118,7 @@ async fn project_types_template() {
     let key = create_key(&app, &login_token(&app).await, &["project"]).await;
     mcp_initialize(&app, &key).await;
 
-    let types = mcp_call_json(&app, &key, "project_types", json!({})).await;
+    let types = act_json(&app, &key, "types", json!({})).await;
     let arr = types.as_array().expect("类型数组");
     let dev = arr.iter().find(|t| t["type"] == "dev").expect("dev 类型");
     assert_eq!(dev["label"], "开发");
@@ -124,10 +144,10 @@ async fn project_full_journey() {
     mcp_initialize(&app, &key).await;
 
     // 建项目（dev）→ 类型模板分类被复制
-    let created = mcp_call_json(
+    let created = act_json(
         &app,
         &key,
-        "project_create",
+        "create",
         json!({"name": "Engram 项目记忆 MCP", "type": "dev", "description": "把项目记忆做成 MCP"}),
     )
     .await;
@@ -140,14 +160,12 @@ async fn project_full_journey() {
     let project_id = created["id"].as_str().unwrap().to_string();
 
     // 同名再建 → JSON-RPC 错误层给出冲突说明
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &key,
-        rpc(
-            3,
-            "tools/call",
-            json!({"name": "project_create", "arguments": {"name": "Engram 项目记忆 MCP", "type": "dev"}}),
-        ),
+        3,
+        "create",
+        json!({"name": "Engram 项目记忆 MCP", "type": "dev"}),
     )
     .await;
     assert!(
@@ -159,14 +177,12 @@ async fn project_full_journey() {
     );
 
     // 未知类型 → 参数错误
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &key,
-        rpc(
-            4,
-            "tools/call",
-            json!({"name": "project_create", "arguments": {"name": "x", "type": "bogus"}}),
-        ),
+        4,
+        "create",
+        json!({"name": "x", "type": "bogus"}),
     )
     .await;
     assert!(
@@ -178,10 +194,10 @@ async fn project_full_journey() {
     );
 
     // 登记两个位置
-    let loc = mcp_call_json(
+    let loc = act_json(
         &app,
         &key,
-        "project_location_add",
+        "location_add",
         json!({
             "project_name": "Engram 项目记忆 MCP",
             "ip": "127.0.0.1", "host": "MacBook Pro", "os": "macOS",
@@ -194,14 +210,14 @@ async fn project_full_journey() {
     let loc_id = loc["id"].as_str().unwrap().to_string();
 
     // 写文档（按名定位项目）
-    let doc = mcp_call_json(
+    let doc = act_json(
         &app,
         &key,
-        "project_doc_add",
+        "doc_add",
         json!({
             "project_name": "Engram 项目记忆 MCP",
             "category": "后端", "title": "MCP 工具设计",
-            "content": "# 工具面\n\n14 个 project_* 工具并入 /mcp。"
+            "content": "# 工具面\n\n项目域工具并入 /mcp。"
         }),
     )
     .await;
@@ -209,16 +225,14 @@ async fn project_full_journey() {
     let doc_id = doc["id"].as_str().unwrap().to_string();
 
     // 同分类同标题 → 冲突
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &key,
-        rpc(
-            5,
-            "tools/call",
-            json!({"name": "project_doc_add", "arguments": {
-                "project_id": project_id, "category": "后端",
-                "title": "MCP 工具设计", "content": "重复"}}),
-        ),
+        5,
+        "doc_add",
+        json!({
+            "project_id": project_id, "category": "后端",
+            "title": "MCP 工具设计", "content": "重复"}),
     )
     .await;
     assert!(
@@ -230,23 +244,21 @@ async fn project_full_journey() {
     );
 
     // 未登记分类 → 参数错误并提示现有分类（防孤儿分类）
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &key,
-        rpc(
-            6,
-            "tools/call",
-            json!({"name": "project_doc_add", "arguments": {
-                "project_id": project_id, "category": "后段", "title": "t", "content": ""}}),
-        ),
+        6,
+        "doc_add",
+        json!({
+            "project_id": project_id, "category": "后段", "title": "t", "content": ""}),
     )
     .await;
     let msg = v["error"]["message"].as_str().unwrap_or_default();
     assert!(msg.contains("不在项目分类里"), "未登记分类应报错：{v}");
     assert!(msg.contains("后端"), "错误应列出现有分类：{msg}");
 
-    // project_get 按 id 取详情（默认索引模式）：位置与文档都在，正文只给字符数
-    let detail = mcp_call_json(&app, &key, "project_get", json!({"project_id": project_id})).await;
+    // get 按 id 取详情（默认索引模式）：位置与文档都在，正文只给字符数
+    let detail = act_json(&app, &key, "get", json!({"project_id": project_id})).await;
     assert_eq!(detail["name"], "Engram 项目记忆 MCP");
     assert_eq!(detail["locations"].as_array().unwrap().len(), 1);
     assert_eq!(detail["docs"].as_array().unwrap().len(), 1);
@@ -257,43 +269,39 @@ async fn project_full_journey() {
     );
     assert_eq!(
         detail["docs"][0]["content_chars"],
-        json!(
-            "# 工具面\n\n14 个 project_* 工具并入 /mcp。"
-                .chars()
-                .count()
-        )
+        json!("# 工具面\n\n项目域工具并入 /mcp。".chars().count())
     );
     assert_eq!(detail["docs"][0]["title"], "MCP 工具设计");
 
     // include_content=true：无损全量
-    let full = mcp_call_json(
+    let full = act_json(
         &app,
         &key,
-        "project_get",
+        "get",
         json!({"project_id": project_id, "include_content": true}),
     )
     .await;
     assert_eq!(
         full["docs"][0]["content"],
-        json!("# 工具面\n\n14 个 project_* 工具并入 /mcp。")
+        json!("# 工具面\n\n项目域工具并入 /mcp。")
     );
 
-    // project_get 按名取详情（名字寻址）
-    let by_name = mcp_call_json(
+    // get 按名取详情（名字寻址）
+    let by_name = act_json(
         &app,
         &key,
-        "project_get",
+        "get",
         json!({"project_name": "Engram 项目记忆 MCP"}),
     )
     .await;
     assert_eq!(by_name["id"], json!(project_id));
 
     // 文档补丁式更新：只传 content，category/title 不动
-    let updated_doc = mcp_call_json(
+    let updated_doc = act_json(
         &app,
         &key,
-        "project_doc_update",
-        json!({"doc_id": doc_id, "content": "# 工具面\n\n14 个工具。\n\n## 更新\n补丁式更新可用。"}),
+        "doc_update",
+        json!({"doc_id": doc_id, "content": "# 工具面\n\n域内操作。\n\n## 更新\n补丁式更新可用。"}),
     )
     .await;
     assert_eq!(updated_doc["title"], "MCP 工具设计", "未传 title 不应改变");
@@ -306,15 +314,12 @@ async fn project_full_journey() {
     );
 
     // 文档移到未登记分类 → 报错
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &key,
-        rpc(
-            7,
-            "tools/call",
-            json!({"name": "project_doc_update",
-            "arguments": {"doc_id": doc_id, "category": "前端x"}}),
-        ),
+        7,
+        "doc_update",
+        json!({"doc_id": doc_id, "category": "前端x"}),
     )
     .await;
     assert!(
@@ -326,10 +331,10 @@ async fn project_full_journey() {
     );
 
     // 位置补丁式更新：只传 path
-    let upd_loc = mcp_call_json(
+    let upd_loc = act_json(
         &app,
         &key,
-        "project_location_update",
+        "location_update",
         json!({"location_id": loc_id, "path": "/new/path"}),
     )
     .await;
@@ -337,10 +342,10 @@ async fn project_full_journey() {
     assert_eq!(upd_loc["host"], "MacBook Pro", "未传 host 不应改变");
 
     // 项目补丁式更新：只改状态与描述，分类保持
-    let upd = mcp_call_json(
+    let upd = act_json(
         &app,
         &key,
-        "project_update",
+        "update",
         json!({"project_id": project_id, "status": "paused", "description": "第一版完成，暂停"}),
     )
     .await;
@@ -353,10 +358,10 @@ async fn project_full_journey() {
     );
 
     // 追加分类：替换式带全量
-    let upd2 = mcp_call_json(
+    let upd2 = act_json(
         &app,
         &key,
-        "project_update",
+        "update",
         json!({"project_id": project_id, "categories": ["后端", "前端", "测试", "规划", "运维"]}),
     )
     .await;
@@ -366,22 +371,19 @@ async fn project_full_journey() {
     );
 
     // 改名：new_name；旧名寻址失效、新名可用
-    mcp_call_json(
+    act_json(
         &app,
         &key,
-        "project_update",
+        "update",
         json!({"project_id": project_id, "new_name": "Engram MCP"}),
     )
     .await;
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &key,
-        rpc(
-            8,
-            "tools/call",
-            json!({"name": "project_get",
-            "arguments": {"project_name": "Engram 项目记忆 MCP"}}),
-        ),
+        8,
+        "get",
+        json!({"project_name": "Engram 项目记忆 MCP"}),
     )
     .await;
     assert!(
@@ -391,17 +393,11 @@ async fn project_full_journey() {
             .contains("不存在"),
         "旧名寻址应 NotFound：{v}"
     );
-    let renamed = mcp_call_json(
-        &app,
-        &key,
-        "project_get",
-        json!({"project_name": "Engram MCP"}),
-    )
-    .await;
+    let renamed = act_json(&app, &key, "get", json!({"project_name": "Engram MCP"})).await;
     assert_eq!(renamed["id"], json!(project_id));
 
     // 列表 + 类型过滤
-    let listed = mcp_call_json(&app, &key, "project_list", json!({"type": "dev"})).await;
+    let listed = act_json(&app, &key, "list", json!({"type": "dev"})).await;
     assert!(
         listed
             .as_array()
@@ -409,40 +405,25 @@ async fn project_full_journey() {
             .iter()
             .any(|p| p["id"] == json!(project_id))
     );
-    let none = mcp_call_json(&app, &key, "project_list", json!({"type": "research"})).await;
+    let none = act_json(&app, &key, "list", json!({"type": "research"})).await;
     assert_eq!(none.as_array().unwrap().len(), 0, "research 过滤应为空");
 
     // 删位置、删文档
-    mcp_call_json(
+    act_json(
         &app,
         &key,
-        "project_location_delete",
+        "location_delete",
         json!({"location_id": loc_id}),
     )
     .await;
-    mcp_call_json(&app, &key, "project_doc_delete", json!({"doc_id": doc_id})).await;
-    let detail2 = mcp_call_json(&app, &key, "project_get", json!({"project_id": project_id})).await;
+    act_json(&app, &key, "doc_delete", json!({"doc_id": doc_id})).await;
+    let detail2 = act_json(&app, &key, "get", json!({"project_id": project_id})).await;
     assert_eq!(detail2["locations"].as_array().unwrap().len(), 0);
     assert_eq!(detail2["docs"].as_array().unwrap().len(), 0);
 
     // 删项目 → 级联（本例已无子行）+ 再查 NotFound
-    mcp_call_json(
-        &app,
-        &key,
-        "project_delete",
-        json!({"project_id": project_id}),
-    )
-    .await;
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        rpc(
-            11,
-            "tools/call",
-            json!({"name": "project_get", "arguments": {"project_id": project_id}}),
-        ),
-    )
-    .await;
+    act_json(&app, &key, "delete", json!({"project_id": project_id})).await;
+    let v = act_raw(&app, &key, 11, "get", json!({"project_id": project_id})).await;
     assert!(
         v["error"]["message"]
             .as_str()
@@ -459,30 +440,27 @@ async fn project_rename_conflict_is_conflict() {
     let key = create_key(&app, &login_token(&app).await, &["project"]).await;
     mcp_initialize(&app, &key).await;
 
-    let a = mcp_call_json(
+    let a = act_json(
         &app,
         &key,
-        "project_create",
+        "create",
         json!({"name": "项目A", "type": "dev"}),
     )
     .await;
-    mcp_call_json(
+    act_json(
         &app,
         &key,
-        "project_create",
+        "create",
         json!({"name": "项目B", "type": "dev"}),
     )
     .await;
 
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &key,
-        rpc(
-            2,
-            "tools/call",
-            json!({"name": "project_update",
-            "arguments": {"project_id": a["id"], "new_name": "项目B"}}),
-        ),
+        2,
+        "update",
+        json!({"project_id": a["id"], "new_name": "项目B"}),
     )
     .await;
     let msg = v["error"]["message"].as_str().unwrap_or_default();
@@ -490,15 +468,12 @@ async fn project_rename_conflict_is_conflict() {
 
     // 空名 / 纯空白名 → BadRequest
     for bad in ["", "   "] {
-        let (_, v) = mcp_rpc(
+        let v = act_raw(
             &app,
             &key,
-            rpc(
-                3,
-                "tools/call",
-                json!({"name": "project_update",
-                "arguments": {"project_id": a["id"], "new_name": bad}}),
-            ),
+            3,
+            "update",
+            json!({"project_id": a["id"], "new_name": bad}),
         )
         .await;
         assert!(
@@ -511,17 +486,7 @@ async fn project_rename_conflict_is_conflict() {
     }
 
     // 空名建项目同样被拒
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        rpc(
-            4,
-            "tools/call",
-            json!({"name": "project_create",
-            "arguments": {"name": "", "type": "dev"}}),
-        ),
-    )
-    .await;
+    let v = act_raw(&app, &key, 4, "create", json!({"name": "", "type": "dev"})).await;
     assert!(
         v["error"]["message"]
             .as_str()
@@ -538,17 +503,17 @@ async fn project_batch_delete_and_cascade() {
     let key = create_key(&app, &login_token(&app).await, &["project"]).await;
     mcp_initialize(&app, &key).await;
 
-    let p1 = mcp_call_json(
+    let p1 = act_json(
         &app,
         &key,
-        "project_create",
+        "create",
         json!({"name": "调研一", "type": "research"}),
     )
     .await;
-    let p2 = mcp_call_json(
+    let p2 = act_json(
         &app,
         &key,
-        "project_create",
+        "create",
         json!({"name": "调研二", "type": "research"}),
     )
     .await;
@@ -559,18 +524,18 @@ async fn project_batch_delete_and_cascade() {
     );
 
     // p1 挂位置和文档，验证项目删除级联
-    let loc = mcp_call_json(
+    let loc = act_json(
         &app,
         &key,
-        "project_location_add",
+        "location_add",
         json!({"project_id": p1["id"], "ip": "10.0.0.2", "host": "tencent-beijing",
                "os": "Ubuntu", "path": "/srv/engram", "purpose": "部署"}),
     )
     .await;
-    let doc = mcp_call_json(
+    let doc = act_json(
         &app,
         &key,
-        "project_doc_add",
+        "doc_add",
         json!({"project_id": p1["id"], "category": "待查", "title": "问题清单", "content": "1. …"}),
     )
     .await;
@@ -580,7 +545,7 @@ async fn project_batch_delete_and_cascade() {
         p2["id"].as_str().unwrap(),
         "00000000-0000-0000-0000-000000000000",
     ];
-    let result = mcp_call_json(&app, &key, "project_batch_delete", json!({"ids": ids})).await;
+    let result = act_json(&app, &key, "batch_delete", json!({"ids": ids})).await;
     assert_eq!(result["deleted"], json!(2));
     assert_eq!(
         result["failed"],
@@ -607,7 +572,7 @@ async fn project_batch_delete_and_cascade() {
     pool.close().await;
 }
 
-/// scope 分权：project scope 的 key 调 memory 工具被拒；memory-only key 看不到 project 工具。
+/// scope 分权：project scope 的 key 调 memory 域被拒；memory-only key 看不到 projects。
 #[tokio::test]
 async fn project_scope_enforcement() {
     let (app, _pg) = app().await;
@@ -616,14 +581,14 @@ async fn project_scope_enforcement() {
     let proj_key = create_key(&app, &admin, &["project"]).await;
     mcp_initialize(&app, &proj_key).await;
 
-    // project scope 调 memory 工具 → 拒
+    // project scope 调 memory 域 → 拒
     let (_, v) = mcp_rpc(
         &app,
         &proj_key,
         rpc(
             2,
             "tools/call",
-            json!({"name": "memory_search", "arguments": {"query": "x"}}),
+            json!({"name": "memory", "arguments": {"action": "search", "query": "x"}}),
         ),
     )
     .await;
@@ -632,24 +597,22 @@ async fn project_scope_enforcement() {
             .as_str()
             .unwrap_or("")
             .contains("memory scope"),
-        "project key 调 memory 工具应被拒：{v}"
+        "project key 调 memory 域应被拒：{v}"
     );
 
-    // memory-only key：tools/list 不见 project_*，调用被拒
+    // memory-only key：tools/list 不见 projects，调用被拒
     let mem_key = create_key(&app, &admin, &["memory"]).await;
     let names = tool_names(&app, &mem_key).await;
     assert!(
-        !names.iter().any(|n| n.starts_with("project_")),
-        "memory-only key 不应看到 project 工具：{names:?}"
+        !names.contains(&"projects".to_string()),
+        "memory-only key 不应看到 projects：{names:?}"
     );
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &mem_key,
-        rpc(
-            3,
-            "tools/call",
-            json!({"name": "project_create", "arguments": {"name": "x", "type": "dev"}}),
-        ),
+        3,
+        "create",
+        json!({"name": "x", "type": "dev"}),
     )
     .await;
     assert!(
@@ -657,26 +620,17 @@ async fn project_scope_enforcement() {
             .as_str()
             .unwrap_or("")
             .contains("project scope"),
-        "memory key 调 project 工具应被拒：{v}"
+        "memory key 调 projects 应被拒：{v}"
     );
 
     // 双 scope key 两边都可用
     let both = create_key(&app, &admin, &["memory", "project"]).await;
     let names = tool_names(&app, &both).await;
-    assert!(names.iter().any(|n| n == "project_create"));
-    assert!(names.iter().any(|n| n == "memory_context"));
+    assert!(names.contains(&"projects".to_string()));
+    assert!(names.contains(&"memory".to_string()));
 
     // 缺定位参数 → 参数错误（不是内部错误）
-    let (_, v) = mcp_rpc(
-        &app,
-        &both,
-        rpc(
-            4,
-            "tools/call",
-            json!({"name": "project_get", "arguments": {}}),
-        ),
-    )
-    .await;
+    let v = act_raw(&app, &both, 4, "get", json!({})).await;
     assert!(
         v["error"]["message"]
             .as_str()
@@ -686,16 +640,7 @@ async fn project_scope_enforcement() {
     );
 
     // 坏 UUID → 参数错误
-    let (_, v) = mcp_rpc(
-        &app,
-        &both,
-        rpc(
-            5,
-            "tools/call",
-            json!({"name": "project_get", "arguments": {"project_id": "not-a-uuid"}}),
-        ),
-    )
-    .await;
+    let v = act_raw(&app, &both, 5, "get", json!({"project_id": "not-a-uuid"})).await;
     assert!(
         v["error"]["message"]
             .as_str()
@@ -705,14 +650,14 @@ async fn project_scope_enforcement() {
     );
 }
 
-/// 管理台同源：build_info 应含 project 域；工具停用开关对 project_* 同样生效。
+/// 管理台同源：build_info 应含 projects 域；action 级停用开关对 projects 同样生效。
 #[tokio::test]
 async fn project_tools_admin_info_and_toggle() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
     let key = create_key(&app, &admin, &["project"]).await;
 
-    // GET /settings/mcp：project 域工具与 memory 域同源展示
+    // GET /settings/mcp：projects 域工具 + 15 操作
     let resp = app
         .clone()
         .oneshot(
@@ -731,14 +676,15 @@ async fn project_tools_admin_info_and_toggle() {
         .unwrap();
     let info: Value = serde_json::from_slice(&body).unwrap();
     let tools = info["tools"].as_array().expect("工具清单");
-    let project_tools: Vec<&Value> = tools.iter().filter(|t| t["domain"] == "project").collect();
+    let project_tools: Vec<&Value> = tools.iter().filter(|t| t["domain"] == "projects").collect();
+    assert_eq!(project_tools.len(), 1, "projects 域应为 1 个域工具");
     assert_eq!(
-        project_tools.len(),
+        project_tools[0]["actions"].as_array().unwrap().len(),
         15,
-        "project 域应自动分组 15 个工具：{tools:?}"
+        "projects 域应展示 15 个操作：{tools:?}"
     );
 
-    // 停用 project_delete：tools/list 隐身 + call 拒绝
+    // 停用 projects.delete：目录隐身 + call 拒绝
     let resp = app
         .clone()
         .oneshot(
@@ -747,7 +693,7 @@ async fn project_tools_admin_info_and_toggle() {
                 .uri("/settings/mcp")
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {admin}"))
-                .body(Body::from(r#"{"disabled_tools":["project_delete"]}"#))
+                .body(Body::from(r#"{"disabled_tools":["projects.delete"]}"#))
                 .unwrap(),
         )
         .await
@@ -755,17 +701,25 @@ async fn project_tools_admin_info_and_toggle() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let names = tool_names(&app, &key).await;
+    assert_eq!(names, vec!["projects"], "域工具应保留");
+    let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
+    let result = expect_result(&v, "tools/list");
+    let description = result["tools"][0]["description"].as_str().unwrap();
     assert!(
-        !names.contains(&"project_delete".to_string()),
-        "停用后不应出现在 tools/list"
+        !description.contains("- delete："),
+        "停用操作应从目录隐身：{description}"
     );
-    let other_count = names.len();
-    assert_eq!(other_count, 14, "其余 14 个应仍在：{names:?}");
+    assert!(
+        description.contains("- create："),
+        "其余操作不受影响：{description}"
+    );
 
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &key,
-        rpc(2, "tools/call", json!({"name": "project_delete", "arguments": {"project_id": "00000000-0000-0000-0000-000000000000"}})),
+        2,
+        "delete",
+        json!({"project_id": "00000000-0000-0000-0000-000000000000"}),
     )
     .await;
     assert!(
@@ -773,10 +727,10 @@ async fn project_tools_admin_info_and_toggle() {
             .as_str()
             .unwrap_or("")
             .contains("已停用"),
-        "停用工具调用应报错：{v}"
+        "停用操作调用应报错：{v}"
     );
 
-    // 未知工具名 400（校验名单覆盖 project_*）
+    // 未知键 400（校验名单覆盖域.action 与工具名）
     let resp = app
         .clone()
         .oneshot(
@@ -807,8 +761,14 @@ async fn project_tools_admin_info_and_toggle() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let names = tool_names(&app, &key).await;
-    assert!(names.contains(&"project_delete".to_string()));
+    let description = {
+        let (_, v) = mcp_rpc(&app, &key, rpc(3, "tools/list", json!({}))).await;
+        expect_result(&v, "tools/list")["tools"][0]["description"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(description.contains("- delete："), "恢复后操作应回归目录");
 }
 
 /// 未传分类必填字段等 schema 缺参：JSON-RPC 参数错误而非 panic。
@@ -818,30 +778,23 @@ async fn project_doc_add_missing_fields_rejected() {
     let key = create_key(&app, &login_token(&app).await, &["project"]).await;
     mcp_initialize(&app, &key).await;
 
-    // 缺 category（schema 必填）→ rmcp 参数反序列化失败，isError=true
+    // 缺 category（action 参数必填）→ JSON-RPC 参数错误，报错带 help 提示（L2 自愈）
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        rpc(
+        call(
             1,
-            "tools/call",
-            json!({"name": "project_doc_add",
-            "arguments": {"project_name": "不存在", "title": "t", "content": "c"}}),
+            "doc_add",
+            json!({"project_name": "不存在", "title": "t", "content": "c"}),
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call project_doc_add");
+    let msg = v["error"]["message"].as_str().unwrap_or_default();
     assert!(
-        out["isError"].as_bool().unwrap_or(false),
-        "缺必填参数应 isError：{out}"
+        msg.contains("missing field") && msg.contains("category"),
+        "应提示缺字段：{v}"
     );
-    assert!(
-        out["content"][0]["text"]
-            .as_str()
-            .unwrap_or("")
-            .contains("missing field"),
-        "应提示缺字段：{out}"
-    );
+    assert!(msg.contains("help"), "报错应提示 help（L2 自愈）：{v}");
 }
 
 /// 精确寻址读设计：索引模式 → 搜索定位行号 → 区间精读；全文模式无损；
@@ -852,10 +805,10 @@ async fn project_precise_addressing_read() {
     let key = create_key(&app, &login_token(&app).await, &["project"]).await;
     mcp_initialize(&app, &key).await;
 
-    let p = mcp_call_json(
+    let p = act_json(
         &app,
         &key,
-        "project_create",
+        "create",
         json!({"name": "寻址读", "type": "dev"}),
     )
     .await;
@@ -872,24 +825,24 @@ async fn project_precise_addressing_read() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let doc = mcp_call_json(
+    let doc = act_json(
         &app,
         &key,
-        "project_doc_add",
+        "doc_add",
         json!({"project_id": pid, "category": "后端", "title": "进度", "content": progress}),
     )
     .await;
     let doc_id = doc["id"].as_str().unwrap().to_string();
-    let other = mcp_call_json(
+    let other = act_json(
         &app,
         &key,
-        "project_doc_add",
+        "doc_add",
         json!({"project_id": pid, "category": "规划", "title": "结论", "content": "结论一：MCP 并入 /mcp\n结论二：scope 分权"}),
     )
     .await;
 
     // 索引模式：无正文，有 content_chars
-    let idx = mcp_call_json(&app, &key, "project_get", json!({"project_id": pid})).await;
+    let idx = act_json(&app, &key, "get", json!({"project_id": pid})).await;
     let docs = idx["docs"].as_array().unwrap();
     assert_eq!(docs.len(), 2);
     for d in docs {
@@ -899,10 +852,10 @@ async fn project_precise_addressing_read() {
     }
 
     // 全量模式：无损拿回原文
-    let full = mcp_call_json(
+    let full = act_json(
         &app,
         &key,
-        "project_get",
+        "get",
         json!({"project_id": pid, "include_content": true}),
     )
     .await;
@@ -910,10 +863,10 @@ async fn project_precise_addressing_read() {
     assert_eq!(full["docs"][0]["content"], json!(progress));
 
     // 分类过滤
-    let filtered = mcp_call_json(
+    let filtered = act_json(
         &app,
         &key,
-        "project_get",
+        "get",
         json!({"project_id": pid, "category": "规划"}),
     )
     .await;
@@ -922,10 +875,10 @@ async fn project_precise_addressing_read() {
     assert_eq!(fd[0]["title"], "结论");
 
     // 搜索定位：命中行号 + 原文行（大小写不敏感）
-    let hits = mcp_call_json(
+    let hits = act_json(
         &app,
         &key,
-        "project_doc_search",
+        "doc_search",
         json!({"project_id": pid, "query": "Streamable HTTP"}),
     )
     .await;
@@ -936,10 +889,10 @@ async fn project_precise_addressing_read() {
     assert_eq!(arr[0]["text"], "第七行提到 streamable http 传输");
 
     // 搜索跨行：同一篇文档多行命中
-    let multi = mcp_call_json(
+    let multi = act_json(
         &app,
         &key,
-        "project_doc_search",
+        "doc_search",
         json!({"project_name": "寻址读", "query": "结论"}),
     )
     .await;
@@ -949,10 +902,10 @@ async fn project_precise_addressing_read() {
     assert_eq!(mh[1]["line"], 2);
 
     // 区间精读 5-9 行：恒带行号前缀，端点含入
-    let range = mcp_call_json(
+    let range = act_json(
         &app,
         &key,
-        "project_doc_get",
+        "doc_get",
         json!({"doc_id": doc_id, "start_line": 5, "end_line": 9}),
     )
     .await;
@@ -969,10 +922,10 @@ async fn project_precise_addressing_read() {
     assert!(content.contains("7: 第七行"));
 
     // 区间开右端：start=11 到末尾
-    let tail = mcp_call_json(
+    let tail = act_json(
         &app,
         &key,
-        "project_doc_get",
+        "doc_get",
         json!({"doc_id": doc_id, "start_line": 11}),
     )
     .await;
@@ -980,13 +933,13 @@ async fn project_precise_addressing_read() {
     assert!(tail["content"].as_str().unwrap().contains("12: 第12行"));
 
     // 全文模式：无损原文 + total_lines；with_line_numbers 加行号
-    let whole = mcp_call_json(&app, &key, "project_doc_get", json!({"doc_id": doc_id})).await;
+    let whole = act_json(&app, &key, "doc_get", json!({"doc_id": doc_id})).await;
     assert_eq!(whole["content"], json!(progress));
     assert_eq!(whole["total_lines"], 12);
-    let numbered = mcp_call_json(
+    let numbered = act_json(
         &app,
         &key,
-        "project_doc_get",
+        "doc_get",
         json!({"doc_id": doc_id, "with_line_numbers": true}),
     )
     .await;
@@ -1002,27 +955,16 @@ async fn project_precise_addressing_read() {
         json!({"doc_id": doc_id, "start_line": 0}),
         json!({"doc_id": doc_id, "start_line": 9, "end_line": 3}),
     ] {
-        let (_, v) = mcp_rpc(
-            &app,
-            &key,
-            rpc(
-                20,
-                "tools/call",
-                json!({"name": "project_doc_get", "arguments": bad}),
-            ),
-        )
-        .await;
+        let (_, v) = mcp_rpc(&app, &key, call(20, "doc_get", bad)).await;
         assert!(v.get("error").is_some(), "坏区间应报错：{v}");
     }
     // 空检索词
-    let (_, v) = mcp_rpc(
+    let v = act_raw(
         &app,
         &key,
-        rpc(
-            21,
-            "tools/call",
-            json!({"name": "project_doc_search", "arguments": {"project_id": pid, "query": "  "}}),
-        ),
+        21,
+        "doc_search",
+        json!({"project_id": pid, "query": "  "}),
     )
     .await;
     assert!(
@@ -1034,10 +976,10 @@ async fn project_precise_addressing_read() {
     );
 
     // 精读另一篇 + limit 上限
-    let limited = mcp_call_json(
+    let limited = act_json(
         &app,
         &key,
-        "project_doc_search",
+        "doc_search",
         json!({"project_id": pid, "query": "行", "limit": 2}),
     )
     .await;

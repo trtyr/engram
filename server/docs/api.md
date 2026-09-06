@@ -137,7 +137,7 @@
 | GET/POST | /settings/api-keys | API Key 列表 / 签发（scope；明文只在创建时返回一次）——admin-only |
 | POST | /settings/api-keys/{id}/revoke | 删除（admin-only；物理删除不留记录，删除后 401 走通用文案） |
 | POST | /settings/api-keys/batch-revoke | 批量删除（{ids}；物理删除，返回 {revoked}） |
-| GET/PUT | /settings/mcp | MCP 服务信息 / 配置更新（服务总开关 + 工具粒度开关 disabled_tools；admin-only）——工具面本体在 **POST /mcp**（Streamable HTTP JSON-RPC，非 OpenAPI 路径；复用 Bearer 认证，五域 45 工具按 scope 分权：memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五；关闭时 503） |
+| GET/PUT | /settings/mcp | MCP 服务信息 / 配置更新（服务总开关 + 整域/单操作两级开关 disabled_tools；admin-only）——工具面本体在 **POST /mcp**（Streamable HTTP JSON-RPC，非 OpenAPI 路径；复用 Bearer 认证，六域渐进式发现：6 域工具共 53 操作——memory 9 / projects 15 / skills 8 / wiki 9 / todos 6 / codegraph 6，调用形态 {"action":"…"}，help 取手册，scope 分权；关闭时 503） |
 
 ## 错误文案三问规范（2026-08-31 起）
 

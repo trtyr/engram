@@ -376,6 +376,15 @@ export interface ApiKey {
   last_used_at: string | null
   revoked_at: string | null
 }
+export interface McpActionInfo {
+  action: string
+  summary: string
+  destructive: boolean
+  /** 参数 JSON Schema（与 help 手册同源） */
+  parameters: Record<string, unknown>
+  /** 是否已被停用（disabled_tools 里的 域.action） */
+  disabled: boolean
+}
 export interface McpToolInfo {
   name: string
   domain: string
@@ -384,6 +393,8 @@ export interface McpToolInfo {
   destructive: boolean | null
   /** 参数 JSON Schema（与 tools/list 的 inputSchema 同源） */
   parameters: Record<string, unknown>
+  /** 域内操作（渐进式发现；非域工具为空表） */
+  actions: McpActionInfo[]
 }
 export interface McpInfo {
   endpoint: string

@@ -4,13 +4,13 @@
 
 ### 把 AI 的记忆，做成可蒸馏、可检索、可审计、可遗忘的资产
 
-**单用户 AI 长期记忆平台 · Rust 单二进制 · 五域 MCP · 全程可溯源**
+**单用户 AI 长期记忆平台 · Rust 单二进制 · 六域 MCP 渐进式发现 · 全程可溯源**
 
 [![Rust](https://img.shields.io/badge/Rust-axum-DEA584?style=for-the-badge&logo=rust&logoColor=white)](server/)
 [![React](https://img.shields.io/badge/React_19-SPA-61DAFB?style=for-the-badge&logo=react&logoColor=black)](web/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_17-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](server/crates/storage/)
-[![MCP](https://img.shields.io/badge/MCP-五域_49_工具-8A2BE2?style=for-the-badge)](#-mcp-五域工具面)
-[![Tests](https://img.shields.io/badge/tests-248_cargo_·_59_vitest-16C784?style=for-the-badge)](#-门禁)
+[![MCP](https://img.shields.io/badge/MCP-六域_渐进式发现-8A2BE2?style=for-the-badge)](#-mcp-六域工具面渐进式发现)
+[![Tests](https://img.shields.io/badge/tests-257_cargo_·_59_vitest-16C784?style=for-the-badge)](#-门禁)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=for-the-badge)](LICENSE)
 
 > **en·gram**（/ˈenɡræm/）*n.* 神经科学中的「记忆痕迹」——记忆在脑中留下的物理印记。
@@ -50,10 +50,10 @@ flowchart LR
 
 - **全程可溯源**：蒸馏链每层记录 `prompt_version`，任意记忆可归因回放到产出它的那一版 prompt
 - **纠错走蒸馏**：把正确的表述写成对话，蒸馏自动生成取代链——永不直接改写语义内容
-- **遗忘是断层**：`memory_forget`（void）会话作废，已蒸馏产物**级联归档**，检索立即失效
+- **遗忘是断层**：memory 域 `forget`（void）会话作废，已蒸馏产物**级联归档**，检索立即失效
 - **实体坐标系**：人物 / 项目 / 主题 / 群组 / 地点，由蒸馏自动抽取，横向串联所有记忆
 
-## 🗂️ 五域资产
+## 🗂️ 六域资产
 
 | 域 | 记什么 | 形态 |
 |:--|:--|:--|
@@ -62,6 +62,7 @@ flowchart LR
 | 🧬 **CodeGraph** | 代码库结构索引 | 本地路径/git 注册 → CLI 异步索引 → 六种结构化查询 + 调用子图 / 文件依赖全图 |
 | 🧩 **项目记忆** | 跨会话的工作「线」 | 项目 + 多主机位置 + 分类文档，精确寻址读（零截断） |
 | 🪄 **Skills** | 可复用的 AI 技能包（文件夹：SKILL.md + scripts/references） | slug 唯一 + 容错导入 + 版本快照回滚 + 附属文件按路径寻址 + 三层取用 |
+| ✅ **待办** | 不绑定项目的快速待办（灵感/计划/操作/排查） | open/done/archived + 优先级 + 标签 + 截止时间，全局检索直达 |
 
 ## 🛡️ 治理，不是摆设
 
@@ -95,22 +96,33 @@ flowchart LR
 - **单二进制单端口**：一个 `engram-server` 同源托管 API + SPA + MCP，本地/Docker 单机部署
 - **中文友好**：jieba FTS + 向量混合检索（RRF 融合），零匹配时收紧向量阈值——返回空，不返回噪声
 
-## 🔌 MCP 五域工具面
+## 🔌 MCP 六域工具面（渐进式发现）
 
 engram-server 内置 MCP 服务端（官方 Rust SDK `rmcp`，Streamable HTTP）。
-**一个 `/mcp` 端点，五个域 49 个工具**，按 key 的 scope 分权——AI 看到的工具面与它实际能调用的完全一致：
+**工具面采用渐进式发现**：六个领域各一个入口工具（AI 常驻上下文只占 6 个工具位），
+域内操作通过 action 按需发现——
 
-| 域 | scope | 工具 |
+- **L0 常驻目录**：每个域工具的描述自带「一行一操作」的紧凑目录，模型多数时候直接调对，零发现轮次
+- **L1 按需手册**：`{"action":"help"}` 一轮取回全域操作的参数 JSON Schema
+- **L2 错误自愈**：未知操作/坏参数的报错附带合法操作清单与 help 提示
+
+```jsonc
+// 调用形态：域工具 + action + 平铺参数
+{"name": "todos", "arguments": {"action": "add", "title": "给记忆做个体检", "priority": "high"}}
+```
+
+| 域工具 | scope | 域内操作（action） |
 |:--|:--|:--|
-| 💬 用户记忆 | `memory` | `memory_context`（冷启动上下文包）· `search` · `list_atoms` · `list_sessions` · `get_session` · `write_session` · `append_session` · `forget` · `entities` |
-| 🧩 项目记忆 | `project` | `project_list/get/create/update/delete/…` · `location_*` · `doc_add/get/search/update/delete`（共 15） |
-| 🪄 技能 | `skills` | `skills_list/get/create/update/delete/import` + `skills_file_get/put`（附属文件按路径读写，脚本由客户端本地执行） |
-| 🧩 LLM 配置 | `llm` | `llm_providers`（供应商只读清单）· `llm_provider_test`（1-token 连通探测）——写入仍走 Web/HTTP，避免 AI 误配 |
-| 🕸️ Wiki | `wiki` | `wiki_search`（混合检索+purpose）· `list_pages` · `get_page` · `write_page` · `ingest` · `archive_query` · `graph` · `lint` |
-| 🗺️ 代码图谱 | `codegraph` | `codegraph_list`（动态项目清单）· `register` · `index` · `sync`（三者走任务队列）· `query` · `delete` |
+| 💬 `memory` | `memory` | `context`（冷启动上下文包）· `search` · `write_session` · `append_session` · `list_sessions` · `get_session` · `list_atoms` · `entities` · `forget`（共 9） |
+| 🧩 `projects` | `project` | `list` · `get` · `create` · `update` · `delete` · `batch_delete` · `types` · `location_add/update/delete` · `doc_add/get/search/update/delete`（共 15） |
+| 🪄 `skills` | `skills` | `list` · `get` · `create` · `update` · `delete` · `import` · `file_get` · `file_put`（附属文件按路径读写，脚本由客户端本地执行） |
+| 🕸️ `wiki` | `wiki` | `search`（混合检索+purpose）· `list_pages` · `get_page` · `write_page` · `ingest` · `archive_query` · `graph` · `lint` · `delete_page`（共 9） |
+| ✅ `todos` | `todos` | `add` · `list` · `get` · `done` · `update` · `delete`（共 6） |
+| 🗺️ `codegraph` | `codegraph` | `list`（动态项目清单）· `register` · `index` · `sync`（走任务队列）· `query` · `delete`（共 6） |
 
-控制台「MCP」页 = 服务总开关（关闭即整体 503）+ 逐域逐工具开关（停用即对 AI 隐身 + 调用拒绝）；
-MCP 专用密钥在「设置 → API 密钥」签发，scope 选择器按需勾选。
+按 key 的 scope 分权——AI 看到的工具面与它实际能调用的完全一致。
+控制台「MCP」页 = 服务总开关（关闭即整体 503）+ 整域开关 + **域内单操作开关**
+（停用的操作从目录与 help 手册隐身、调用被拒）；MCP 专用密钥在「设置 → API 密钥」签发。
 
 Claude Code 三秒接入：
 
@@ -169,7 +181,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_B" -H "Content-Type: application/j
 curl -X POST -H "Authorization: Bearer $ADMIN_B" -H "Content-Type: application/json"   -d '{"source_url":"http://a-host:8080","source_admin_password":"…"}' http://b-host:8080/migrate/pull
 ```
 
-覆盖五域全部业务数据（用户记忆五表 + 实体关系 / 技能含附属文件 / Wiki 页面 / 项目记忆）；
+覆盖六域全部业务数据（用户记忆五表 + 实体关系 / 技能含附属文件 / Wiki 页面 / 项目记忆 / 待办）；
 向量与 codegraph 索引为派生数据不迁移，导入端重建。控制台「设置 → 数据迁移」有同能力 UI。
 
 ## ✅ 门禁

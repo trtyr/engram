@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-**五域 MCP + 分层收敛成型**：`/mcp` 一个端点承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 **45 工具**，按 key scope 分权（AI 看到的工具面与可调用集一致），管理台按域分组逐工具开点开看详情（描述/参数 Schema 与 tools/list 同源）。持久化全面收口 `engram-storage::repo`（core/api src 层零 sqlx），MCP 拆独立 crate（11 crates，与 HTTP 平级双适配器）。cargo **248** 测试 / vitest **59**（11 文件）/ 104 路径 / 136 方法 / 33 迁移 / 31 业务表（+管理员账号）。
+**六域 MCP 渐进式发现 + 分层收敛成型**：`/mcp` 六个域入口工具（memory/projects/skills/wiki/todos/codegraph）共 **53 操作**按 action 分发——L0 描述内嵌操作目录（含动态资产清单织入）+ L1 action="help" 参数手册 + L2 错误自愈，按 key scope 分权（AI 看到的工具面与可调用集一致），管理台两级开关（整域隐身 / 单操作停用）。持久化全面收口 `engram-storage::repo`（core/api src 层零 sqlx），MCP 拆独立 crate（11 crates，与 HTTP 平级双适配器）。cargo **257** 测试 / vitest **59**（11 文件）/ 104 路径 / 136 方法 / 35 迁移 / 33 业务表（+管理员账号）。
 :8090 开发栈在跑（am_dev 库，数据由所有者主动清空后重建）。
 
 ## 当日验证矩阵（活体）
@@ -75,6 +75,8 @@
 32. **技能 = 文件夹 + 三层消费**（2026-09-05）：0032 迁移建 `skill_files`（(skill_id, path) 唯一，写入侧校验禁 `..`/绝对路径/SKILL.md 本体）；skills_get 返回带 files 索引；MCP +2（skills_file_get/put，40→45 工具的部分）；HTTP 三层消费——①纯文本 MCP 读 ②单文件直下 `GET /skills/{slug}/file?path=…&raw=1`（Content-Disposition 落盘名）③整包 `GET /skills/{slug}/bundle`（zip：SKILL.md 自动还原 frontmatter + 全部文件）；导出含附属文件；消费形态指南织入工具描述（AI 自选通道）。云部署语义：文件是内容不是执行体——云端存发、客户端本地执行，服务端永不执行上传代码。
 
 33. **CodeGraph 重做 + MCP 工具面动态化**（2026-09-05）：CodeGraph 接入任务队列（cg_index/cg_sync job，POST 返回 202——废除同步阻塞 10 分钟）；新增 DELETE（git clone 工作目录一并清理）与 GET /codegraph/status（CLI 可用性，Windows spawn 适配 .cmd shim）；**MCP +5 codegraph_* 工具（38→45，五域）**，codegraph_list 描述织入动态项目清单；新增 `GET /codegraph/projects/{id}/graph` 双模式——无 symbol = 文件级全图（rusqlite 只读 CLI 索引库聚合跨文件依赖），带 symbol = callers/callees 子图归一 nodes+edges；前端代码图谱页重做（CLI 状态条 / indexing 自动轮询 / 删除 / sigma 调用图弹窗）；修 stats 字段错位（CLI fileCount/nodeCount/edgeCount → 前端 files/symbols/edges）与同源重复注册。CLI 安装 `npm i -g @colbymchenry/codegraph@1.5.0`。MCP 工具描述动态化（skills_list/project_list/codegraph_list 清单织入，管理台与 tools/list 同源）。验证：cargo **245** / vitest **55** / 前后端门禁全绿 + 真实 CLI 端到端（注册 engram→异步索引→查询→调用图→MCP tools/list 45）。
+
+34. **MCP 渐进式发现重构 + API key 可编辑 + /todos 刷新修复**（2026-09-06）：① MCP 工具面从 53 个扁平工具收编为六域入口（memory/projects/skills/wiki/todos/codegraph）——新增 dispatch.rs 分发层（DomainCall 信封：action + 平铺参数，历史参数结构体全复用；ActionDoc 静态表为 L0 目录/help 手册/管理台三方同源事实源）；三级发现：L0 域工具描述内嵌「一行一操作」目录（动态资产清单织入沿用）+ L1 `{"action":"help"}` 返回全域参数 JSON Schema + L2 未知操作/坏参数报错列合法清单与 help 提示；SERVER_INSTRUCTIONS 重写为域语法；disabled_tools 升级两级语义（域工具名整域隐身 / `域.action` 单操作从目录+手册隐身且调用拒绝）；管理台 McpToolInfo 下挂 actions（McpActionInfo）+ Web MCP 页两级开关。② `PUT /settings/api-keys/{id}`：改名 + scope 全量替换（ABCD→AB/ABCDE），即时生效无需重签（bearer 每请求查库）；修 repo update_api_key jsonb 绑定（sqlx::types::Json）；设置页 Keys 表格加「编辑」。③ is_spa_nav_path 补 /todos——浏览器硬刷新（Accept: text/html）回 SPA 页，API 客户端照常认证。验证：cargo **257**（mcp_test 16 + project_mcp_test 9 全重写 + dispatch 单测 4 + api_key_edit + todos_spa_nav 回归）/ vitest **59**（mcp.test 5 用例重写两级开关）/ 前后端门禁全绿 + 真机 MCP 协议端到端（tools/list 6 域工具带目录 / action add/list/delete / help 手册 / 未知 action 自愈 / memory-only key 仅见 memory）。
 
 ## 已知未了项
 

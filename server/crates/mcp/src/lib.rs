@@ -1,8 +1,10 @@
-//! MCP（Model Context Protocol）适配器：四域工具面（用户记忆 / 项目记忆 / 技能 / Wiki）。
+//! MCP（Model Context Protocol）适配器：六域渐进式发现工具面。
 //!
 //! 官方 Rust SDK（rmcp）Streamable HTTP 传输，由 api 装配到 engram-server 的 `/mcp` 端点。
 //! 与 HTTP 路由平级的第二适配器：同一套 core 服务与 scope 分权，独立成 crate。
-//! 单服务器多域：工具名前缀即域（memory_* / wiki_*，管理台按域分组），
+//! 渐进式发现（progressive disclosure）：六个领域各一个入口工具
+//! （memory/projects/skills/wiki/todos/codegraph），域内操作经 action 分发
+//! （历史 53 个扁平工具全部收编；action 表在 dispatch 模块，三级发现同源）。
 //! 各域工具在调用时检查各自 scope。鉴权复用 Bearer 中间件（amk_ key / ams_ 会话）：
 //! 每个工具调用请求都过 `bearer_auth`，Principal 已注入 request extensions；
 //! rmcp 把 HTTP request Parts 注入工具上下文，工具实现从这里取 Principal
@@ -29,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
+pub mod dispatch;
 pub mod wiki;
 
 use axum::response::IntoResponse;
@@ -85,15 +88,27 @@ fn require_project(principal: &Principal) -> Result<(), rmcp::ErrorData> {
 }
 
 /// 工具名 → 所需 scope（域名前缀即 scope 名；管理台按同一前缀分域）。
+/// 渐进式发现后常规工具就是 6 个域工具（projects 的 scope 叫 project）；
+/// 下面的平铺分支保留兜底（防御未来再加非域工具）。
 fn tool_scope(name: &str) -> &'static str {
-    match name.split('_').next() {
-        Some("project") => "project",
-        Some("skills") => "skills",
-        Some("wiki") => "wiki",
-        Some("codegraph") => "codegraph",
-        Some("llm") => "llm",
-        Some("todos") | Some("todo") => "todos",
-        _ => "memory",
+    match name {
+        // 渐进式发现后的 6 个域工具：名即域（唯一例外 projects → project scope）
+        "projects" => "project",
+        "memory" => "memory",
+        "skills" => "skills",
+        "wiki" => "wiki",
+        "todos" => "todos",
+        "codegraph" => "codegraph",
+        // 平铺名兜底（防御未来再加非域工具）
+        other => match other.split('_').next() {
+            Some("project") => "project",
+            Some("skills") => "skills",
+            Some("wiki") => "wiki",
+            Some("codegraph") => "codegraph",
+            Some("llm") => "llm",
+            Some("todos") | Some("todo") => "todos",
+            _ => "memory",
+        },
     }
 }
 
@@ -734,6 +749,10 @@ pub struct CgNameParams {
     pub project: String,
 }
 
+/// 无参操作（codegraph list）占位：inputSchema 根类型须为 object（同 wiki::WikiNoParams）。
+#[derive(Serialize, Deserialize, JsonSchema, Default)]
+pub struct CgNoParams {}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CgQueryParams {
     /// 项目名（codegraph_list 里的 name；也接受 id）
@@ -915,16 +934,6 @@ impl EngramMcpServer {
     /// 何时不用：需要回忆某个具体细节时用 memory_search（更省 token）；本工具是全景而非定向检索。
     /// 返回：persona（画像分面）、scenarios（场景）、atoms（原子事实）、entities（实体）、
     /// pending_review（待用户复核的低置信度条目，可顺带提醒用户）。
-    #[tool(
-        name = "memory_context",
-        annotations(
-            title = "装载记忆上下文",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn memory_context(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -951,16 +960,6 @@ impl EngramMcpServer {
     /// 何时不用：会话开场的全景装载用 memory_context；浏览全量列表用 memory_list_atoms。
     /// 命中会回写热度（hit_count），常被检索的内容会在整理中获得更高权重。
     /// 敏感条目默认排除；返回 {entities, l1, l2, l3}，各元素含 score/title/snippet。
-    #[tool(
-        name = "memory_search",
-        annotations(
-            title = "检索用户记忆",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn memory_search(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -992,16 +991,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：需要系统性浏览用户的事实条目（而非定向检索）时；或巡检 needs_review 条目。
     /// 何时不用：有明确主题的回忆用 memory_search；开场装载用 memory_context。
-    #[tool(
-        name = "memory_list_atoms",
-        annotations(
-            title = "列出原子事实",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn memory_list_atoms(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1028,16 +1017,6 @@ impl EngramMcpServer {
     /// 列出 L0 原始会话（keyset 分页，可按 agent 过滤）。
     ///
     /// 何时用：找某段对话的原文入口时（拿到 session_id 后用 memory_get_session 看全文）。
-    #[tool(
-        name = "memory_list_sessions",
-        annotations(
-            title = "列出原始会话",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn memory_list_sessions(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1060,16 +1039,6 @@ impl EngramMcpServer {
     /// 读取一个 L0 原始会话全文（逐轮对话原文）。
     ///
     /// 何时用：memory_search / memory_list_sessions 定位到会话后，需要核对原文细节时。
-    #[tool(
-        name = "memory_get_session",
-        annotations(
-            title = "读取原始会话",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn memory_get_session(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1090,16 +1059,6 @@ impl EngramMcpServer {
     /// 蒸馏（distill="auto"）会把原文抽取为 L1 原子事实并沉淀 L2/L3，全程带 prompt 溯源。
     /// 注意：不要用本工具「纠正」既有记忆——把纠正后的内容写成对话（可含 correction 语义），
     /// 蒸馏会自动生成取代链；直接改写语义内容是用户（Web 登录态）专属权限。
-    #[tool(
-        name = "memory_write_session",
-        annotations(
-            title = "写入会话记忆",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn memory_write_session(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1130,16 +1089,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：同一会话持续进行、已用 memory_write_session 开头后，后续内容追加进来。
     /// 已蒸馏的会话不可追加（会报错）——那就新开一个会话。
-    #[tool(
-        name = "memory_append_session",
-        annotations(
-            title = "追加会话轮次",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn memory_append_session(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1165,16 +1114,6 @@ impl EngramMcpServer {
     /// active 原子会**级联归档**——检索与上下文包立即不再返回它们。
     /// mode="erase"：物理删除该会话（不可逆，需要 erase scope 的 key）。
     /// 注意：只对用户明确表达的遗忘请求使用，不要自行判断「这段不重要」就遗忘。
-    #[tool(
-        name = "memory_forget",
-        annotations(
-            title = "遗忘会话",
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn memory_forget(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1207,16 +1146,6 @@ impl EngramMcpServer {
     /// 何时用：想按「某个具体的人/项目/主题」横向拉出相关记忆线索时；
     /// 或对话中出现新人物/项目，先查一下是否已有档案。
     /// 实体由蒸馏从会话中自动抽取维护——发现信息更新请写会话，不要要求直接改实体。
-    #[tool(
-        name = "memory_entities",
-        annotations(
-            title = "检索实体",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn memory_entities(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1240,16 +1169,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：project_create 前不知道给什么 type 时。返回 dev（开发，预置 后端/前端/测试/规划）
     /// 与 research（调研，预置 待查/线索/资料/结论/疑点/证伪）两类及其默认分类。
-    #[tool(
-        name = "project_types",
-        annotations(
-            title = "列出项目类型模板",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_types(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1267,16 +1186,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：开工前找「这件事」的项目锚点，或确认某个项目名是否已存在。
     /// 返回 id / name / type / status / description / categories，按创建时间倒序。
-    #[tool(
-        name = "project_list",
-        annotations(
-            title = "列出项目",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_list(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1299,16 +1208,6 @@ impl EngramMcpServer {
     /// 默认索引模式不带正文（文档多时省 token 也无信息损失）：
     /// 用 project_doc_search 定位关键词行号，project_doc_get 区间精读；
     /// 小项目想一次全量就 include_content=true。可用 project_id 或 project_name（唯一）定位。
-    #[tool(
-        name = "project_get",
-        annotations(
-            title = "项目详情",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_get(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1349,16 +1248,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：接到一件一次干不完、要跨会话推进的工作，先建项目做锚点，后续进展沉淀为文档。
     /// 项目名唯一，撞名会报错——先 project_list 确认没有可复用的同名项目。
-    #[tool(
-        name = "project_create",
-        annotations(
-            title = "新建项目",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn project_create(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1379,16 +1268,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：收尾改状态（active/paused/done/abandoned）、追加新分类、补描述。
     /// categories 是替换式——追加分类请把现有分类带上（先 project_get 看 categories）。
-    #[tool(
-        name = "project_update",
-        annotations(
-            title = "编辑项目",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_update(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1421,16 +1300,6 @@ impl EngramMcpServer {
     /// 删除项目（级联删除其位置与文档，不可逆）。
     ///
     /// 何时用：项目彻底作废时。只对用户明确表达「删掉这个项目」的请求使用。
-    #[tool(
-        name = "project_delete",
-        annotations(
-            title = "删除项目",
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_delete(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1450,16 +1319,6 @@ impl EngramMcpServer {
     /// 批量删除项目（返回删除条数与不存在的 id）。
     ///
     /// 何时用：一次清理多个作废项目。不可逆——删除前最好和用户确认过清单。
-    #[tool(
-        name = "project_batch_delete",
-        annotations(
-            title = "批量删除项目",
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_batch_delete(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1488,16 +1347,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：项目代码在某个主机上有了新副本/部署时登记一条。纯元数据登记制，
     /// 服务端不会读取该路径。
-    #[tool(
-        name = "project_location_add",
-        annotations(
-            title = "登记项目位置",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn project_location_add(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1527,16 +1376,6 @@ impl EngramMcpServer {
     /// 编辑项目位置（补丁式，不传不改）。
     ///
     /// 何时用：代码挪了目录、换了机器，更新已登记的位置。
-    #[tool(
-        name = "project_location_update",
-        annotations(
-            title = "编辑项目位置",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_location_update(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1570,16 +1409,6 @@ impl EngramMcpServer {
     /// 删除一条项目位置登记（不动项目本体）。
     ///
     /// 何时用：某个主机上的副本不再属于这个项目。
-    #[tool(
-        name = "project_location_delete",
-        annotations(
-            title = "删除项目位置",
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_location_delete(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1600,16 +1429,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：沉淀进展/结论/决策——干活中的发现写成文档，收尾写总结。
     /// category 必须是项目已有分类（先 project_get 看 categories）；同项目同分类下标题唯一。
-    #[tool(
-        name = "project_doc_add",
-        annotations(
-            title = "新增项目文档",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn project_doc_add(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1636,16 +1455,6 @@ impl EngramMcpServer {
     /// 传 start_line/end_line 只读该区间（输出恒带「行号: 」前缀，便于连环寻址）；
     /// 不传读全文（无损，不截断），with_line_numbers=true 可给全文加行号。
     /// 行号基于文档当前版本——改文档后需重取。
-    #[tool(
-        name = "project_doc_get",
-        annotations(
-            title = "读取项目文档",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_doc_get(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1703,16 +1512,6 @@ impl EngramMcpServer {
     /// 何时用：索引模式下想找「某句话/某个结论在哪篇文档哪一行」。
     /// 返回命中 {doc_id, title, category, line, text}；拿到行号后用
     /// project_doc_get 的 start_line/end_line 区间精读上下文。
-    #[tool(
-        name = "project_doc_search",
-        annotations(
-            title = "检索项目文档行",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_doc_search(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1736,16 +1535,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：追加进展、更新结论。content 是替换式——改长文档先 project_doc_get
     /// 取原文改好再整体传回。移分类时 category 须是项目已有分类。
-    #[tool(
-        name = "project_doc_update",
-        annotations(
-            title = "编辑项目文档",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_doc_update(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1773,16 +1562,6 @@ impl EngramMcpServer {
     /// 删除项目文档（不可逆）。
     ///
     /// 何时用：文档写废或彻底过时。只对明确表达的删除请求使用。
-    #[tool(
-        name = "project_doc_delete",
-        annotations(
-            title = "删除项目文档",
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn project_doc_delete(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1804,16 +1583,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：开始需要某种可复用能力前，先看库里有没有现成技能；或按标签浏览技能面。
     /// 命中候选后用 skills_get 取正文照做；没有合适的再用 skills_create 沉淀新技能。
-    #[tool(
-        name = "skills_list",
-        annotations(
-            title = "列出技能",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn skills_list(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1839,16 +1608,6 @@ impl EngramMcpServer {
     /// "{本服务origin}/skills/{slug}/file?path=…&raw=1" -o 文件名；
     /// ③ 需要整个文件夹（SKILL.md+scripts+references）→
     /// curl -s -H "Authorization: Bearer $KEY" "{origin}/skills/{slug}/bundle" -o s.zip && tar -xf s.zip。
-    #[tool(
-        name = "skills_get",
-        annotations(
-            title = "读取技能",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn skills_get(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1880,16 +1639,6 @@ impl EngramMcpServer {
     /// 只需要一个文件且要落盘时，HTTP 直下比逐文件调本工具更快：
     /// curl -s -H "Authorization: Bearer $KEY" "{本服务origin}/skills/{slug}/file?path=…&raw=1" -o 文件名
     /// （需要整个文件夹时用整包：curl … "{origin}/skills/{slug}/bundle" -o s.zip && tar -xf s.zip）
-    #[tool(
-        name = "skills_file_get",
-        annotations(
-            title = "读取技能文件",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn skills_file_get(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1913,16 +1662,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：skills_create 之后补充 scripts/、references/ 等文件；
     /// 同路径重复写 = 覆盖更新。SKILL.md 本体走 skills_update 的 content。
-    #[tool(
-        name = "skills_file_put",
-        annotations(
-            title = "写入技能文件",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn skills_file_put(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1948,16 +1687,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：想探索/查询某个代码库前，先看注册了哪些项目、哪个 ready；
     /// 没有 → codegraph_register 注册（本地路径或 git URL）再 codegraph_index。
-    #[tool(
-        name = "codegraph_list",
-        annotations(
-            title = "列出图谱项目",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn codegraph_list(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1972,16 +1701,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：想让 AI 理解某个代码库的结构与调用关系时。注册后须 codegraph_index
     /// 建索引（异步 job，稍等片刻再 codegraph_list 确认 ready）。
-    #[tool(
-        name = "codegraph_register",
-        annotations(
-            title = "注册图谱项目",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn codegraph_register(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1999,16 +1718,6 @@ impl EngramMcpServer {
     /// 建索引/重建索引（异步 job——返回 job_id，稍后 codegraph_list 看状态）。
     ///
     /// 何时用：注册后首次建索引；或代码大改后需要重建。小改动用 codegraph_sync 即可。
-    #[tool(
-        name = "codegraph_index",
-        annotations(
-            title = "建图谱索引",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn codegraph_index(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2033,16 +1742,6 @@ impl EngramMcpServer {
     /// 增量同步索引（代码小改动后刷新；异步 job）。
     ///
     /// 何时用：项目 ready 后代码有小改动，不想全量重建时。
-    #[tool(
-        name = "codegraph_sync",
-        annotations(
-            title = "同步图谱索引",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn codegraph_sync(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2068,16 +1767,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：读陌生代码前先 search/explore；改代码前用 callers/impact 评估影响面；
     /// 深入一个函数用 node。
-    #[tool(
-        name = "codegraph_query",
-        annotations(
-            title = "图谱查询",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn codegraph_query(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2111,16 +1800,6 @@ impl EngramMcpServer {
     /// 注销代码图谱项目（删除注册与索引；不可逆——本地路径项目的源码不动）。
     ///
     /// 何时用：项目已完结/注册错了。按 name 或 id 注销。
-    #[tool(
-        name = "codegraph_delete",
-        annotations(
-            title = "注销图谱项目",
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn codegraph_delete(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2141,16 +1820,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：用户说「把这个做法存成技能/记成 SOP」，或一套流程已被验证有效且可复用时。
     /// 何时不用：一次性的操作细节不值得建技能；用户个人事实走记忆域（memory_write_session）。
-    #[tool(
-        name = "skills_create",
-        annotations(
-            title = "创建技能",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn skills_create(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2179,16 +1848,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：技能做法需要修正或演进时（如用户指出了更好的步骤）。
     /// 注意：改坏可回滚（版本快照），但删除不可逆——拿不准就更新而不是删除。
-    #[tool(
-        name = "skills_update",
-        annotations(
-            title = "更新技能",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn skills_update(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2217,16 +1876,6 @@ impl EngramMcpServer {
     /// 删除技能（级联删版本快照，不可逆）。
     ///
     /// 何时用：仅当用户明确要求删除某个技能时。不要因「内容过时」自行删除——用 skills_update 修订。
-    #[tool(
-        name = "skills_delete",
-        annotations(
-            title = "删除技能",
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn skills_delete(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2245,16 +1894,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：用户给了现成的 SKILL.md 文件/文本要入库时。逐条导入用本工具，
     /// 批量走 HTTP API POST /skills/import（逐条报告，互不阻断）。
-    #[tool(
-        name = "skills_import",
-        annotations(
-            title = "导入 SKILL.md",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn skills_import(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2330,16 +1969,6 @@ impl EngramMcpServer {
     /// 何时不用：回忆「用户本人」的偏好/事实/经历用 memory_search——那是用户记忆域。
     /// 返回 {purpose, pages}：purpose 是 wiki 的研究方向意图（未设为 null），
     /// pages 为命中页面全文；写作前先检索可避免造重复页面。
-    #[tool(
-        name = "wiki_search",
-        annotations(
-            title = "检索 Wiki",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn wiki_search(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2358,16 +1987,6 @@ impl EngramMcpServer {
     /// 浏览 Wiki 页面列表（可按页型过滤；列表不带正文）。
     ///
     /// 何时用：想系统性看看 Wiki 里有什么（而非定向检索）时；读全文用 wiki_get_page。
-    #[tool(
-        name = "wiki_list_pages",
-        annotations(
-            title = "列出 Wiki 页面",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn wiki_list_pages(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2391,16 +2010,6 @@ impl EngramMcpServer {
     /// 读取一个 Wiki 页面全文（含 frontmatter 与版本）。
     ///
     /// 何时用：wiki_search / wiki_list_pages 定位到页面后需要读全文时。
-    #[tool(
-        name = "wiki_get_page",
-        annotations(
-            title = "读取 Wiki 页面",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn wiki_get_page(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2421,16 +2030,6 @@ impl EngramMcpServer {
     /// （Markdown + [[wikilink]]）。已存在同 slug 页面则整体覆盖更新（版本 +1）。
     /// 注意：这是覆盖式写入——更新既有页面前先用 wiki_get_page 读原文，别盲目覆盖；
     /// 临时性的问答结论更适合 wiki_archive_query 而非手搓页面。
-    #[tool(
-        name = "wiki_write_page",
-        annotations(
-            title = "写入 Wiki 页面",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn wiki_write_page(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2457,16 +2056,6 @@ impl EngramMcpServer {
     /// 何时用：有一篇完整文档 / 长文本值得沉淀进知识库时。内容相同（sha 命中）会跳过。
     /// 注意：织入是异步任务（前端「任务」页可见），立即返回 skipped 只代表入队/去重结果；
     /// 单条问答式的结论用 wiki_archive_query 更合适。
-    #[tool(
-        name = "wiki_ingest",
-        annotations(
-            title = "织入 Wiki 来源",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn wiki_ingest(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2494,16 +2083,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：一次检索/讨论得出值得长期保留的结论时，落成「查询」页沉淀。
     /// 同标题已存档 → 幂等跳过（skipped=true），不会重复烧 LLM。
-    #[tool(
-        name = "wiki_archive_query",
-        annotations(
-            title = "存档问答",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn wiki_archive_query(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2531,16 +2110,6 @@ impl EngramMcpServer {
     ///
     /// 何时用：写页面前了解现有结构、找相关页面、看知识网络长什么样。
     /// 页面很多时输出较大——粗看结构够用，定位具体页面用 wiki_search。
-    #[tool(
-        name = "wiki_graph",
-        annotations(
-            title = "Wiki 链接图",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn wiki_graph(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2558,16 +2127,6 @@ impl EngramMcpServer {
     /// Wiki 健康检查（死链、孤页、缺源等 lint 报告）。
     ///
     /// 何时用：怀疑 Wiki 结构有问题（失效双链、孤立页面）时体检；只报告不修改。
-    #[tool(
-        name = "wiki_lint",
-        annotations(
-            title = "Wiki 健康检查",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn wiki_lint(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2585,16 +2144,6 @@ impl EngramMcpServer {
     /// 删除 Wiki 页面（不可逆——连带清理双向 wikilinks）。
     ///
     /// 何时用：页面作废/测试数据清理。只对明确表达的删除请求使用。
-    #[tool(
-        name = "wiki_delete_page",
-        annotations(
-            title = "删除 Wiki 页面",
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn wiki_delete_page(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2612,16 +2161,6 @@ impl EngramMcpServer {
     // ---------- 待办域工具（todos scope；第七域） ----------
 
     /// 快速记一条待办（灵感/学习计划/系统操作/问题排查——不绑定项目）。
-    #[tool(
-        name = "todo_add",
-        annotations(
-            title = "记待办",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn todo_add(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2645,16 +2184,6 @@ impl EngramMcpServer {
     }
 
     /// 待办列表（open 优先；status/priority/tag/q 过滤）。
-    #[tool(
-        name = "todo_list",
-        annotations(
-            title = "待办列表",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn todo_list(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2677,16 +2206,6 @@ impl EngramMcpServer {
     }
 
     /// 待办详情。
-    #[tool(
-        name = "todo_get",
-        annotations(
-            title = "待办详情",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn todo_get(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2701,16 +2220,6 @@ impl EngramMcpServer {
     }
 
     /// 标记待办完成（done_at 自动记录）。
-    #[tool(
-        name = "todo_done",
-        annotations(
-            title = "完成待办",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn todo_done(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2728,16 +2237,6 @@ impl EngramMcpServer {
     }
 
     /// 更新待办（标题/详情/优先级/状态，部分字段 None 不动）。
-    #[tool(
-        name = "todo_update",
-        annotations(
-            title = "更新待办",
-            read_only_hint = false,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
     async fn todo_update(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2764,16 +2263,6 @@ impl EngramMcpServer {
     }
 
     /// 删除待办（物理删除；归档语义走 todo_update status=archived）。
-    #[tool(
-        name = "todo_delete",
-        annotations(
-            title = "删除待办",
-            read_only_hint = false,
-            destructive_hint = true,
-            idempotent_hint = false,
-            open_world_hint = false
-        )
-    )]
     async fn todo_delete(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2786,55 +2275,609 @@ impl EngramMcpServer {
         todo_svc(&self.state).delete(id).await.map_err(from_todo)?;
         ok_json(serde_json::json!({ "deleted": params.0.id }))
     }
+
+    // ---------- 渐进式发现：域入口工具（每域一个，域内操作按需发现） ----------
+    //
+    // 历史上的 53 个扁平工具全部收编为「域 + action」，action 表（摘要/破坏性/参数
+    // schema）是 dispatch::action_docs 的静态表——L0 目录、help 手册、管理台三方同源。
+    // scope 检查在各域实现方法内原样保留；这里只做 help 渲染与 action 分发。
+
+    /// 用户记忆域（单一入口）。记忆四层：L0 会话 →（蒸馏）→ L1 原子 → L2 场景 → L3 画像，
+    /// 实体坐标系横向串联。开场用 action="context" 装载，定向回忆用 "search"，
+    /// 收尾用 "write_session" 写入；遗忘用 "forget"。操作全景：action="help"。
+    #[tool(
+        name = "memory",
+        annotations(
+            title = "用户记忆域",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn memory_tool(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(call): Parameters<dispatch::DomainCall>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        if call.action == "help" {
+            let cfg = load_config(&self.state.pool).await;
+            return ok_json(dispatch::render_manual("memory", &cfg.disabled_tools));
+        }
+        match call.action.as_str() {
+            "context" => {
+                self.memory_context(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "context", call.args)?),
+                )
+                .await
+            }
+            "search" => {
+                self.memory_search(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "search", call.args)?),
+                )
+                .await
+            }
+            "write_session" => {
+                self.memory_write_session(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "write_session", call.args)?),
+                )
+                .await
+            }
+            "append_session" => {
+                self.memory_append_session(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "append_session", call.args)?),
+                )
+                .await
+            }
+            "list_sessions" => {
+                self.memory_list_sessions(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "list_sessions", call.args)?),
+                )
+                .await
+            }
+            "get_session" => {
+                self.memory_get_session(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "get_session", call.args)?),
+                )
+                .await
+            }
+            "list_atoms" => {
+                self.memory_list_atoms(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "list_atoms", call.args)?),
+                )
+                .await
+            }
+            "entities" => {
+                self.memory_entities(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "entities", call.args)?),
+                )
+                .await
+            }
+            "forget" => {
+                self.memory_forget(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "forget", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("memory", other)),
+        }
+    }
+
+    /// 项目记忆域（单一入口）：项目 = 一件有明确目标、跨会话推进的工作，
+    /// 下挂多主机位置（登记制）与「分类 > 文档」树。开工 "list"/"get" 接上下文，
+    /// 干活中 "doc_add"/"doc_update" 沉淀，收尾 "update" 改状态。操作全景：action="help"。
+    #[tool(
+        name = "projects",
+        annotations(
+            title = "项目记忆域",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn projects_tool(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(call): Parameters<dispatch::DomainCall>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_project(&p)?;
+        if call.action == "help" {
+            let cfg = load_config(&self.state.pool).await;
+            return ok_json(dispatch::render_manual("projects", &cfg.disabled_tools));
+        }
+        match call.action.as_str() {
+            "types" => {
+                self.project_types(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "types", call.args)?),
+                )
+                .await
+            }
+            "list" => {
+                self.project_list(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "list", call.args)?),
+                )
+                .await
+            }
+            "get" => {
+                self.project_get(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "get", call.args)?),
+                )
+                .await
+            }
+            "create" => {
+                self.project_create(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "create", call.args)?),
+                )
+                .await
+            }
+            "update" => {
+                self.project_update(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "update", call.args)?),
+                )
+                .await
+            }
+            "delete" => {
+                self.project_delete(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "delete", call.args)?),
+                )
+                .await
+            }
+            "batch_delete" => {
+                self.project_batch_delete(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "batch_delete", call.args)?),
+                )
+                .await
+            }
+            "location_add" => {
+                self.project_location_add(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "location_add", call.args)?),
+                )
+                .await
+            }
+            "location_update" => {
+                self.project_location_update(
+                    ctx,
+                    Parameters(dispatch::from_args(
+                        "projects",
+                        "location_update",
+                        call.args,
+                    )?),
+                )
+                .await
+            }
+            "location_delete" => {
+                self.project_location_delete(
+                    ctx,
+                    Parameters(dispatch::from_args(
+                        "projects",
+                        "location_delete",
+                        call.args,
+                    )?),
+                )
+                .await
+            }
+            "doc_add" => {
+                self.project_doc_add(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "doc_add", call.args)?),
+                )
+                .await
+            }
+            "doc_get" => {
+                self.project_doc_get(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "doc_get", call.args)?),
+                )
+                .await
+            }
+            "doc_search" => {
+                self.project_doc_search(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "doc_search", call.args)?),
+                )
+                .await
+            }
+            "doc_update" => {
+                self.project_doc_update(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "doc_update", call.args)?),
+                )
+                .await
+            }
+            "doc_delete" => {
+                self.project_doc_delete(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "doc_delete", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("projects", other)),
+        }
+    }
+
+    /// 技能域（单一入口）：技能 = 可复用的指令包（SKILL.md 形态 + scripts/references 附件）。
+    /// 需要某种能力前先 "list" 找现成的，命中 "get" 取全文照做；验证有效的做法
+    /// 用 "create" 沉淀。操作全景：action="help"。
+    #[tool(
+        name = "skills",
+        annotations(
+            title = "技能域",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn skills_tool(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(call): Parameters<dispatch::DomainCall>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        if call.action == "help" {
+            let cfg = load_config(&self.state.pool).await;
+            return ok_json(dispatch::render_manual("skills", &cfg.disabled_tools));
+        }
+        match call.action.as_str() {
+            "list" => {
+                self.skills_list(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "list", call.args)?),
+                )
+                .await
+            }
+            "get" => {
+                self.skills_get(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "get", call.args)?),
+                )
+                .await
+            }
+            "file_get" => {
+                self.skills_file_get(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "file_get", call.args)?),
+                )
+                .await
+            }
+            "file_put" => {
+                self.skills_file_put(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "file_put", call.args)?),
+                )
+                .await
+            }
+            "create" => {
+                self.skills_create(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "create", call.args)?),
+                )
+                .await
+            }
+            "update" => {
+                self.skills_update(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "update", call.args)?),
+                )
+                .await
+            }
+            "delete" => {
+                self.skills_delete(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "delete", call.args)?),
+                )
+                .await
+            }
+            "import" => {
+                self.skills_import(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "import", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("skills", other)),
+        }
+    }
+
+    /// Wiki 域（单一入口）：世界知识库——Markdown 页面 + [[wikilink]] + 混合检索。
+    /// 查证「客观知识」用 "search"；用户要求沉淀时：单条结论 "archive_query"、
+    /// 整篇文档 "ingest"（异步）、明确要页面 "write_page"。操作全景：action="help"。
+    #[tool(
+        name = "wiki",
+        annotations(
+            title = "Wiki 域",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn wiki_tool(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(call): Parameters<dispatch::DomainCall>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        if call.action == "help" {
+            let cfg = load_config(&self.state.pool).await;
+            return ok_json(dispatch::render_manual("wiki", &cfg.disabled_tools));
+        }
+        match call.action.as_str() {
+            "search" => {
+                self.wiki_search(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "search", call.args)?),
+                )
+                .await
+            }
+            "list_pages" => {
+                self.wiki_list_pages(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "list_pages", call.args)?),
+                )
+                .await
+            }
+            "get_page" => {
+                self.wiki_get_page(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "get_page", call.args)?),
+                )
+                .await
+            }
+            "write_page" => {
+                self.wiki_write_page(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "write_page", call.args)?),
+                )
+                .await
+            }
+            "ingest" => {
+                self.wiki_ingest(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "ingest", call.args)?),
+                )
+                .await
+            }
+            "archive_query" => {
+                self.wiki_archive_query(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "archive_query", call.args)?),
+                )
+                .await
+            }
+            "graph" => {
+                self.wiki_graph(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "graph", call.args)?),
+                )
+                .await
+            }
+            "lint" => {
+                self.wiki_lint(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "lint", call.args)?),
+                )
+                .await
+            }
+            "delete_page" => {
+                self.wiki_delete_page(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "delete_page", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("wiki", other)),
+        }
+    }
+
+    /// 待办域（todos scope，第七域）：快速记录与跟进不绑定项目的待办
+    /// （灵感/学习计划/系统操作/问题排查）。"add" 秒记，"list" 看进行中，
+    /// "done" 完成，"delete" 删。操作全景：action="help"。
+    #[tool(
+        name = "todos",
+        annotations(
+            title = "待办域",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn todos_tool(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(call): Parameters<dispatch::DomainCall>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        if call.action == "help" {
+            let cfg = load_config(&self.state.pool).await;
+            return ok_json(dispatch::render_manual("todos", &cfg.disabled_tools));
+        }
+        match call.action.as_str() {
+            "add" => {
+                self.todo_add(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "add", call.args)?),
+                )
+                .await
+            }
+            "list" => {
+                self.todo_list(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "list", call.args)?),
+                )
+                .await
+            }
+            "get" => {
+                self.todo_get(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "get", call.args)?),
+                )
+                .await
+            }
+            "done" => {
+                self.todo_done(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "done", call.args)?),
+                )
+                .await
+            }
+            "update" => {
+                self.todo_update(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "update", call.args)?),
+                )
+                .await
+            }
+            "delete" => {
+                self.todo_delete(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "delete", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("todos", other)),
+        }
+    }
+
+    /// 代码图谱域（单一入口）：注册代码库 → 建索引 → 图谱查询
+    /// （search/explore/node/callers/callees/impact），读懂陌生代码库的调用关系。
+    /// 操作全景：action="help"。
+    #[tool(
+        name = "codegraph",
+        annotations(
+            title = "代码图谱域",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn codegraph_tool(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(call): Parameters<dispatch::DomainCall>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_codegraph(&p)?;
+        if call.action == "help" {
+            let cfg = load_config(&self.state.pool).await;
+            return ok_json(dispatch::render_manual("codegraph", &cfg.disabled_tools));
+        }
+        match call.action.as_str() {
+            "list" => self.codegraph_list(ctx).await,
+            "register" => {
+                self.codegraph_register(
+                    ctx,
+                    Parameters(dispatch::from_args("codegraph", "register", call.args)?),
+                )
+                .await
+            }
+            "query" => {
+                self.codegraph_query(
+                    ctx,
+                    Parameters(dispatch::from_args("codegraph", "query", call.args)?),
+                )
+                .await
+            }
+            "index" => {
+                self.codegraph_index(
+                    ctx,
+                    Parameters(dispatch::from_args("codegraph", "index", call.args)?),
+                )
+                .await
+            }
+            "sync" => {
+                self.codegraph_sync(
+                    ctx,
+                    Parameters(dispatch::from_args("codegraph", "sync", call.args)?),
+                )
+                .await
+            }
+            "delete" => {
+                self.codegraph_delete(
+                    ctx,
+                    Parameters(dispatch::from_args("codegraph", "delete", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("codegraph", other)),
+        }
+    }
 }
 
 /// MCP instructions：initialize 时返回给调用方 AI 的顶层使用说明。
 const SERVER_INSTRUCTIONS: &str = "\
-Engram —— 长期记忆平台（用户记忆域 + 项目记忆域 + 技能域 + Wiki 域 MCP）。
+Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：六个领域各一个入口工具\
+（memory 用户记忆 / projects 项目记忆 / skills 技能 / wiki 知识库 / todos 待办 / codegraph 代码图谱），\
+调用形态 {\"action\":\"<操作名>\", ...参数}；每个工具的描述里带操作目录（常驻可见），\
+参数细节用 {\"action\":\"help\"} 一轮取回全域操作手册。
 
 用户记忆分四层蒸馏：L0 原始会话 →（蒸馏）→ L1 原子事实 → L2 场景模式 → L3 用户画像；\
 另有实体坐标系（人物/项目/主题/群组/地点）横向串联记忆。全部记忆可溯源、可遗忘。
-项目记忆是跨会话工作线：项目 = 一件有明确目标、一次干不完、跨多次会话推进的工作，\
-下挂多主机位置（登记制）与「分类 > 文档」树。
 
-用户记忆用法：
-1. 会话开始：调用 memory_context 装载用户画像与近期记忆，再开始对话；
-2. 对话中需要背景：用 memory_search 定向回忆，或 memory_entities 按人/项目/主题查档案；
-3. 会话收尾：用 memory_write_session 把值得长期记住的对话写入（蒸馏自动沉淀为结构化记忆）；
-   长对话可分段 memory_append_session 追加；
-4. 用户明确表达遗忘：「别记住这个」→ memory_forget（void 会话作废且已蒸馏产物自动级联归档，检索立即失效）。
+memory 域用法：
+1. 会话开始：{\"action\":\"context\"} 装载用户画像与近期记忆，再开始对话；
+2. 对话中需要背景：{\"action\":\"search\",\"query\":\"…\"} 定向回忆，或 {\"action\":\"entities\"} 按人/项目/主题查档案；
+3. 会话收尾：{\"action\":\"write_session\",\"turns\":[…]} 把值得长期记住的对话写入（蒸馏自动沉淀）；
+   长对话分段用 {\"action\":\"append_session\"} 追加；
+4. 用户明确表达遗忘：「别记住这个」→ {\"action\":\"forget\"}（void 会话作废且蒸馏产物级联归档）。
 
-项目记忆用法：
-1. 开工：project_list / project_get 找到这件事的项目锚点，读目标、位置与文档索引接上上下文；
-   没有就 project_create 建一个（dev=开发 / research=调研），再用 project_location_add 登记代码位置；
-2. 找内容：project_get 默认索引模式（文档只给 id/分类/标题/字符数，不带正文）；
-   project_doc_search 按关键词定位到「哪篇文档哪一行」，project_doc_get 传 start_line/end_line
-   区间精读（无截断、无损）——按需取用，不必整篇倒腾；
-3. 干活中：有阶段性进展或结论就 project_doc_add / project_doc_update 沉淀成文档
-   （category 必须是项目已有分类，要新分类先 project_update 追加进 categories）；
-4. 收尾：project_update 改状态、写总结文档，下次会话从 project_get 接上。
+projects 域用法：项目 = 一件有明确目标、一次干不完、跨多次会话推进的工作。
+1. 开工：{\"action\":\"list\"} / {\"action\":\"get\"} 找到这件事的锚点接上上下文；没有就 {\"action\":\"create\"}；
+2. 找内容：get 默认索引模式（文档只给 id/分类/标题/字符数）；{\"action\":\"doc_search\"} 定位到哪篇哪行，
+   {\"action\":\"doc_get\",\"doc_id\":\"…\",\"start_line\":…,\"end_line\":…} 区间精读——按需取用，无截断；
+3. 干活中：{\"action\":\"doc_add\"} / {\"action\":\"doc_update\"} 沉淀进展与结论；
+4. 收尾：{\"action\":\"update\"} 改状态、写总结文档，下次会话从 get 接上。
 
-技能域用法：技能 = 可复用的指令包（SKILL.md 形态：名称/描述/标签 + markdown 正文）。
-1. 需要某种可复用能力前：先 skills_list 看有没有现成技能，命中就 skills_get 照做；
-2. 用户说「把这个做法存成技能」或一套流程被验证有效且可复用：skills_create 沉淀；
-3. 技能需要修正/演进：skills_update（自动留版本快照，可回滚）；
-4. 用户给了现成 SKILL.md：skills_import（frontmatter 容错解析）。
+skills 域用法：技能 = 可复用的指令包（SKILL.md 形态 + scripts/references 附件）。
+1. 需要某种能力前：{\"action\":\"list\"} 看有没有现成技能，命中 {\"action\":\"get\"} 照做；
+2. 用户说「把这个做法存成技能」：{\"action\":\"create\"}；修正演进：{\"action\":\"update\"}（自动留版本）；
+3. 用户给现成 SKILL.md：{\"action\":\"import\"}。
 
-Wiki 域用法：世界知识库——Markdown 页面 + [[wikilink]] 互链 + 混合检索（FTS + 向量）。
-1. 需要查证事实性知识（文档、概念、实体、既往问答）→ wiki_search；
-2. 浏览结构：wiki_list_pages / wiki_graph，读全文 wiki_get_page；
-3. 用户要求把知识沉淀进 Wiki → 单条结论 wiki_archive_query，整篇文档 wiki_ingest（异步织入），
-   明确要页面则 wiki_write_page（更新前先 wiki_get_page 读原文，别盲目覆盖）；
-4. 怀疑结构问题（死链/孤页）→ wiki_lint。
-域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory_*；查证「客观知识」用 wiki_*。
+wiki 域用法：世界知识库——Markdown 页面 + [[wikilink]] + 混合检索（FTS + 向量）。
+1. 查证事实性知识 → {\"action\":\"search\"}；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}；
+2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page）。
+
+todos 域用法：不绑定项目的快速待办（灵感/学习计划/系统操作/问题排查）。
+{\"action\":\"add\",\"title\":\"…\"} 秒记；{\"action\":\"list\"} 看进行中；{\"action\":\"done\",\"id\":\"…\"} 完成。
+
+codegraph 域用法：注册代码库 → index/sync → {\"action\":\"query\"}（search/explore/node/callers/callees/impact）读懂调用关系。
+
+域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory；查证「客观知识」用 wiki；
+跨会话的工作线用 projects；可复用能力用 skills。
 
 分权规则（务必遵守）：
 - 用户记忆的写入通道只有「写会话」：事实抽取、画像更新、实体维护全部由蒸馏完成；
 - 直接改写用户记忆语义内容（原子内容、画像分面、实体档案）是用户专属权限，MCP 工具面不提供；
 - 纠错也走会话：把正确的表述写成对话（correction 语义），蒸馏会自动生成取代链；
 - 敏感对话（医疗/感情/财务等）写入时置 sensitive=true，默认不进检索与上下文；
-- project_delete / project_batch_delete 不可逆，只对用户明确表达的删除请求使用；
-- skills_delete 仅限用户明确要求——内容过时用 skills_update 修订，不要自行删除。\
+- 破坏性操作（各域 delete/forget 类，目录里有【破坏性】标注）不可逆，只对用户明确请求使用；
+- skills delete 仅限用户明确要求——内容过时用 update 修订，不要自行删除。\
 ";
 
 #[tool_handler(router = self.tool_router)]
@@ -2867,14 +2910,23 @@ impl ServerHandler for EngramMcpServer {
                     .is_none_or(|p| p.has_scope(tool_scope(t.name.as_ref())))
             })
             .collect();
-        // 动态描述：发现能力长在工具面上——云端资产清单织进工具描述（见 tools_catalog 段）
+        // 动态描述：发现能力长在工具面上——域操作目录（L0）织进域工具描述，
+        // 云端资产清单（技能/项目/代码库）原样沿用（见 tools_catalog 段）
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
         let catalogs = ToolCatalogs::for_tools(&self.state.pool, &names).await;
         let tools = tools
             .into_iter()
             .map(|t| {
-                let extra = catalogs.extra_for(t.name.as_ref());
-                with_dynamic_description(t, extra)
+                let name = t.name.as_ref();
+                let asset = catalogs.extra_for(name);
+                let catalog = dispatch::render_catalog(name, &cfg.disabled_tools);
+                let extra = match (catalog, asset) {
+                    (Some(c), Some(a)) => Some(format!("{c}\n\n{a}")),
+                    (Some(c), None) => Some(c),
+                    (None, Some(a)) => Some(a.to_string()),
+                    (None, None) => None,
+                };
+                with_dynamic_description(t, extra.as_deref())
             })
             .collect();
         let supports_cache_hints = context
@@ -2891,21 +2943,36 @@ impl ServerHandler for EngramMcpServer {
     }
 
     /// 停用工具的调用直接拒绝（服务总开关在 HTTP gate 层已拦）。
+    /// 渐进式发现：域内单个操作也可停用（disabled_tools 里的 `域.action` 键）。
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
         let cfg = load_config(&self.state.pool).await;
-        if cfg
-            .disabled_tools
-            .iter()
-            .any(|d| d == request.name.as_ref())
-        {
+        let name = request.name.as_ref();
+        if cfg.disabled_tools.iter().any(|d| d == name) {
             return Err(mcp_err(
                 ErrorCode::INVALID_REQUEST,
-                format!("工具 {} 已停用——控制台「MCP」页可重新开启", request.name),
+                format!("工具 {name} 已停用——控制台「MCP」页可重新开启"),
             ));
+        }
+        // action 级开关：{"action":"delete"} → 键 "todos.delete"
+        if dispatch::is_domain_tool(name) {
+            let action = request
+                .arguments
+                .as_ref()
+                .and_then(|a| a.get("action"))
+                .and_then(|v| v.as_str());
+            if let Some(action) = action {
+                let key = dispatch::action_key(name, action);
+                if cfg.disabled_tools.iter().any(|d| d == &key) {
+                    return Err(mcp_err(
+                        ErrorCode::INVALID_REQUEST,
+                        format!("操作 {key} 已停用——控制台「MCP」页可重新开启"),
+                    ));
+                }
+            }
         }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await
@@ -2978,7 +3045,7 @@ async fn skills_catalog(pool: &engram_storage::PgPool) -> Option<String> {
         ));
     }
     Some(format!(
-        "【当前可用技能 {} 个】（命中候选后用 skills_get 取全文照做）\n{}",
+        "【当前可用技能 {} 个】（命中候选后用 skills 的 action=\"get\" 取全文照做）\n{}",
         rows.len(),
         lines.join("\n")
     ))
@@ -3020,7 +3087,7 @@ async fn projects_catalog(pool: &engram_storage::PgPool) -> Option<String> {
         ));
     }
     Some(format!(
-        "【当前项目 {} 个】（project_get / project_doc_* 支持按 name 寻址）\n{}",
+        "【当前项目 {} 个】（projects 的 action=\"get\" / action=\"doc_get\" 支持按 name 寻址）\n{}",
         rows.len(),
         lines.join("\n")
     ))
@@ -3053,7 +3120,7 @@ async fn codegraph_catalog(pool: &engram_storage::PgPool) -> Option<String> {
         })
         .collect();
     Some(format!(
-        "【已注册代码库 {} 个】（codegraph_query 按 name 查询）
+        "【已注册代码库 {} 个】（codegraph 的 action=\"query\" 按 name 查询）
 {}",
         rows.len(),
         lines.join(
@@ -3080,17 +3147,17 @@ struct ToolCatalogs {
 
 impl ToolCatalogs {
     async fn for_tools(pool: &engram_storage::PgPool, names: &[&str]) -> Self {
-        let skills = if names.contains(&"skills_list") {
+        let skills = if names.contains(&"skills") {
             skills_catalog(pool).await
         } else {
             None
         };
-        let projects = if names.contains(&"project_list") {
+        let projects = if names.contains(&"projects") {
             projects_catalog(pool).await
         } else {
             None
         };
-        let codegraph = if names.contains(&"codegraph_list") {
+        let codegraph = if names.contains(&"codegraph") {
             codegraph_catalog(pool).await
         } else {
             None
@@ -3104,9 +3171,9 @@ impl ToolCatalogs {
 
     fn extra_for(&self, name: &str) -> Option<&str> {
         match name {
-            "skills_list" => self.skills.as_deref(),
-            "project_list" => self.projects.as_deref(),
-            "codegraph_list" => self.codegraph.as_deref(),
+            "skills" => self.skills.as_deref(),
+            "projects" => self.projects.as_deref(),
+            "codegraph" => self.codegraph.as_deref(),
             _ => None,
         }
     }
@@ -3133,7 +3200,8 @@ pub struct McpConfig {
     /// 服务总开关：false 时 /mcp 整体 503（AI 客户端连接/调用一律拒绝）
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// 停用的工具名清单：tools/list 不出现、tools/call 报错
+    /// 停用清单：域工具名（tools/list 不出现、call 报错）或 `域.action`（单操作停用，
+    /// 从目录隐身 + call 拒绝）。历史扁平工具名的残留条目惰性忽略。
     #[serde(default)]
     pub disabled_tools: Vec<String>,
 }
@@ -3192,11 +3260,27 @@ pub async fn gate(
 
 // ---------- 服务信息（Web 控制台「MCP」页用；HTTP handler 在 api 层） ----------
 
-/// MCP 工具条目（控制台工具清单）。
+/// 域内操作条目（渐进式发现：域工具下的 action 清单，控制台两级展示 + 单操作开关）。
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct McpActionInfo {
+    /// 操作名（与调用时 {"action":"…"} 一致）
+    pub action: String,
+    /// 一行摘要（与 AI 看到的 L0 目录同源）
+    pub summary: String,
+    /// 破坏性操作（不可逆/删除类）
+    pub destructive: bool,
+    /// 参数 JSON Schema（help 手册同源；控制台详情展示用）
+    #[schema(value_type = Object)]
+    pub parameters: serde_json::Value,
+    /// 是否已被停用（disabled_tools 里的 `域.action`）
+    pub disabled: bool,
+}
+
+/// MCP 工具条目（控制台工具清单；域工具下挂 actions）。
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct McpToolInfo {
     pub name: String,
-    /// 所属资产域（工具名前缀；memory → 用户记忆，wiki → Wiki，未来逐域扩展）
+    /// 所属资产域（渐进式发现后工具名即域名：memory/projects/skills/wiki/todos/codegraph）
     pub domain: String,
     pub description: String,
     pub read_only: Option<bool>,
@@ -3204,6 +3288,8 @@ pub struct McpToolInfo {
     /// 参数 JSON Schema（tools/list 的 inputSchema 同源；控制台详情展示用）
     #[schema(value_type = Object)]
     pub parameters: serde_json::Value,
+    /// 域内操作（非域工具为空表）
+    pub actions: Vec<McpActionInfo>,
 }
 
 /// MCP 服务信息。
@@ -3217,20 +3303,28 @@ pub struct McpInfo {
     pub server_version: String,
     /// 服务总开关（false = /mcp 整体 503）
     pub enabled: bool,
-    /// 停用的工具名（tools/list 对 AI 隐身、call 拒绝）
+    /// 停用清单：域工具名（整个工具隐身）或 `域.action`（单操作停用）
     pub disabled_tools: Vec<String>,
     /// initialize 时下发给调用方 AI 的使用说明（与工具面同源展示）
     pub instructions: String,
     pub tools: Vec<McpToolInfo>,
 }
 
-/// 已知工具名清单（控制台配置校验用）。
+/// 已知工具名 + 操作键清单（控制台配置校验用）。
 pub fn tool_catalog() -> Vec<String> {
-    EngramMcpServer::tool_router()
+    let mut keys: Vec<String> = EngramMcpServer::tool_router()
         .list_all()
         .into_iter()
         .map(|t| t.name.to_string())
-        .collect()
+        .collect();
+    for domain in dispatch::DOMAIN_TOOLS {
+        if let Some(docs) = dispatch::action_docs(domain) {
+            for d in docs {
+                keys.push(dispatch::action_key(domain, d.action));
+            }
+        }
+    }
+    keys
 }
 
 /// 汇总服务信息（开关状态 + 工具清单）。与 tools/list 同源：控制台看到的描述
@@ -3244,15 +3338,40 @@ pub async fn build_info(pool: &engram_storage::PgPool) -> McpInfo {
     let tools = all
         .into_iter()
         .map(|t| {
-            let extra = catalogs.extra_for(t.name.as_ref());
-            let t = with_dynamic_description(t, extra);
+            let name = t.name.as_ref().to_string();
+            let asset = catalogs.extra_for(&name);
+            let catalog = dispatch::render_catalog(&name, &cfg.disabled_tools);
+            let extra = match (catalog, asset) {
+                (Some(c), Some(a)) => Some(format!("{c}\n\n{a}")),
+                (Some(c), None) => Some(c),
+                (None, Some(a)) => Some(a.to_string()),
+                (None, None) => None,
+            };
+            let t = with_dynamic_description(t, extra.as_deref());
+            let actions = dispatch::action_docs(&name)
+                .map(|docs| {
+                    docs.iter()
+                        .map(|d| McpActionInfo {
+                            action: d.action.to_string(),
+                            summary: d.summary.to_string(),
+                            destructive: d.destructive,
+                            parameters: (d.schema)(),
+                            disabled: cfg
+                                .disabled_tools
+                                .iter()
+                                .any(|x| x == &dispatch::action_key(&name, d.action)),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             McpToolInfo {
-                name: t.name.to_string(),
+                name,
                 domain: t.name.split('_').next().unwrap_or("other").to_string(),
                 description: t.description.as_deref().unwrap_or("").to_string(),
                 read_only: t.annotations.as_ref().and_then(|a| a.read_only_hint),
                 destructive: t.annotations.as_ref().and_then(|a| a.destructive_hint),
                 parameters: serde_json::to_value(&*t.input_schema).unwrap_or(serde_json::json!({})),
+                actions,
             }
         })
         .collect();
