@@ -34,7 +34,6 @@ pub mod wiki;
 use axum::response::IntoResponse;
 use engram_core::auth::Principal;
 use engram_core::state::AppState;
-use engram_llm::provider::LlmProvider;
 
 /// 错误桥：把本模块的错误统一成 MCP ErrorData。
 pub(crate) fn mcp_err(code: ErrorCode, msg: impl Into<String>) -> rmcp::ErrorData {
@@ -140,21 +139,6 @@ fn from_cg(e: engram_cg_bridge::CgError) -> rmcp::ErrorData {
         }
         other => rmcp::ErrorData::internal_error(other.to_string(), None),
     }
-}
-
-fn require_llm(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    if principal.has_scope("llm") {
-        Ok(())
-    } else {
-        Err(mcp_err(
-            ErrorCode::INVALID_REQUEST,
-            "缺少 llm scope——请用带 llm scope 的 amk_ key 连接 MCP",
-        ))
-    }
-}
-
-fn from_storage(e: engram_storage::StoreError) -> rmcp::ErrorData {
-    rmcp::ErrorData::internal_error(e.to_string(), None)
 }
 
 /// CodeGraph 桥（root 与 api 层同一约定：data_dir/codegraph）。
@@ -632,16 +616,6 @@ pub struct SkillsListParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct LlmNoParams {}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct LlmTestParams {
-    /// 供应商名（llm_providers 返回的 name）
-    #[schemars(description = "供应商名（llm_providers 返回的 name）。")]
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CgRegisterParams {
     /// 项目名（唯一，如 engram-server）
     #[schemars(description = "项目名（唯一，如 engram-server）。")]
@@ -971,28 +945,14 @@ impl EngramMcpServer {
         require_memory(&p)?;
         let lp = params.0;
         let cursor = lp.cursor.as_deref().map(parse_flex_datetime).transpose()?;
+        // D6（重构）：列表是浏览/定位场景——返回轻量元数据（轮次数 + 首条预览），
+        // 不截断不裁剪正文；定位到目标后用 memory_get_session 取完整原文
         let sessions = self
             .svc()
-            .list_sessions(lp.agent.as_deref(), cursor, lp.limit.unwrap_or(50))
+            .list_sessions_meta(lp.agent.as_deref(), cursor, lp.limit.unwrap_or(50))
             .await
             .map_err(from_memory)?;
-        // D6：列表是浏览场景——正文截断为摘要（全文走 memory_get_session）
-        let mut rows = serde_json::to_value(&sessions).unwrap_or(serde_json::json!([]));
-        if let Some(arr) = rows.as_array_mut() {
-            for it in arr {
-                if let Some(turns) = it.get_mut("content").and_then(|c| c.as_array_mut()) {
-                    let total = turns.len();
-                    if total > 3 {
-                        turns.truncate(3);
-                        turns.push(serde_json::json!({
-                            "speaker": "system",
-                            "text": format!("…共 {total} 轮，其余 {} 轮见 memory_get_session", total - 3),
-                        }));
-                    }
-                }
-            }
-        }
-        ok_json(rows)
+        ok_json(serde_json::to_value(&sessions).unwrap_or(serde_json::json!([])))
     }
 
     /// 读取一个 L0 原始会话全文（逐轮对话原文）。
@@ -2044,112 +2004,6 @@ impl EngramMcpServer {
             .await
             .map_err(from_cg)?;
         ok_json(v)
-    }
-
-    // ---------- LLM 配置域工具（llm scope；D14：AI 自助配置闭环的读+测半环） ----------
-
-    /// 列出 LLM 供应商（只读，永不含密钥）：名称/地址/模型/能力/是否默认。
-    ///
-    /// 何时用：写会话报「LLM 未配置」时先看有没有供应商；或配置前盘点现状。
-    /// 配置/修改走 Web UI 或 HTTP /settings/llm/*。
-    #[tool(
-        name = "llm_providers",
-        annotations(
-            title = "列出 LLM 供应商",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
-    async fn llm_providers(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        _params: Parameters<LlmNoParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        require_llm(&p)?;
-        let rows = engram_storage::repo::llm::list_providers(&self.state.pool)
-            .await
-            .map_err(from_storage)?;
-        let rows: Vec<serde_json::Value> = rows
-            .into_iter()
-            .map(|(id, name, base_url, model_id, capability, is_default)| {
-                serde_json::json!({
-                    "id": id, "name": name, "base_url": base_url,
-                    "model_id": model_id, "capability": capability, "is_default": is_default,
-                })
-            })
-            .collect();
-        ok_json(serde_json::json!({
-            "providers": rows,
-            "note": "无供应商或蒸馏失败时：请管理员在 Web UI「设置 → AI 功能」配置（写入不开放给 MCP，避免误配）",
-        }))
-    }
-
-    /// LLM 供应商连通测试：1-token 探测（chat）。
-    ///
-    /// 何时用：配置后确认可用；写会话报 LLM 错误时排查是否供应商侧问题。
-    #[tool(
-        name = "llm_provider_test",
-        annotations(
-            title = "测试 LLM 供应商连通",
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
-    async fn llm_provider_test(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<LlmTestParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        require_llm(&p)?;
-        let hex = self
-            .state
-            .master_key
-            .as_ref()
-            .map(|m| m.0.clone())
-            .ok_or_else(|| {
-                mcp_err(
-                    ErrorCode::INTERNAL_ERROR,
-                    "服务端未配置主密钥（AGENT_MEMORY_MASTER_KEY）——无法解密供应商密钥做连通测试",
-                )
-            })?;
-        let cipher = engram_llm::crypto::KeyCipher::from_hex_master(&hex)
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
-        let registry = engram_llm::provider::ProviderRegistry::new(self.state.pool.clone(), cipher);
-        // get 内部完成解密校验：能拿到 provider = 密钥可用
-        let (provider, model_id) = registry.get(&params.0.name).await.map_err(|e| {
-            mcp_err(
-                ErrorCode::RESOURCE_NOT_FOUND,
-                format!("供应商 {:?} 不存在或不可用：{}", params.0.name, e),
-            )
-        })?;
-        let req = engram_llm::types::ChatRequest {
-            model: model_id.clone(),
-            messages: vec![engram_llm::types::ChatMessage::user("ping")],
-            temperature: None,
-            json_mode: false,
-            max_tokens: Some(1),
-        };
-        match provider.chat(req).await {
-            Ok(r) => ok_json(serde_json::json!({
-                "name": params.0.name,
-                "ok": true,
-                "latency_ms": r.latency_ms,
-                "model": r.model,
-                "note": "连通正常（chat 1-token 探测）",
-            })),
-            Err(e) => ok_json(serde_json::json!({
-                "name": params.0.name,
-                "ok": false,
-                "error": e.to_string(),
-                "note": "供应商侧返回错误——检查密钥/额度/模型名",
-            })),
-        }
     }
 
     /// 注销代码图谱项目（删除注册与索引；不可逆——本地路径项目的源码不动）。

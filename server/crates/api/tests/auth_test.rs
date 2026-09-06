@@ -1328,6 +1328,7 @@ async fn openapi_snapshot() {
             "/settings/api-keys/batch-revoke",
             "/settings/api-keys/{id}/revoke",
             "/settings/llm/providers",
+            "/settings/llm/providers/models",
             "/settings/llm/providers/re-encrypt",
             "/settings/llm/providers/{id}",
             "/settings/llm/providers/{id}/test",

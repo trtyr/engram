@@ -546,6 +546,55 @@ impl ProviderRegistry {
     }
 }
 
+/// 拉取 OpenAI 兼容供应商的模型 ID 列表（GET {base}/models，标准端点）。
+/// 供应商未实现 /models 时返回 Err(Permanent)——前端回退手动输入模型 ID。
+pub async fn fetch_model_ids(
+    base_url: &str,
+    api_key: &str,
+) -> Result<Vec<String>, crate::types::LlmError> {
+    use crate::types::LlmError;
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{base}/models");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| LlmError::Permanent(format!("HTTP 客户端构建失败: {e}")))?;
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .send()
+        .await
+        .map_err(|e| LlmError::Permanent(format!("连接失败: {e}")))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(LlmError::Permanent(format!(
+            "HTTP {}——供应商可能不支持 /models 列表，请手动输入模型 ID",
+            status.as_u16()
+        )));
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| LlmError::Permanent(format!("响应解析失败: {e}")))?;
+    let ids: Vec<String> = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id").and_then(|x| x.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if ids.is_empty() {
+        return Err(LlmError::Permanent(
+            "供应商返回空模型列表——请手动输入模型 ID".into(),
+        ));
+    }
+    let mut ids = ids;
+    ids.sort();
+    Ok(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

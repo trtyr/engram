@@ -12,7 +12,7 @@ use engram_search::{SearchHit, search_atoms, search_scenarios};
 use engram_storage::repo::memory as repo;
 use engram_storage::{PgPool, StoreError};
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 /// 记忆域错误（api 层转 ApiError）。
@@ -394,6 +394,17 @@ impl MemoryService {
         limit: i64,
     ) -> Result<Vec<SessionDto>, MemoryError> {
         Ok(repo::list_sessions(&self.pool, agent, cursor, limit.min(200)).await?)
+    }
+
+    /// 会话列表轻量行（浏览/定位用）：轮次数 + 首条消息预览，不含正文数组。
+    /// MCP memory_list_sessions 用——按需取用而非截断全文。
+    pub async fn list_sessions_meta(
+        &self,
+        agent: Option<&str>,
+        cursor: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<Value>, MemoryError> {
+        Ok(repo::list_sessions_meta(&self.pool, agent, cursor, limit.min(200)).await?)
     }
 
     pub async fn get_session(&self, id: Uuid) -> Result<SessionDto, MemoryError> {

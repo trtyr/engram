@@ -216,3 +216,13 @@ pub async fn list_provider_models(pool: &PgPool) -> StoreResult<Vec<(String, Str
         .await?;
     Ok(rows)
 }
+
+/// 已存 provider 的加密密钥（模型列表拉取等场景：用库存密钥而非明文重传）。
+pub async fn get_provider_encrypted(pool: &PgPool, id: Uuid) -> StoreResult<Option<Vec<u8>>> {
+    let row: Option<(Vec<u8>,)> =
+        sqlx::query_as("SELECT api_key_encrypted FROM llm_providers WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|(enc,)| enc))
+}

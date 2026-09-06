@@ -411,6 +411,8 @@ function Providers() {
   const [err, setErr] = useState('')
   const [form, setForm] = useState({ name: '', base_url: '', api_key: '', model_id: '', capability: 'chat' })
   const [testMsg, setTestMsg] = useState<Record<string, string>>({})
+  const [modelOptions, setModelOptions] = useState<string[]>([])
+  const [fetchingModels, setFetchingModels] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const load = () => api.get<Provider[]>('/settings/llm/providers').then(setRows).catch((e) => setErr(e.message))
@@ -486,14 +488,45 @@ function Providers() {
             />
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="prov-model" className="block text-xs font-medium">模型 ID</label>
+            <div className="flex items-center justify-between">
+              <label htmlFor="prov-model" className="block text-xs font-medium">模型 ID</label>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground disabled:opacity-50"
+                disabled={fetchingModels || !form.base_url.trim()}
+                title="从供应商拉取可用模型列表（OpenAI 兼容 GET /models）；拉取失败可手动输入"
+                onClick={async () => {
+                  setFetchingModels(true)
+                  try {
+                    const r = await api.post<{ models: string[] }>('/settings/llm/providers/models', {
+                      base_url: form.base_url,
+                      api_key: form.api_key || undefined,
+                      provider_id: editingId ?? undefined,
+                    })
+                    setModelOptions(r.models)
+                  } catch (ex) {
+                    setErr(ex instanceof Error ? ex.message : '拉取模型列表失败')
+                  } finally {
+                    setFetchingModels(false)
+                  }
+                }}
+              >
+                {fetchingModels ? '获取中…' : '自动获取模型'}
+              </button>
+            </div>
             <input
               id="prov-model"
+              list="provider-model-options"
               className={`${inputCls} w-full font-mono`}
-              placeholder="MiniMax-M3"
+              placeholder="MiniMax-M3（可手动输入或点上方自动获取）"
               value={form.model_id}
               onChange={(e) => setForm({ ...form, model_id: e.target.value })}
             />
+            <datalist id="provider-model-options">
+              {modelOptions.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
           </div>
           <div className="space-y-1.5">
             <label htmlFor="prov-cap" className="block text-xs font-medium">类型</label>

@@ -1057,3 +1057,30 @@ pub async fn audit(pool: &PgPool, kind: &str, payload: Value) {
     .await
     .ok();
 }
+
+/// 会话列表轻量行（浏览/定位用，不含正文大字段）：
+/// turns = 轮次数，preview = 首条消息前 80 字。
+pub async fn list_sessions_meta(
+    pool: &PgPool,
+    agent: Option<&str>,
+    cursor: Option<DateTime<Utc>>,
+    limit: i64,
+) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT jsonb_build_object( \
+            'id', s.id, 'agent', s.agent, 'distill_status', s.distill_status, \
+            'sensitive', s.sensitive, 'created_at', s.created_at, 'metadata', s.metadata, \
+            'turns', jsonb_array_length(s.content), \
+            'preview', left(COALESCE(s.content->0->>'text', ''), 80) \
+         ) FROM raw_sessions s \
+         WHERE ($1::text IS NULL OR s.agent = $1) \
+           AND ($2::timestamptz IS NULL OR s.created_at < $2) \
+         ORDER BY s.created_at DESC LIMIT $3",
+    )
+    .bind(agent)
+    .bind(cursor)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
