@@ -4,13 +4,13 @@
 
 ### 把 AI 的记忆，做成可蒸馏、可检索、可审计、可遗忘的资产
 
-**单用户 AI 长期记忆平台 · Rust 单二进制 · 四域 MCP · 全程可溯源**
+**单用户 AI 长期记忆平台 · Rust 单二进制 · 五域 MCP · 全程可溯源**
 
 [![Rust](https://img.shields.io/badge/Rust-axum-DEA584?style=for-the-badge&logo=rust&logoColor=white)](server/)
 [![React](https://img.shields.io/badge/React_19-SPA-61DAFB?style=for-the-badge&logo=react&logoColor=black)](web/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_17-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](server/crates/storage/)
-[![MCP](https://img.shields.io/badge/MCP-四域_38_工具-8A2BE2?style=for-the-badge)](#-mcp-四域工具面)
-[![Tests](https://img.shields.io/badge/tests-234_cargo_·_53_vitest-16C784?style=for-the-badge)](#-门禁)
+[![MCP](https://img.shields.io/badge/MCP-五域_45_工具-8A2BE2?style=for-the-badge)](#-mcp-五域工具面)
+[![Tests](https://img.shields.io/badge/tests-245_cargo_·_55_vitest-16C784?style=for-the-badge)](#-门禁)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=for-the-badge)](LICENSE)
 
 > **en·gram**（/ˈenɡræm/）*n.* 神经科学中的「记忆痕迹」——记忆在脑中留下的物理印记。
@@ -89,15 +89,15 @@ flowchart LR
                     └─────────────────────────────┘
 ```
 
-- **后端**：Rust workspace 10 crates（`engram-api` / `engram-core` / `engram-storage` / `engram-wiki-engine` / …）
+- **后端**：Rust workspace 11 crates（`engram-api` / `engram-mcp` / `engram-core` / `engram-storage` / `engram-wiki-engine` / …）；领域表业务面 SQL 唯一收口在 `engram-storage::repo` 仓储层
 - **前端**：React 19 + TypeScript + Vite 8 + Tailwind 4，十页 SPA，墨白双主题（Vercel/Geist 系设计语言）
 - **单二进制单端口**：一个 `engram-server` 同源托管 API + SPA + MCP，本地/Docker 单机部署
 - **中文友好**：jieba FTS + 向量混合检索（RRF 融合），零匹配时收紧向量阈值——返回空，不返回噪声
 
-## 🔌 MCP 四域工具面
+## 🔌 MCP 五域工具面
 
 engram-server 内置 MCP 服务端（官方 Rust SDK `rmcp`，Streamable HTTP）。
-**一个 `/mcp` 端点，四个域 38 个工具**，按 key 的 scope 分权——AI 看到的工具面与它实际能调用的完全一致：
+**一个 `/mcp` 端点，五个域 45 个工具**，按 key 的 scope 分权——AI 看到的工具面与它实际能调用的完全一致：
 
 | 域 | scope | 工具 |
 |:--|:--|:--|
@@ -105,6 +105,7 @@ engram-server 内置 MCP 服务端（官方 Rust SDK `rmcp`，Streamable HTTP）
 | 🧩 项目记忆 | `project` | `project_list/get/create/update/delete/…` · `location_*` · `doc_add/get/search/update/delete`（共 15） |
 | 🪄 技能 | `skills` | `skills_list/get/create/update/delete/import` |
 | 🕸️ Wiki | `wiki` | `wiki_search`（混合检索+purpose）· `list_pages` · `get_page` · `write_page` · `ingest` · `archive_query` · `graph` · `lint` |
+| 🗺️ 代码图谱 | `codegraph` | `codegraph_list`（动态项目清单）· `register` · `index` · `sync`（三者走任务队列）· `query`（search/explore/node/callers/callees/impact） |
 
 控制台「MCP」页 = 服务总开关（关闭即整体 503）+ 逐域逐工具开关（停用即对 AI 隐身 + 调用拒绝）；
 MCP 专用密钥在「设置 → API 密钥」签发，scope 选择器按需勾选。

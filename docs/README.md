@@ -1,7 +1,7 @@
 # Engram 项目档案
 
 > 全新初始化：2026-08-30；2026-09-01 全面更新（实体层/编辑分权/敏感清空体系/圈子页入档）；
-> 2026-09-04 更新（产品更名 Engram / 项目记忆第五域 / 88 路径 113 方法）；2026-09-05 更新（用户记忆 MCP / 89 路径 114 方法）。**三层结构**——本目录是全栈集成视角；
+> 最近更新 2026-09-05（分层收敛 engram-storage::repo + engram-mcp 独立 crate / 技能文件夹化三层消费 / CodeGraph 重做 / **100 路径 132 方法 / MCP 五域 45 工具 / 32 迁移 30 表**）。**三层结构**——本目录是全栈集成视角；
 > 后端与前端各有独立项目档案。
 
 ## 三层地图
@@ -9,7 +9,7 @@
 | 层 | 入口 | 视角 |
 |---|---|---|
 | 全栈（本目录） | 本 README | 仓库整体、前后端接缝、跨栈约定 |
-| 后端项目 | [server/docs/README.md](../server/docs/README.md) | Rust workspace 10 crates 的完整档案 |
+| 后端项目 | [server/docs/README.md](../server/docs/README.md) | Rust workspace 11 crates 的完整档案 |
 | 前端项目 | [web/docs/README.md](../web/docs/README.md) | Engram SPA 的完整档案 |
 
 产品事实与设计系统在仓库根：[PRODUCT.md](../PRODUCT.md)、[DESIGN.md](../DESIGN.md)。

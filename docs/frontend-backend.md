@@ -6,7 +6,7 @@
 
 | 形态 | 前端 | 后端 | 说明 |
 |---|---|---|---|
-| 开发 | Vite :5173 | cargo run :8080 | Vite 代理九前缀（/api /auth /jobs /memory /mcp /wiki /codegraph /settings /llm）→ VITE_PROXY_TARGET |
+| 开发 | Vite :5173 | cargo run :8080 | Vite 代理域前缀（/api /auth /jobs /memory /mcp /wiki /codegraph /settings /llm /skills /projects /search）→ VITE_PROXY_TARGET |
 | 本地整栈 | 构建 dist 后 rust-embed（debug 直读磁盘） | 同端口 | 改前端无需重编 server |
 | 生产 | web/dist 编进二进制 | 单端口同源 | 零 CORS（tower-http cors feature 在 Cargo.toml 但未挂中间件——不需要） |
 
@@ -18,7 +18,7 @@ Login 页 ──POST /auth/login（管理员密码）──▶ ams_ token
 挂载探活：GET /jobs?limit=1（复用碰撞路径做探针）
   仅 401（凭证失效）→ 回登录页；5xx（服务抖动/部署窗口）保持会话不误杀
 中途失效：任何 401 ─▶ clearToken + engram-auth-expired 事件 ─▶ App 回 /login
-Agent 侧：settings 页签发 amk_ API Key（七 scope：memory/wiki/codegraph/project/llm/erase/cron）
+Agent 侧：settings 页签发 amk_ API Key（八 scope：memory/wiki/codegraph/project/skills/llm/erase/cron）
 ```
 
 ## /jobs 路由冲突（2026-08-30 定稿）

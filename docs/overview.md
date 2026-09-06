@@ -26,7 +26,7 @@ L0 会话 ──蒸馏──▶ L1 原子 ──组织──▶ L2 场景 ──
 
 ## 谁在用
 
-1. **人**——Engram 控制台（web/，九页 SPA：概览/用户记忆/圈子/Wiki/代码图谱/项目/任务/MCP/设置，墨白双主题；
+1. **人**——Engram 控制台（web/，十页 SPA：概览/用户记忆/圈子/Wiki/代码图谱/项目/技能/任务/MCP/设置，墨白双主题；
    2026-09-02 Knowledge 并入 Wiki，/knowledge 重定向）
 2. **AI Agent**——API Key 调 /memory/context 取画像与相关记忆（含实体透镜与人审代问），写会话回灌。
    AI 是主消费者，Web 是辅助观察面。
@@ -35,7 +35,7 @@ L0 会话 ──蒸馏──▶ L1 原子 ──组织──▶ L2 场景 ──
 
 ```text
 Engram/
-├── server/          # Rust workspace（10 crates，axum+sqlx+pgvector，rust-embed 托管前端）
+├── server/          # Rust workspace（11 crates，axum+sqlx+pgvector，rust-embed 托管前端）
 │   └── docs/        # ← 后端项目档案
 ├── web/             # React 19 SPA（Engram 控制台）
 │   └── docs/        # ← 前端项目档案

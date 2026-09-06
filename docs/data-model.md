@@ -1,6 +1,6 @@
 # 数据模型（集成索引）
 
-数据库 27 张业务表 + 30 迁移（2026-09-05 运行库实查；0030 = wiki 约束名归位 + api_keys 默认 scopes 去 knowledge）。表清单、迁移史、约束陷阱在
+数据库 30 张业务表 + 32 迁移（2026-09-05 运行库实查；0031 = 技能域 skills + skill_revisions，0032 = 技能文件夹形态 skill_files）。表清单、迁移史、约束陷阱在
 [server/docs/data-model.md](../server/docs/data-model.md)；前端消费形状在
 [web/docs/data-model.md](../web/docs/data-model.md)。
 

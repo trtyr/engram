@@ -4,7 +4,7 @@
 
 ## 一句话状态
 
-**四域 MCP 单服务器成型**：`/mcp` 一个端点承载 memory 九 + project 15 + skills 六 + wiki 八共 **38 工具**，按 key scope 分权（AI 看到的工具面与可调用集一致），管理台按域分组逐工具开关。仓库收敛为**单分支 main**（三个 feat 分支已并入并删除），与 origin/main 同步。cargo **234** 测试（40 套件）/ vitest **53**（10 文件）/ 95 路径 / 124 方法 / 31 迁移 / 29 业务表。
+**五域 MCP + 分层收敛成型**：`/mcp` 一个端点承载 memory 九 + project 15 + skills 八 + wiki 八 + codegraph 五共 **45 工具**，按 key scope 分权（AI 看到的工具面与可调用集一致），管理台按域分组逐工具开点开看详情（描述/参数 Schema 与 tools/list 同源）。持久化全面收口 `engram-storage::repo`（core/api src 层零 sqlx），MCP 拆独立 crate（11 crates，与 HTTP 平级双适配器）。cargo **245** 测试 / vitest **55**（10 文件）/ 100 路径 / 132 方法 / 32 迁移 / 30 业务表。
 :8090 开发栈在跑（am_dev 库，数据由所有者主动清空后重建）。
 
 ## 当日验证矩阵（活体）
@@ -12,11 +12,11 @@
 | 栈 | 命令 | 结果 |
 |---|---|---|
 | server | cargo fmt --check / clippy -D warnings | exit 0 / 0 errors |
-| server | cargo test --workspace | 234 passed（40 套件） |
-| web | pnpm run lint / tsc / test / build | 11 既有警告（WikiMarkdown） / 0 / 53 全过（10 文件）/ exit 0 |
+| server | cargo test --workspace | 245 passed / 0 failed |
+| web | pnpm run lint / tsc / test / build | 12 既有警告 / 0 / 55 全过（10 文件）/ exit 0 |
 | web | 入口 bundle | 287.55 kB（gzip 92.46），预算 350 内 |
 | CI | gh run list（f8e1031） | CI + e2e FAIL（GitHub 支出限额，未启动） |
-| 事实 | OpenAPI 活体 / 迁移 / 表 | **95 路径 / 124 方法注册**（GET 51/POST 50/PUT 9/PATCH 3/DELETE 11，另有 POST /mcp JSON-RPC 不进 OpenAPI）/ **31 迁移** / **29 业务表**（openapi-dump + am_dev 库实查） |
+| 事实 | OpenAPI 活体 / 迁移 / 表 | **100 路径 / 132 方法注册**（GET 56/POST 50/PUT 10/PATCH 3/DELETE 13，另有 POST /mcp JSON-RPC 不进 OpenAPI）/ **32 迁移** / **30 业务表**（openapi-dump + 库实查） |
 
 ## 运行环境实况（2026-09-03 实查 + 所有者确认）
 
@@ -69,6 +69,12 @@
 29. **Wiki 域 MCP**（2026-09-05，feat/wiki-mcp）：单服务器扩为多域（memory + project + skills + wiki，工具名前缀即域，管理台按域分组自动出 Wiki tab）——`EngramMcpServer`（原 MemoryMcpServer 更名）新增八个 `wiki_*` 工具（mcp_wiki.rs 放参数结构/错误桥/实现辅助，`#[tool]` 方法落在 mcp.rs 同一 tool_router 块）：`wiki_search`（search_with_purpose 混合检索 + purpose）/ `wiki_list_pages`（瘦身去正文 content_omitted）/ `wiki_get_page`（slug 宽容匹配读全文）/ `wiki_write_page`（AI 通道 put_page，frontmatter.via="ai" 区分执行者；描述写明覆盖前先读原文）/ `wiki_ingest`（入队织入，返回 async=true 提示异步）/ `wiki_archive_query`（同标题幂等跳过）/ `wiki_graph` / `wiki_lint`；全部 wiki scope 分权（缺 scope 报 JSON-RPC 错误）；instructions 扩为多域（memory_* 管用户本人、wiki_* 管世界知识的域选择指引）；无参工具用空结构体 WikiNoParams（`Parameters<()>` schema 为 null 违反 MCP inputSchema 规范）。验证：cargo **193**（mcp_test 12 用例：wiki 工具清单/写读改搜列图 lint/问答存档幂等/织入/双域 scope 互拒/wiki 工具停用隐身+拒绝/管理台校验 wiki 工具名）+ vitest 46（mcp.test +1 Wiki 域 Tab 用例）+ 前端门禁四绿。
 
 30. **三 feat 分支并入 main + 仓库收敛**（2026-09-05）：feat/project-memory-mcp、feat/skills-mcp、feat/wiki-mcp 三分支以 --no-ff 依次并入 main（b7ba722 / 67348b7 / 966d3f6）——四域工具链拼接、tool_scope 补 skills/wiki 分支、SERVER_INSTRUCTIONS 扩为四域、README/docs 多域口径统一；顺修 mcp_test toggle 断言（scope 过滤下 memory-only key 见 9 工具 9→8，skills 分支遗留的 15→14 与 project 分支的 scope 过滤矛盾）。三 worktree 撤除、四分支删除（含已合并的 fix/memory-mcp-v2，远端同步删除），仓库收敛为单分支 main。验证：cargo 234（40 套件）+ vitest 53 + fmt/clippy 全绿。
+
+31. **持久化分层收敛**（2026-09-05）：SQL 全量收口 `engram-storage::repo`（8 域模块 145+ 仓储函数，行类型进 `engram-storage::models`；事务边界归 repo）——core/api src 层零 sqlx（测试夹具保留 dev-dep）；MCP 拆独立 crate **engram-mcp**（workspace 10→11 crates，与 HTTP 平级双适配器）；`Principal`/`AppState` 上移 core（auth/state）；api 加 `mcp_admin.rs`（/settings/mcp HTTP 壳）；jobs 加 `admin` 模块（deep-purge 两阶段读写/提案聚合收口）；ApiError.Database 换 `StoreError`。全量回归：cargo 245 / vitest 55 / fmt/clippy 零告警。
+
+32. **技能 = 文件夹 + 三层消费**（2026-09-05）：0032 迁移建 `skill_files`（(skill_id, path) 唯一，写入侧校验禁 `..`/绝对路径/SKILL.md 本体）；skills_get 返回带 files 索引；MCP +2（skills_file_get/put，40→45 工具的部分）；HTTP 三层消费——①纯文本 MCP 读 ②单文件直下 `GET /skills/{slug}/file?path=…&raw=1`（Content-Disposition 落盘名）③整包 `GET /skills/{slug}/bundle`（zip：SKILL.md 自动还原 frontmatter + 全部文件）；导出含附属文件；消费形态指南织入工具描述（AI 自选通道）。云部署语义：文件是内容不是执行体——云端存发、客户端本地执行，服务端永不执行上传代码。
+
+33. **CodeGraph 重做 + MCP 工具面动态化**（2026-09-05）：CodeGraph 接入任务队列（cg_index/cg_sync job，POST 返回 202——废除同步阻塞 10 分钟）；新增 DELETE（git clone 工作目录一并清理）与 GET /codegraph/status（CLI 可用性，Windows spawn 适配 .cmd shim）；**MCP +5 codegraph_* 工具（38→45，五域）**，codegraph_list 描述织入动态项目清单；新增 `GET /codegraph/projects/{id}/graph` 双模式——无 symbol = 文件级全图（rusqlite 只读 CLI 索引库聚合跨文件依赖），带 symbol = callers/callees 子图归一 nodes+edges；前端代码图谱页重做（CLI 状态条 / indexing 自动轮询 / 删除 / sigma 调用图弹窗）；修 stats 字段错位（CLI fileCount/nodeCount/edgeCount → 前端 files/symbols/edges）与同源重复注册。CLI 安装 `npm i -g @colbymchenry/codegraph@1.5.0`。MCP 工具描述动态化（skills_list/project_list/codegraph_list 清单织入，管理台与 tools/list 同源）。验证：cargo **245** / vitest **55** / 前后端门禁全绿 + 真实 CLI 端到端（注册 engram→异步索引→查询→调用图→MCP tools/list 45）。
 
 ## 已知未了项
 

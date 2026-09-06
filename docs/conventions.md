@@ -12,11 +12,21 @@
 
 | 门 | 内容 |
 |---|---|
-| backend | fmt → clippy(-D warnings) → test(189)；pgvector service；`mkdir -p ../web/dist` 占位 |
-| web | oxlint（0 警告）→ tsc → vitest(42) → build |
+| backend | fmt → clippy(-D warnings) → test(245)；pgvector service；`mkdir -p ../web/dist` 占位 |
+| web | oxlint → tsc → vitest(55) → build |
 | api-types | OpenAPI 导出 → 生成 → 与 api-schema.ts 零漂移 |
 | docker | 多阶段镜像构建 |
 | e2e | compose 全栈 + Playwright journey（无 provider 部分旅程） |
+
+## 分层约定（2026-09-05 分层收敛后）
+
+- **SQL 收口**：领域表的业务面读写唯一出现在 `engram-storage::repo`（行类型在
+  `engram-storage::models`）；core/api/mcp 的 src 层零 sqlx 引用（测试夹具可用
+  dev-dependency 直连 PG 造数）。事务边界归 repo 函数。
+- **双适配器**：HTTP（engram-api）与 MCP（engram-mcp）平级，各自只做协议壳，
+  业务语义都在 core；共用 `engram_core::auth::Principal` / `engram_core::state::AppState`。
+- **流水线 crate**（distill / wiki-engine / llm / search / jobs）按既有设计拥有
+  各自管道内部的 SQL（job 处理器 / 检索只读路径 / 路由表），后续按同模式收敛。
 
 ## 跨栈同步点（改一端想另一端）
 

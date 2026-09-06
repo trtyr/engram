@@ -38,3 +38,15 @@ cd web && E2E_ADMIN_PW=… pnpm exec playwright test   # 需运行中栈
 deploy/Dockerfile 多阶段（web-build pnpm → cargo-chef → 运行时含 Node+git+codegraph CLI）+
 docker-compose.yml。当前阶段仅由 CI docker job 验证可构建，未实际部署。
 备份：scripts/backup.sh（pg_dump + 数据卷）。
+
+## 本地 codegraph CLI（代码图谱域依赖）
+
+```bash
+npm install -g @colbymchenry/codegraph@1.5.0   # 版本必须等于 pin（bridge 版本守卫拒绝其他版本）
+```
+
+- Windows：engram-server 进程的 PATH 必须含 npm 全局目录（`%APPDATA%
+pm`），
+  否则代码图谱页 CLI 状态条报不可用；Docker 镜像已内置 CLI。
+- 测试：集成测试默认连 `postgres://127.0.0.1:5432/postgres`（trust），可用
+  `AM_TEST_PG_URL` 覆盖；每测试一库即建即删。
