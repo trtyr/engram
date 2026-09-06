@@ -37,7 +37,8 @@ pub async fn enqueue_ingest(
     text: &str,
 ) -> Result<(Uuid, bool), JobError> {
     let sha = sha256_hex(text.as_bytes());
-    // 已有同 sha 且成功 ingest 的原料 → 幂等跳过
+    // 同 sha 去重（D11）：ready=已完成 / pending=排队中 / processing=处理中——
+    // 三态均幂等跳过，重复提交不重复烧 LLM 配额；仅 failed 才允许重试重入队
     let existing: Option<(Uuid, String)> =
         sqlx::query_as("SELECT id, status FROM wiki_sources WHERE sha256 = $1")
             .bind(&sha)
@@ -45,7 +46,7 @@ pub async fn enqueue_ingest(
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
     if let Some((id, status)) = existing
-        && status == "ready"
+        && matches!(status.as_str(), "ready" | "pending" | "processing")
     {
         return Ok((id, true));
     }

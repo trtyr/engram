@@ -127,6 +127,18 @@ fn retry_after_secs(resp: &reqwest::Response) -> std::time::Duration {
 }
 
 /// OpenAI 兼容 HTTP provider（/v1/chat/completions + /v1/embeddings）。
+///
+/// base_url 规范化：trim → 去尾部 `/` → 去尾部 `/v1`（大小写不敏感）→ 再去尾部 `/`。
+/// 用户填 `https://api.xx.com` 或 `https://api.xx.com/v1`（含尾随空格）均归一为同一根，
+/// 路径拼接统一为 `{root}/v1/...`——消除两种填写约定的歧义（MCP 黑盒测试 D1 根因）。
+pub(crate) fn normalize_base_url(base_url: &str) -> String {
+    let mut b = base_url.trim().trim_end_matches('/').to_string();
+    if b.len() >= 3 && b[b.len() - 3..].eq_ignore_ascii_case("/v1") {
+        b.truncate(b.len() - 3);
+    }
+    b.trim_end_matches('/').to_string()
+}
+
 pub struct OpenAiCompatProvider {
     name: String,
     base_url: String,
@@ -157,7 +169,7 @@ impl OpenAiCompatProvider {
             .clone();
         Self {
             name,
-            base_url: base_url.into().trim_end_matches('/').to_string(),
+            base_url: normalize_base_url(base_url.into().as_str()),
             api_key: api_key.into(),
             http: reqwest::Client::new(),
             chat_timeout: std::time::Duration::from_secs(120),
@@ -553,13 +565,11 @@ pub async fn fetch_model_ids(
     api_key: &str,
 ) -> Result<Vec<String>, crate::types::LlmError> {
     // 粘贴的地址/密钥常带尾随空白或换行——header 值被污染会直接 401
-    let base_url = base_url.trim();
+    let base_url = normalize_base_url(base_url);
     let api_key = api_key.trim();
     use crate::types::LlmError;
-    let base = base_url.trim_end_matches('/');
-    // 双路径回退：用户填的 base_url 可能不带 /v1（如 https://api.xx.com），
-    // 先试 {base}/models，404 再试 {base}/v1/models
-    let url = format!("{base}/models");
+    // base_url 已规范化为根形式，模型列表统一 {root}/v1/models
+    let url = format!("{base_url}/v1/models");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -570,17 +580,7 @@ pub async fn fetch_model_ids(
         .send()
         .await
         .map_err(|e| LlmError::Permanent(format!("连接失败: {e}")))?;
-    let resp = if resp.status() == reqwest::StatusCode::NOT_FOUND && !base.ends_with("/v1") {
-        // 404 回退：试 {base}/v1/models
-        client
-            .get(format!("{base}/v1/models"))
-            .header("Authorization", format!("Bearer {api_key}"))
-            .send()
-            .await
-            .map_err(|e| LlmError::Permanent(format!("连接失败: {e}")))?
-    } else {
-        resp
-    };
+    let resp = resp;
     let status = resp.status();
     if !status.is_success() {
         // 按状态分类，避免误导（401 是 Key 错误，不是端点不支持）
