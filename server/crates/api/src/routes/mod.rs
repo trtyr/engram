@@ -55,6 +55,7 @@ use utoipa::OpenApi;
         wiki_docs_api::delete_document, wiki_docs_api::reembed, wiki_docs_api::search,
         wiki_api::ingest, wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
+ wiki_api::rebuild_links,
         wiki_api::list_proposals,
         wiki_api::get_purpose, wiki_api::set_purpose,
         wiki_api::list_reviews, wiki_api::resolve_review,
@@ -283,6 +284,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/wiki/graph", get(wiki_api::graph))
         .route("/wiki/lint", post(wiki_api::lint))
+        .route("/wiki/links/rebuild", post(wiki_api::rebuild_links))
         .route("/wiki/proposals", get(wiki_api::list_proposals))
         .route("/wiki/proposals/apply", post(wiki_api::apply_proposal))
         .route("/wiki/search", post(wiki_api::search))

@@ -104,6 +104,26 @@ pub fn parse_frontmatter(content: &str) -> (FrontmatterMeta, String) {
         };
         let key = key.trim().to_ascii_lowercase();
         let value = value.trim();
+        // YAML 块列表（D7）：`tags:` 值为空时收集后续 "- item" 行
+        if key == "tags"
+            && value.is_empty()
+            && i < lines.len()
+            && lines[i].trim_start().starts_with("- ")
+        {
+            let mut items: Vec<String> = Vec::new();
+            while i < lines.len() {
+                let l = lines[i].trim_start();
+                match l.strip_prefix("- ") {
+                    Some(item) => {
+                        items.push(item.trim().trim_matches('"').trim_matches('\'').to_string());
+                        i += 1;
+                    }
+                    None => break,
+                }
+            }
+            meta.tags = items;
+            continue;
+        }
         if matches!(value, ">" | ">>" | ">-" | ">+" | "|" | "|-" | "|+") && i < lines.len() {
             // 块标量：收集缩进行（空行不断块，去缩进后折叠或保留）
             let mut buf: Vec<&str> = Vec::new();
@@ -820,6 +840,38 @@ mod tests {
         let (meta, body) = parse_frontmatter("# 直接正文");
         assert_eq!(meta, FrontmatterMeta::default());
         assert_eq!(body, "# 直接正文");
+    }
+
+    #[test]
+    fn frontmatter_tags_block_list() {
+        // D7：YAML 块列表 tags（tags: 后跟 "- item" 行）
+        let (meta, body) = parse_frontmatter(
+            "---
+name: X
+tags:
+  - zztest
+  - 标签二
+---
+正文",
+        );
+        assert_eq!(meta.tags, vec!["zztest", "标签二"]);
+        assert_eq!(body, "正文");
+    }
+
+    #[test]
+    fn body_strips_leading_blank_lines() {
+        // 块标量/闭合行后的前导空行不应残留进正文
+        let (_, body) = parse_frontmatter(
+            "---
+name: X
+description: |
+  多行
+---
+
+
+正文内容",
+        );
+        assert_eq!(body, "正文内容");
     }
 
     #[test]

@@ -420,3 +420,14 @@ pub async fn delete_page(
     svc(&state).delete_page(&slug).await.map_err(we)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
+
+/// 存量回填：重析全部页面正文重建 wiki_links（D4 存量修复；幂等）。
+#[utoipa::path(post, path = "/wiki/links/rebuild", responses((status = 200, body = Object)))]
+pub async fn rebuild_links(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_wiki(&principal)?;
+    let n = svc(&state).rebuild_all_links().await.map_err(we)?;
+    Ok(Json(serde_json::json!({ "rebuilt_links": n })))
+}

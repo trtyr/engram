@@ -546,6 +546,32 @@ impl WikiService {
         Ok(skipped)
     }
 
+    /// 存量回填（D4 遗留）：重析全部页面正文重建 wiki_links。
+    /// 修复前写入的页面链接索引缺失——一次性全量重析（幂等，先清后建）。
+    pub async fn rebuild_all_links(&self) -> Result<u64, WikiError> {
+        let pages: Vec<(String, String)> =
+            sqlx::query_as("SELECT slug, content FROM wiki_pages ORDER BY slug")
+                .fetch_all(&self.pool)
+                .await?;
+        sqlx::query("DELETE FROM wiki_links")
+            .execute(&self.pool)
+            .await?;
+        let mut n = 0;
+        for (slug, content) in &pages {
+            for target in crate::markup::extract_wikilinks(content) {
+                sqlx::query(
+                    "INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, 3.0)                      ON CONFLICT (from_slug, to_slug) DO NOTHING",
+                )
+                .bind(slug)
+                .bind(&target)
+                .execute(&self.pool)
+                .await?;
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
     /// 删除页面（D10：MCP wiki_delete_page / HTTP DELETE /wiki/pages/{slug}）——
     /// 连带清理双向 wikilinks（图与孤页检测不留幽灵边）。
     pub async fn delete_page(&self, slug: &str) -> Result<bool, WikiError> {
