@@ -747,13 +747,14 @@ function Routing() {
   )
 }
 
-/** scope 中文标签（与后端 SCOPES 八项对齐）。 */
+/** scope 中文标签（与后端 SCOPES 九项对齐）。 */
 const SCOPE_LABELS: Record<string, string> = {
   memory: '记忆',
   wiki: 'Wiki',
   codegraph: '代码图谱',
   project: '项目',
   skills: '技能',
+  todos: '待办',
   llm: 'LLM 网关',
   erase: '擦除（不可逆删除）',
   cron: '节律心跳',
@@ -807,18 +808,17 @@ function Keys() {
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1" role="group" aria-label="scope 选择">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2" role="group" aria-label="scope 选择">
             {Object.entries(SCOPE_LABELS).map(([s, label]) => (
-              <label key={s} className="flex items-center gap-1 text-xs">
-                <input
-                  type="checkbox"
-                  className="accent-current"
-                  checked={scopes.has(s)}
-                  onChange={() => toggleScope(s)}
-                />
-                <span className="font-mono">{s}</span>
+              <Checkbox
+                key={s}
+                checked={scopes.has(s)}
+                onChange={() => toggleScope(s)}
+                label={s}
+              >
+                <span className="font-mono text-xs">{s}</span>
                 <span className="text-muted-foreground">{label}</span>
-              </label>
+              </Checkbox>
             ))}
           </div>
           <Button size="sm" type="submit" disabled={scopes.size === 0}>

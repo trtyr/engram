@@ -79,12 +79,17 @@ impl UnifiedSearch {
         let wiki = WikiService::new(self.pool.clone(), self.registry.clone());
 
         // 三域并行检索 + 实体层（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
-        let (mem_res, know_res, wiki_res, ent_res) = tokio::join!(
+        let (mem_res, know_res, wiki_res, ent_res, todo_res) = tokio::join!(
             mem.search(query, &["l1", "l2"], per_domain, true, false, None, None),
             know.search(query, per_domain),
             wiki.search(query, per_domain),
             async {
                 engram_search::search_entities(&self.pool, query, per_domain)
+                    .await
+                    .map_err(engram_storage::StoreError::from)
+            },
+            async {
+                engram_storage::repo::todos::search_open(&self.pool, query, per_domain)
                     .await
                     .map_err(engram_storage::StoreError::from)
             },
@@ -146,6 +151,22 @@ impl UnifiedSearch {
             }
         } else {
             tracing::warn!("统一检索：entity 域失败，跳过");
+        }
+
+        // 待办域：open 待办的标题/正文 ILIKE 匹配
+        if let Ok(hits) = todo_res {
+            for t in hits {
+                merged.push(UnifiedHit {
+                    domain: "todo".into(),
+                    id: t.0,
+                    title: Some(t.1),
+                    snippet: t.2.chars().take(200).collect(),
+                    score: 0.0,
+                    extra: serde_json::json!({ "priority": t.3 }),
+                });
+            }
+        } else {
+            tracing::warn!("统一检索：todo 域失败，跳过");
         }
 
         if let Ok(res) = wiki_res {

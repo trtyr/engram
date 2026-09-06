@@ -3,8 +3,8 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::error::StoreResult;
 use crate::PgPool;
+use crate::error::StoreResult;
 
 /// 待办行（sqlx FromRow 由调用方按需 derive；此处返回元组避免重复结构体）。
 pub type TodoTuple = (
@@ -135,6 +135,27 @@ pub async fn export_all(pool: &PgPool) -> StoreResult<Vec<ExportRow>> {
     let rows = sqlx::query_as::<_, ExportRow>(
         "SELECT id, title, body, status, priority, tags, due_at, project_hint, done_at, created_at, updated_at          FROM todos ORDER BY (status = 'open') DESC, updated_at DESC",
     )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// 统一检索（/search）的待办段：open 待办的标题/正文 ILIKE 匹配。
+/// 返回 (id, title, body 前 200 字, priority)。
+pub async fn search_open(
+    pool: &PgPool,
+    q: &str,
+    limit: i64,
+) -> StoreResult<Vec<(Uuid, String, String, String)>> {
+    let pattern = format!("%{q}%");
+    let rows = sqlx::query_as::<_, (Uuid, String, String, String)>(
+        "SELECT id, title, body, priority FROM todos \
+         WHERE status = 'open' AND (title ILIKE $1 OR body ILIKE $1) \
+         ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, updated_at DESC \
+         LIMIT $2",
+    )
+    .bind(&pattern)
+    .bind(limit)
     .fetch_all(pool)
     .await?;
     Ok(rows)

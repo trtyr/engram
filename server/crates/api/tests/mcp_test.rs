@@ -984,7 +984,6 @@ async fn wiki_mcp_tools_listed() {
         .collect();
     assert_eq!(wiki_tools.len(), 9, "管理台应展示 9 个 wiki 工具");
 
-
     // instructions 应覆盖两个域
     assert!(
         info["instructions"]

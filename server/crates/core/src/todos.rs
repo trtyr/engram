@@ -150,11 +150,13 @@ impl TodoService {
                 PRIORITIES.join("/")
             )));
         }
-        Ok(repo::list(&self.pool, status, priority, tag, q, limit.min(500))
-            .await?
-            .into_iter()
-            .map(to_dto)
-            .collect())
+        Ok(
+            repo::list(&self.pool, status, priority, tag, q, limit.min(500))
+                .await?
+                .into_iter()
+                .map(to_dto)
+                .collect(),
+        )
     }
 
     pub async fn get(&self, id: Uuid) -> Result<TodoDto, TodoError> {

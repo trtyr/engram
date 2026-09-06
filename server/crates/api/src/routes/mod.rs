@@ -7,10 +7,10 @@ pub mod jobs_api;
 pub mod llm_api;
 pub mod memory_api;
 pub mod migrate_api;
-pub mod todos_api;
 pub mod project_api;
 pub mod search_api;
 pub mod skills_api;
+pub mod todos_api;
 pub mod wiki_api;
 pub mod wiki_docs_api;
 
