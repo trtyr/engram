@@ -59,9 +59,9 @@ flowchart LR
 |:--|:--|:--|
 | 💬 **Chat Memory** | 用户的事实、偏好、决策、事件 | L0→L3 分层蒸馏，全程可溯源 |
 | 🕸️ **Wiki** | 世界的知识：文档 + LLM 增量互链 | 文档/URL 摄取 → `[[wikilink]]` 知识网 + 图谱 + lint 死链分级 |
-| 🧬 **CodeGraph** | 代码库结构索引 | 符号/调用关系六种结构化查询 |
+| 🧬 **CodeGraph** | 代码库结构索引 | 本地路径/git 注册 → CLI 异步索引 → 六种结构化查询 + 调用子图 / 文件依赖全图 |
 | 🧩 **项目记忆** | 跨会话的工作「线」 | 项目 + 多主机位置 + 分类文档，精确寻址读（零截断） |
-| 🪄 **Skills** | 可复用的 AI 指令包（SKILL.md） | slug 唯一 + 容错导入 + 版本快照回滚 + 全量导出 |
+| 🪄 **Skills** | 可复用的 AI 技能包（文件夹：SKILL.md + scripts/references） | slug 唯一 + 容错导入 + 版本快照回滚 + 附属文件按路径寻址 + 三层取用 |
 
 ## 🛡️ 治理，不是摆设
 
@@ -71,7 +71,7 @@ flowchart LR
 | ⚖️ | **编辑分权** | AI 只写会话；改写语义内容是用户专属，改动留痕钉住 |
 | 🧹 | **一等清空** | deep purge 两阶段（arm 5 分钟冷却 → token 执行），agent 级彻底清场 |
 | 🧾 | **数据主权** | 全量导出；密钥 AES-GCM 加密落库 |
-| 🚦 | **任务队列** | 一切 LLM 长操作走 PG 队列，pending/running/dead 生命周期可见可恢复 |
+| 🚦 | **任务队列** | 一切长操作走 PG 队列（蒸馏/摄取/索引/同步），pending/running/dead 生命周期可见可恢复 |
 
 ## 🏗️ 技术形态
 
@@ -103,7 +103,7 @@ engram-server 内置 MCP 服务端（官方 Rust SDK `rmcp`，Streamable HTTP）
 |:--|:--|:--|
 | 💬 用户记忆 | `memory` | `memory_context`（冷启动上下文包）· `search` · `list_atoms` · `list_sessions` · `get_session` · `write_session` · `append_session` · `forget` · `entities` |
 | 🧩 项目记忆 | `project` | `project_list/get/create/update/delete/…` · `location_*` · `doc_add/get/search/update/delete`（共 15） |
-| 🪄 技能 | `skills` | `skills_list/get/create/update/delete/import` |
+| 🪄 技能 | `skills` | `skills_list/get/create/update/delete/import` + `skills_file_get/put`（附属文件按路径读写，脚本由客户端本地执行） |
 | 🕸️ Wiki | `wiki` | `wiki_search`（混合检索+purpose）· `list_pages` · `get_page` · `write_page` · `ingest` · `archive_query` · `graph` · `lint` |
 | 🗺️ 代码图谱 | `codegraph` | `codegraph_list`（动态项目清单）· `register` · `index` · `sync`（三者走任务队列）· `query`（search/explore/node/callers/callees/impact） |
 

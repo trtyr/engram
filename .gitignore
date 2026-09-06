@@ -41,3 +41,7 @@ __pycache__/
 
 # CodeGraph CLI 运行时产物（索引库）
 .codegraph/
+
+# Playwright 运行产物
+web/test-results/
+web/playwright-report/
