@@ -13,7 +13,7 @@ web
 
 ## Product Purpose
 
-单用户 AI 长期记忆平台。核心理念「平台即工具」：平台对外暴露 HTTP API，AI（或人）拿着 API 操纵平台；人通过 Web UI 管理浏览。五类长期记忆资产：Chat Memory（L0→L3 分层蒸馏，全程可溯源）、Wiki（文档知识：文档/URL 摄取→混合检索 + LLM 增量维护的互链知识库）、CodeGraph（代码知识图谱）、项目记忆（跨会话工作线）、Skills（SKILL.md 形态的可复用指令包：导入/检索/版本回滚）。成功 = 所有者与其 AI 能长期信赖的、可溯源的记忆系统。
+单用户 AI 长期记忆平台。核心理念「平台即工具」：平台对外暴露 HTTP API，AI（或人）拿着 API 操纵平台；人通过 Web UI 管理浏览。五类长期记忆资产：Chat Memory（L0→L3 分层蒸馏，全程可溯源）、Wiki（文档知识：文档/URL 摄取→混合检索 + LLM 增量维护的互链知识库）、CodeGraph（代码知识图谱）、项目记忆（跨会话工作线；dev 模板五分类含部署）、Skills（SKILL.md 形态的可复用指令包：导入/检索/版本回滚）。成功 = 所有者与其 AI 能长期信赖的、可溯源的记忆系统。
 
 ## Positioning
 

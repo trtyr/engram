@@ -93,7 +93,7 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | /projects/types | 类型模板（开发四分类/调研六分类预设） |
+| GET | /projects/types | 类型模板（开发五分类：后端/前端/测试/部署/规划；调研六分类） |
 | GET/POST | /projects | 项目列表（?type= 筛选）/ 新建（type 决定初始分类） |
 | GET/PUT/DELETE | /projects/{id} | 项目详情（本体+位置+文档）/ 编辑 / 删除（级联） |
 | POST | /projects/batch-delete | 批量删除（返回 {deleted, failed}，failed=不存在的 id） |
