@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { api, type AdminSessionDto, type ApiKey, type Job, type Provider } from '@/lib/api'
 import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls, relTime, tableCls } from '@/lib/ui'
+import { cn, copyText } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
 type Tab = 'providers' | 'routing' | 'keys' | 'rhythm' | 'danger' | 'migrate' | 'account'
@@ -1172,6 +1173,7 @@ function RhythmPane() {
   const [events, setEvents] = useState<Job[] | null>(null)
   const [err, setErr] = useState('')
   const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
   const [expected, setExpected] = useState(() => {
     // 期望周期持久化在首帧读取（此前 effect 里同步 setState 触发级联渲染告警）
     try {
@@ -1230,12 +1232,12 @@ function RhythmPane() {
   ].join('\n')
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(crontab)
+    if (await copyText(crontab)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch {
-      /* 剪贴板不可用时静默 */
+    } else {
+      setCopyFailed(true)
+      setTimeout(() => setCopyFailed(false), 2000)
     }
   }
 
@@ -1299,8 +1301,12 @@ function RhythmPane() {
       <Card className="p-5 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">安装向导（crontab 片段）</h2>
-          <Button variant="outline" className="h-8" onClick={copy}>
-            {copied ? '已复制' : '复制'}
+          <Button
+            variant="outline"
+            className={cn('h-8', copyFailed && 'border-destructive/40 text-destructive')}
+            onClick={copy}
+          >
+            {copied ? '已复制' : copyFailed ? '复制失败' : '复制'}
           </Button>
         </div>
         <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-relaxed">{crontab}</pre>

@@ -10,7 +10,7 @@ import { Check, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import { api, type McpInfo, type McpToolInfo } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
-import { cn } from '@/lib/utils'
+import { cn, copyText } from '@/lib/utils'
 
 /** 拨杆开关（墨白：选中即墨底白钮）。 */
 function Switch({
@@ -48,25 +48,28 @@ function Switch({
   )
 }
 
-/** 复制按钮：点击后短暂打勾。 */
+/** 复制按钮：成功短暂打勾，失败明确提示（HTTP 部署下 Clipboard API 缺席，走 execCommand 回退）。 */
 function CopyBtn({ text, label }: { text: string; label: string }) {
-  const [done, setDone] = useState(false)
+  const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle')
+  const flash = (s: 'done' | 'failed') => {
+    setState(s)
+    setTimeout(() => setState('idle'), 1500)
+  }
   return (
     <Button
       size="sm"
       variant="outline"
+      className={state === 'failed' ? 'border-destructive/40 text-destructive' : undefined}
       onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text)
-        } catch {
-          return
-        }
-        setDone(true)
-        setTimeout(() => setDone(false), 1500)
+        flash((await copyText(text)) ? 'done' : 'failed')
       }}
     >
-      {done ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
-      {done ? '已复制' : label}
+      {state === 'done' ? (
+        <Check className="size-3.5" aria-hidden="true" />
+      ) : (
+        <Copy className="size-3.5" aria-hidden="true" />
+      )}
+      {state === 'done' ? '已复制' : state === 'failed' ? '复制失败' : label}
     </Button>
   )
 }
