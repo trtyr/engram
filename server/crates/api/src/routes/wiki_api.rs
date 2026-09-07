@@ -93,6 +93,8 @@ pub struct IngestAccepted {
 #[derive(Deserialize, IntoParams)]
 pub struct ListPagesParams {
     pub page_type: Option<String>,
+    /// keyset 分页游标：{updated_at ISO8601}|{id}（上一页最后一条）
+    pub cursor: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -106,7 +108,11 @@ pub async fn list_pages(
     require_wiki(&principal)?;
     Ok(Json(
         svc(&state)
-            .list_pages(p.page_type.as_deref(), p.limit.unwrap_or(100))
+            .list_pages(
+                p.page_type.as_deref(),
+                p.limit.unwrap_or(100),
+                p.cursor.as_deref(),
+            )
             .await
             .map_err(we)?,
     ))

@@ -135,7 +135,7 @@ async fn two_docs_interlinked_no_duplicate() {
     ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
-    let pages = wiki.list_pages(None, 50).await.unwrap();
+    let pages = wiki.list_pages(None, 50, None).await.unwrap();
     // 3 内容页 + synthesis + comparison + index
     assert!(
         pages.len() >= 6,
@@ -982,6 +982,52 @@ async fn generate_page_cap_truncates_and_warns() {
     handle.join().await;
 }
 
+/// R9/D28：list_pages keyset 游标翻页——无重复、无丢失、垃圾游标响亮拒。
+#[tokio::test]
+async fn list_pages_cursor_pagination_walks_all() {
+    let (pool, wiki, _runner, _pg) = setup(vec![]).await;
+    for i in 0..5 {
+        wiki.put_page(
+            &format!("d28-页-{i}"),
+            &format!("D28 页 {i}"),
+            &format!("第 {i} 页"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = wiki.list_pages(None, 2, cursor.as_deref()).await.unwrap();
+        assert!(page.len() <= 2);
+        if page.is_empty() {
+            break;
+        }
+        seen.extend(page.iter().map(|p| p.slug.clone()));
+        let last = page.last().unwrap();
+        cursor = Some(format!("{}|{}", last.updated_at.to_rfc3339(), last.id));
+        if seen.len() > 5 {
+            panic!("游标翻页越走越多");
+        }
+    }
+    assert_eq!(seen.len(), 5, "应恰好走全 5 页：{seen:?}");
+    assert_eq!(
+        seen.iter().collect::<std::collections::HashSet<_>>().len(),
+        5,
+        "不得重复"
+    );
+    // 垃圾游标响亮拒
+    let err = wiki
+        .list_pages(None, 2, Some("garbage"))
+        .await
+        .expect_err("垃圾游标应被拒");
+    assert!(err.to_string().contains("cursor"), "{err}");
+    let _ = pool;
+}
+
 /// R7/D23+D24：log 系统页不进 graph/lint 口径；ingest 空入参响亮拒绝。
 #[tokio::test]
 async fn log_page_excluded_from_graph_and_lint_and_empty_ingest_rejected() {
@@ -999,7 +1045,7 @@ async fn log_page_excluded_from_graph_and_lint_and_empty_ingest_rejected() {
     .unwrap();
 
     // D23：list_pages / lint / graph 三口径一致（都不含 log）
-    assert_eq!(svc.list_pages(None, 100).await.unwrap().len(), 1);
+    assert_eq!(svc.list_pages(None, 100, None).await.unwrap().len(), 1);
     let lint = svc.lint().await.unwrap();
     assert_eq!(lint.checked_pages, 1, "log 页不应计入 lint：{lint:?}");
     let graph = svc.graph().await.unwrap();

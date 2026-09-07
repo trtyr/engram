@@ -297,8 +297,14 @@ pub struct TodoListParams {
     /// 标题/正文子串
     #[schemars(description = "可选子串过滤（标题或正文）。")]
     pub q: Option<String>,
-    /// 条数上限（缺省 50）
-    #[schemars(description = "条数上限（缺省 50）。")]
+    /// keyset 分页游标（D29）：上一页最后一条的 {1|0}|{updated_at ISO8601}|{id}——
+    /// 1 表示该条 status=open。首查不传；结果恰为 limit 条时继续传游标取下一页
+    #[schemars(
+        description = "可选：keyset 分页游标。取上一页最后一条构造：{1|0}|{updated_at ISO8601}|{id}（1=该条 status 为 open，否则 0）。首查不传；返回条数恰等于 limit 时说明可能还有下一页。"
+    )]
+    pub cursor: Option<String>,
+    /// 条数上限（缺省 50，单页上限 500——更多结果用 cursor 翻页）
+    #[schemars(description = "条数上限（缺省 50，单页上限 500——更多结果用 cursor 翻页）。")]
     pub limit: Option<i64>,
 }
 
@@ -759,7 +765,7 @@ pub struct CgQueryParams {
     pub kind: String,
     /// 查询文本或符号名
     #[schemars(
-        description = "查询文本（search/explore）或符号名（node/callers/callees/impact）。"
+        description = "查询文本（search/explore）或符号名（node/callers/callees/impact）。注意 explore 按目录名或符号定位，不支持按单文件文件名查询。"
     )]
     pub target: String,
     /// explore→max-files；impact→depth
@@ -1992,7 +1998,11 @@ impl EngramMcpServer {
         wiki::require_wiki(&p)?;
         let lp = params.0;
         let pages = wiki::svc(&self.state)
-            .list_pages(lp.page_type.as_deref(), lp.limit.unwrap_or(100))
+            .list_pages(
+                lp.page_type.as_deref(),
+                lp.limit.unwrap_or(100),
+                lp.cursor.as_deref(),
+            )
             .await
             .map_err(wiki::from_wiki)?;
         let values: Vec<serde_json::Value> = serde_json::to_value(&pages)
@@ -2226,6 +2236,7 @@ impl EngramMcpServer {
                 lp.priority.as_deref(),
                 lp.tag.as_deref(),
                 lp.q.as_deref(),
+                lp.cursor.as_deref(),
                 lp.limit.unwrap_or(50),
             )
             .await

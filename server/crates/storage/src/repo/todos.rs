@@ -33,24 +33,44 @@ pub async fn insert(pool: &PgPool, t: &NewTodo<'_>) -> StoreResult<()> {
 }
 
 /// 列表：open 优先，其余按 updated_at 降序；status/priority/tag/q 过滤。
+/// cursor（D29 keyset 分页）：(open 标记, updated_at, id) 三元组行比较——排序键
+/// 含 open 优先旗标，纯时间游标会在 open/done 分界处丢行。ORDER BY 带 id 决稳。
+#[allow(clippy::too_many_arguments)]
 pub async fn list(
     pool: &PgPool,
     status: Option<&str>,
     priority: Option<&str>,
     tag: Option<&str>,
     q: Option<&str>,
+    cursor: Option<(i32, DateTime<Utc>, Uuid)>,
     limit: i64,
 ) -> StoreResult<Vec<TodoTuple>> {
-    Ok(sqlx::query_as::<_, TodoTuple>(
-        "SELECT id, title, body, status, priority, tags, due_at, project_hint, done_at, created_at, updated_at          FROM todos          WHERE ($1::text IS NULL OR status = $1)            AND ($2::text IS NULL OR priority = $2)            AND ($3::text IS NULL OR tags @> ARRAY[$3::text])            AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%')          ORDER BY (status = 'open') DESC, updated_at DESC          LIMIT $5",
-    )
-    .bind(status)
-    .bind(priority)
-    .bind(tag)
-    .bind(q)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?)
+    if let Some((flag, ts, id)) = cursor {
+        Ok(sqlx::query_as::<_, TodoTuple>(
+            "SELECT id, title, body, status, priority, tags, due_at, project_hint, done_at, created_at, updated_at          FROM todos          WHERE ($1::text IS NULL OR status = $1)            AND ($2::text IS NULL OR priority = $2)            AND ($3::text IS NULL OR tags @> ARRAY[$3::text])            AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%')            AND (CASE WHEN status = 'open' THEN 1 ELSE 0 END, updated_at, id) < ($6::int, $7::timestamptz, $8::uuid)          ORDER BY (status = 'open') DESC, updated_at DESC, id DESC          LIMIT $5",
+        )
+        .bind(status)
+        .bind(priority)
+        .bind(tag)
+        .bind(q)
+        .bind(limit)
+        .bind(flag)
+        .bind(ts)
+        .bind(id)
+        .fetch_all(pool)
+        .await?)
+    } else {
+        Ok(sqlx::query_as::<_, TodoTuple>(
+            "SELECT id, title, body, status, priority, tags, due_at, project_hint, done_at, created_at, updated_at          FROM todos          WHERE ($1::text IS NULL OR status = $1)            AND ($2::text IS NULL OR priority = $2)            AND ($3::text IS NULL OR tags @> ARRAY[$3::text])            AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%')          ORDER BY (status = 'open') DESC, updated_at DESC, id DESC          LIMIT $5",
+        )
+        .bind(status)
+        .bind(priority)
+        .bind(tag)
+        .bind(q)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?)
+    }
 }
 
 pub async fn get(pool: &PgPool, id: Uuid) -> StoreResult<Option<TodoTuple>> {

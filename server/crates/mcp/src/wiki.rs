@@ -66,8 +66,13 @@ pub struct WikiListPagesParams {
         description = "可选：按页型过滤。entity=实体, concept=概念, source=来源, synthesis=综合, comparison=对比, queries=查询存档, overview=总览, index=索引。"
     )]
     pub page_type: Option<String>,
-    /// 返回条数（默认 100，上限 300）
-    #[schemars(description = "返回条数，默认 100。")]
+    /// keyset 分页游标（D28）：上一页最后一条的 {updated_at ISO8601}|{id}
+    #[schemars(
+        description = "可选：keyset 分页游标。取上一页最后一条构造 {updated_at ISO8601}|{id}。首查不传；返回条数恰等于 limit 时说明可能还有下一页。"
+    )]
+    pub cursor: Option<String>,
+    /// 返回条数（默认 100，单页上限 300——更多结果用 cursor 翻页）
+    #[schemars(description = "返回条数，默认 100，单页上限 300——更多结果用 cursor 翻页。")]
     pub limit: Option<i64>,
 }
 

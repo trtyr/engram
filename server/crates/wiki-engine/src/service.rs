@@ -188,20 +188,62 @@ impl WikiService {
         self.ingest(&title, &text).await
     }
 
+    /// 页面列表（D28 keyset 分页，单页上限 300）：cursor = 上一页最后一条的
+    /// `{updated_at ISO8601}|{id}`，首查不传。ORDER BY 带 id 决稳——
+    /// 此前静默截断曾让最老的页面从列表「消失」（graph/lint 却可见）。
     pub async fn list_pages(
         &self,
         page_type: Option<&str>,
         limit: i64,
+        cursor: Option<&str>,
     ) -> Result<Vec<WikiPageDto>, WikiError> {
-        Ok(sqlx::query_as::<_, WikiPageDto>(
-            "SELECT * FROM wiki_pages \
-             WHERE ($1::text IS NULL OR page_type = $1) AND page_type NOT IN ('log') \
-             ORDER BY updated_at DESC LIMIT $2",
-        )
-        .bind(page_type)
-        .bind(limit.min(300))
-        .fetch_all(&self.pool)
-        .await?)
+        let parse_cursor =
+            |raw: &str| -> Result<(chrono::DateTime<chrono::Utc>, uuid::Uuid), WikiError> {
+                let parts: Vec<&str> = raw.split('|').collect();
+                if parts.len() != 2 {
+                    return Err(WikiError::BadRequest(format!(
+                        "cursor 非法（收到 {raw:?}）——期望 {{updated_at ISO8601}}|{{id}}，取上一页最后一条构造"
+                    )));
+                }
+                let ts = chrono::DateTime::parse_from_rfc3339(parts[0].trim())
+                    .map(|d| d.with_timezone(&chrono::Utc))
+                    .map_err(|_| {
+                        WikiError::BadRequest(format!(
+                            "cursor 时间无法解析（收到 {:?}）——期望 ISO8601",
+                            parts[0]
+                        ))
+                    })?;
+                let id = uuid::Uuid::parse_str(parts[1].trim()).map_err(|_| {
+                    WikiError::BadRequest(format!("cursor id 不是合法 UUID（收到 {:?}）", parts[1]))
+                })?;
+                Ok((ts, id))
+            };
+        match cursor {
+            None | Some("") => Ok(sqlx::query_as::<_, WikiPageDto>(
+                "SELECT * FROM wiki_pages \
+                     WHERE ($1::text IS NULL OR page_type = $1) AND page_type NOT IN ('log') \
+                     ORDER BY updated_at DESC, id DESC LIMIT $2",
+            )
+            .bind(page_type)
+            .bind(limit.min(300))
+            .fetch_all(&self.pool)
+            .await?),
+            Some(raw) => {
+                let (ts, id) = parse_cursor(raw)?;
+                Ok(sqlx::query_as::<_, WikiPageDto>(
+                    "SELECT * FROM wiki_pages \
+                     WHERE ($1::text IS NULL OR page_type = $1) AND page_type NOT IN ('log') \
+                       AND (updated_at, id) < ($3::timestamptz, $4::uuid) \
+                     ORDER BY updated_at DESC, id DESC LIMIT $2",
+                )
+                .bind(page_type)
+                .bind(limit.min(300))
+                .bind(ts)
+                .bind(id)
+                .fetch_all(&self.pool)
+                .await?)
+            }
+        }
     }
 
     pub async fn get_page(&self, slug: &str) -> Result<WikiPageDto, WikiError> {

@@ -139,12 +139,15 @@ impl TodoService {
     }
 
     /// 列表：open 优先；status/priority/tag/q 过滤。
+    /// cursor（D29 keyset 分页，单页上限 500）：上一页最后一条的
+    /// `{1|0}|{updated_at ISO8601}|{id}`——1 表示该条 status=open。首查不传。
     pub async fn list(
         &self,
         status: Option<&str>,
         priority: Option<&str>,
         tag: Option<&str>,
         q: Option<&str>,
+        cursor: Option<&str>,
         limit: i64,
     ) -> Result<Vec<TodoDto>, TodoError> {
         if limit < 0 {
@@ -152,6 +155,30 @@ impl TodoService {
                 "limit 不能为负（收到 {limit}）"
             )));
         }
+        let cursor = match cursor {
+            None | Some("") => None,
+            Some(raw) => {
+                let parts: Vec<&str> = raw.split('|').collect();
+                if parts.len() != 3 {
+                    return Err(TodoError::BadRequest(format!(
+                        "cursor 非法（收到 {raw:?}）——期望 {{1|0}}|{{updated_at ISO8601}}|{{id}}，取上一页最后一条构造"
+                    )));
+                }
+                let flag = parts[0].parse::<i32>().ok().filter(|f| *f == 0 || *f == 1);
+                let ts = chrono::DateTime::parse_from_rfc3339(parts[1].trim())
+                    .map(|d| d.with_timezone(&Utc))
+                    .ok();
+                let id = Uuid::parse_str(parts[2].trim()).ok();
+                match (flag, ts, id) {
+                    (Some(flag), Some(ts), Some(id)) => Some((flag, ts, id)),
+                    _ => {
+                        return Err(TodoError::BadRequest(format!(
+                            "cursor 非法（收到 {raw:?}）——期望 {{1|0}}|{{updated_at ISO8601}}|{{id}}，取上一页最后一条构造"
+                        )));
+                    }
+                }
+            }
+        };
         if let Some(s) = status
             && !STATUSES.contains(&s)
         {
@@ -169,7 +196,7 @@ impl TodoService {
             )));
         }
         Ok(
-            repo::list(&self.pool, status, priority, tag, q, limit.min(500))
+            repo::list(&self.pool, status, priority, tag, q, cursor, limit.min(500))
                 .await?
                 .into_iter()
                 .map(to_dto)

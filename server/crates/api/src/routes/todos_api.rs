@@ -34,6 +34,8 @@ pub struct ListTodosParams {
     pub priority: Option<String>,
     pub tag: Option<String>,
     pub q: Option<String>,
+    /// keyset 分页游标：{1|0}|{updated_at ISO8601}|{id}（1=该条 status=open）
+    pub cursor: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -83,6 +85,7 @@ pub async fn list_todos(
                 p.priority.as_deref(),
                 p.tag.as_deref(),
                 p.q.as_deref(),
+                p.cursor.as_deref(),
                 p.limit.unwrap_or(200),
             )
             .await
