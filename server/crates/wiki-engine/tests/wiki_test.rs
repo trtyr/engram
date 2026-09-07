@@ -129,7 +129,10 @@ async fn two_docs_interlinked_no_duplicate() {
         )
         .await
         .unwrap();
-    assert!(!skipped);
+    assert!(matches!(
+        skipped,
+        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+    ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     let pages = wiki.list_pages(None, 50).await.unwrap();
@@ -152,7 +155,10 @@ async fn two_docs_interlinked_no_duplicate() {
         .ingest("文档二", "近似搜索是向量检索的加速子方向，如 HNSW。")
         .await
         .unwrap();
-    assert!(!skipped2);
+    assert!(matches!(
+        skipped2,
+        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+    ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     // 不重复建页：向量检索 v2（更新）而非新 slug；张三仍 1 版
@@ -195,7 +201,13 @@ async fn two_docs_interlinked_no_duplicate() {
         )
         .await
         .unwrap();
-    assert!(skipped3, "同 sha 应跳过");
+    assert!(
+        matches!(
+            skipped3,
+            engram_wiki_engine::ingest::IngestOutcome::AlreadyReady(_)
+        ),
+        "同 sha 已就绪应跳过"
+    );
 
     // queries 存档闭环：archive_query → wiki_analyze 入队（自动再摄取产页）
     let skipped_q = wiki
@@ -318,7 +330,13 @@ async fn ingest_document_url_fallback_uses_chunks() {
     }
 
     let skipped = wiki.ingest_document(doc_id).await.unwrap();
-    assert!(!skipped, "首次织入不应跳过");
+    assert!(
+        matches!(
+            skipped,
+            engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+        ),
+        "首次织入不应跳过"
+    );
     // wiki_sources 已入队（sha 按 title+拼接文本计算，两段都进文本）
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM wiki_sources")
         .fetch_one(&pool)
@@ -534,7 +552,10 @@ async fn w1_generate_failure_resubmit_recovers() {
 
     let text = "# W1 死锁恢复测试\n这是独一无二的内容 w1-unique-123。";
     let skipped = wiki.ingest("W1文档", text).await.unwrap();
-    assert!(!skipped);
+    assert!(matches!(
+        skipped,
+        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+    ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     // 第一轮：generate 永久失败，source 未 ready
@@ -554,7 +575,13 @@ async fn w1_generate_failure_resubmit_recovers() {
     // 重提交同 sha → 状态感知：从失败 job payload 取 analysis 直发新 generate
     // （旧逻辑：幂等键墙返回终态 job，链断死锁）
     let skipped2 = wiki.ingest("W1文档", text).await.unwrap();
-    assert!(!skipped2, "恢复路径应真正重跑而非秒跳过");
+    assert!(
+        matches!(
+            skipped2,
+            engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+        ),
+        "恢复路径应真正重跑而非秒跳过"
+    );
 
     for _ in 0..300 {
         let done: i64 = sqlx::query_scalar(
@@ -929,7 +956,10 @@ async fn generate_page_cap_truncates_and_warns() {
         .ingest("批量源", "一篇覆盖大量主题的文档。")
         .await
         .unwrap();
-    assert!(!skipped);
+    assert!(matches!(
+        skipped,
+        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+    ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     // 截断到 20（21 页 concept 只建 20）
@@ -950,4 +980,37 @@ async fn generate_page_cap_truncates_and_warns() {
 
     handle.shutdown();
     handle.join().await;
+}
+
+/// R7/D23+D24：log 系统页不进 graph/lint 口径；ingest 空入参响亮拒绝。
+#[tokio::test]
+async fn log_page_excluded_from_graph_and_lint_and_empty_ingest_rejected() {
+    let (pool, svc, _runner, _pg) = setup(vec![]).await;
+    svc.put_page("普通页", "普通页", "正文 [[普通页]] 自链", None, None)
+        .await
+        .unwrap();
+    // 直插一条系统 log 页（list_pages 不可见）
+    sqlx::query(
+        "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv)          VALUES ($1, 'log', '审计日志', 'log', '系统', '日志内容', '{}', 'llm', 1, '')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // D23：list_pages / lint / graph 三口径一致（都不含 log）
+    assert_eq!(svc.list_pages(None, 100).await.unwrap().len(), 1);
+    let lint = svc.lint().await.unwrap();
+    assert_eq!(lint.checked_pages, 1, "log 页不应计入 lint：{lint:?}");
+    let graph = svc.graph().await.unwrap();
+    assert_eq!(graph.nodes.len(), 1, "log 页不应进图：{:?}", graph.nodes);
+
+    // D24：空标题 / 空文本 / 纯空白，全部响亮拒绝不入队
+    for (title, text) in [("", "正文"), ("标题", ""), ("  ", "  ")] {
+        let err = svc.ingest(title, text).await.expect_err("空入参应被拒");
+        assert!(
+            err.to_string().contains("不能为空"),
+            "({title:?}, {text:?}) 应报不能为空：{err}"
+        );
+    }
 }

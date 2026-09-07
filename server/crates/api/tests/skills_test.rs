@@ -231,6 +231,21 @@ async fn skills_slug_conflict_and_validation() {
     assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
     assert!(v["error"]["message"].as_str().unwrap().contains("slug"));
 
+    // D25：混 ASCII 前缀的中文名不再静默坍缩到前缀 slug（曾把 "ZZTEST 中文" 推导成 "zztest"）
+    let (st, v) = send(
+        &app,
+        "POST",
+        "/skills",
+        &admin,
+        Some(json!({"name": "ZZTEST 中文名技能", "content": "x"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "混 ASCII 中文名应被拒：{v}");
+    assert!(
+        v["error"]["message"].as_str().unwrap().contains("非 ASCII"),
+        "报错应说明非 ASCII 原因：{v}"
+    );
+
     // 404：改/删不存在的技能
     let (st, _) = send(
         &app,

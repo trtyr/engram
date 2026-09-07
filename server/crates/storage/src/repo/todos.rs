@@ -62,7 +62,9 @@ pub async fn get(pool: &PgPool, id: Uuid) -> StoreResult<Option<TodoTuple>> {
     .await?)
 }
 
-/// 更新：COALESCE 部分更新（None 不动）；status 变更时同步 done_at。
+/// 更新：COALESCE 部分更新（None 不动）；status **迁移**时同步 done_at
+/// （D17：已是 done 再传 done 是 no-op，不刷新首次完成时间戳；done→open 清空；
+/// open→done 盖 now()。todos.status 在 SET 表达式里引用的是更新前的旧值）。
 pub struct TodoPatch<'a> {
     pub title: Option<&'a str>,
     pub body: Option<&'a str>,
@@ -75,7 +77,7 @@ pub struct TodoPatch<'a> {
 
 pub async fn update(pool: &PgPool, id: Uuid, p: &TodoPatch<'_>) -> StoreResult<u64> {
     let res = sqlx::query(
-        "UPDATE todos SET             title = COALESCE($2, title),             body = COALESCE($3, body),             priority = COALESCE($4, priority),             status = COALESCE($5, status),             due_at = COALESCE($6, due_at),             project_hint = COALESCE($7, project_hint),             tags = COALESCE($8::text[], tags),             done_at = CASE WHEN $5 = 'done' THEN now() WHEN $5 = 'open' THEN NULL ELSE done_at END,             updated_at = now()          WHERE id = $1",
+        "UPDATE todos SET             title = COALESCE($2, title),             body = COALESCE($3, body),             priority = COALESCE($4, priority),             status = COALESCE($5, status),             due_at = COALESCE($6, due_at),             project_hint = COALESCE($7, project_hint),             tags = COALESCE($8::text[], tags),             done_at = CASE WHEN $5 = 'done' AND todos.status IS DISTINCT FROM 'done' THEN now() WHEN $5 = 'open' THEN NULL ELSE done_at END,             updated_at = now()          WHERE id = $1",
     )
     .bind(id)
     .bind(p.title)

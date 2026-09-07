@@ -1141,3 +1141,51 @@ async fn context_budget_keeps_atoms_alive() {
         pack.meta.chars_used
     );
 }
+
+/// R7/D21：非法 distill 值响亮拒绝（此前 "sometimes"/"manaul" 静默落入 auto 语义）。
+#[tokio::test]
+async fn invalid_distill_is_rejected() {
+    let (_pool, svc, _pg) = setup().await;
+    let turns = json!([{"speaker": "user", "text": "R7 D21 校验"}]);
+    for bad in ["sometimes", "manaul", ""] {
+        let err = svc
+            .write_session("zztest", turns.clone(), bad, false)
+            .await
+            .expect_err("非法 distill 应被拒");
+        assert!(
+            err.to_string().contains("distill") && err.to_string().contains(bad),
+            "应回显收到的值：{err}"
+        );
+    }
+    // append 通道无 manual 语义
+    let s = svc
+        .write_session("zztest", turns.clone(), "off", false)
+        .await
+        .unwrap();
+    let err = svc
+        .append_session(s.id, turns, None, "manual")
+        .await
+        .expect_err("append 不接受 manual");
+    assert!(err.to_string().contains("distill"), "{err}");
+}
+
+/// R7/D22：轮内 ts 显式提供时必须可解析（此前垃圾串原样落库）。
+#[tokio::test]
+async fn invalid_turn_ts_is_rejected() {
+    let (_pool, svc, _pg) = setup().await;
+    let bad = json!([{"speaker": "user", "text": "x", "ts": "not-a-time"}]);
+    let err = svc
+        .write_session("zztest", bad, "off", false)
+        .await
+        .expect_err("垃圾 ts 应被拒");
+    assert!(
+        err.to_string().contains("ts") && err.to_string().contains("ISO8601"),
+        "报错应带期望格式：{err}"
+    );
+    // 合法形态（date-only 与 RFC3339）放行
+    let ok = json!([
+        {"speaker": "user", "text": "a", "ts": "2026-09-07"},
+        {"speaker": "assistant", "text": "b", "ts": "2026-09-07T08:00:00Z"}
+    ]);
+    svc.write_session("zztest", ok, "off", false).await.unwrap();
+}

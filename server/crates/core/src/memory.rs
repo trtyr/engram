@@ -164,6 +164,30 @@ fn validate_turns(arr: &[serde_json::Value]) -> Result<(), MemoryError> {
                 i + 1
             )));
         }
+        // D22：轮内 ts 显式提供时必须可解析（垃圾时间戳原样落库会污染时间检索/排序）；
+        // 与 cursor/from/to 同一宽容口径：RFC3339 全形态或 date-only
+        if let Some(ts) = t.get("ts").and_then(|v| v.as_str())
+            && !ts.trim().is_empty()
+            && chrono::DateTime::parse_from_rfc3339(ts.trim()).is_err()
+            && chrono::NaiveDate::parse_from_str(ts.trim(), "%Y-%m-%d").is_err()
+        {
+            return Err(MemoryError::BadRequest(format!(
+                "第 {} 轮 ts 无法解析（收到 {ts:?}）——期望 ISO8601（2026-09-02 或 2026-09-02T00:00:00Z）",
+                i + 1
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// distill 模式校验（D21）：拼错的值（如 "manaul"）静默落入 auto 语义会违背调用方意图，
+/// 与同函数内 speaker/priority 的响亮拒绝同口径。allowed 按通道不同（append 无 manual）。
+fn validate_distill(distill: &str, allowed: &[&str]) -> Result<(), MemoryError> {
+    if !allowed.contains(&distill) {
+        return Err(MemoryError::BadRequest(format!(
+            "distill 仅接受 {}（收到 {distill:?}）",
+            allowed.join("/")
+        )));
     }
     Ok(())
 }
@@ -195,6 +219,10 @@ impl MemoryService {
         distill: &str,
         sensitive: bool,
     ) -> Result<SessionDto, MemoryError> {
+        validate_distill(distill, &["auto", "manual", "off"])?;
+        // D 观察项：空串 agent 归一化（回读 agent="" 无意义）
+        let agent = agent.trim();
+        let agent = if agent.is_empty() { "unknown" } else { agent };
         let Some(arr) = turns.as_array() else {
             return Err(MemoryError::BadRequest("content 必须是轮次数组".into()));
         };
@@ -258,6 +286,7 @@ impl MemoryService {
         format: &str,
         distill: &str,
     ) -> Result<SessionDto, MemoryError> {
+        validate_distill(distill, &["auto", "manual", "off"])?;
         let turns = Self::parse_import(content, format)?;
         // M-1/SEC-B 同口径：导入的 turns 也过校验（jsonl 行 content 为空同样挡）
         if let Some(arr) = turns.as_array() {
@@ -355,6 +384,8 @@ impl MemoryService {
         agent: Option<&str>,
         distill: &str,
     ) -> Result<SessionDto, MemoryError> {
+        // append 无 manual 语义（off 会话本就被豁免）；乱传 manual 此前被静默忽略
+        validate_distill(distill, &["auto", "off"])?;
         let Some(arr) = turns.as_array() else {
             return Err(MemoryError::BadRequest("content 必须是轮次数组".into()));
         };
@@ -393,6 +424,11 @@ impl MemoryService {
         cursor: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<SessionDto>, MemoryError> {
+        if limit < 0 {
+            return Err(MemoryError::BadRequest(format!(
+                "limit 不能为负（收到 {limit}）"
+            )));
+        }
         Ok(repo::list_sessions(&self.pool, agent, cursor, limit.min(200)).await?)
     }
 
@@ -404,6 +440,11 @@ impl MemoryService {
         cursor: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<Value>, MemoryError> {
+        if limit < 0 {
+            return Err(MemoryError::BadRequest(format!(
+                "limit 不能为负（收到 {limit}）"
+            )));
+        }
         Ok(repo::list_sessions_meta(&self.pool, agent, cursor, limit.min(200)).await?)
     }
 
@@ -464,6 +505,11 @@ impl MemoryService {
         cursor: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<AtomDto>, MemoryError> {
+        if limit < 0 {
+            return Err(MemoryError::BadRequest(format!(
+                "limit 不能为负（收到 {limit}）"
+            )));
+        }
         Ok(repo::list_atoms(
             &self.pool,
             kind,
@@ -1212,6 +1258,11 @@ impl MemoryService {
         from: Option<chrono::DateTime<chrono::Utc>>,
         to: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<SearchResponse, MemoryError> {
+        if max_items < 0 {
+            return Err(MemoryError::BadRequest(format!(
+                "max_items 不能为负（收到 {max_items}）"
+            )));
+        }
         let qv = self
             .try_embed_query(&[query.to_string()])
             .await

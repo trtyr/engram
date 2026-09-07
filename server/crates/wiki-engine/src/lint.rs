@@ -21,10 +21,12 @@ pub struct LintReport {
 
 /// 全量 lint：死链 / 孤儿 / 过时源 / 损坏 frontmatter / 重复实体。
 pub async fn lint(pool: &PgPool) -> Result<LintReport, sqlx::Error> {
-    let pages: Vec<(Uuid, String, String, String, serde_json::Value)> =
-        sqlx::query_as("SELECT id, slug, page_type, content, frontmatter FROM wiki_pages")
-            .fetch_all(pool)
-            .await?;
+    // D23：排除系统 log 页——list_pages 不可见的页不该进 lint 口径（此前 checked_pages 恒定 +1）
+    let pages: Vec<(Uuid, String, String, String, serde_json::Value)> = sqlx::query_as(
+        "SELECT id, slug, page_type, content, frontmatter FROM wiki_pages WHERE page_type <> 'log'",
+    )
+    .fetch_all(pool)
+    .await?;
     let slugs: std::collections::HashSet<String> =
         pages.iter().map(|(_, s, ..)| s.clone()).collect();
     // W-1（2026-09-03）：小写索引——LLM 生成正文常把链接写成标题原文（[[Engram]]），

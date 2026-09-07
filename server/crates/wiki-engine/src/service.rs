@@ -123,17 +123,34 @@ impl WikiService {
         }
     }
 
-    /// 触发两步 ingest（文本 + 标题）。sha 命中返回 true（跳过）。
-    pub async fn ingest(&self, title: &str, text: &str) -> Result<bool, WikiError> {
-        let (_, skipped) = ingest::enqueue_ingest(&self.queue, title, text).await?;
-        Ok(skipped)
+    /// 触发两步 ingest（文本 + 标题）。返回三态（D27）：已就绪跳过 / 在途 / 新入队。
+    /// D24：空标题/空文本响亮拒绝（空文本任务曾在队列里滞留不执行、空标题白烧一次 LLM）。
+    pub async fn ingest(
+        &self,
+        title: &str,
+        text: &str,
+    ) -> Result<crate::ingest::IngestOutcome, WikiError> {
+        if title.trim().is_empty() {
+            return Err(WikiError::BadRequest(
+                "title 不能为空——织入来源需要可辨认的标题".into(),
+            ));
+        }
+        if text.trim().is_empty() {
+            return Err(WikiError::BadRequest(
+                "text 不能为空——空文本织入只会浪费 LLM 调用".into(),
+            ));
+        }
+        Ok(ingest::enqueue_ingest(&self.queue, title, text).await?)
     }
 
     /// 从 wiki 文档触发织入（upload 与 URL 通用，2026-09-04 补 URL 兜底）：
     /// raw_path 有 → 重新读取原文件并解析（保留原行为）；
     /// raw_path 空（URL 摄取）→ 用已分块文本按 seq 拼接——此前 URL 文档既不能
     /// --doc-id 手动织入（404）也不会被自动织入静默跳过，两路都收敛到 ingest(title, text)。
-    pub async fn ingest_document(&self, doc_id: Uuid) -> Result<bool, WikiError> {
+    pub async fn ingest_document(
+        &self,
+        doc_id: Uuid,
+    ) -> Result<crate::ingest::IngestOutcome, WikiError> {
         let row: Option<(String, Option<String>, Option<String>)> =
             sqlx::query_as("SELECT title, raw_path, mime FROM wiki_documents WHERE id = $1")
                 .bind(doc_id)
@@ -273,15 +290,21 @@ impl WikiService {
 
     /// 链接图（节点 = 页面，边 = wikilink；含 Louvain 社区 + 凝聚度）。
     pub async fn graph(&self) -> Result<GraphDto, WikiError> {
+        // D23：排除系统 log 页（list_pages 不可见，图里也不该出现——否则节点无法溯源）
         let nodes: Vec<(String, String, String)> = sqlx::query_as(
-            "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type FROM wiki_pages",
+            "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type FROM wiki_pages \
+             WHERE page_type <> 'log'",
         )
         .fetch_all(&self.pool)
         .await?;
-        let edges: Vec<(String, String, f32)> =
-            sqlx::query_as("SELECT from_slug, to_slug, weight FROM wiki_links")
-                .fetch_all(&self.pool)
-                .await?;
+        // 边随节点过滤：任一端是 log 页的边一并剔除（防悬空引用进社区发现）
+        let edges: Vec<(String, String, f32)> = sqlx::query_as(
+            "SELECT l.from_slug, l.to_slug, l.weight FROM wiki_links l \
+             WHERE EXISTS (SELECT 1 FROM wiki_pages f WHERE f.slug = l.from_slug AND f.page_type <> 'log') \
+               AND EXISTS (SELECT 1 FROM wiki_pages t WHERE t.slug = l.to_slug AND t.page_type <> 'log')",
+        )
+        .fetch_all(&self.pool)
+        .await?;
         // 社区发现
         let node_slugs: Vec<String> = nodes.iter().map(|(s, _, _)| s.clone()).collect();
         let e64: Vec<(String, String, f64)> = edges
@@ -541,9 +564,9 @@ impl WikiService {
         .execute(&self.pool)
         .await?;
 
-        // 2) 再摄取（实体概念网络吸收本次问答内容）
-        let (_, skipped) = crate::ingest::enqueue_ingest(&self.queue, title, &content).await?;
-        Ok(skipped)
+        // 2) 再摄取（实体概念网络吸收本次问答内容）——D27 三态：仅已就绪算 skipped
+        let outcome = crate::ingest::enqueue_ingest(&self.queue, title, &content).await?;
+        Ok(outcome.skipped())
     }
 
     /// 存量回填（D4 遗留）：重析全部页面正文重建 wiki_links。

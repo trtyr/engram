@@ -160,12 +160,6 @@ fn todo_svc(state: &AppState) -> engram_core::todos::TodoService {
     engram_core::todos::TodoService::new(state.pool.clone())
 }
 
-fn parse_flex_dt(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-    chrono::DateTime::parse_from_rfc3339(s)
-        .ok()
-        .map(|d| d.with_timezone(&chrono::Utc))
-}
-
 /// TodoError → MCP 错误码。
 fn from_todo(e: engram_core::todos::TodoError) -> rmcp::ErrorData {
     use engram_core::todos::TodoError;
@@ -844,7 +838,9 @@ pub struct SkillsUpdateParams {
     #[schemars(description = "可选：新标签列表（整体替换）。不传不动。")]
     pub tags: Option<Vec<String>>,
     /// 可选：启用/停用
-    #[schemars(description = "可选：true=启用 / false=停用（停用后列表与检索对 AI 隐身）。")]
+    #[schemars(
+        description = "可选：true=启用 / false=停用。停用后不再出现在 enabled=true 过滤里；缺省列表是管理视角仍会显示（停用技能不被删除）。"
+    )]
     pub enabled: Option<bool>,
 }
 
@@ -2064,18 +2060,32 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let wp = params.0;
-        let skipped = wiki::svc(&self.state)
+        let outcome = wiki::svc(&self.state)
             .ingest(&wp.title, &wp.text)
             .await
             .map_err(wiki::from_wiki)?;
+        // D27 三态：已就绪（跳过）/ 在途（勿重提也非丢失）/ 新入队——此前三者不可分，
+        // sha 去重封锁重试，在途窗口任务表现如「丢失」
+        use engram_core::wiki::IngestOutcome;
+        let (skipped, status, message) = match &outcome {
+            IngestOutcome::AlreadyReady(_) => (true, "ready", "内容已存在（sha 命中），本次跳过"),
+            IngestOutcome::InFlight(_) => (
+                false,
+                "in_flight",
+                "同内容任务正在处理中——无需重复提交（sha 去重会挡住），稍后可在 Wiki 页面看到产物；进度见任务页",
+            ),
+            IngestOutcome::Enqueued(_) => (
+                false,
+                "enqueued",
+                "已入队织入任务——LLM 流水线异步处理；进度见任务页，稍后可在 Wiki 页面看到产物",
+            ),
+        };
         ok_json(serde_json::json!({
             "skipped": skipped,
+            "status": status,
+            "source_id": outcome.source_id(),
             "async": true,
-            "message": if skipped {
-                "内容已存在（sha 命中），本次跳过"
-            } else {
-                "已入队织入任务——LLM 流水线异步处理，稍后可在 Wiki 页面看到产物"
-            }
+            "message": message,
         }))
     }
 
@@ -2175,7 +2185,12 @@ impl EngramMcpServer {
                 tp.body.as_deref().unwrap_or(""),
                 tp.priority.as_deref().unwrap_or("normal"),
                 tp.tags.as_deref().unwrap_or(&[]),
-                tp.due_at.as_deref().and_then(parse_flex_dt),
+                match tp.due_at.as_deref() {
+                    // D18：显式传了 due_at 就必须可解析（此前垃圾值被静默吞成 None，
+                    // 调用方以为设置了截止时间实际没生效）
+                    Some(s) => Some(parse_flex_datetime(s)?),
+                    None => None,
+                },
                 tp.project_hint.as_deref(),
             )
             .await
@@ -2253,7 +2268,10 @@ impl EngramMcpServer {
                 params.0.body.as_deref(),
                 params.0.priority.as_deref(),
                 params.0.status.as_deref(),
-                params.0.due_at.as_deref().and_then(parse_flex_dt).map(Some),
+                match params.0.due_at.as_deref() {
+                    Some(s) => Some(Some(parse_flex_datetime(s)?)),
+                    None => None,
+                },
                 None,
                 None,
             )

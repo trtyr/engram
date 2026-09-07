@@ -78,6 +78,25 @@ impl TodoService {
         Ok(())
     }
 
+    /// NUL 字节拒绝（D20）：PG UTF8 层对 \0 直接报编码错误——裸漏成「存储暂时不可用」，
+    /// 在入参层响亮拒绝。
+    fn reject_nul(field: &str, value: &str) -> Result<(), TodoError> {
+        if value.contains('\0') {
+            return Err(TodoError::BadRequest(format!(
+                "{field} 含非法控制字符（NUL）"
+            )));
+        }
+        Ok(())
+    }
+
+    /// tag 规整：trim + 丢弃空串（观察项：空字符串 tag 无意义还污染过滤面）。
+    fn normalize_tags(tags: &[String]) -> Vec<String> {
+        tags.iter()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect()
+    }
+
     /// 新建待办。
     pub async fn create(
         &self,
@@ -95,6 +114,12 @@ impl TodoService {
         if title.chars().count() > 200 {
             return Err(TodoError::BadRequest("title 过长（>200 字符）".into()));
         }
+        Self::reject_nul("title", title)?;
+        Self::reject_nul("body", body)?;
+        let tags = Self::normalize_tags(tags);
+        for t in &tags {
+            Self::reject_nul("tags", t)?;
+        }
         Self::validate_priority(priority)?;
         let id = Uuid::now_v7();
         repo::insert(
@@ -104,7 +129,7 @@ impl TodoService {
                 title,
                 body: body.trim(),
                 priority,
-                tags,
+                tags: &tags,
                 due_at,
                 project_hint: project_hint.map(str::trim).filter(|s| !s.is_empty()),
             },
@@ -122,6 +147,11 @@ impl TodoService {
         q: Option<&str>,
         limit: i64,
     ) -> Result<Vec<TodoDto>, TodoError> {
+        if limit < 0 {
+            return Err(TodoError::BadRequest(format!(
+                "limit 不能为负（收到 {limit}）"
+            )));
+        }
         if let Some(s) = status
             && !STATUSES.contains(&s)
         {
@@ -172,6 +202,16 @@ impl TodoService {
             if t.is_empty() {
                 return Err(TodoError::BadRequest("title 不能为空".into()));
             }
+            Self::reject_nul("title", t)?;
+        }
+        if let Some(b) = body {
+            Self::reject_nul("body", b)?;
+        }
+        let tags = tags.map(Self::normalize_tags);
+        if let Some(ts) = &tags {
+            for t in ts {
+                Self::reject_nul("tags", t)?;
+            }
         }
         if let Some(p) = priority {
             Self::validate_priority(p)?;
@@ -194,7 +234,7 @@ impl TodoService {
                 status,
                 due_at,
                 project_hint,
-                tags,
+                tags: tags.as_deref(),
             },
         )
         .await?;

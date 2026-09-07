@@ -29,26 +29,55 @@ fn sha256_hex(b: &[u8]) -> String {
     h.finalize().iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// D27：织入提交的三态结果——此前「已完成跳过」与「在途处理中」都返回 skipped=true，
+/// 调用方无从分辨、sha 去重又封锁了重试手段（在途窗口的任务表现为「丢失」）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IngestOutcome {
+    /// 同 sha 来源已就绪（曾成功织入）——幂等跳过
+    AlreadyReady(Uuid),
+    /// 同 sha 任务在途（pending/processing）——勿重复提交；source id 供任务页追踪
+    InFlight(Uuid),
+    /// 新入队（或失败后重入队）
+    Enqueued(Uuid),
+}
+
+impl IngestOutcome {
+    pub fn source_id(&self) -> Uuid {
+        match self {
+            IngestOutcome::AlreadyReady(id)
+            | IngestOutcome::InFlight(id)
+            | IngestOutcome::Enqueued(id) => *id,
+        }
+    }
+
+    /// 兼容旧布尔语义：仅「已就绪」算 skipped
+    pub fn skipped(&self) -> bool {
+        matches!(self, IngestOutcome::AlreadyReady(_))
+    }
+}
+
 /// 入队 ingest：source 内容（复用 wiki 文档的解析产物文本或直接文本）。
 /// sha 命中且已 ingest → 跳过（幂等）。
 pub async fn enqueue_ingest(
     queue: &engram_jobs::JobQueue,
     title: &str,
     text: &str,
-) -> Result<(Uuid, bool), JobError> {
+) -> Result<IngestOutcome, JobError> {
     let sha = sha256_hex(text.as_bytes());
-    // 同 sha 去重（D11）：ready=已完成 / pending=排队中 / processing=处理中——
-    // 三态均幂等跳过，重复提交不重复烧 LLM 配额；仅 failed 才允许重试重入队
+    // 同 sha 去重（D11 + D27 语义细化）：ready=已完成（跳过）/ pending|processing=在途
+    // （返回 InFlight——调用方知道无需重提，也不再误以为丢失）/ failed 才允许重试重入队
     let existing: Option<(Uuid, String)> =
         sqlx::query_as("SELECT id, status FROM wiki_sources WHERE sha256 = $1")
             .bind(&sha)
             .fetch_optional(queue.pool())
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
-    if let Some((id, status)) = existing
-        && matches!(status.as_str(), "ready" | "pending" | "processing")
-    {
-        return Ok((id, true));
+    if let Some((id, status)) = existing {
+        match status.as_str() {
+            "ready" => return Ok(IngestOutcome::AlreadyReady(id)),
+            "pending" | "processing" => return Ok(IngestOutcome::InFlight(id)),
+            _ => {} // failed → 走下方 W1 状态感知重入队
+        }
     }
 
     // 落不可变原料副本
@@ -149,7 +178,7 @@ pub async fn enqueue_ingest(
                                 )),
                         )
                         .await?;
-                    return Ok((real_id, false));
+                    return Ok(IngestOutcome::Enqueued(real_id));
                 }
                 // analyze 未成功或 analysis 不可得 → 重跑 analyze（原料文件刚重写过，可读）
                 sqlx::query("UPDATE wiki_sources SET status = 'pending', error = NULL WHERE id = $1 AND status <> 'ready'")
@@ -167,7 +196,7 @@ pub async fn enqueue_ingest(
                             )),
                     )
                     .await?;
-                return Ok((real_id, false));
+                return Ok(IngestOutcome::Enqueued(real_id));
             }
         }
     }
@@ -179,7 +208,7 @@ pub async fn enqueue_ingest(
                 .with_idempotency_key(format!("wiki-analyze-{real_id}")),
         )
         .await?;
-    Ok((real_id, false))
+    Ok(IngestOutcome::Enqueued(real_id))
 }
 
 /// 第一步：分析。source 全文 + 既有 index → 结构化分析（存 wiki_sources.status + 事件）。

@@ -137,6 +137,11 @@ impl ProjectService {
         if name.trim().is_empty() {
             return Err(ProjectError::BadRequest("项目名不能为空".to_string()));
         }
+        if name.trim().chars().count() > 200 {
+            return Err(ProjectError::BadRequest(
+                "项目名过长（>200 字符）".to_string(),
+            ));
+        }
         let categories = Self::default_categories(type_).ok_or_else(|| {
             ProjectError::BadRequest(format!("未知项目类型: {type_}（支持 dev/research）"))
         })?;
@@ -199,6 +204,11 @@ impl ProjectService {
         }
         if name.trim().is_empty() {
             return Err(ProjectError::BadRequest("项目名不能为空".to_string()));
+        }
+        if name.trim().chars().count() > 200 {
+            return Err(ProjectError::BadRequest(
+                "项目名过长（>200 字符）".to_string(),
+            ));
         }
         // 改名撞唯一约束会以 sqlx 错误冒成 500，这里先查给出 409 语义
         if let Some(holder) = repo::name_holder(&self.pool, name, id).await? {

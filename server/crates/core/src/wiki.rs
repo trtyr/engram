@@ -3,6 +3,7 @@
 //! 依赖方向：api → core → wiki-engine（Q9 收敛：api 不再直连 wiki-engine）。
 
 pub use engram_wiki_engine::cascade::CascadeReport;
+pub use engram_wiki_engine::ingest::IngestOutcome;
 pub use engram_wiki_engine::insights::InsightsReport;
 pub use engram_wiki_engine::purpose::Purpose;
 pub use engram_wiki_engine::review::ReviewItem;

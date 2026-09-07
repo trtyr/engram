@@ -364,11 +364,20 @@ impl SkillsService {
                     )))
                 }
             }
-            None => slugify(name).ok_or_else(|| {
-                SkillsError::BadRequest(format!(
-                    "无法从技能名「{name}」推导 slug（非 ASCII 名字请显式传 slug，如 code-review）"
-                ))
-            }),
+            None => {
+                // D25：名字含非 ASCII（中文等）时 slugify 只保留 ASCII 部分——
+                // "PR 审查" 会坍缩成 "pr"，任何同前缀中文名都挤到同一 slug。响亮拒绝强制显式。
+                if !name.is_ascii() {
+                    return Err(SkillsError::BadRequest(format!(
+                        "技能名「{name}」含非 ASCII 字符——slug 推导会丢弃这些字符造成撞名，请显式传 slug（kebab-case，如 code-review）"
+                    )));
+                }
+                slugify(name).ok_or_else(|| {
+                    SkillsError::BadRequest(format!(
+                        "无法从技能名「{name}」推导 slug（非 ASCII 名字请显式传 slug，如 code-review）"
+                    ))
+                })
+            }
         }
     }
 
@@ -393,7 +402,7 @@ impl SkillsService {
         .await?;
         if inserted == 0 {
             return Err(SkillsError::Conflict(format!(
-                "slug「{slug}」已被占用——slug 唯一，请换 slug 或直接更新已有技能"
+                "slug「{slug}」已被占用——slug 唯一，请换 slug 或直接更新已有技能（未显式传 slug 时它由 name 推导，中文名会坍缩到 ASCII 前缀，撞车时显式传 slug 即可避开）"
             )));
         }
         self.get_skill(&slug).await

@@ -38,7 +38,8 @@ pub struct IngestRequest {
     pub document_id: Option<uuid::Uuid>,
 }
 
-/// 触发两步 ingest（sha 命中秒跳过，返回 skipped=true）。
+/// 触发两步 ingest（D27 三态：skipped 仅表示同内容曾成功织入；
+/// in_flight=同内容任务处理中（勿重提也非丢失）；enqueued=新入队）。
 #[utoipa::path(post, path = "/wiki/ingest",
     request_body = IngestRequest,
     responses((status = 202, body = IngestAccepted)))]
@@ -47,8 +48,9 @@ pub async fn ingest(
     State(state): State<AppState>,
     Json(req): Json<IngestRequest>,
 ) -> Result<(StatusCode, Json<IngestAccepted>), ApiError> {
+    use engram_core::wiki::IngestOutcome;
     require_wiki(&principal)?;
-    let skipped = match (req.text, req.document_id) {
+    let outcome = match (req.text, req.document_id) {
         (Some(text), _) => svc(&state).ingest(&req.title, &text).await.map_err(we)?,
         (None, Some(doc_id)) => svc(&state).ingest_document(doc_id).await.map_err(we)?,
         (None, None) => {
@@ -57,12 +59,31 @@ pub async fn ingest(
             ));
         }
     };
-    Ok((StatusCode::ACCEPTED, Json(IngestAccepted { skipped })))
+    let (status, skipped) = match &outcome {
+        IngestOutcome::AlreadyReady(_) => ("ready", true),
+        IngestOutcome::InFlight(_) => ("in_flight", false),
+        IngestOutcome::Enqueued(_) => ("enqueued", false),
+    };
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(IngestAccepted {
+            skipped,
+            status: Some(status.into()),
+            source_id: Some(outcome.source_id()),
+        }),
+    ))
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct IngestAccepted {
+    /// 仅「同内容曾成功织入」为 true；in_flight/enqueued 均为 false
     pub skipped: bool,
+    /// ready | in_flight | enqueued（仅 /wiki/ingest 返回；queries/archive 无此字段）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// wiki_sources 行 id（任务页/审计追踪用；仅 /wiki/ingest 返回）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<uuid::Uuid>,
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -326,7 +347,14 @@ pub async fn archive_query(
         .archive_query(&req.title, &req.question, &req.answer)
         .await
         .map_err(we)?;
-    Ok((StatusCode::ACCEPTED, Json(IngestAccepted { skipped })))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(IngestAccepted {
+            skipped,
+            status: None,
+            source_id: None,
+        }),
+    ))
 }
 
 // ---------- sources（级联删除） ----------
