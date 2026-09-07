@@ -51,6 +51,21 @@ pub struct WikiPageDto {
     pub updated_at: DateTime<Utc>,
 }
 
+/// 页面版本快照行（列表用——不带正文，防一次拖回全史）。
+#[derive(Debug, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct WikiPageVersionDto {
+    pub id: Uuid,
+    pub slug: String,
+    pub version: i32,
+    pub title: String,
+    pub page_type: String,
+    pub folder: String,
+    pub origin: String,
+    /// 该版正文字符数（决定是否值得回读全文）
+    pub content_chars: i64,
+    pub created_at: DateTime<Utc>,
+}
+
 /// page_type → 目录树默认文件夹（Obsidian 式目录树层级）。
 pub fn folder_for_type(page_type: &str) -> &'static str {
     match page_type {
@@ -250,15 +265,29 @@ impl WikiService {
         // 先精确匹配；未中则按「小写 + 空格转连字符」宽容重查——LLM 生成正文时
         // 常把双链写成标题原文（[[Rust 异步运行时]]），与真实 slug（rust-异步运行时）
         // 只差大小写和分隔符，精确匹配 404 后点过去就"没反应"。
+        // R 报告 P1-11 双寻址：slug 未中再按 title 精确兜底（标题寻址）。
         sqlx::query_as::<_, WikiPageDto>(
             "SELECT * FROM wiki_pages \
-             WHERE slug = $1 OR slug = lower(replace($1, ' ', '-')) \
-             ORDER BY (slug = $1) DESC LIMIT 1",
+             WHERE slug = $1 OR slug = lower(replace($1, ' ', '-')) OR title = $1 \
+             ORDER BY (slug = $1) DESC, (title = $1) DESC LIMIT 1",
         )
         .bind(slug)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| WikiError::NotFound(format!("页面 {slug} 不存在")))
+    }
+
+    /// slug/title 宽容解析成真实 slug（删除/版本操作用，与 get_page 同一匹配口径）。
+    async fn resolve_slug(&self, slug_or_title: &str) -> Result<String, WikiError> {
+        let row: Option<String> = sqlx::query_scalar(
+            "SELECT slug FROM wiki_pages \
+             WHERE slug = $1 OR slug = lower(replace($1, ' ', '-')) OR title = $1 \
+             ORDER BY (slug = $1) DESC LIMIT 1",
+        )
+        .bind(slug_or_title)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.ok_or_else(|| WikiError::NotFound(format!("页面 {slug_or_title} 不存在")))
     }
 
     /// 人工编辑：origin=human、版本递增、重嵌入。folder 可选（None=保持原值/默认空）。
@@ -288,6 +317,18 @@ impl WikiService {
             fm_merge_obj["via"] = serde_json::json!(v);
         }
         let fm_merge = fm_merge_obj.to_string();
+        // 版本历史（R 报告建议 #5）：覆盖前先把现状快照进 wiki_page_versions——
+        // 此前 version 只是计数器，覆盖即失忆。INSERT..SELECT 天然幂等（无旧页 0 行）。
+        sqlx::query(
+            "INSERT INTO wiki_page_versions (id, slug, version, title, page_type, folder, content, origin) \
+             SELECT $1, slug, version, title, page_type, folder, content, origin \
+             FROM wiki_pages WHERE slug = $2",
+        )
+        .bind(Uuid::now_v7())
+        .bind(slug)
+        .execute(&self.pool)
+        .await?;
+        self.prune_page_versions(slug).await;
         let row = sqlx::query_as::<_, WikiPageDto>(
             "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
              VALUES ($1, $2, $3, 'concept', COALESCE($4, ''), $5, $6::jsonb, 'human', 1, to_tsvector('simple', $7)) \
@@ -639,9 +680,22 @@ impl WikiService {
 
     /// 删除页面（D10：MCP wiki_delete_page / HTTP DELETE /wiki/pages/{slug}）——
     /// 连带清理双向 wikilinks（图与孤页检测不留幽灵边）。
+    /// 删除前快照最后状态进 wiki_page_versions——误删可经 restore_version 重建
+    /// （R 报告「删除抹掉全部历史」的回收通道；版本历史本身保留）。
     pub async fn delete_page(&self, slug: &str) -> Result<bool, WikiError> {
+        let slug = self.resolve_slug(slug).await?;
+        sqlx::query(
+            "INSERT INTO wiki_page_versions (id, slug, version, title, page_type, folder, content, origin) \
+             SELECT $1, slug, version, title, page_type, folder, content, origin \
+             FROM wiki_pages WHERE slug = $2",
+        )
+        .bind(Uuid::now_v7())
+        .bind(&slug)
+        .execute(&self.pool)
+        .await?;
+        self.prune_page_versions(&slug).await;
         let n = sqlx::query("DELETE FROM wiki_pages WHERE slug = $1")
-            .bind(slug)
+            .bind(&slug)
             .execute(&self.pool)
             .await?
             .rows_affected();
@@ -649,10 +703,143 @@ impl WikiService {
             return Err(WikiError::NotFound(format!("页面 {slug} 不存在")));
         }
         sqlx::query("DELETE FROM wiki_links WHERE from_slug = $1 OR to_slug = $1")
-            .bind(slug)
+            .bind(&slug)
             .execute(&self.pool)
             .await?;
         Ok(true)
+    }
+
+    // ---------- 版本历史（R 报告建议 #5：列表 + 回滚） ----------
+
+    /// 每 slug 保留的版本快照上限（与 skill_revisions 同口径）。
+    const VERSION_KEEP: i64 = 50;
+
+    /// 裁剪旧快照（每 slug 只留最近 VERSION_KEEP 条；best-effort，不影响主流程）。
+    async fn prune_page_versions(&self, slug: &str) {
+        sqlx::query(
+            "DELETE FROM wiki_page_versions WHERE slug = $1 AND id NOT IN ( \
+             SELECT id FROM wiki_page_versions WHERE slug = $1 \
+             ORDER BY created_at DESC, version DESC LIMIT $2)",
+        )
+        .bind(slug)
+        .bind(Self::VERSION_KEEP)
+        .execute(&self.pool)
+        .await
+        .ok();
+    }
+
+    /// 页面版本列表（新→旧；不带正文，content_chars 供决策）。
+    /// 已删除的页面按 slug 直查快照表——恢复通道不因页面不在而 404。
+    pub async fn page_versions(&self, slug: &str) -> Result<Vec<WikiPageVersionDto>, WikiError> {
+        let slug = match self.resolve_slug(slug).await {
+            Ok(s) => s,
+            Err(WikiError::NotFound(_)) => slug.to_string(),
+            Err(e) => return Err(e),
+        };
+        Ok(sqlx::query_as::<_, WikiPageVersionDto>(
+            "SELECT id, slug, version, title, page_type, folder, origin, \
+             length(content)::bigint AS content_chars, created_at \
+             FROM wiki_page_versions WHERE slug = $1 ORDER BY version DESC, created_at DESC",
+        )
+        .bind(&slug)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// 读取一个版本快照的正文（回滚前预览用）。已删除页面按 slug 直查。
+    pub async fn page_version_content(
+        &self,
+        slug: &str,
+        version: i32,
+    ) -> Result<String, WikiError> {
+        let slug = match self.resolve_slug(slug).await {
+            Ok(s) => s,
+            Err(WikiError::NotFound(_)) => slug.to_string(),
+            Err(e) => return Err(e),
+        };
+        let row: Option<String> = sqlx::query_scalar(
+            "SELECT content FROM wiki_page_versions WHERE slug = $1 AND version = $2",
+        )
+        .bind(&slug)
+        .bind(version)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.ok_or_else(|| {
+            WikiError::NotFound(format!(
+                "页面 {slug} 没有版本 {version}——先查 versions 列表取可用版本号"
+            ))
+        })
+    }
+
+    /// 回滚到某个版本快照：以「当前版本 +1」落地（历史不可变，回滚也是新版本）。
+    /// 页面已被删除时从快照重建（沿用页型/目录，版本号接续快照史）。
+    pub async fn restore_page_version(
+        &self,
+        slug: &str,
+        version: i32,
+    ) -> Result<WikiPageDto, WikiError> {
+        let snap: (String, String, String, String, i32) = sqlx::query_as(
+            "SELECT title, content, page_type, folder, version \
+             FROM wiki_page_versions WHERE slug = $1 AND version = $2",
+        )
+        .bind(slug)
+        .bind(version)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| {
+            WikiError::NotFound(format!(
+                "没有 {slug}#{version} 的快照——先查 versions 列表取可用版本号"
+            ))
+        })?;
+        let (title, content, page_type, folder, _) = snap;
+        match self.get_page(slug).await {
+            Ok(_) => {
+                // 活页：走 put_page（快照现状 → 落目标内容 → 版本 +1、重算链接）
+                self.put_page(slug, &title, &content, Some(&folder), Some("restore"))
+                    .await
+            }
+            Err(WikiError::NotFound(_)) => {
+                // 死页重建：版本号接续快照史（避免清零后与历史快照版本撞号）
+                let next: i32 = sqlx::query_scalar(
+                    "SELECT COALESCE(MAX(version), 0) + 1 \
+                     FROM (SELECT version FROM wiki_page_versions WHERE slug = $1 \
+                           UNION ALL SELECT version FROM wiki_pages WHERE slug = $1) t",
+                )
+                .bind(slug)
+                .fetch_one(&self.pool)
+                .await?;
+                let fm = serde_json::json!({"title": title, "sources": [], "via": "restore"});
+                let row = sqlx::query_as::<_, WikiPageDto>(
+                    "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'human', $8, to_tsvector('simple', $9)) \
+                     RETURNING *",
+                )
+                .bind(Uuid::now_v7())
+                .bind(slug)
+                .bind(&title)
+                .bind(&page_type)
+                .bind(&folder)
+                .bind(&content)
+                .bind(fm.to_string())
+                .bind(next)
+                .bind(tsv_text(&content))
+                .fetch_one(&self.pool)
+                .await?;
+                for target in crate::markup::extract_wikilinks(&content) {
+                    sqlx::query(
+                        "INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, 3.0) \
+                         ON CONFLICT (from_slug, to_slug) DO NOTHING",
+                    )
+                    .bind(slug)
+                    .bind(&target)
+                    .execute(&self.pool)
+                    .await
+                    .ok();
+                }
+                Ok(row)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     // ---------- 级联删除 ----------

@@ -208,7 +208,10 @@ impl CgBridge {
         } else {
             let p = Path::new(source_uri);
             if !p.exists() {
-                return Err(CgError::BadRequest(format!("本地路径不存在: {source_uri}")));
+                return Err(CgError::BadRequest(format!(
+                    "本地路径不存在: {source_uri}——注意路径按**服务端**文件系统校验 \
+                     （MCP 客户端在另一台机器上时，它本地的路径服务端看不到，请改用 git URL）"
+                )));
             }
             (source_uri.to_string(), source_uri.to_string())
         };
@@ -320,15 +323,128 @@ impl CgBridge {
         }))
     }
 
+    /// explore 符号大纲（R 报告 P0-3）：直接读索引库（.codegraph/codegraph.db，
+    /// 只读——与 full_graph 同哲学），按「路径/文件名含 target 或符号名含 target」取
+    /// 符号清单（name/kind/行号/签名截断），不返回任何源码正文。
+    /// 返回 None = 大纲数据源不可用或零命中（调用方落回 CLI explore）。
+    async fn explore_outline(
+        &self,
+        path: &Path,
+        target: &str,
+    ) -> Result<Option<serde_json::Value>, CgError> {
+        let db_path = path.join(".codegraph").join("codegraph.db");
+        if !db_path.exists() {
+            return Ok(None);
+        }
+        let db_str = db_path.to_string_lossy().into_owned();
+        let target = target.trim().to_string();
+        let job = tokio::task::spawn_blocking(
+            move || -> Result<Option<serde_json::Value>, CgError> {
+                let conn = rusqlite::Connection::open_with_flags(
+                    &db_str,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                )
+                .map_err(|e| CgError::Parse(format!("索引库打开失败: {e}")))?;
+                // LIKE 通配符转义（target 是自由文本，% _ 会改变匹配语义）
+                let like = format!(
+                    "%{}%",
+                    target
+                        .replace('\\', "\\\\")
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                );
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT name, kind, file_path, start_line, end_line, signature \
+                     FROM nodes \
+                     WHERE file_path LIKE ?1 ESCAPE '\\' OR name LIKE ?1 ESCAPE '\\' \
+                     ORDER BY file_path, start_line LIMIT 200",
+                    )
+                    .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?;
+                let rows: Vec<(String, String, String, i64, i64, Option<String>)> = stmt
+                    .query_map(rusqlite::params![like], |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
+                    })
+                    .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?
+                    .collect::<Result<_, _>>()
+                    .map_err(|e| CgError::Parse(format!("索引读取失败: {e}")))?;
+                if rows.is_empty() {
+                    return Ok(None);
+                }
+                let truncate = |s: &str| -> String {
+                    if s.chars().count() <= 120 {
+                        s.to_string()
+                    } else {
+                        s.chars().take(120).collect::<String>() + "…"
+                    }
+                };
+                let symbols: Vec<serde_json::Value> = rows
+                    .iter()
+                    .map(|(name, kind, fp, sl, el, sig)| {
+                        let mut o = serde_json::json!({
+                            "name": name, "kind": kind, "file_path": fp,
+                            "line": sl, "end_line": el,
+                        });
+                        if let Some(s) = sig {
+                            o["signature"] = serde_json::json!(truncate(s));
+                        }
+                        o
+                    })
+                    .collect();
+                // 文件清单（去重保序 + 每文件符号数）
+                let mut files: Vec<(String, usize)> = Vec::new();
+                for (_, _, fp, _, _, _) in &rows {
+                    match files.last_mut() {
+                        Some((p, n)) if p == fp => *n += 1,
+                        _ => files.push((fp.clone(), 1)),
+                    }
+                }
+                let files: Vec<serde_json::Value> = files
+                    .into_iter()
+                    .map(|(p, n)| serde_json::json!({"path": p, "symbols": n}))
+                    .collect();
+                let total_hint = if symbols.len() >= 200 {
+                    "（已达 200 上限——用更具体的目录/符号名缩小范围）"
+                } else {
+                    ""
+                };
+                Ok(Some(serde_json::json!({
+                    "kind": "explore",
+                    "mode": "outline",
+                    "target": target,
+                    "files": files,
+                    "symbols": symbols,
+                    "hint": format!(
+                        "符号大纲（无源码）。看单个符号的源码与调用列表：kind=node；\
+                         看影响面：kind=callers/impact；要完整源码文件：本查询传 include_source=true。{total_hint}"
+                    ),
+                })))
+            },
+        );
+        job.await
+            .map_err(|e| CgError::Parse(format!("索引读取线程崩溃: {e}")))?
+    }
+
     // ---------- 查询代理 ----------
 
     /// 代理查询。explore/node 返回 Markdown（包 JSON {kind, text}）；其余返回归一 JSON。
+    /// explore 默认（include_source=false）返回**符号大纲**（直接读索引库，不再拖整份源码——
+    /// R 报告 P0-3：一次 explore 曾拖回 300+ 行 App.tsx 全文）；要看源码传 include_source=true
+    /// 走 CLI 原生输出。大纲数据源缺失（无索引库）时自动回落 CLI。
     pub async fn query(
         &self,
         id: Uuid,
         kind: QueryKind,
         target: &str,
         depth: Option<u32>,
+        include_source: bool,
     ) -> Result<serde_json::Value, CgError> {
         let proj = self.get(id).await?;
         if proj.status == "version_mismatch" {
@@ -346,6 +462,13 @@ impl CgBridge {
         let path = Path::new(&proj.path);
         self.ensure_version().await?;
 
+        if kind == QueryKind::Explore
+            && !include_source
+            && let Some(outline) = self.explore_outline(path, target).await?
+        {
+            return Ok(outline);
+            // 大纲不可用 → 落回 CLI explore 源码形态
+        }
         let (args, timeout): (Vec<String>, Duration) = match kind {
             QueryKind::Explore => {
                 // explore 无 --json：Markdown 文本

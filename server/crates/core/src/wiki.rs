@@ -8,6 +8,7 @@ pub use engram_wiki_engine::insights::InsightsReport;
 pub use engram_wiki_engine::purpose::Purpose;
 pub use engram_wiki_engine::review::ReviewItem;
 pub use engram_wiki_engine::service::GraphDto;
+pub use engram_wiki_engine::service::WikiPageVersionDto;
 pub use engram_wiki_engine::{LintReport, LlmRef, WikiError, WikiPageDto, WikiService};
 
 /// 摄取 job handler 注册（main.rs 装配用）。

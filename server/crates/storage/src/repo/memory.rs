@@ -118,9 +118,32 @@ pub async fn session_distill_status(pool: &PgPool, id: Uuid) -> StoreResult<Opti
 }
 
 pub async fn void_session_update(pool: &PgPool, id: Uuid) -> StoreResult<Option<SessionDto>> {
+    // unvoid 通道（R 报告 P2）：作废前把 distill_status 存进 metadata.pre_void_distill——
+    // 恢复时照原样还原（pending 回 pending 可继续蒸馏；done 回 done），无需加列
     let row = sqlx::query_as::<_, SessionDto>(
-        "UPDATE raw_sessions SET distill_status = 'void' \
+        "UPDATE raw_sessions SET distill_status = 'void', \
+         metadata = COALESCE(metadata,'{}'::jsonb) || jsonb_build_object('pre_void_distill', distill_status) \
          WHERE id = $1 AND distill_status IN ('pending','done') RETURNING *",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// 恢复 void 会话：distill_status 还原自 metadata.pre_void_distill；
+/// 历史遗留（修复前作废、无存档标记）按「有无源为它的原子」启发式推断 done/pending。
+pub async fn unvoid_session_update(pool: &PgPool, id: Uuid) -> StoreResult<Option<SessionDto>> {
+    let row = sqlx::query_as::<_, SessionDto>(
+        "UPDATE raw_sessions SET \
+         distill_status = COALESCE( \
+             NULLIF(metadata->>'pre_void_distill', ''), \
+             CASE WHEN EXISTS ( \
+                 SELECT 1 FROM atoms a, jsonb_array_elements(a.source_refs) e \
+                 WHERE e->>'session_id' = raw_sessions.id::text) \
+             THEN 'done' ELSE 'pending' END), \
+         metadata = metadata - 'pre_void_distill' \
+         WHERE id = $1 AND distill_status = 'void' RETURNING *",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -433,11 +456,30 @@ pub async fn archive_atoms_by_entity(pool: &PgPool, entity_id: Uuid) -> StoreRes
     Ok(res.rows_affected())
 }
 
-/// 归档 source_refs 指向该会话的 active 原子（会话作废的级联遗忘）。
+/// 归档 source_refs 指向该会话的原子（会话作废/擦除的级联遗忘）。
+/// D2（R 报告）：superseded 一并归档——被取代的旧原子同样源自该会话，
+/// 只归档 active 会留下「来源已遗忘、派生还挂 superseded」的不一致状态。
 pub async fn archive_atoms_by_session(pool: &PgPool, session_id: &str) -> StoreResult<u64> {
     let res = sqlx::query(
         "UPDATE atoms SET status = 'archived', updated_at = now() \
-         WHERE status = 'active' AND EXISTS ( \
+         WHERE status IN ('active','superseded') AND EXISTS ( \
+            SELECT 1 FROM jsonb_array_elements(atoms.source_refs) e \
+            WHERE e->>'session_id' = $1)",
+    )
+    .bind(session_id)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
+/// unvoid 恢复：该会话源的被归档原子回到归档前状态——
+/// superseded_by 还在 → 回 superseded（它确实被更新的原子取代）；
+/// 否则回 active（被 void 误伤的正常记忆）。superseded_by 指针在归档时保留，恢复由此判别。
+pub async fn restore_atoms_by_session(pool: &PgPool, session_id: &str) -> StoreResult<u64> {
+    let res = sqlx::query(
+        "UPDATE atoms SET status = CASE WHEN superseded_by IS NOT NULL THEN 'superseded' \
+         ELSE 'active' END, updated_at = now() \
+         WHERE status = 'archived' AND EXISTS ( \
             SELECT 1 FROM jsonb_array_elements(atoms.source_refs) e \
             WHERE e->>'session_id' = $1)",
     )

@@ -24,6 +24,11 @@ pub struct SearchHit {
 
 const RRF_K: i32 = 60;
 
+/// score 展示舍入（3 位小数）：RRF 融合分 16 位小数对排序判断毫无增益，纯耗 token。
+fn round3(x: f64) -> f64 {
+    (x * 1000.0).round() / 1000.0
+}
+
 /// FTS 零命中时的向量腿兜底阈值（余弦距离上限）。
 /// 词法证据缺席时，只保留语义强相关项——否则不相关查询会返回按名次排序的
 /// 全库噪声页（v2 测试报告 H-B2：空查询/乱码/不相关词一律 20 条）。
@@ -163,13 +168,19 @@ pub async fn search_atoms(
     Ok(rows
         .into_iter()
         .map(|r| {
-            // v2 修复（N1）：atoms 无 title 列——取内容前缀做标题，MCP 消费方不再只能看 snippet
+            // v2 修复（N1）：atoms 无 title 列——取内容前缀做标题；内容 ≤40 字时
+            // 前缀 == 全文，title 与 snippet 完全重复（R 报告 P1-4）→ 置 None 去冗余
             let content: String = r.get("content");
-            let title: String = content.chars().take(40).collect();
+            let prefix: String = content.chars().take(40).collect();
+            let title = if prefix == content {
+                None
+            } else {
+                Some(prefix)
+            };
             SearchHit {
                 id: r.get("id"),
-                score: r.get::<f64, _>("score"),
-                title: Some(title),
+                score: round3(r.get::<f64, _>("score")),
+                title,
                 snippet: content,
                 kind: r.get("kind"),
                 needs_review: r.get("needs_review"),
@@ -244,7 +255,7 @@ pub async fn search_scenarios(
         .into_iter()
         .map(|r| SearchHit {
             id: r.get("id"),
-            score: r.get::<f64, _>("score"),
+            score: round3(r.get::<f64, _>("score")),
             title: r.get::<Option<String>, _>("topic"),
             snippet: r.get("summary"),
             kind: None,
@@ -285,7 +296,7 @@ pub async fn search_entities(
             }
             Some(SearchHit {
                 id,
-                score,
+                score: round3(score),
                 title: Some(name),
                 snippet: summary,
                 kind: Some(kind),

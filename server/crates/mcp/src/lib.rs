@@ -1,10 +1,11 @@
-//! MCP（Model Context Protocol）适配器：六域渐进式发现工具面。
+//! MCP（Model Context Protocol）适配器：渐进式发现工具面（六域 + 跨域 search_all）。
 //!
 //! 官方 Rust SDK（rmcp）Streamable HTTP 传输，由 api 装配到 engram-server 的 `/mcp` 端点。
 //! 与 HTTP 路由平级的第二适配器：同一套 core 服务与 scope 分权，独立成 crate。
 //! 渐进式发现（progressive disclosure）：六个领域各一个入口工具
 //! （memory/projects/skills/wiki/todos/codegraph），域内操作经 action 分发
-//! （历史 53 个扁平工具全部收编；action 表在 dispatch 模块，三级发现同源）。
+//! （历史 53 个扁平工具全部收编，R 测试报告后又扩至 60+ 个：remember/doc_patch/
+//! versions/restore/sources 等；action 表在 dispatch 模块，三级发现同源）。
 //! 各域工具在调用时检查各自 scope。鉴权复用 Bearer 中间件（amk_ key / ams_ 会话）：
 //! 每个工具调用请求都过 `bearer_auth`，Principal 已注入 request extensions；
 //! rmcp 把 HTTP request Parts 注入工具上下文，工具实现从这里取 Principal
@@ -88,7 +89,8 @@ fn require_project(principal: &Principal) -> Result<(), rmcp::ErrorData> {
 }
 
 /// 工具名 → 所需 scope（域名前缀即 scope 名；管理台按同一前缀分域）。
-/// 渐进式发现后常规工具就是 6 个域工具（projects 的 scope 叫 project）；
+/// 渐进式发现后常规工具就是 6 个域工具 + 跨域 search_all（scope 检查在 list_tools/
+/// handler 内按"任一域"特判，不进本表；projects 的 scope 叫 project）；
 /// 下面的平铺分支保留兜底（防御未来再加非域工具）。
 fn tool_scope(name: &str) -> &'static str {
     match name {
@@ -257,6 +259,77 @@ fn ok_json(v: serde_json::Value) -> Result<CallToolResult, rmcp::ErrorData> {
     )]))
 }
 
+// ---------- MCP 面返回瘦身（R 报告 P0-1：写操作不回显正文） ----------
+//
+// 调用方刚发送的正文原样返回是纯浪费（正文已在调用方上下文里）。
+// HTTP API 保持全量（Web UI 依赖），MCP 面统一只回元数据——渐进式「列表层」字段集。
+
+/// 通用瘦身：删 body/content 等正文键，补 content_chars。
+fn slim_content(v: serde_json::Value, content_keys: &[&str]) -> serde_json::Value {
+    let mut v = v;
+    let mut chars = 0i64;
+    if let Some(obj) = v.as_object_mut() {
+        for key in content_keys {
+            if let Some(s) = obj.remove(*key).and_then(|x| x.as_str().map(String::from)) {
+                chars = s.chars().count() as i64;
+            }
+        }
+        obj.insert("content_chars".into(), json!(chars));
+        obj.insert("content_omitted".into(), json!(true));
+    }
+    v
+}
+
+/// 会话写入瘦身：turns 数组换轮次数（全文走 get_session）。
+fn slim_session(s: serde_json::Value) -> serde_json::Value {
+    let mut v = s;
+    if let Some(obj) = v.as_object_mut() {
+        let turns = obj.remove("content");
+        let n = turns.as_ref().and_then(|t| t.as_array()).map(|a| a.len());
+        obj.insert("turns".into(), json!(n.unwrap_or(0)));
+        obj.insert(
+            "hint".into(),
+            json!("已入库（轮次数见 turns）——原文用 get_session 回读；蒸馏产物几分钟后可 search/list_atoms 看到"),
+        );
+    }
+    v
+}
+
+/// 技能写操作瘦身：正文换 content_chars。
+fn slim_skill(s: serde_json::Value) -> serde_json::Value {
+    slim_content(s, &["content"])
+}
+
+/// 项目文档瘦身：正文换 content_chars。
+fn slim_doc(d: serde_json::Value) -> serde_json::Value {
+    slim_content(d, &["content"])
+}
+
+/// 待办瘦身：正文换 content_chars（title/状态/时间全保留）。
+fn slim_todo(t: serde_json::Value) -> serde_json::Value {
+    slim_content(t, &["body"])
+}
+
+/// 递归删除对象键（context include_evidence=false 时剥溯源字段）。
+fn strip_keys(v: &mut serde_json::Value, keys: &[&str]) {
+    match v {
+        serde_json::Value::Object(m) => {
+            for k in keys {
+                m.remove(*k);
+            }
+            for (_, child) in m.iter_mut() {
+                strip_keys(child, keys);
+            }
+        }
+        serde_json::Value::Array(a) => {
+            for child in a.iter_mut() {
+                strip_keys(child, keys);
+            }
+        }
+        _ => {}
+    }
+}
+
 // ---------- 工具参数 ----------
 
 /// memory_context / memory_search 公共可选参数里的时间串直接用 String（ISO8601）。
@@ -350,6 +423,11 @@ pub struct ContextParams {
     /// 总字符预算（默认 8000）
     #[schemars(description = "总字符数预算，默认 8000。通常不需要调。")]
     pub budget_chars: Option<usize>,
+    /// 证据溯源（默认关）
+    #[schemars(
+        description = "可选：true = 携带证据溯源字段（persona.evidence_refs / atom.source_refs / scenario.atom_refs 的 ID 数组）。默认 false——溯源 ID 客户端几乎不消费，省上下文（R 报告 P1-5）；审计需要时再开。"
+    )]
+    pub include_evidence: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -382,9 +460,9 @@ pub struct ListAtomsParams {
         description = "可选：按类型过滤。preference=偏好, fact=事实, decision=决策, event=事件, insight=洞察, correction=纠正, failure=失败, convention=惯例。"
     )]
     pub kind: Option<String>,
-    /// active / superseded / archived
+    /// active（默认）/ superseded / archived / candidate / all
     #[schemars(
-        description = "可选：按状态过滤。active=有效（默认查这个）, superseded=被取代, archived=归档。"
+        description = "可选：按状态过滤，默认 \"active\"（只看有效记忆）。superseded=被取代, archived=归档, candidate=候选；\"all\" = 全部状态（巡检历史时用）。"
     )]
     pub status: Option<String>,
     /// true = 只看待审（低置信度）；false = 只看已审
@@ -473,13 +551,29 @@ pub struct AppendSessionParams {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ForgetParams {
     /// 会话 id（UUID）
-    #[schemars(description = "要遗忘的会话 id（UUID）。")]
+    #[schemars(description = "会话 id（UUID）。restore 模式 = 要恢复的会话 id。")]
     pub session_id: String,
-    /// void（默认：蒸馏跳过，记录保留）| erase（需 erase scope：物理删除）
+    /// void（默认：蒸馏跳过，记录保留）| erase（需 erase scope：物理删除）| restore（撤销 void）
     #[schemars(
-        description = "遗忘力度：\"void\"（默认，推荐——会话作废、原文保留，已蒸馏产物自动级联归档）/ \"erase\"（物理删除，需要 erase scope 的 key）。"
+        description = "遗忘力度：\"void\"（默认，推荐——会话作废、原文保留，已蒸馏产物自动级联归档）/ \"erase\"（物理删除，需要 erase scope 的 key）/ \"restore\"（撤销 void：恢复会话与被级联归档的原子——误作废的后悔药）。"
     )]
     pub mode: Option<String>,
+}
+
+/// 一句话记忆（R 报告 P1-9）：记条小事实不必手搓 turns 数组。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct RememberParams {
+    /// 要记住的一句话
+    #[schemars(
+        description = "要记住的事实/偏好/事件，一句话（如「用户的猫叫墨鱼，喜欢趴键盘上睡觉」）。等价于单轮 write_session + auto 蒸馏。"
+    )]
+    pub text: String,
+    /// 会话级敏感标记
+    #[schemars(description = "可选：敏感内容（医疗/感情/财务）置 true，蒸馏产物默认不进检索。")]
+    pub sensitive: Option<bool>,
+    /// agent 归因
+    #[schemars(description = "可选：agent 归因名。缺省用连接本服务的 API key 名。")]
+    pub agent: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -490,6 +584,19 @@ pub struct EntitiesParams {
     /// 返回条数（默认 20）
     #[schemars(description = "返回条数，默认 20。")]
     pub limit: Option<i64>,
+}
+
+/// 跨域全局检索（R 报告 P1-8：把 6 次单域搜索并成 1 次）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SearchAllParams {
+    /// 检索词（各域同词并发检索）
+    #[schemars(
+        description = "检索词。对 key 有 scope 的域并发检索（memory/wiki/skills/todos/projects）。"
+    )]
+    pub query: String,
+    /// 每域返回条数（默认 3）
+    #[schemars(description = "每域返回条数上限，默认 3。结果只有摘要——精确检索请用单域工具。")]
+    pub max_per_domain: Option<i64>,
 }
 
 // ---------- 项目记忆工具参数 ----------
@@ -717,6 +824,32 @@ pub struct ProjectDocDeleteParams {
     pub doc_id: String,
 }
 
+/// 行级补丁（R 报告 P1-10）：改长文档不再「doc_get 取全文→doc_update 重发全文」。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProjectDocPatchParams {
+    /// 文档 id（UUID）
+    #[schemars(description = "文档 id（UUID，来自 project_get 返回的 docs 列表）。")]
+    pub doc_id: String,
+    /// 起始行（1-based）
+    #[schemars(
+        description = "行号（1-based）。replace/delete = 区间起点；insert = 插入位置（在该行之前，total+1 = 追加到末尾）。"
+    )]
+    pub start_line: i64,
+    /// 结束行（1-based，含该行）
+    #[schemars(
+        description = "行号（1-based，含该行）。replace/delete = 区间终点；insert 忽略此参数。"
+    )]
+    pub end_line: i64,
+    /// replace（默认）| insert | delete
+    #[schemars(
+        description = "补丁模式：\"replace\"（默认，[start_line,end_line] 替换为 content）/ \"insert\"（在 start_line 前插入 content，可传 start_line=total+1 追加）/ \"delete\"（删除 [start_line,end_line]，忽略 content）。"
+    )]
+    pub mode: Option<String>,
+    /// 替换/插入的文本（可多行；delete 忽略）
+    #[schemars(description = "替换或插入的文本（可多行）。mode=delete 时不需要。")]
+    pub content: Option<String>,
+}
+
 // ---------- 技能域工具参数 ----------
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -760,7 +893,7 @@ pub struct CgQueryParams {
     pub project: String,
     /// explore | search | node | callers | callees | impact
     #[schemars(
-        description = "查询类型：search=搜符号, explore=区域总览(markdown), node=符号详情(markdown), callers=谁调用它, callees=它调用谁, impact=改动影响面。"
+        description = "查询类型：search=搜符号, explore=区域符号大纲(默认不带源码), node=符号详情含源码, callers=谁调用它, callees=它调用谁, impact=改动影响面。"
     )]
     pub kind: String,
     /// 查询文本或符号名
@@ -769,15 +902,45 @@ pub struct CgQueryParams {
     )]
     pub target: String,
     /// explore→max-files；impact→depth
-    #[schemars(description = "可选：explore 的 max-files 或 impact 的 depth。")]
+    #[schemars(
+        description = "可选：explore 的 max-files（仅 include_source=true 生效）或 impact 的 depth。"
+    )]
     pub depth: Option<u32>,
+    /// explore 是否带完整源码（默认 false）
+    #[schemars(
+        description = "可选，仅 explore 生效：true = CLI 原生输出（含完整源码，体积大）；默认 false = 符号大纲（name/kind/行号/签名，无源码——单个符号的源码用 kind=node 取）。"
+    )]
+    pub include_source: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SkillsGetParams {
     /// 技能 slug（kebab-case 标识）
-    #[schemars(description = "技能 slug（来自 skills_list 的返回，如 review-pr）。")]
+    #[schemars(
+        description = "技能 slug（来自 skills_list 的返回，如 review-pr）。也接受技能名 name 精确匹配。"
+    )]
     pub slug: String,
+}
+
+/// 版本列表（R 报告建议 #5：skills 快照已在存，MCP 此前未暴露）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsVersionsParams {
+    /// 技能 slug（或技能名）
+    #[schemars(description = "技能 slug（或技能名）。")]
+    pub slug: String,
+}
+
+/// 回滚到历史版本。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SkillsRestoreParams {
+    /// 技能 slug（或技能名）
+    #[schemars(description = "技能 slug（或技能名）。")]
+    pub slug: String,
+    /// 目标版本 id（versions 列表返回的 id，非 rev 序号）
+    #[schemars(
+        description = "目标版本 id（来自 versions 列表的 id 字段）。回滚本身也留版本快照，可再滚回来。"
+    )]
+    pub revision_id: String,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -953,7 +1116,12 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_memory)?;
-        ok_json(serde_json::to_value(&pack).unwrap_or(serde_json::json!({})))
+        let mut v = serde_json::to_value(&pack).unwrap_or(serde_json::json!({}));
+        // P1-5：证据溯源 ID 默认不携带（审计时显式 include_evidence=true）
+        if !params.0.include_evidence.unwrap_or(false) {
+            strip_keys(&mut v, &["evidence_refs", "source_refs", "atom_refs"]);
+        }
+        ok_json(v)
     }
 
     /// 定向检索用户记忆（全文 + 向量混合，跨 L1/L2/L3/实体四层）。
@@ -1002,11 +1170,25 @@ impl EngramMcpServer {
         require_memory(&p)?;
         let lp = params.0;
         let cursor = lp.cursor.as_deref().map(parse_flex_datetime).transpose()?;
+        // P1-6：默认 active——文档一直写着「默认查这个」，行为此前却是全量。
+        // "all" 是显式出口（巡检历史）。
+        let status = match lp.status.as_deref() {
+            None | Some("") | Some("active") => Some("active"),
+            Some("all") => None,
+            Some(other) => {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "status 只支持 active/superseded/archived/candidate/all（收到 {other:?}）"
+                    ),
+                ));
+            }
+        };
         let atoms = self
             .svc()
             .list_atoms(
                 lp.kind.as_deref(),
-                lp.status.as_deref(),
+                status,
                 lp.needs_review,
                 cursor,
                 lp.limit.unwrap_or(100),
@@ -1084,7 +1266,10 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_memory)?;
-        ok_json(serde_json::to_value(&s).unwrap_or(serde_json::json!({})))
+        // P0-1：turns 原文不回显（调用方刚发过——回显是纯浪费）
+        ok_json(slim_session(
+            serde_json::to_value(&s).unwrap_or(serde_json::json!({})),
+        ))
     }
 
     /// 向一个未蒸馏的会话追加轮次（长对话分片落库，不必等收尾一次性写）。
@@ -1107,14 +1292,60 @@ impl EngramMcpServer {
             .append_session(id, turns, None, ap.distill.as_deref().unwrap_or("auto"))
             .await
             .map_err(from_memory)?;
-        ok_json(serde_json::to_value(&s).unwrap_or(serde_json::json!({})))
+        ok_json(slim_session(
+            serde_json::to_value(&s).unwrap_or(serde_json::json!({})),
+        ))
+    }
+
+    /// 一句话记忆（R 报告 P1-9）：记条小事实不必手搓 turns 数组。
+    ///
+    /// 何时用：用户说了值得长期记住的一句话事实/偏好/事件时（「记住我的猫叫墨鱼」）。
+    /// 何时不用：成段对话收尾用 write_session（上下文更完整，蒸馏质量更高）。
+    async fn memory_remember(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<RememberParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let principal = principal_of(&ctx)?;
+        require_memory(&principal)?;
+        let rp = params.0;
+        let text = rp.text.trim().to_string();
+        if text.is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "text 不能为空——要记住的内容一句话写清楚",
+            ));
+        }
+        if text.chars().count() > engram_core::memory::TURN_TEXT_MAX_CHARS {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "text 超长（上限 {} 字）——成段内容请走 write_session",
+                    engram_core::memory::TURN_TEXT_MAX_CHARS
+                ),
+            ));
+        }
+        let agent = rp.agent.unwrap_or_else(|| match &principal {
+            Principal::ApiKey { name, .. } => name.clone(),
+            Principal::Admin => "admin".into(),
+        });
+        let turns = serde_json::json!([{ "speaker": "user", "text": text }]);
+        let s = self
+            .svc()
+            .write_session(&agent, turns, "auto", rp.sensitive.unwrap_or(false))
+            .await
+            .map_err(from_memory)?;
+        let mut v = slim_session(serde_json::to_value(&s).unwrap_or(serde_json::json!({})));
+        v["hint"] = json!("已记住（auto 蒸馏，几分钟内可 search 命中）");
+        ok_json(v)
     }
 
     /// 遗忘：用户说「别记住这段/把这事忘了」时使用，对任何会话都有效。
     ///
     /// mode="void"（默认）：该会话作废、原文保留可审计；若会话已蒸馏，其产出的
-    /// active 原子会**级联归档**——检索与上下文包立即不再返回它们。
-    /// mode="erase"：物理删除该会话（不可逆，需要 erase scope 的 key）。
+    /// 原子（active 与 superseded）会**级联归档**——检索与上下文包立即不再返回它们。
+    /// mode="erase"：物理删除该会话及其派生原子的检索可见性（不可逆，需要 erase scope 的 key）。
+    /// mode="restore"：撤销 void——误作废的后悔药，恢复会话与被归档的原子。
     /// 注意：只对用户明确表达的遗忘请求使用，不要自行判断「这段不重要」就遗忘。
     async fn memory_forget(
         &self,
@@ -1136,9 +1367,18 @@ impl EngramMcpServer {
                 self.svc().erase_session(id).await.map_err(from_memory)?;
                 ok_json(serde_json::json!({ "mode": "erase", "erased": fp.session_id }))
             }
+            "restore" => {
+                let (s, restored) = self.svc().unvoid_session(id).await.map_err(from_memory)?;
+                ok_json(serde_json::json!({
+                    "mode": "restore",
+                    "session": s,
+                    "restored_atoms": restored,
+                    "message": "已撤销作废——会话与被级联归档的原子均已恢复",
+                }))
+            }
             other => Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
-                format!("mode 只支持 void / erase，收到 {other:?}"),
+                format!("mode 只支持 void / erase / restore，收到 {other:?}"),
             )),
         }
     }
@@ -1448,7 +1688,10 @@ impl EngramMcpServer {
             .add_doc(id, &dp.category, &dp.title, &dp.content)
             .await
             .map_err(from_project)?;
-        ok_json(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})))
+        // P0-1：刚发送的正文不回显
+        ok_json(slim_doc(
+            serde_json::to_value(&doc).unwrap_or(serde_json::json!({})),
+        ))
     }
 
     /// 读取项目文档：全文或按行区间精读（1-based，含两端）。
@@ -1558,7 +1801,45 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_project)?;
-        ok_json(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})))
+        ok_json(slim_doc(
+            serde_json::to_value(&doc).unwrap_or(serde_json::json!({})),
+        ))
+    }
+
+    /// 行级补丁（R 报告 P1-10）：改长文档的一行/一段，不再取全文重发全文。
+    ///
+    /// 何时用：doc_search 命中行号后的小修正——replace 换一段、insert 插一段、delete 删一段。
+    /// 何时不用：结构性重写还是 doc_update 整体替换省事。
+    async fn project_doc_patch(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<ProjectDocPatchParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_project(&p)?;
+        let dp = params.0;
+        let id = Uuid::parse_str(&dp.doc_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "doc_id 不是合法 UUID"))?;
+        let doc = self
+            .svc_project()
+            .patch_doc(
+                id,
+                dp.start_line,
+                dp.end_line,
+                dp.mode.as_deref().unwrap_or("replace"),
+                dp.content.as_deref(),
+            )
+            .await
+            .map_err(from_project)?;
+        let mut v = slim_doc(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})));
+        v["total_lines"] = json!(doc.content.lines().count());
+        v["patched"] = json!({
+            "mode": dp.mode.as_deref().unwrap_or("replace"),
+            "start_line": dp.start_line,
+            "end_line": dp.end_line,
+        });
+        v["hint"] = json!("行号基于新版本——继续补丁前先重新定位（行区间读 doc_get）");
+        ok_json(v)
     }
 
     /// 删除项目文档（不可逆）。
@@ -1737,7 +2018,8 @@ impl EngramMcpServer {
             .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, format!("入队失败: {e}")))?;
         ok_json(serde_json::json!({
             "project": params.0.project, "job_id": job.id, "status": "queued",
-            "hint": "索引异步执行（首次可能数分钟）——稍后 codegraph_list 确认 ready",
+            "hint": "索引异步执行（首次可能数分钟）——稍后 codegraph_list 确认 ready。\
+                     ready 后 files/symbols 为 0 通常说明仓库没有可识别的源码文件（纯 README/文档仓库索引不出符号，属正常行为）",
         }))
     }
 
@@ -1793,7 +2075,13 @@ impl EngramMcpServer {
         })?;
         let id = cg_resolve(&self.state, &params.0.project).await?;
         let v = cg_svc(&self.state)
-            .query(id, kind, &params.0.target, params.0.depth)
+            .query(
+                id,
+                kind,
+                &params.0.target,
+                params.0.depth,
+                params.0.include_source.unwrap_or(false),
+            )
             .await
             .map_err(from_cg)?;
         ok_json(v)
@@ -1843,7 +2131,9 @@ impl EngramMcpServer {
             })
             .await
             .map_err(from_skills)?;
-        ok_json(serde_json::to_value(&s).unwrap_or(serde_json::json!({})))
+        ok_json(slim_skill(
+            serde_json::to_value(&s).unwrap_or(serde_json::json!({})),
+        ))
     }
 
     /// 更新技能（正文/名称/描述/标签/启停；语义变更自动留版本快照，可回滚）。
@@ -1872,7 +2162,63 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_skills)?;
-        ok_json(serde_json::to_value(&s).unwrap_or(serde_json::json!({})))
+        ok_json(slim_skill(
+            serde_json::to_value(&s).unwrap_or(serde_json::json!({})),
+        ))
+    }
+
+    /// 版本列表（R 报告建议 #5）：语义变更自动留的快照，MCP 此前不可见。
+    ///
+    /// 何时用：改坏前先看有哪些版本；或挑 revision_id 给 restore 回滚。
+    async fn skills_versions(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsVersionsParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        let revs = self
+            .skills_svc()
+            .list_revisions(&params.0.slug)
+            .await
+            .map_err(from_skills)?;
+        // 列表不带正文全文（content_chars 决策用）；回滚走 restore（revision_id）
+        let rows: Vec<serde_json::Value> = revs
+            .iter()
+            .map(|r| {
+                json!({
+                    "id": r.id, "rev": r.rev, "name": r.name,
+                    "description": r.description, "tags": r.tags,
+                    "origin": r.origin, "created_at": r.created_at,
+                    "content_chars": r.content.chars().count(),
+                })
+            })
+            .collect();
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+    }
+
+    /// 回滚到历史版本（回滚本身也留快照，可再滚回）。
+    ///
+    /// 何时用：一次 update 改坏后恢复。revision_id 来自 versions 列表（id 字段）。
+    async fn skills_restore(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SkillsRestoreParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_skills(&p)?;
+        let rp = params.0;
+        let rid = Uuid::parse_str(&rp.revision_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "revision_id 不是合法 UUID"))?;
+        let s = self
+            .skills_svc()
+            .restore_revision(&rp.slug, rid)
+            .await
+            .map_err(from_skills)?;
+        let mut v = slim_skill(serde_json::to_value(&s).unwrap_or(serde_json::json!({})));
+        v["restored_from"] = json!(rp.revision_id);
+        v["hint"] = json!("已回滚（本次回滚前状态留了 restore 快照，可再滚回）");
+        ok_json(v)
     }
 
     /// 删除技能（级联删版本快照，不可逆）。
@@ -1960,7 +2306,10 @@ impl EngramMcpServer {
                 .map(|s| ("imported", s))
         };
         let (status, s) = result.map_err(from_skills)?;
-        ok_json(serde_json::json!({ "status": status, "skill": s }))
+        ok_json(serde_json::json!({
+            "status": status,
+            "skill": slim_skill(serde_json::to_value(&s).unwrap_or(serde_json::json!({}))),
+        }))
     }
 
     // ---------- Wiki 域（wiki scope；实现细节见 mcp_wiki.rs） ----------
@@ -1969,8 +2318,8 @@ impl EngramMcpServer {
     ///
     /// 何时用：需要查证「世界知识」（用户 Wiki 里沉淀的文档、概念、实体、问答）时。
     /// 何时不用：回忆「用户本人」的偏好/事实/经历用 memory_search——那是用户记忆域。
-    /// 返回 {purpose, pages}：purpose 是 wiki 的研究方向意图（未设为 null），
-    /// pages 为命中页面全文；写作前先检索可避免造重复页面。
+    /// 返回 {purpose, pages}：命中只带片段（命中词附近 ~160 字符）+ content_chars，
+    /// 全文按需 wiki_get_page——检索可能拖回数万字符全文是 R 报告点名的上下文黑洞（P0-2）。
     async fn wiki_search(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1983,7 +2332,16 @@ impl EngramMcpServer {
             .search_with_purpose(&wp.query, wp.max_items.unwrap_or(20))
             .await
             .map_err(wiki::from_wiki)?;
-        ok_json(result)
+        let mut v = result;
+        if let Some(pages) = v["pages"].as_array_mut() {
+            *pages = pages
+                .iter()
+                .cloned()
+                .map(|pg| wiki::snippet_page(pg, &wp.query))
+                .collect();
+        }
+        v["hint"] = json!("命中只带片段——读全文用 get_page（slug 在每条命中里）");
+        ok_json(v)
     }
 
     /// 浏览 Wiki 页面列表（可按页型过滤；列表不带正文）。
@@ -2008,7 +2366,7 @@ impl EngramMcpServer {
         let values: Vec<serde_json::Value> = serde_json::to_value(&pages)
             .unwrap_or(serde_json::json!([]))
             .as_array()
-            .map(|a| a.iter().map(wiki::trim_page).collect())
+            .map(|a| a.iter().cloned().map(wiki::trim_page).collect())
             .unwrap_or_default();
         ok_json(serde_json::to_value(&values).unwrap_or(serde_json::json!([])))
     }
@@ -2054,7 +2412,10 @@ impl EngramMcpServer {
             )
             .await
             .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::to_value(&page).unwrap_or(serde_json::json!({})))
+        // P0-1：刚发送的正文不回显；版本历史在覆盖时自动留快照
+        let mut v = wiki::trim_page(serde_json::to_value(&page).unwrap_or(serde_json::json!({})));
+        v["content_omitted"] = json!(true);
+        ok_json(v)
     }
 
     /// 把一段源文本织入 Wiki（异步：入队 LLM 流水线，自动抽取实体/概念并互链）。
@@ -2174,7 +2535,7 @@ impl EngramMcpServer {
         ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
     }
 
-    /// 删除 Wiki 页面（不可逆——连带清理双向 wikilinks）。
+    /// 删除 Wiki 页面（不可逆——连带清理双向 wikilinks；最后状态留版本快照可重建）。
     ///
     /// 何时用：页面作废/测试数据清理。只对明确表达的删除请求使用。
     async fn wiki_delete_page(
@@ -2188,7 +2549,111 @@ impl EngramMcpServer {
             .delete_page(&params.0.slug)
             .await
             .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::json!({ "deleted": params.0.slug, "ok": deleted }))
+        ok_json(serde_json::json!({
+            "deleted": params.0.slug, "ok": deleted,
+            "message": "已删除（最后状态留有版本快照——误删可 restore_version 重建）",
+        }))
+    }
+
+    /// 页面版本列表（新→旧；含已删除页的最后状态快照）。
+    ///
+    /// 何时用：覆盖更新前看看历史；或找某个版本的 version 号/预览正文。
+    async fn wiki_versions(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiVersionsParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let rows = wiki::svc(&self.state)
+            .page_versions(&params.0.slug)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+    }
+
+    /// 读取某版本快照的正文（回滚前预览用）。
+    async fn wiki_version_content(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiVersionContentParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let content = wiki::svc(&self.state)
+            .page_version_content(&params.0.slug, params.0.version)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::json!({
+            "slug": params.0.slug,
+            "version": params.0.version,
+            "content": content,
+        }))
+    }
+
+    /// 回滚页面到历史版本（回滚本身产生新版本，历史不丢；已删除的页面从快照重建）。
+    ///
+    /// 何时用：一次覆盖改坏内容时；或误删页面要找回。
+    async fn wiki_restore_version(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiRestoreVersionParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let page = wiki::svc(&self.state)
+            .restore_page_version(&params.0.slug, params.0.version)
+            .await
+            .map_err(wiki::from_wiki)?;
+        let mut v = wiki::trim_page(serde_json::to_value(&page).unwrap_or(serde_json::json!({})));
+        v["restored_from"] = json!(params.0.version);
+        v["message"] = json!("已恢复（本次回滚前状态留了快照，可再滚回）");
+        ok_json(v)
+    }
+
+    /// 列出织入原料（wiki_sources：ingest 的源文本及其状态）。
+    ///
+    /// 何时用：lint 报 stale_source 后找要清理的 source_id；或查某次 ingest 的状态。
+    async fn wiki_sources(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        _params: Parameters<wiki::WikiSourcesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let rows = wiki::svc(&self.state)
+            .list_sources()
+            .await
+            .map_err(wiki::from_wiki)?;
+        let items: Vec<serde_json::Value> = rows
+            .into_iter()
+            .map(|(id, title, status, sha)| {
+                json!({"source_id": id, "title": title, "status": status, "sha256": sha})
+            })
+            .collect();
+        ok_json(serde_json::to_value(&items).unwrap_or(serde_json::json!([])))
+    }
+
+    /// 删除一条织入原料及其全部产出（级联：源、任务、由它产出的页面；不可逆）。
+    ///
+    /// 何时用：lint 报 stale_source（页面已删但原料残留）或想整体撤销一次织入。
+    async fn wiki_delete_source(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiDeleteSourceParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let id = Uuid::parse_str(&params.0.source_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "source_id 不是合法 UUID"))?;
+        let report = wiki::svc(&self.state)
+            .delete_source_cascade(id)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(
+            serde_json::to_value(&report)
+                .unwrap_or(serde_json::json!({ "deleted": params.0.source_id })),
+        )
     }
 
     // ---------- 待办域工具（todos scope；第七域） ----------
@@ -2218,7 +2683,9 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_todo)?;
-        ok_json(serde_json::to_value(&dto).unwrap_or(serde_json::json!({})))
+        ok_json(slim_todo(
+            serde_json::to_value(&dto).unwrap_or(serde_json::json!({})),
+        ))
     }
 
     /// 待办列表（open 优先；status/priority/tag/q 过滤）。
@@ -2272,7 +2739,9 @@ impl EngramMcpServer {
             .update(id, None, None, None, Some("done"), None, None, None)
             .await
             .map_err(from_todo)?;
-        ok_json(serde_json::to_value(&dto).unwrap_or(serde_json::json!({})))
+        ok_json(slim_todo(
+            serde_json::to_value(&dto).unwrap_or(serde_json::json!({})),
+        ))
     }
 
     /// 更新待办（标题/详情/优先级/状态，部分字段 None 不动）。
@@ -2301,7 +2770,9 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_todo)?;
-        ok_json(serde_json::to_value(&dto).unwrap_or(serde_json::json!({})))
+        ok_json(slim_todo(
+            serde_json::to_value(&dto).unwrap_or(serde_json::json!({})),
+        ))
     }
 
     /// 删除待办（物理删除；归档语义走 todo_update status=archived）。
@@ -2316,6 +2787,190 @@ impl EngramMcpServer {
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "id 不是合法 UUID"))?;
         todo_svc(&self.state).delete(id).await.map_err(from_todo)?;
         ok_json(serde_json::json!({ "deleted": params.0.id }))
+    }
+
+    // ---------- 跨域全局检索（第七个常驻工具；不属单一 scope，按 key 实际 scope 分域执行） ----------
+
+    /// 全局检索（R 报告 P1-8）：一次查询并发打 memory/wiki/skills/todos/projects 五域，
+    /// 各返回 top-k 摘要（含命中域标注）——「6 次单域搜索」压成 1 次。
+    ///
+    /// 何时用：不确定信息在哪域、或要先扫一遍全库面时。
+    /// 何时不用：已知域的精确检索直接用单域工具（省时省 token，且支持更多过滤参数）。
+    /// 只检索本 key 有 scope 的域；命中只有摘要，全文按各域 get/read 通道按需取。
+    #[tool(
+        name = "search_all",
+        annotations(
+            title = "全局检索",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn search_all_tool(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<SearchAllParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        let q = params.0.query.trim().to_string();
+        if q.is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "query 不能为空——给出检索词，各域并发检索",
+            ));
+        }
+        let max = params.0.max_per_domain.unwrap_or(3).clamp(1, 10);
+        let scope_of = |s: &str| p.has_scope(s);
+        if !["memory", "wiki", "skills", "todos", "project"]
+            .iter()
+            .any(|s| scope_of(s))
+        {
+            return Err(mcp_err(
+                ErrorCode::INVALID_REQUEST,
+                "本 key 没有任何可检索域的 scope——search_all 需要至少一个域的读权限",
+            ));
+        }
+
+        // memory（l1/l2/实体）；检索失败（如 LLM 未配置）降级为错误标注而非整体失败
+        let mem = scope_of("memory");
+        let mem_fut = async {
+            if !mem {
+                return None;
+            }
+            let r = self
+                .svc()
+                .search(&q, &["l1", "l2", "entities"], max, false, false, None, None)
+                .await;
+            Some(match r {
+                Ok(r) => json!({
+                    "l1": r.l1.iter().map(|h| json!({"id": h.id, "score": h.score, "snippet": h.snippet})).collect::<Vec<_>>(),
+                    "l2": r.l2.iter().map(|h| json!({"id": h.id, "title": h.title, "snippet": h.snippet})).collect::<Vec<_>>(),
+                    "entities": r.entities.iter().map(|h| json!({"id": h.id, "title": h.title, "kind": h.kind})).collect::<Vec<_>>(),
+                }),
+                Err(e) => json!({ "error": e.to_string() }),
+            })
+        };
+        // wiki（命中片段化，与 wiki_search 同口径）
+        let wik = scope_of("wiki");
+        let wiki_fut = async {
+            if !wik {
+                return None;
+            }
+            let r = wiki::svc(&self.state).search(&q, max).await;
+            Some(match r {
+                Ok(pages) => json!(
+                    pages
+                        .iter()
+                        .map(|pg| {
+                            wiki::snippet_page(serde_json::to_value(pg).unwrap_or(json!({})), &q)
+                        })
+                        .collect::<Vec<_>>()
+                ),
+                Err(e) => json!({ "error": e.to_string() }),
+            })
+        };
+        // skills（名字/描述命中，标题 + 描述即可定位）
+        let sk = scope_of("skills");
+        let skills_fut = async {
+            if !sk {
+                return None;
+            }
+            let pattern = format!("%{q}%");
+            match engram_storage::repo::skills::list_skills(
+                &self.state.pool,
+                Some(pattern),
+                None,
+                None,
+            )
+            .await
+            {
+                Ok(rows) => Some(json!(rows
+                    .iter()
+                    .take(max as usize)
+                    .map(|s| json!({"slug": s.slug, "name": s.name, "description": s.description}))
+                    .collect::<Vec<_>>())),
+                Err(e) => Some(json!({ "error": e.to_string() })),
+            }
+        };
+        // todos（标题/正文子串）
+        let td = scope_of("todos");
+        let todos_fut = async {
+            if !td {
+                return None;
+            }
+            match todo_svc(&self.state)
+                .list(None, None, None, Some(&q), None, max)
+                .await
+            {
+                Ok(rows) => Some(json!(
+                    rows.iter()
+                        .map(|t| json!({"id": t.id, "title": t.title, "status": t.status}))
+                        .collect::<Vec<_>>()
+                )),
+                Err(e) => Some(json!({ "error": e.to_string() })),
+            }
+        };
+        let (mem_r, wiki_r, skills_r, todos_r) =
+            tokio::join!(mem_fut, wiki_fut, skills_fut, todos_fut);
+
+        // projects（项目名/描述命中 + 各项目文档按行检索，总量封顶）
+        let mut projects_val: Option<serde_json::Value> = None;
+        if scope_of("project") {
+            let mut hits: Vec<serde_json::Value> = Vec::new();
+            match self.svc_project().list_projects(None).await {
+                Ok(projects) => {
+                    let ql = q.to_lowercase();
+                    'outer: for pr in projects.iter().take(20) {
+                        let desc = pr.description.as_deref().unwrap_or("").to_lowercase();
+                        let name_hit = pr.name.to_lowercase().contains(&ql);
+                        let desc_hit = desc.contains(&ql);
+                        if (name_hit || desc_hit) && hits.len() < max as usize {
+                            hits.push(json!({
+                                "project": pr.name, "match": "项目名/描述",
+                                "status": pr.status,
+                            }));
+                        }
+                        if let Ok(doc_hits) =
+                            self.svc_project().search_doc_lines(pr.id, &q, 2).await
+                        {
+                            for h in doc_hits {
+                                if hits.len() >= max as usize + 2 {
+                                    break 'outer;
+                                }
+                                hits.push(json!({
+                                    "project": pr.name, "match": "文档行",
+                                    "title": h.title, "line": h.line, "text": h.text,
+                                }));
+                            }
+                        }
+                    }
+                    projects_val = Some(json!(hits));
+                }
+                Err(e) => projects_val = Some(json!({ "error": e.to_string() })),
+            }
+        }
+
+        let mut out = json!({
+            "query": q,
+            "note": "各域 top-k 摘要——精确/过滤检索用单域工具；wiki 全文 get_page，memory 原文 get_session，技能全文 skills get",
+        });
+        if let Some(v) = mem_r {
+            out["memory"] = v;
+        }
+        if let Some(v) = wiki_r {
+            out["wiki"] = v;
+        }
+        if let Some(v) = skills_r {
+            out["skills"] = v;
+        }
+        if let Some(v) = todos_r {
+            out["todos"] = v;
+        }
+        if let Some(v) = projects_val {
+            out["projects"] = v;
+        }
+        ok_json(out)
     }
 
     // ---------- 渐进式发现：域入口工具（每域一个，域内操作按需发现） ----------
@@ -2360,6 +3015,13 @@ impl EngramMcpServer {
                 self.memory_search(
                     ctx,
                     Parameters(dispatch::from_args("memory", "search", call.args)?),
+                )
+                .await
+            }
+            "remember" => {
+                self.memory_remember(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "remember", call.args)?),
                 )
                 .await
             }
@@ -2547,6 +3209,13 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "doc_patch" => {
+                self.project_doc_patch(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "doc_patch", call.args)?),
+                )
+                .await
+            }
             "doc_delete" => {
                 self.project_doc_delete(
                     ctx,
@@ -2622,6 +3291,20 @@ impl EngramMcpServer {
                 self.skills_update(
                     ctx,
                     Parameters(dispatch::from_args("skills", "update", call.args)?),
+                )
+                .await
+            }
+            "versions" => {
+                self.skills_versions(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "versions", call.args)?),
+                )
+                .await
+            }
+            "restore" => {
+                self.skills_restore(
+                    ctx,
+                    Parameters(dispatch::from_args("skills", "restore", call.args)?),
                 )
                 .await
             }
@@ -2707,6 +3390,41 @@ impl EngramMcpServer {
                 self.wiki_archive_query(
                     ctx,
                     Parameters(dispatch::from_args("wiki", "archive_query", call.args)?),
+                )
+                .await
+            }
+            "versions" => {
+                self.wiki_versions(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "versions", call.args)?),
+                )
+                .await
+            }
+            "version_content" => {
+                self.wiki_version_content(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "version_content", call.args)?),
+                )
+                .await
+            }
+            "restore_version" => {
+                self.wiki_restore_version(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "restore_version", call.args)?),
+                )
+                .await
+            }
+            "sources" => {
+                self.wiki_sources(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "sources", call.args)?),
+                )
+                .await
+            }
+            "delete_source" => {
+                self.wiki_delete_source(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "delete_source", call.args)?),
                 )
                 .await
             }
@@ -2876,42 +3594,49 @@ impl EngramMcpServer {
 const SERVER_INSTRUCTIONS: &str = "\
 Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：六个领域各一个入口工具\
 （memory 用户记忆 / projects 项目记忆 / skills 技能 / wiki 知识库 / todos 待办 / codegraph 代码图谱），\
-调用形态 {\"action\":\"<操作名>\", ...参数}；每个工具的描述里带操作目录（常驻可见），\
+外加跨域全局检索 search_all（一次查询并发五域，各回 top-k 摘要）。\
+域工具调用形态 {\"action\":\"<操作名>\", ...参数}；每个工具的描述里带操作目录（常驻可见），\
 参数细节用 {\"action\":\"help\"} 一轮取回全域操作手册。
 
 用户记忆分四层蒸馏：L0 原始会话 →（蒸馏）→ L1 原子事实 → L2 场景模式 → L3 用户画像；\
-另有实体坐标系（人物/项目/主题/群组/地点）横向串联记忆。全部记忆可溯源、可遗忘。
+另有实体坐标系（人物/项目/主题/群组/地点）横向串联记忆。全部记忆可溯源、可遗忘（void 可 restore 撤销）。
 
 memory 域用法：
 1. 会话开始：{\"action\":\"context\"} 装载用户画像与近期记忆，再开始对话；
 2. 对话中需要背景：{\"action\":\"search\",\"query\":\"…\"} 定向回忆，或 {\"action\":\"entities\"} 按人/项目/主题查档案；
-3. 会话收尾：{\"action\":\"write_session\",\"turns\":[…]} 把值得长期记住的对话写入（蒸馏自动沉淀）；
+3. 记一句话事实：{\"action\":\"remember\",\"text\":\"…\"}（不必手搓 turns）；
+4. 会话收尾：{\"action\":\"write_session\",\"turns\":[…]} 把值得长期记住的对话写入（蒸馏自动沉淀）；
    长对话分段用 {\"action\":\"append_session\"} 追加；
-4. 用户明确表达遗忘：「别记住这个」→ {\"action\":\"forget\"}（void 会话作废且蒸馏产物级联归档）。
+5. 用户明确表达遗忘：「别记住这个」→ {\"action\":\"forget\"}（void 会话作废且蒸馏产物级联归档；
+   误作废用 mode=\"restore\" 撤销）。凭据类内容（密码/密钥）蒸馏会主动跳过，属有意的隐私保护。
 
 projects 域用法：项目 = 一件有明确目标、一次干不完、跨多次会话推进的工作。
 1. 开工：{\"action\":\"list\"} / {\"action\":\"get\"} 找到这件事的锚点接上上下文；没有就 {\"action\":\"create\"}；
 2. 找内容：get 默认索引模式（文档只给 id/分类/标题/字符数）；{\"action\":\"doc_search\"} 定位到哪篇哪行，
    {\"action\":\"doc_get\",\"doc_id\":\"…\",\"start_line\":…,\"end_line\":…} 区间精读——按需取用，无截断；
 3. 干活中：{\"action\":\"doc_add\"} / {\"action\":\"doc_update\"} 沉淀进展与结论；
+   小修一段用 {\"action\":\"doc_patch\"}（行级 replace/insert/delete，不必取全文重发）；
 4. 收尾：{\"action\":\"update\"} 改状态、写总结文档，下次会话从 get 接上。
 
 skills 域用法：技能 = 可复用的指令包（SKILL.md 形态 + scripts/references 附件）。
 1. 需要某种能力前：{\"action\":\"list\"} 看有没有现成技能，命中 {\"action\":\"get\"} 照做；
 2. 用户说「把这个做法存成技能」：{\"action\":\"create\"}；修正演进：{\"action\":\"update\"}（自动留版本）；
+   改坏了 {\"action\":\"versions\"} 查历史、{\"action\":\"restore\"} 回滚；
 3. 用户给现成 SKILL.md：{\"action\":\"import\"}。
 
 wiki 域用法：世界知识库——Markdown 页面 + [[wikilink]] + 混合检索（FTS + 向量）。
-1. 查证事实性知识 → {\"action\":\"search\"}；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}；
-2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page）。
+1. 查证事实性知识 → {\"action\":\"search\"}（命中带片段，全文 get_page）；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}；
+2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；
+3. 版本与原料：{\"action\":\"versions\"}/{\"action\":\"restore_version\"} 查历史与回滚（误删页可重建）；{\"action\":\"sources\"}/{\"action\":\"delete_source\"} 清理织入原料（lint 报 stale_source 时用）。
 
 todos 域用法：不绑定项目的快速待办（灵感/学习计划/系统操作/问题排查）。
 {\"action\":\"add\",\"title\":\"…\"} 秒记；{\"action\":\"list\"} 看进行中；{\"action\":\"done\",\"id\":\"…\"} 完成。
 
-codegraph 域用法：注册代码库 → index/sync → {\"action\":\"query\"}（search/explore/node/callers/callees/impact）读懂调用关系。
+codegraph 域用法：注册代码库 → index/sync → {\"action\":\"query\"}（search/explore/node/callers/callees/impact）读懂调用关系。\
+explore 默认返回符号大纲（不带源码）；单符号源码用 node，整份源码 explore 传 include_source=true。
 
 域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory；查证「客观知识」用 wiki；
-跨会话的工作线用 projects；可复用能力用 skills。
+跨会话的工作线用 projects；可复用能力用 skills；不确定在哪域就 search_all。
 LLM 供应商/模型的配置与排障是管理员专属，走 Web 控制台「设置 → AI 功能」——MCP 工具面
 不提供 provider 配置工具（AI 报 LLM 未配置时，引导用户去设置页，不要尝试自行配置）。
 
@@ -2921,7 +3646,7 @@ LLM 供应商/模型的配置与排障是管理员专属，走 Web 控制台「�
 - 纠错也走会话：把正确的表述写成对话（correction 语义），蒸馏会自动生成取代链；
 - 敏感对话（医疗/感情/财务等）写入时置 sensitive=true，默认不进检索与上下文；
 - 破坏性操作（各域 delete/forget 类，目录里有【破坏性】标注）不可逆，只对用户明确请求使用；
-- skills delete 仅限用户明确要求——内容过时用 update 修订，不要自行删除。\
+- skills delete 仅限用户明确要求——内容过时用 update 修订，改坏用 restore 回滚，不要自行删除。\
 ";
 
 #[tool_handler(router = self.tool_router)]
@@ -2941,7 +3666,8 @@ impl ServerHandler for EngramMcpServer {
         context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
         let cfg = load_config(&self.state.pool).await;
-        // 认证主体缺失时不做 scope 过滤（协议能力层放行；业务拒绝在 tools/call 的 scope 检查）
+        // 认证主体缺失时不做 scope 过滤（协议能力层放行；业务拒绝在 tools/call 的 scope 检查）；
+        // search_all 是跨域工具——只要持有任一可检索域的 scope 就可见（域内结果按 scope 分域执行）
         let scope = principal_of(&context).ok();
         let tools: Vec<_> = self
             .tool_router
@@ -2949,9 +3675,12 @@ impl ServerHandler for EngramMcpServer {
             .into_iter()
             .filter(|t| !cfg.disabled_tools.iter().any(|d| d == t.name.as_ref()))
             .filter(|t| {
-                scope
-                    .as_ref()
-                    .is_none_or(|p| p.has_scope(tool_scope(t.name.as_ref())))
+                scope.as_ref().is_none_or(|p| match t.name.as_ref() {
+                    "search_all" => ["memory", "wiki", "skills", "todos", "project"]
+                        .iter()
+                        .any(|s| p.has_scope(s)),
+                    name => p.has_scope(tool_scope(name)),
+                })
             })
             .collect();
         // 动态描述：发现能力长在工具面上——域操作目录（L0）织进域工具描述，

@@ -161,6 +161,9 @@ pub struct CgQueryRequest {
     pub target: String,
     /// explore→max-files；impact→depth
     pub depth: Option<u32>,
+    /// explore 专用：true = CLI 原生输出（含完整源码）；缺省 true（HTTP 是人与 Web UI 的
+    /// 通道，保留源码形态；MCP 侧缺省 false 走符号大纲，R 报告 P0-3 省 AI 上下文）
+    pub include_source: Option<bool>,
 }
 
 /// 代理查询（explore/node 返回 Markdown 文本，其余归一 JSON）。
@@ -182,7 +185,13 @@ pub async fn query(
         ));
     }
     let v = bridge(&state)
-        .query(id, kind, &req.target, req.depth)
+        .query(
+            id,
+            kind,
+            &req.target,
+            req.depth,
+            req.include_source.unwrap_or(true),
+        )
         .await
         .map_err(ce)?;
     Ok(Json(v))

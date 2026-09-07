@@ -455,7 +455,11 @@ impl MemoryService {
     }
 
     /// L0 擦除：删会话 + 引用它的 atoms 标记来源失效。
+    /// erase 是「物理删除」语义——派生原子也必须撤出检索：删除前把源自该会话的
+    /// active/superseded 原子级联归档（与 void/purge_agent 同口径；多源原子同被归档，
+    /// 保守可恢复）。此前只标 source_refs erased，原子仍在检索里，违背遗忘承诺。
     pub async fn erase_session(&self, id: Uuid) -> Result<(), MemoryError> {
+        let archived = repo::archive_atoms_by_session(&self.pool, &id.to_string()).await?;
         let affected = repo::delete_session(&self.pool, id).await?;
         if affected == 0 {
             return Err(MemoryError::NotFound(format!("会话 {id} 不存在")));
@@ -465,6 +469,13 @@ impl MemoryService {
         for (aid, refs) in atoms {
             let marked = mark_erased(refs, id);
             repo::update_atom_source_refs(&self.pool, aid, &marked).await?;
+        }
+        if archived > 0 {
+            self.audit(
+                "session_erase_cascade",
+                json!({"session": id.to_string(), "archived_atoms": archived}),
+            )
+            .await;
         }
         Ok(())
     }
@@ -1047,6 +1058,57 @@ impl MemoryService {
             .ok();
         repo::archive_orphan_entities(&self.pool).await?;
         Ok(row)
+    }
+
+    /// 恢复 void 会话（forget mode="restore"，R 报告建议 #7：void 原文保留，恢复成本低）：
+    /// - distill_status 还原自作废时的存档（pending→pending 可继续蒸馏，done→done）；
+    /// - 级联归档的原子一并恢复（superseded_by 在 → superseded；否则 → active）。
+    /// - 返回 (恢复的会话, 恢复的原子数)。
+    pub async fn unvoid_session(&self, id: Uuid) -> Result<(SessionDto, u64), MemoryError> {
+        let status = repo::session_distill_status(&self.pool, id).await?;
+        match status.as_deref() {
+            None => return Err(MemoryError::NotFound(format!("会话 {id} 不存在"))),
+            Some("processing") => {
+                return Err(MemoryError::BadRequest(format!(
+                    "会话 {id} 正在蒸馏（processing）——等蒸馏完成后再作废/恢复"
+                )));
+            }
+            Some("void") => {}
+            Some(other) => {
+                return Err(MemoryError::BadRequest(format!(
+                    "会话 {id} 未被作废（当前状态 {other}）——restore 只对 void 会话有意义"
+                )));
+            }
+        }
+        let row = repo::unvoid_session_update(&self.pool, id)
+            .await?
+            .ok_or_else(|| {
+                MemoryError::BadRequest(format!("会话 {id} 刚被蒸馏任务取走——请稍后重试"))
+            })?;
+        let restored = repo::restore_atoms_by_session(&self.pool, &id.to_string()).await?;
+        self.audit(
+            "session_unvoid_restore",
+            json!({"session": id.to_string(), "restored_atoms": restored, "to": row.distill_status}),
+        )
+        .await;
+        // 还原成 pending 的会话恢复蒸馏资格——触发一次防抖扫描（off 豁免由 metadata 保留）
+        if row.distill_status == "pending" {
+            engram_distill::trigger_auto_extract(&self.queue, self.debounce_secs)
+                .await
+                .ok();
+        }
+        // 恢复的 active 原子需要场景收敛重算（幂等）
+        if restored > 0 {
+            self.queue
+                .enqueue(
+                    JobTemplate::new("organize_scenarios")
+                        .with_payload(json!({ "converge_only": true }))
+                        .with_idempotency_key(format!("unvoid-converge-{id}")),
+                )
+                .await
+                .ok();
+        }
+        Ok((row, restored))
     }
 
     /// P11/SEC-E 按 agent 清场（测试隔离，2026-09-03 彻底化）：该 agent **全部**会话

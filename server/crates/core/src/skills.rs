@@ -422,11 +422,20 @@ impl SkillsService {
     }
 
     pub async fn get_skill(&self, slug: &str) -> Result<SkillDto, SkillsError> {
-        repo::get_skill(&self.pool, slug).await?.ok_or_else(|| {
+        // 双寻址（R 报告 P1-11）：slug 优先，未中按 name 精确兜底
+        let row = repo::get_skill(&self.pool, slug)
+            .await?
+            .or(repo::get_skill_by_name(&self.pool, slug).await?);
+        row.ok_or_else(|| {
             SkillsError::NotFound(format!(
                 "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"
             ))
         })
+    }
+
+    /// slug/name → 真实 slug（更新/删除/文件操作寻址用；slug 优先，name 精确兜底）。
+    async fn resolve(&self, slug_or_name: &str) -> Result<String, SkillsError> {
+        Ok(self.get_skill(slug_or_name).await?.slug)
     }
 
     /// 语义字段更新：先快照现状（origin=update），再落变更；enabled-only 不留版本。
@@ -435,7 +444,8 @@ impl SkillsService {
         slug: &str,
         patch: SkillPatch,
     ) -> Result<SkillDto, SkillsError> {
-        let current = self.get_skill(slug).await?;
+        let slug = self.resolve(slug).await?;
+        let current = self.get_skill(&slug).await?;
         let semantic_change = patch.name.is_some()
             || patch.description.is_some()
             || patch.content.is_some()
@@ -462,11 +472,12 @@ impl SkillsService {
                 "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"
             )));
         }
-        self.get_skill(slug).await
+        self.get_skill(&slug).await
     }
 
     pub async fn delete_skill(&self, slug: &str) -> Result<bool, SkillsError> {
-        let deleted = repo::delete_skill(&self.pool, slug).await?;
+        let slug = self.resolve(slug).await?;
+        let deleted = repo::delete_skill(&self.pool, &slug).await?;
         if deleted == 0 {
             return Err(SkillsError::NotFound(format!(
                 "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"

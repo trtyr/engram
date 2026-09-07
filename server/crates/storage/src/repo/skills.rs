@@ -13,8 +13,7 @@ use crate::models::skills::{SkillDto, SkillRevisionDto, SkillSummaryDto};
 /// 版本快照保留上限（防膨胀；更老的自动淘汰）。
 pub const MAX_REVISIONS: i32 = 50;
 
-const SUMMARY_COLS: &str =
-    "id, slug, name, description, tags, enabled, source, created_at, updated_at";
+const SUMMARY_COLS: &str = "id, slug, name, description, tags, enabled, source, length(content)::bigint AS content_chars, created_at, updated_at";
 const FULL_COLS: &str =
     "id, slug, name, description, content, tags, enabled, source, created_at, updated_at";
 const REV_COLS: &str = "id, skill_id, rev, name, description, content, tags, origin, created_at";
@@ -154,6 +153,15 @@ pub async fn list_skills(
 pub async fn get_skill(pool: &PgPool, slug: &str) -> StoreResult<Option<SkillDto>> {
     sqlx::query_as::<_, SkillDto>(&format!("SELECT {FULL_COLS} FROM skills WHERE slug = $1"))
         .bind(slug)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
+}
+
+/// 按技能名精确取（双寻址兜底：调用方记不住 slug 时用 name，R 报告 P1-11）。
+pub async fn get_skill_by_name(pool: &PgPool, name: &str) -> StoreResult<Option<SkillDto>> {
+    sqlx::query_as::<_, SkillDto>(&format!("SELECT {FULL_COLS} FROM skills WHERE name = $1"))
+        .bind(name)
         .fetch_optional(pool)
         .await
         .map_err(Into::into)

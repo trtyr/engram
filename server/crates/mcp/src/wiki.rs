@@ -35,11 +35,54 @@ pub fn svc(state: &engram_core::state::AppState) -> engram_core::wiki::WikiServi
 }
 
 /// wiki_list_pages 的瘦身输出：列表不带正文（正文可能很大），全文走 wiki_get_page。
-pub fn trim_page(page: &serde_json::Value) -> serde_json::Value {
-    let mut v = page.clone();
+/// content_chars（P1-7）给「值不值得拉全文」的决策依据。
+pub fn trim_page(page: serde_json::Value) -> serde_json::Value {
+    let mut v = page;
+    let chars = v["content"]
+        .as_str()
+        .map(|c| c.chars().count())
+        .unwrap_or(0);
     v["content"] = serde_json::json!("");
     v["content_omitted"] = serde_json::json!(true);
+    v["content_chars"] = serde_json::json!(chars);
     v
+}
+
+/// wiki_search 的命中瘦身（P0-2）：正文换片段——命中词附近窗口，找不到词
+/// （纯向量召回）取开头 160 字符。全文按需 wiki_get_page。
+pub fn snippet_page(page: serde_json::Value, query: &str) -> serde_json::Value {
+    let content = page["content"].as_str().unwrap_or("").to_string();
+    let mut v = page;
+    let chars = content.chars().count();
+    v["content"] = serde_json::json!(build_snippet(&content, query));
+    v["content_omitted"] = serde_json::json!(true);
+    v["content_chars"] = serde_json::json!(chars);
+    v
+}
+
+/// 命中片段：优先第一个查询词出现的位置，取前后 ~160 字符窗口；
+/// 全部词都不在（向量召回路径）→ 取正文开头。
+fn build_snippet(content: &str, query: &str) -> String {
+    let lower = content.to_lowercase();
+    let hit = query
+        .split_whitespace()
+        .filter(|w| w.chars().count() >= 2)
+        .find_map(|w| lower.find(&w.to_lowercase()));
+    let start = match hit {
+        Some(pos) => {
+            let char_pos = lower[..pos].chars().count();
+            char_pos.saturating_sub(40)
+        }
+        None => 0,
+    };
+    let window: String = content.chars().skip(start).take(160).collect();
+    let prefix = if start > 0 { "…" } else { "" };
+    let suffix = if content.chars().count() > start + 160 {
+        "…"
+    } else {
+        ""
+    };
+    format!("{prefix}{window}{suffix}")
 }
 
 // ---------- 工具参数 ----------
@@ -79,7 +122,9 @@ pub struct WikiListPagesParams {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiGetPageParams {
     /// 页面 slug（来自 wiki_list_pages / wiki_search 的返回）
-    #[schemars(description = "页面 slug。对大小写与空格/连字符差异宽容。")]
+    #[schemars(
+        description = "页面 slug。对大小写与空格/连字符差异宽容；传页面标题（title 精确匹配）也可寻址。"
+    )]
     pub slug: String,
 }
 
@@ -128,6 +173,56 @@ pub struct WikiArchiveQueryParams {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiDeletePageParams {
     /// 页面 slug（wiki_list_pages 返回的 slug）
-    #[schemars(description = "要删除的页面 slug（wiki_list_pages 返回）。不可逆。")]
+    #[schemars(
+        description = "要删除的页面 slug（wiki_list_pages 返回；也接受页面标题）。不可逆——最后状态会留版本快照，可用 restore_version 重建。"
+    )]
     pub slug: String,
+}
+
+/// 页面版本列表参数（R 报告建议 #5）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiVersionsParams {
+    /// 页面 slug（也接受页面标题）
+    #[schemars(
+        description = "页面 slug（或标题）。返回该页的历史版本（新→旧，含已删除页的最后状态）。"
+    )]
+    pub slug: String,
+}
+
+/// 读取某版本正文参数（回滚前预览）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiVersionContentParams {
+    /// 页面 slug（或标题）
+    #[schemars(description = "页面 slug（或标题）。")]
+    pub slug: String,
+    /// 版本号（versions 列表里的 version）
+    #[schemars(description = "版本号（来自 versions 列表）。")]
+    pub version: i32,
+}
+
+/// 回滚到历史版本参数。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiRestoreVersionParams {
+    /// 页面 slug（或标题）
+    #[schemars(description = "页面 slug（或标题）。页面已删除时会从快照重建。")]
+    pub slug: String,
+    /// 要恢复到的版本号
+    #[schemars(
+        description = "要恢复到的版本号（来自 versions 列表）。回滚本身也产生新版本，历史不丢。"
+    )]
+    pub version: i32,
+}
+
+/// 无参操作（wiki sources 列表）占位。
+#[derive(Serialize, Deserialize, JsonSchema, Default)]
+pub struct WikiSourcesParams {}
+
+/// 删除织入原料参数（E7：删除页面后原料成 stale_source 残留——级联清理通道）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiDeleteSourceParams {
+    /// 原料 id（sources 列表返回；级联删除该源产出的页面与任务）
+    #[schemars(
+        description = "原料 id（sources 列表返回）。级联删除：该源、其任务与由它产出的页面一并删除，不可逆。"
+    )]
+    pub source_id: String,
 }

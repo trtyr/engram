@@ -101,14 +101,18 @@ async fn mcp_initialize_and_list_tools() {
         .as_array()
         .expect("tools 数组")
         .clone();
-    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    // memory-only key 恰好看到 memory 一个域工具（scope 过滤）
+    let mut names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    names.sort_unstable();
+    // memory-only key 看到 memory 域工具 + 跨域 search_all（按任一 scope 可见）
     assert_eq!(
         names,
-        vec!["memory"],
-        "memory-only key 应只见 memory 域工具"
+        vec!["memory", "search_all"],
+        "memory-only key 应见 memory 域工具与 search_all"
     );
-    let memory = &tools[0];
+    let memory = tools
+        .iter()
+        .find(|t| t["name"] == "memory")
+        .expect("memory 工具");
     // 描述带操作目录（L0 发现层）：action 概览 + help 提示
     let description = memory["description"].as_str().unwrap_or("");
     assert!(
@@ -435,12 +439,17 @@ async fn mcp_admin_info_endpoint() {
     assert_eq!(info["enabled"], json!(true), "缺省配置应全开");
     assert_eq!(info["disabled_tools"], json!([]));
     let tools = info["tools"].as_array().expect("工具清单");
-    assert_eq!(tools.len(), 6, "应为六个域工具：{}", tools.len());
+    assert_eq!(
+        tools.len(),
+        7,
+        "应为六个域工具 + search_all：{}",
+        tools.len()
+    );
     let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();
     assert_eq!(
         memory["actions"].as_array().unwrap().len(),
-        9,
-        "memory 域应展示 9 个操作：{memory}"
+        10,
+        "memory 域应展示 10 个操作：{memory}"
     );
 
     // 非 admin 拒绝
@@ -542,9 +551,21 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .iter()
         .filter_map(|t| t["name"].as_str().map(String::from))
         .collect();
-    assert_eq!(names, vec!["memory"], "域工具应保留：{names:?}");
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        vec!["memory", "search_all"],
+        "域工具应保留（+跨域 search_all）：{names:?}"
+    );
     // 描述目录里 write_session 应隐身
-    let description = result["tools"][0]["description"].as_str().unwrap_or("");
+    let domain = result["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "memory")
+        .expect("memory 工具");
+    let description = domain["description"].as_str().unwrap_or("");
     assert!(
         !description.contains("- write_session："),
         "停用操作应从目录隐身：{description}"
@@ -584,7 +605,11 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .iter()
         .filter_map(|a| a["action"].as_str())
         .collect();
-    assert_eq!(actions.len(), 8, "停用操作应从手册隐身：{actions:?}");
+    assert_eq!(
+        actions.len(),
+        9,
+        "停用操作应从手册隐身（10 含 remember，停 1 剩 9）：{actions:?}"
+    );
     assert!(!actions.contains(&"write_session"));
 
     // 未知键 400（防笔误）
@@ -626,7 +651,7 @@ async fn mcp_progressive_discovery_help_and_unknown_action() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
-    assert_eq!(names, vec!["todos"]);
+    assert_eq!(names, vec!["search_all", "todos"]);
 
     // help：一轮取回全域操作手册（含参数 schema）
     let (_, v) = mcp_rpc(&app, &key, call(2, "todos", "help", json!({}))).await;
@@ -700,12 +725,21 @@ async fn mcp_skills_tools_listed_with_domain() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
+    let mut sorted: Vec<&str> = names.clone();
+    sorted.sort_unstable();
     assert_eq!(
-        names,
-        vec!["skills"],
-        "skills-only key 应只见 skills 域工具"
+        sorted,
+        vec!["search_all", "skills"],
+        "skills-only key 应见 skills 域工具与 search_all"
     );
-    let description = result["tools"][0]["description"].as_str().unwrap_or("");
+    let description = result["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "skills")
+        .expect("skills 工具")["description"]
+        .as_str()
+        .unwrap_or("");
     for action in [
         "- list：",
         "- get：",
@@ -754,8 +788,8 @@ async fn mcp_skills_tools_listed_with_domain() {
     assert_eq!(skills_tools.len(), 1, "管理端点应展示 1 个 skills 域工具");
     assert_eq!(
         skills_tools[0]["actions"].as_array().unwrap().len(),
-        8,
-        "skills 域应展示 8 个操作"
+        10,
+        "skills 域应展示 10 个操作（含 versions/restore）"
     );
 }
 
@@ -828,12 +862,32 @@ async fn mcp_skills_crud_journey() {
         ),
     )
     .await;
-    let updated = expect_result(&v, "skills update");
-    assert!(
-        updated["content"][0]["text"]
+    let updated: Value = serde_json::from_str(
+        expect_result(&v, "skills update")["content"][0]["text"]
             .as_str()
-            .unwrap()
-            .contains("新流程")
+            .unwrap(),
+    )
+    .unwrap();
+    // P0-1：写操作瘦身——正文不回显，只有 content_chars
+    assert!(
+        updated["content_chars"].is_i64(),
+        "update 应回元数据：{updated}"
+    );
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(5, "skills", "get", json!({"slug": "review-pr"})),
+    )
+    .await;
+    let got: Value = serde_json::from_str(
+        expect_result(&v, "skills get 回读")["content"][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        got["content"].as_str().unwrap().contains("新流程"),
+        "更新应落库：{got}"
     );
 
     // 停用后 enabled 过滤查不到
@@ -956,10 +1010,20 @@ async fn wiki_mcp_tools_listed() {
     let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
     let result = expect_result(&v, "tools/list");
     let tools = result["tools"].as_array().expect("tools 数组");
-    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-    assert_eq!(names, vec!["wiki"], "wiki-only key 应只见 wiki 域工具");
-    // 描述目录：9 个操作齐备
-    let description = tools[0]["description"].as_str().unwrap_or("");
+    let mut names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        vec!["search_all", "wiki"],
+        "wiki-only key 应见 wiki 域工具与 search_all"
+    );
+    // 描述目录：操作齐备
+    let description = tools
+        .iter()
+        .find(|t| t["name"] == "wiki")
+        .expect("wiki 工具")["description"]
+        .as_str()
+        .unwrap_or("");
     for action in [
         "- search：",
         "- list_pages：",
@@ -1005,8 +1069,8 @@ async fn wiki_mcp_tools_listed() {
     assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
     assert_eq!(
         wiki_tools[0]["actions"].as_array().unwrap().len(),
-        9,
-        "wiki 域应展示 9 个操作"
+        14,
+        "wiki 域应展示 14 个操作（含版本与原料通道）"
     );
 
     // instructions 应覆盖 wiki 域
@@ -1309,8 +1373,21 @@ async fn wiki_mcp_tool_toggle_hides_and_rejects() {
         .iter()
         .filter_map(|t| t["name"].as_str().map(String::from))
         .collect();
-    assert_eq!(names, vec!["wiki"], "域工具应保留：{names:?}");
-    let description = result["tools"][0]["description"].as_str().unwrap_or("");
+    let mut sorted: Vec<String> = names.clone();
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        vec!["search_all".to_string(), "wiki".to_string()],
+        "域工具应保留（+跨域 search_all）：{names:?}"
+    );
+    let description = result["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "wiki")
+        .expect("wiki 工具")["description"]
+        .as_str()
+        .unwrap_or("");
     assert!(
         !description.contains("- write_page："),
         "停用操作应从目录隐身：{description}"

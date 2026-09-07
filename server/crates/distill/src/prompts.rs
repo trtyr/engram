@@ -3,7 +3,7 @@
 /// 提示词标识：(名称, 版本)。
 pub struct PromptId(pub &'static str, pub u32);
 
-pub const P_EXTRACT: PromptId = PromptId("extract", 4);
+pub const P_EXTRACT: PromptId = PromptId("extract", 5);
 pub const P_ARBITRATE: PromptId = PromptId("arbitrate", 1);
 pub const P_ORGANIZE: PromptId = PromptId("organize", 2);
 pub const P_PERSONA: PromptId = PromptId("persona", 2);
@@ -28,9 +28,10 @@ pub fn extract_system() -> String {
 2. 每条原子记忆是一句自包含的中文短句（主语可以是用户本人，也可以是他世界里的人/项目/群组），不超过 40 字。
 3. confidence ∈ [0,1]：明确说了的 0.9+，可推断的 0.7~0.9，模糊的 0.5~0.7。
 4. turn_refs 是该信息来源对话轮次的编号数组（编号见用户消息中的标注）。
-5. entities 是这条记忆涉及的主角（他人姓名 / 项目名 / 主题名 / 群体名 / 地点名），kind ∈ person|project|topic|group|place；用对话中的规范称呼，只收稳定可复现的实体，没有则为空数组。用户本人不是实体。kind 判例：具体的人→person；公司/团队/组织/乐队→group；个人或团队在做的项目/产品→project；学校/城市/地点/地址→place；抽象话题/领域→topic。
+5. entities 是这条记忆涉及的主角（他人姓名 / 项目名 / 主题名 / 群体名 / 地点名），kind ∈ person|project|topic|group|place；用对话中的规范称呼，只收稳定可复现的实体，没有则为空数组。用户本人不是实体。kind 判例：具体的人→person；宠物/动物/被当作个体称呼的名字（用户养的猫狗等）→person；公司/团队/组织/乐队→group；个人或团队在做的项目/产品→project；学校/城市/地点/地址→place；抽象话题/领域→topic。
 6. **event 类或含明确时间的信息**给 occurred_at（ISO8601，如 \"2026-09-02T00:00:00Z\"）；有过期语义的（活动/安排）再给 valid_until。无法定位时间的省略这两个字段。
 7. 不值得记的对话输出空数组。宁缺毋滥。
+7.5 **凭据类信息（密码/密钥/令牌/助记词）一律不抽取**，哪怕原文出现也不落原子——凭据会轮换且属于高危泄露面；可记的只有「用户使用某服务/某账号」这类无密级事实。此类会话产出为空是预期行为，不是遗漏。
 8. relations 是这些实体之间的关系（可选）：from 与 to 用 entities 里的规范称呼，rel_type ∈ member_of|located_in|works_on|part_of|related_to。方向：from --rel_type--> to（如 张三 member_of 后端组，长亭科技 located_in 上海）。只输出对话中明确表达的关系，没有则为空数组。
 9. 会话头若标注「批量导入的历史」——这是用户导入的旧聊天记录（如微信导出），里面对方（assistant/ai 或第三人）说的话只是理解用户事实的素材，不是用户本人的记忆：只抽用户自己的事实/偏好/人脉/约定，不要把对方表达的观点、身份、行为当成用户记忆。
 

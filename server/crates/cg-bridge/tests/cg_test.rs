@@ -61,7 +61,7 @@ async fn version_guard_rejects_mismatch() {
         .await
         .unwrap();
     let e = bridge
-        .query(pid, QueryKind::Search, "x", None)
+        .query(pid, QueryKind::Search, "x", None, false)
         .await
         .unwrap_err();
     assert!(matches!(e, CgError::VersionMismatch { .. }), "{e:?}");
@@ -104,7 +104,7 @@ async fn index_and_query_real_repo() {
 
     // search：JobQueue 符号命中
     let r = bridge
-        .query(proj.id, QueryKind::Search, "JobQueue", None)
+        .query(proj.id, QueryKind::Search, "JobQueue", None, false)
         .await
         .unwrap();
     let arr = r.as_array().unwrap();
@@ -118,7 +118,7 @@ async fn index_and_query_real_repo() {
 
     // callers：run_migrations 有调用者
     let r = bridge
-        .query(proj.id, QueryKind::Callers, "run_migrations", None)
+        .query(proj.id, QueryKind::Callers, "run_migrations", None, false)
         .await
         .unwrap();
     assert!(
@@ -131,7 +131,7 @@ async fn index_and_query_real_repo() {
 
     // impact：enqueue 影响面非空
     let r = bridge
-        .query(proj.id, QueryKind::Impact, "enqueue", Some(2))
+        .query(proj.id, QueryKind::Impact, "enqueue", Some(2), false)
         .await
         .unwrap();
     assert!(
@@ -149,6 +149,7 @@ async fn index_and_query_real_repo() {
             QueryKind::Explore,
             "How does the job queue claim tasks",
             None,
+            true,
         )
         .await
         .unwrap();

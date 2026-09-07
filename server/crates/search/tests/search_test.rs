@@ -248,34 +248,49 @@ async fn zero_fts_match_uses_tight_vec_fallback() {
     );
 }
 
-/// v2 修复（N1）：SearchHit.title 不再恒 null——取内容前缀 40 字做标题。
+/// N1 + R 报告 P1-4：长原子（>40 字）title 取内容前缀；短原子（≤40 字）
+/// title 置 None——前缀与 snippet（全文）完全重复，去冗余。score 舍入到 3 位小数。
 #[tokio::test]
 async fn atom_hit_title_is_content_prefix() {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
-    let content = "用户最爱的数据库是 PostgreSQL，已使用十年";
-    sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, tsv) \
-         VALUES ($1, 'fact', $2, 'active', to_tsvector('simple', $3))",
-    )
-    .bind(uuid::Uuid::new_v4())
-    .bind(content)
-    .bind(tsv_text(content))
-    .execute(&pool)
-    .await
-    .unwrap();
+    let short = "用户最爱的数据库是 PostgreSQL，已使用十年";
+    let long = "用户最爱的数据库是 PostgreSQL，从 2016 年开始使用，经历了从 MySQL 迁移的完整过程，十年间换过三台机器";
+    for content in [short, long] {
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, status, tsv) \
+             VALUES ($1, 'fact', $2, 'active', to_tsvector('simple', $3))",
+        )
+        .bind(uuid::Uuid::new_v4())
+        .bind(content)
+        .bind(tsv_text(content))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
 
     let hits = engram_search::search_atoms(&pool, "PostgreSQL", None, 5, false, None, None)
         .await
         .unwrap();
-    assert_eq!(hits.len(), 1);
+    assert_eq!(hits.len(), 2);
+    let short_hit = hits.iter().find(|h| h.snippet == short).unwrap();
+    assert_eq!(short_hit.title, None, "短原子 title 应去重置 None");
+    let long_hit = hits.iter().find(|h| h.snippet == long).unwrap();
+    let prefix: String = long.chars().take(40).collect();
     assert_eq!(
-        hits[0].title.as_deref(),
-        Some("用户最爱的数据库是 PostgreSQL，已使用十年"),
-        "title 应为内容前缀（N1 回归）"
+        long_hit.title.as_deref(),
+        Some(prefix.as_str()),
+        "长原子 title 应为 40 字前缀"
     );
+    for h in &hits {
+        assert!(
+            (h.score * 1000.0).fract().abs() < 1e-6,
+            "score 应舍入到 3 位：{}",
+            h.score
+        );
+    }
 }
 
 /// v2 修复（N2）：occurred_at 优先于 created_at 参与时间窗过滤——

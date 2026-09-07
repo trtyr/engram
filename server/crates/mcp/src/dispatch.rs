@@ -60,13 +60,14 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
         "memory" => action_docs![
             "context", false, "装载用户记忆上下文包（L3 画像 + L2 场景 + L1 原子 + 实体；会话开场调用一次）" => crate::ContextParams;
             "search", false, "定向检索用户记忆（全文+向量，跨 L1/L2/L3/实体）" => crate::SearchParams;
+            "remember", false, "一句话记忆（记条小事实不必手搓 turns；等价单轮 write_session+auto 蒸馏）" => crate::RememberParams;
             "write_session", false, "写入一段对话到 L0 会话（收尾用；蒸馏自动抽取记忆）" => crate::WriteSessionParams;
             "append_session", false, "向未蒸馏的会话追加轮次（长对话分段落库）" => crate::AppendSessionParams;
             "list_sessions", false, "列出 L0 会话（keyset 分页，可按 agent 过滤）" => crate::ListSessionsParams;
             "get_session", false, "读取一个会话的逐轮原文全文" => crate::GetSessionParams;
-            "list_atoms", false, "浏览 L1 原子事实（按类型/状态/待审过滤，分页）" => crate::ListAtomsParams;
+            "list_atoms", false, "浏览 L1 原子事实（默认只看 active；可按类型/状态/待审过滤，分页）" => crate::ListAtomsParams;
             "entities", false, "检索实体（人物/项目/主题/群组/地点的横向档案）" => crate::EntitiesParams;
-            "forget", true, "遗忘：会话作废（void，级联归档蒸馏产物）或物理删除（erase，需 erase scope）" => crate::ForgetParams
+            "forget", true, "遗忘：void 作废（级联归档产物）/ erase 物理删除（需 erase scope）/ restore 撤销 void" => crate::ForgetParams
         ],
         "projects" => action_docs![
             "types", false, "列出项目类型模板（建项目选 type 用）" => crate::ProjectTypesParams;
@@ -82,6 +83,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "doc_add", false, "项目下新增分类文档（Markdown）" => crate::ProjectDocAddParams;
             "doc_get", false, "读项目文档（全文或按行区间精读）" => crate::ProjectDocGetParams;
             "doc_search", false, "grep 式跨文档按行检索（定位到哪篇哪行）" => crate::ProjectDocSearchParams;
+            "doc_patch", false, "行级补丁（replace/insert/delete 一个行区间——改长文档不必取全文重发）" => crate::ProjectDocPatchParams;
             "doc_update", false, "编辑项目文档（补丁式）" => crate::ProjectDocUpdateParams;
             "doc_delete", true, "删除项目文档（不可逆）" => crate::ProjectDocDeleteParams
         ],
@@ -92,19 +94,26 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "file_put", false, "写技能附属文件（同路径覆盖；SKILL.md 本体走 update）" => crate::SkillsFilePutParams;
             "create", false, "沉淀新技能（正文 + 可选 slug/描述/标签）" => crate::SkillsCreateParams;
             "update", false, "更新技能（语义变更自动留版本快照）" => crate::SkillsUpdateParams;
+            "versions", false, "版本快照列表（改坏前看历史 / 找回滚 revision_id）" => crate::SkillsVersionsParams;
+            "restore", false, "回滚到历史版本（回滚本身也留快照）" => crate::SkillsRestoreParams;
             "delete", true, "删除技能（级联删版本快照，不可逆；仅限用户明确要求）" => crate::SkillsDeleteParams;
             "import", false, "导入现成 SKILL.md（frontmatter 容错解析）" => crate::SkillsImportParams
         ],
         "wiki" => action_docs![
-            "search", false, "Wiki 检索（FTS + 向量融合）——查证世界知识的第一入口" => crate::wiki::WikiSearchParams;
+            "search", false, "Wiki 检索（FTS + 向量融合；命中带片段，全文按需 get_page）" => crate::wiki::WikiSearchParams;
             "list_pages", false, "浏览页面列表（可按页型过滤；不含正文）" => crate::wiki::WikiListPagesParams;
             "get_page", false, "读页面全文（含 frontmatter 与版本）" => crate::wiki::WikiGetPageParams;
-            "write_page", false, "写/覆盖一个页面（Markdown + [[wikilink]]；覆盖前先 get_page）" => crate::wiki::WikiWritePageParams;
+            "write_page", false, "写/覆盖一个页面（Markdown + [[wikilink]]；覆盖前先 get_page，旧文自动留版本快照）" => crate::wiki::WikiWritePageParams;
             "ingest", false, "整篇源文本织入 Wiki（异步 LLM 流水线，sha 去重）" => crate::wiki::WikiIngestParams;
             "archive_query", false, "把一条问答存档为 queries 页（幂等跳过重复）" => crate::wiki::WikiArchiveQueryParams;
+            "versions", false, "页面版本列表（含已删除页的最后状态快照）" => crate::wiki::WikiVersionsParams;
+            "version_content", false, "读某版本快照的正文（回滚前预览）" => crate::wiki::WikiVersionContentParams;
+            "restore_version", false, "回滚到历史版本（已删除页面从快照重建）" => crate::wiki::WikiRestoreVersionParams;
+            "sources", false, "列出织入原料（wiki_sources 及其状态；stale_source 清理的入口）" => crate::wiki::WikiSourcesParams;
+            "delete_source", true, "删除一条织入原料及其全部产出（级联，不可逆）" => crate::wiki::WikiDeleteSourceParams;
             "graph", false, "Wiki 链接图全貌（节点/边/社区划分）" => crate::wiki::WikiNoParams;
             "lint", false, "Wiki 体检（死链/孤页/缺源；只报告不修改）" => crate::wiki::WikiNoParams;
-            "delete_page", true, "删除页面（连带清理双向 wikilink，不可逆）" => crate::wiki::WikiDeletePageParams
+            "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
         ],
         "todos" => action_docs![
             "add", false, "快速记一条待办（灵感/计划/操作/排查；不绑定项目）" => crate::TodoAddParams;
@@ -116,8 +125,8 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
         ],
         "codegraph" => action_docs![
             "list", false, "列出已注册代码库（注册状态/索引规模）" => crate::CgNoParams;
-            "register", false, "注册代码库（本地绝对路径或 git URL）" => crate::CgRegisterParams;
-            "query", false, "代码图谱查询（search/explore/node/callers/callees/impact）" => crate::CgQueryParams;
+            "register", false, "注册代码库（本地绝对路径按服务端文件系统校验，或 git URL）" => crate::CgRegisterParams;
+            "query", false, "代码图谱查询（search/explore大纲/node/callers/callees/impact）" => crate::CgQueryParams;
             "index", false, "建索引/重建索引（异步 job）" => crate::CgNameParams;
             "sync", false, "增量同步索引（小改动后刷新）" => crate::CgNameParams;
             "delete", true, "注销代码图谱项目（删注册与索引；源码不动）" => crate::CgNameParams

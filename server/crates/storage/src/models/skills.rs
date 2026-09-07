@@ -5,6 +5,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 /// 列表/导入/概览用摘要（不含正文——列表与仪表盘不必拖全量指令）。
+/// content_chars = 正文字符数（R 报告 P1-7：列表层给「值不值得拉全文」的决策依据）。
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct SkillSummaryDto {
     pub id: Uuid,
@@ -14,6 +15,7 @@ pub struct SkillSummaryDto {
     pub tags: Vec<String>,
     pub enabled: bool,
     pub source: String,
+    pub content_chars: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

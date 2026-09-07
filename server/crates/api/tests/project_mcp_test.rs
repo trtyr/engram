@@ -74,12 +74,13 @@ async fn project_tools_listed_with_annotations() {
         info["instructions"]
     );
 
-    // project scope 的 key 恰见 projects 一个域工具（scope 过滤）
-    let names = tool_names(&app, &key).await;
+    // project scope 的 key 见 projects 域工具 + 跨域 search_all（scope 过滤）
+    let mut names = tool_names(&app, &key).await;
+    names.sort();
     assert_eq!(
         names,
-        vec!["projects"],
-        "project scope 应只见 projects 域工具"
+        vec!["projects", "search_all"],
+        "project scope 应见 projects 域工具与 search_all"
     );
 
     // 描述目录：15 个操作齐备，破坏性操作带标注
@@ -306,11 +307,24 @@ async fn project_full_journey() {
     .await;
     assert_eq!(updated_doc["title"], "MCP 工具设计", "未传 title 不应改变");
     assert_eq!(updated_doc["category"], "后端");
+    // P0-1 瘦身：写操作不回显正文，只回 content_chars
     assert!(
-        updated_doc["content"]
+        updated_doc["content"].is_null() && updated_doc["content_chars"].is_i64(),
+        "update 应回瘦身元数据：{updated_doc}"
+    );
+    let reread = act_json(
+        &app,
+        &key,
+        "doc_get",
+        json!({"doc_id": doc_id, "start_line": 6, "end_line": 6}),
+    )
+    .await;
+    assert!(
+        reread["content"]
             .as_str()
             .unwrap()
-            .contains("补丁式更新可用")
+            .contains("补丁式更新可用"),
+        "更新应落库：{reread}"
     );
 
     // 文档移到未登记分类 → 报错
@@ -680,8 +694,8 @@ async fn project_tools_admin_info_and_toggle() {
     assert_eq!(project_tools.len(), 1, "projects 域应为 1 个域工具");
     assert_eq!(
         project_tools[0]["actions"].as_array().unwrap().len(),
-        15,
-        "projects 域应展示 15 个操作：{tools:?}"
+        16,
+        "projects 域应展示 16 个操作（含 doc_patch）：{tools:?}"
     );
 
     // 停用 projects.delete：目录隐身 + call 拒绝
@@ -701,7 +715,13 @@ async fn project_tools_admin_info_and_toggle() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let names = tool_names(&app, &key).await;
-    assert_eq!(names, vec!["projects"], "域工具应保留");
+    let mut sorted_names = names.clone();
+    sorted_names.sort();
+    assert_eq!(
+        sorted_names,
+        vec!["projects", "search_all"],
+        "域工具应保留（+跨域 search_all）"
+    );
     let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
     let result = expect_result(&v, "tools/list");
     let description = result["tools"][0]["description"].as_str().unwrap();
