@@ -2067,26 +2067,39 @@ impl EngramMcpServer {
         // D27 三态：已就绪（跳过）/ 在途（勿重提也非丢失）/ 新入队——此前三者不可分，
         // sha 去重封锁重试，在途窗口任务表现如「丢失」
         use engram_core::wiki::IngestOutcome;
+        let job_id = outcome.job_id();
         let (skipped, status, message) = match &outcome {
-            IngestOutcome::AlreadyReady(_) => (true, "ready", "内容已存在（sha 命中），本次跳过"),
-            IngestOutcome::InFlight(_) => (
+            IngestOutcome::AlreadyReady(_) => (
+                true,
+                "ready",
+                "内容已存在（sha 命中），本次跳过".to_string(),
+            ),
+            IngestOutcome::InFlight(_, _) => (
                 false,
                 "in_flight",
-                "同内容任务正在处理中——无需重复提交（sha 去重会挡住），稍后可在 Wiki 页面看到产物；进度见任务页",
+                "同内容任务正在处理中——无需重复提交（sha 去重会挡住），稍后可在 Wiki 页面看到产物"
+                    .to_string(),
             ),
-            IngestOutcome::Enqueued(_) => (
+            IngestOutcome::Enqueued(_, _) => (
                 false,
                 "enqueued",
-                "已入队织入任务——LLM 流水线异步处理；进度见任务页，稍后可在 Wiki 页面看到产物",
+                "已入队织入任务——LLM 流水线异步处理，稍后可在 Wiki 页面看到产物".to_string(),
             ),
         };
-        ok_json(serde_json::json!({
+        let mut out = serde_json::json!({
             "skipped": skipped,
             "status": status,
             "source_id": outcome.source_id(),
             "async": true,
             "message": message,
-        }))
+        });
+        // R8 观察 3：进度通道落到具体 id——GET /jobs/{job_id}（任意 scope 的 key 可读）
+        if let Some(j) = job_id {
+            out["job_id"] = serde_json::json!(j);
+            out["message"] =
+                serde_json::json!(format!("{message}；进度：GET /jobs/{j}（或任务页）"));
+        }
+        ok_json(out)
     }
 
     /// 把一条问答（问 + 答）存档为 queries 页并自动再摄取。
@@ -2888,6 +2901,8 @@ codegraph 域用法：注册代码库 → index/sync → {\"action\":\"query\"}�
 
 域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory；查证「客观知识」用 wiki；
 跨会话的工作线用 projects；可复用能力用 skills。
+LLM 供应商/模型的配置与排障是管理员专属，走 Web 控制台「设置 → AI 功能」——MCP 工具面
+不提供 provider 配置工具（AI 报 LLM 未配置时，引导用户去设置页，不要尝试自行配置）。
 
 分权规则（务必遵守）：
 - 用户记忆的写入通道只有「写会话」：事实抽取、画像更新、实体维护全部由蒸馏完成；

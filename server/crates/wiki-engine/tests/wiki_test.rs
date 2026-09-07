@@ -131,7 +131,7 @@ async fn two_docs_interlinked_no_duplicate() {
         .unwrap();
     assert!(matches!(
         skipped,
-        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_, _)
     ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
@@ -157,7 +157,7 @@ async fn two_docs_interlinked_no_duplicate() {
         .unwrap();
     assert!(matches!(
         skipped2,
-        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_, _)
     ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
@@ -333,7 +333,7 @@ async fn ingest_document_url_fallback_uses_chunks() {
     assert!(
         matches!(
             skipped,
-            engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+            engram_wiki_engine::ingest::IngestOutcome::Enqueued(_, _)
         ),
         "首次织入不应跳过"
     );
@@ -554,7 +554,7 @@ async fn w1_generate_failure_resubmit_recovers() {
     let skipped = wiki.ingest("W1文档", text).await.unwrap();
     assert!(matches!(
         skipped,
-        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_, _)
     ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
@@ -578,7 +578,7 @@ async fn w1_generate_failure_resubmit_recovers() {
     assert!(
         matches!(
             skipped2,
-            engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+            engram_wiki_engine::ingest::IngestOutcome::Enqueued(_, _)
         ),
         "恢复路径应真正重跑而非秒跳过"
     );
@@ -958,7 +958,7 @@ async fn generate_page_cap_truncates_and_warns() {
         .unwrap();
     assert!(matches!(
         skipped,
-        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_)
+        engram_wiki_engine::ingest::IngestOutcome::Enqueued(_, _)
     ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 

@@ -61,8 +61,8 @@ pub async fn ingest(
     };
     let (status, skipped) = match &outcome {
         IngestOutcome::AlreadyReady(_) => ("ready", true),
-        IngestOutcome::InFlight(_) => ("in_flight", false),
-        IngestOutcome::Enqueued(_) => ("enqueued", false),
+        IngestOutcome::InFlight(_, _) => ("in_flight", false),
+        IngestOutcome::Enqueued(_, _) => ("enqueued", false),
     };
     Ok((
         StatusCode::ACCEPTED,
@@ -70,6 +70,7 @@ pub async fn ingest(
             skipped,
             status: Some(status.into()),
             source_id: Some(outcome.source_id()),
+            job_id: outcome.job_id(),
         }),
     ))
 }
@@ -84,6 +85,9 @@ pub struct IngestAccepted {
     /// wiki_sources 行 id（任务页/审计追踪用；仅 /wiki/ingest 返回）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_id: Option<uuid::Uuid>,
+    /// 织入任务 id（GET /jobs/{job_id} 直查进度；仅 /wiki/ingest 返回）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<uuid::Uuid>,
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -353,6 +357,7 @@ pub async fn archive_query(
             skipped,
             status: None,
             source_id: None,
+            job_id: None,
         }),
     ))
 }

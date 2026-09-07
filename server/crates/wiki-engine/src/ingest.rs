@@ -35,18 +35,27 @@ fn sha256_hex(b: &[u8]) -> String {
 pub enum IngestOutcome {
     /// 同 sha 来源已就绪（曾成功织入）——幂等跳过
     AlreadyReady(Uuid),
-    /// 同 sha 任务在途（pending/processing）——勿重复提交；source id 供任务页追踪
-    InFlight(Uuid),
-    /// 新入队（或失败后重入队）
-    Enqueued(Uuid),
+    /// 同 sha 任务在途（pending/processing）——勿重复提交；携带在途 job id
+    InFlight(Uuid, Option<Uuid>),
+    /// 新入队（或失败后重入队）；携带 analyze job id
+    Enqueued(Uuid, Uuid),
 }
 
 impl IngestOutcome {
     pub fn source_id(&self) -> Uuid {
         match self {
             IngestOutcome::AlreadyReady(id)
-            | IngestOutcome::InFlight(id)
-            | IngestOutcome::Enqueued(id) => *id,
+            | IngestOutcome::InFlight(id, _)
+            | IngestOutcome::Enqueued(id, _) => *id,
+        }
+    }
+
+    /// 进度查询通道（R8 观察 3）：GET /jobs/{job_id}（任意 scope 的 key 可读）或任务页
+    pub fn job_id(&self) -> Option<Uuid> {
+        match self {
+            IngestOutcome::AlreadyReady(_) => None,
+            IngestOutcome::InFlight(_, job) => *job,
+            IngestOutcome::Enqueued(_, job) => Some(*job),
         }
     }
 
@@ -75,7 +84,17 @@ pub async fn enqueue_ingest(
     if let Some((id, status)) = existing {
         match status.as_str() {
             "ready" => return Ok(IngestOutcome::AlreadyReady(id)),
-            "pending" | "processing" => return Ok(IngestOutcome::InFlight(id)),
+            "pending" | "processing" => {
+                // R8 观察 3：带上在途 job id，调用方可 GET /jobs/{id} 直查进度
+                let job: Option<(Uuid,)> = sqlx::query_as(
+                    "SELECT id FROM jobs                      WHERE payload->>'source_id' = $1 AND kind IN ('wiki_analyze','wiki_generate')                        AND status IN ('pending','running')                      ORDER BY created_at DESC LIMIT 1",
+                )
+                .bind(id.to_string())
+                .fetch_optional(queue.pool())
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+                return Ok(IngestOutcome::InFlight(id, job.map(|(j,)| j)));
+            }
             _ => {} // failed → 走下方 W1 状态感知重入队
         }
     }
@@ -164,7 +183,9 @@ pub async fn enqueue_ingest(
                     .execute(queue.pool())
                     .await
                     .map_err(|e| JobError::Retryable(e.to_string()))?;
-                    queue
+                    // 注意必须 return：直发 generate 后不得坠落进下方 analyze 重跑分支
+                    // （.map(...)? 只是求值丢弃，不是提前返回——曾因此多入队 analyze 抢走恢复用的 LLM 响应）
+                    return queue
                         .enqueue(
                             JobTemplate::new("wiki_generate")
                                 .with_payload(json!({
@@ -177,8 +198,8 @@ pub async fn enqueue_ingest(
                                     Uuid::now_v7().simple()
                                 )),
                         )
-                        .await?;
-                    return Ok(IngestOutcome::Enqueued(real_id));
+                        .await
+                        .map(|j| IngestOutcome::Enqueued(real_id, j.id));
                 }
                 // analyze 未成功或 analysis 不可得 → 重跑 analyze（原料文件刚重写过，可读）
                 sqlx::query("UPDATE wiki_sources SET status = 'pending', error = NULL WHERE id = $1 AND status <> 'ready'")
@@ -186,7 +207,7 @@ pub async fn enqueue_ingest(
                     .execute(queue.pool())
                     .await
                     .map_err(|e| JobError::Retryable(e.to_string()))?;
-                queue
+                return queue
                     .enqueue(
                         JobTemplate::new("wiki_analyze")
                             .with_payload(json!({"source_id": real_id}))
@@ -195,20 +216,20 @@ pub async fn enqueue_ingest(
                                 Uuid::now_v7().simple()
                             )),
                     )
-                    .await?;
-                return Ok(IngestOutcome::Enqueued(real_id));
+                    .await
+                    .map(|j| IngestOutcome::Enqueued(real_id, j.id));
             }
         }
     }
 
-    queue
+    let job = queue
         .enqueue(
             JobTemplate::new("wiki_analyze")
                 .with_payload(json!({"source_id": real_id}))
                 .with_idempotency_key(format!("wiki-analyze-{real_id}")),
         )
         .await?;
-    Ok(IngestOutcome::Enqueued(real_id))
+    Ok(IngestOutcome::Enqueued(real_id, job.id))
 }
 
 /// 第一步：分析。source 全文 + 既有 index → 结构化分析（存 wiki_sources.status + 事件）。
@@ -559,9 +580,14 @@ pub async fn generate_job(
             .ok();
     }
 
+    let thin_hint = if created + updated + proposals == 0 {
+        "（0 产物：内容较薄，LLM 未产出页面——status=ready 仅代表处理完成，不代表有产物）"
+    } else {
+        ""
+    };
     ctx.emit(
         &format!(
-            "Wiki 生成：新建 {created} / 更新 {updated} / 提案 {proposals}（{embedded_pages} 页已嵌入）"
+            "Wiki 生成：新建 {created} / 更新 {updated} / 提案 {proposals}（{embedded_pages} 页已嵌入）{thin_hint}"
         ),
         Some(json!({"created": created, "updated": updated, "proposals": proposals, "embedded": embedded_pages})),
     )
@@ -660,9 +686,14 @@ async fn update_index_and_log(
 
     // log：append 一行（存 latest 系统页；全量历史靠 job_events）
     let log_line = format!(
-        "- {} ingest `{}` → 新建 {created} / 更新 {updated} / 提案 {proposals}",
+        "- {} ingest `{}` → 新建 {created} / 更新 {updated} / 提案 {proposals}{}",
         chrono::Utc::now().format("%Y-%m-%d %H:%M"),
-        source_title
+        source_title,
+        if created + updated + proposals == 0 {
+            "（0 产物——薄内容未产出页面）"
+        } else {
+            ""
+        }
     );
     let prev_log: Option<String> = sqlx::query_scalar(
         "SELECT content FROM wiki_pages WHERE slug = 'log' AND page_type = 'log'",
