@@ -837,3 +837,89 @@ async fn persona_current_hides_retired_empty_facets() {
     assert_eq!(goals["version"], 3);
     assert_eq!(goals["content"], "用户新目标：攀登");
 }
+
+/// 擦除路径的孤儿清扫（2026-09-08 用户：画像空了圈子里怎么还有东西）：
+/// erase 归档源原子后，挂链原子全部失效的实体必须同场退场——圈子和画像口径一致。
+#[tokio::test]
+async fn erase_archives_orphan_entities() {
+    let (app, pg) = app().await;
+    let admin = login_token(&app).await;
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/memory/sessions")
+                .header("authorization", format!("Bearer {admin}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"distill": "off", "turns": [{"speaker": "user", "text": "擦除孤儿实体靶会话"}]})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let sid: String = serde_json::from_slice::<Value>(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let pool = sqlx::PgPool::connect(&support::connection_url(&pg).await.unwrap())
+        .await
+        .unwrap();
+    // 挂一个实体，其唯一活跃原子源自该会话
+    let atom_id = uuid::Uuid::now_v7();
+    let entity_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, source_refs)          VALUES ($1, 'fact', '孤儿清扫靶原子', 'active', $2::jsonb)",
+    )
+    .bind(atom_id)
+    .bind(format!(r#"[{{"session_id":"{sid}"}}]"#))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO entities (id, name, kind) VALUES ($1, 'wipe-orphan-e', 'topic')")
+        .bind(entity_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
+        .bind(atom_id)
+        .bind(entity_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/memory/sessions/{sid}"))
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "擦除应 204");
+
+    let archived: Option<Option<chrono::DateTime<chrono::Utc>>> =
+        sqlx::query_scalar("SELECT archived_at FROM entities WHERE id = $1")
+            .bind(entity_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        archived.flatten().is_some(),
+        "挂链原子全部失效的实体应随擦除退场"
+    );
+}

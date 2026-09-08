@@ -490,6 +490,18 @@ impl MemoryService {
             )
             .await;
         }
+        // 与 void 同一套孤儿清扫（2026-09-08 用户：画像空了圈子里怎么还有东西）——
+        // erase 归档原子后，挂链原子全部失效的实体也要退场，否则圈子和画像口径分裂。
+        // 场景收敛一并触发（快照里可能引用被归档的成员）。
+        self.queue
+            .enqueue(
+                JobTemplate::new("organize_scenarios")
+                    .with_payload(json!({ "converge_only": true }))
+                    .with_idempotency_key(format!("erase-converge-{id}")),
+            )
+            .await
+            .ok();
+        repo::archive_orphan_entities(&self.pool).await?;
         Ok(())
     }
 
