@@ -65,6 +65,7 @@ pub async fn enqueue_ingest(
     queue: &engram_jobs::JobQueue,
     _registry: &ProviderRegistry,
     data_dir: &std::path::Path,
+    lib: Uuid,
     source: IngestSource,
 ) -> Result<(Uuid, bool), WikiDocumentError> {
     // sha256 计算
@@ -120,6 +121,7 @@ pub async fn enqueue_ingest(
     // K6：INSERT ... ON CONFLICT 单往返——并发同 sha 一个赢、一个幂等命中，不再竞态 503
     let inserted = repo::insert_document_sha(
         queue.pool(),
+        lib,
         id,
         &title,
         &source_uri,
@@ -135,14 +137,14 @@ pub async fn enqueue_ingest(
         if !raw_path.is_empty() {
             let _ = tokio::fs::remove_file(&raw_path).await;
         }
-        let existing = repo::find_document_id_by_sha(queue.pool(), &sha)
+        let existing = repo::find_document_id_by_sha(queue.pool(), lib, &sha)
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
 
         // K1 自愈：failed 文档 / 非终态卡死（>5 分钟无 pending·running 活 job）→ 原子重置 + 重新入队。
         // 不再让一次网络抖动永久卡死该 sha；ready 或在途文档不受影响。
         // 5 分钟静默期：杜绝「并发重复提交时，先到者尚未入队」毫秒窗口被误判为卡死。
-        let healed = repo::heal_stuck_document(queue.pool(), existing)
+        let healed = repo::heal_stuck_document(queue.pool(), lib, existing)
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
         if healed.is_some() {
@@ -150,7 +152,7 @@ pub async fn enqueue_ingest(
             queue
                 .enqueue(
                     JobTemplate::new("parse_document")
-                        .with_payload(json!({"document_id": existing}))
+                        .with_payload(json!({"document_id": existing, "library_id": lib}))
                         .with_idempotency_key(format!(
                             "ingest-{existing}-{}",
                             Uuid::now_v7().simple()
@@ -166,12 +168,12 @@ pub async fn enqueue_ingest(
     if let Err(e) = queue
         .enqueue(
             JobTemplate::new("parse_document")
-                .with_payload(json!({"document_id": id}))
+                .with_payload(json!({"document_id": id, "library_id": lib}))
                 .with_idempotency_key(format!("ingest-{id}")),
         )
         .await
     {
-        let _ = repo::delete_document_quiet(queue.pool(), id).await;
+        let _ = repo::delete_document_quiet(queue.pool(), lib, id).await;
         if !raw_path.is_empty() {
             let _ = tokio::fs::remove_file(&raw_path).await;
         }
@@ -213,8 +215,13 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| JobError::Permanent("payload 缺 document_id".into()))?;
 
+    // 文档所属库（多库：全部 repo 调用按库收窄）
+    let lib: Uuid = repo::document_library(pool, doc_id)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .ok_or_else(|| JobError::Permanent(format!("文档 {doc_id} 不存在")))?;
     // 读取文档行（raw_path 可空：URL 文档摄取前无本地文件）
-    let (source_uri, raw_path, mime) = repo::get_document_source(pool, doc_id)
+    let (source_uri, raw_path, mime) = repo::get_document_source(pool, lib, doc_id)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?
         .ok_or_else(|| JobError::Permanent(format!("文档 {doc_id} 不存在")))?;
@@ -225,8 +232,8 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
         JobError::Permanent(msg)
     };
     // 状态标记为 failed（尽力而为，事件可查）
-    async fn mark_failed(ctx: &JobContext, doc_id: Uuid, msg: &str) {
-        let _ = repo::mark_failed_document(ctx.pool(), doc_id, msg).await;
+    async fn mark_failed(ctx: &JobContext, lib: Uuid, doc_id: Uuid, msg: &str) {
+        let _ = repo::mark_failed_document(ctx.pool(), lib, doc_id, msg).await;
         ctx.emit("文档摄取失败", Some(serde_json::json!({"error": msg})))
             .await
             .ok();
@@ -252,6 +259,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
                 let title = extract_title_from_html(&page.bytes).or(Some(source_uri.clone()));
                 let _ = repo::update_document_fetch_result(
                     pool,
+                    lib,
                     doc_id,
                     path.to_string_lossy().as_ref(),
                     page.content_type.as_deref(),
@@ -277,7 +285,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
                 };
                 let last_attempt = ctx.job.attempts >= ctx.job.max_attempts;
                 if permanent || last_attempt {
-                    mark_failed(&ctx, doc_id, &m).await;
+                    mark_failed(&ctx, lib, doc_id, &m).await;
                 }
                 if permanent {
                     return Err(fail(m));
@@ -292,7 +300,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
             Ok(b) => b,
             Err(e) => {
                 let m = format!("读文件失败: {e}");
-                mark_failed(&ctx, doc_id, &m).await;
+                mark_failed(&ctx, lib, doc_id, &m).await;
                 return Err(fail(m));
             }
         };
@@ -304,7 +312,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
     };
 
     // 状态 → parsing
-    repo::update_document_status(pool, doc_id, "parsing")
+    repo::update_document_status(pool, lib, doc_id, "parsing")
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
@@ -316,7 +324,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
         Ok(Ok(t)) => t,
         Ok(Err(e)) => {
             let m = e.to_string();
-            mark_failed(&ctx, doc_id, &m).await;
+            mark_failed(&ctx, lib, doc_id, &m).await;
             return Err(fail(m));
         }
         Err(e) => return Err(JobError::Permanent(format!("解析线程崩溃: {e}"))),
@@ -335,7 +343,8 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
 
     // 入队 chunk
     ctx.enqueue_next(
-        JobTemplate::new("chunk_document").with_payload(json!({"document_id": doc_id})),
+        JobTemplate::new("chunk_document")
+            .with_payload(json!({"document_id": doc_id, "library_id": lib})),
     )
     .await?;
     Ok(json!({"document_id": doc_id, "chars": text.chars().count()}))
@@ -368,7 +377,11 @@ pub async fn chunk_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| JobError::Permanent("payload 缺 document_id".into()))?;
 
-    repo::update_document_status(pool, doc_id, "chunking")
+    let lib: Uuid = repo::document_library(pool, doc_id)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .ok_or_else(|| JobError::Permanent(format!("文档 {doc_id} 不存在")))?;
+    repo::update_document_status(pool, lib, doc_id, "chunking")
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
@@ -379,7 +392,7 @@ pub async fn chunk_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
 
     let chunks = chunk_text(&text);
     if chunks.is_empty() {
-        repo::mark_failed_document(pool, doc_id, "解析后内容为空")
+        repo::mark_failed_document(pool, lib, doc_id, "解析后内容为空")
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
         return Ok(json!({"document_id": doc_id, "chunks": 0, "empty": true}));
@@ -388,6 +401,7 @@ pub async fn chunk_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
     for c in &chunks {
         repo::insert_chunk(
             pool,
+            lib,
             Uuid::now_v7(),
             doc_id,
             c.seq as i32,
@@ -403,7 +417,8 @@ pub async fn chunk_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
 
     // 入队 embed
     ctx.enqueue_next(
-        JobTemplate::new("embed_document").with_payload(json!({"document_id": doc_id})),
+        JobTemplate::new("embed_document")
+            .with_payload(json!({"document_id": doc_id, "library_id": lib})),
     )
     .await?;
     Ok(json!({"document_id": doc_id, "chunks": chunks.len()}))
@@ -424,17 +439,21 @@ pub async fn embed_job(
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| JobError::Permanent("payload 缺 document_id".into()))?;
 
-    repo::update_document_status(pool, doc_id, "embedding")
+    let lib: Uuid = repo::document_library(pool, doc_id)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .ok_or_else(|| JobError::Permanent(format!("文档 {doc_id} 不存在")))?;
+    repo::update_document_status(pool, lib, doc_id, "embedding")
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
     // K8：只补缺失块（NULL 向量或 embed_failed）——重跑 / re-embed / Transient 重试
     // 的进度天然保留，已嵌入块不重复计费
-    let chunks = repo::missing_chunks(pool, doc_id)
+    let chunks = repo::missing_chunks(pool, lib, doc_id)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    let total = repo::count_chunks(pool, doc_id)
+    let total = repo::count_chunks(pool, lib, doc_id)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
     let missing = chunks.len();
@@ -461,14 +480,14 @@ pub async fn embed_job(
                             "embed 响应与批次不符，整批降级 FTS"
                         );
                         for (cid, _) in batch {
-                            repo::set_chunk_failed(pool, *cid)
+                            repo::set_chunk_failed(pool, lib, *cid)
                                 .await
                                 .map_err(|e| JobError::Retryable(e.to_string()))?;
                         }
                         continue;
                     }
                     for (i, (cid, _)) in batch.iter().enumerate() {
-                        repo::set_chunk_embedding(pool, *cid, resp.embeddings[i].clone())
+                        repo::set_chunk_embedding(pool, lib, *cid, resp.embeddings[i].clone())
                             .await
                             .map_err(|e| JobError::Retryable(e.to_string()))?;
                         embedded += 1;
@@ -488,7 +507,7 @@ pub async fn embed_job(
                     }
                     tracing::warn!(error = %e, "嵌入批次失败，标记 embed_failed");
                     for (cid, _) in batch {
-                        repo::set_chunk_failed(pool, *cid)
+                        repo::set_chunk_failed(pool, lib, *cid)
                             .await
                             .map_err(|e| JobError::Retryable(e.to_string()))?;
                     }
@@ -497,7 +516,7 @@ pub async fn embed_job(
         }
     }
 
-    repo::set_ready_document(pool, doc_id)
+    repo::set_ready_document(pool, lib, doc_id)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
@@ -506,7 +525,7 @@ pub async fn embed_job(
     // best-effort（sha256 去重 + 失败不影响文档 ready，页面层降级为空）。
     {
         let wiki = crate::wiki::WikiService::new(pool.clone(), registry.clone());
-        let _ = wiki.ingest_document(doc_id).await;
+        let _ = wiki.ingest_document(lib, doc_id).await;
     }
 
     // 清理 extracted 临时文件

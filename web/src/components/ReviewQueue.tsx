@@ -38,14 +38,14 @@ const ACTIONS: Record<string, string[]> = {
   flag: ['已处理', '忽略'],
 }
 
-export default function ReviewQueue() {
+export default function ReviewQueue({ libSlug }: { libSlug: string }) {
   const [items, setItems] = useState<ReviewItem[] | null>(null)
   const [err, setErr] = useState('')
 
-  const load = () => api.get<ReviewItem[]>('/wiki/reviews').then(setItems).catch((e) => setErr(e.message))
+  const load = () => api.get<ReviewItem[]>(`/wiki/reviews?lib=${encodeURIComponent(libSlug)}`).then(setItems).catch((e) => setErr(e.message))
   useEffect(() => {
     load()
-  }, [])
+  }, [libSlug])
 
   if (err) return <ErrorBox msg={err} />
   if (!items) return <Spinner label="人审队列加载…" />
@@ -90,7 +90,7 @@ export default function ReviewQueue() {
                       variant="outline"
                       data-testid={`review-action-${a}`}
                       onClick={async () => {
-                        await api.post(`/wiki/reviews/${it.id}/resolve`, { action: a })
+                        await api.post(`/wiki/reviews/${it.id}/resolve?lib=${encodeURIComponent(libSlug)}`, { action: a })
                         load()
                       }}
                     >
@@ -101,7 +101,7 @@ export default function ReviewQueue() {
                     size="sm"
                     variant="ghost"
                     onClick={async () => {
-                      await api.post(`/wiki/reviews/${it.id}/resolve`, { dismiss: true })
+                      await api.post(`/wiki/reviews/${it.id}/resolve?lib=${encodeURIComponent(libSlug)}`, { dismiss: true })
                       load()
                     }}
                   >

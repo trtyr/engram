@@ -268,6 +268,15 @@ export interface EntityDetail {
   neighbors: EntityNode[]
   relations: EntityRelation[]
 }
+/** Wiki 多库（GET /wiki/libraries）。pages / sources 是该库页面 / 原料数。 */
+export interface WikiLibrary {
+  id: string
+  slug: string
+  name: string
+  createdAt: string
+  pages: number
+  sources: number
+}
 export interface WikiPage {
   id: string
   slug: string

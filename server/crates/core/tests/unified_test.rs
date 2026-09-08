@@ -42,7 +42,7 @@ async fn unified_search_fuses_three_domains() {
     // 2. wiki：document + chunk
     let doc_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO wiki_documents (id, title, source_uri, sha256, status) VALUES ($1, 'Rust 文档', 'rust.md', $2, 'ready')",
+        "INSERT INTO wiki_documents (id, library_id, title, source_uri, sha256, status) VALUES ($1, (SELECT id FROM wiki_libraries WHERE slug = 'main'), 'Rust 文档', 'rust.md', $2, 'ready')",
     )
     .bind(doc_id)
     .bind(format!("sha-{}", Uuid::now_v7()))
@@ -50,8 +50,8 @@ async fn unified_search_fuses_three_domains() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO wiki_chunks (id, document_id, seq, content, embed_failed, tsv) \
-         VALUES ($1, $2, 0, 'Rust 语言的内存安全特性', false, to_tsvector('simple', $3))",
+        "INSERT INTO wiki_chunks (id, library_id, document_id, seq, content, embed_failed, tsv) \
+         VALUES ($1, (SELECT id FROM wiki_libraries WHERE slug = 'main'), $2, 0, 'Rust 语言的内存安全特性', false, to_tsvector('simple', $3))",
     )
     .bind(Uuid::now_v7())
     .bind(doc_id)
@@ -62,8 +62,8 @@ async fn unified_search_fuses_three_domains() {
 
     // 3. wiki：page
     sqlx::query(
-        "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version, tsv) \
-         VALUES ($1, 'rust-page', 'Rust', 'concept', 'Rust 是一门系统编程语言', '{}'::jsonb, 'llm', 1, to_tsvector('simple', $2))",
+        "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, tsv) \
+         VALUES ($1, (SELECT id FROM wiki_libraries WHERE slug = 'main'), 'rust-page', 'Rust', 'concept', 'Rust 是一门系统编程语言', '{}'::jsonb, 'llm', 1, to_tsvector('simple', $2))",
     )
     .bind(Uuid::now_v7())
     .bind(tsv_text("Rust 是一门系统编程语言"))

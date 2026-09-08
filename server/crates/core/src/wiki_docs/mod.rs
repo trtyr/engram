@@ -55,28 +55,37 @@ impl WikiDocumentService {
     }
 
     /// 提交摄取（上传字节或 URL）。sha 命中返回 (既有id, true)。
-    pub async fn submit(&self, source: IngestSource) -> Result<(Uuid, bool), WikiDocumentError> {
+    pub async fn submit(
+        &self,
+        lib: Uuid,
+        source: IngestSource,
+    ) -> Result<(Uuid, bool), WikiDocumentError> {
         if let IngestSource::Bytes { content, .. } = &source
             && content.len() > 50 * 1024 * 1024
         {
             return Err(WikiDocumentError::BadRequest("文件超过 50MB 上限".into()));
         }
-        pipeline::enqueue_ingest(&self.queue, &self.registry, &self.data_dir, source).await
+        pipeline::enqueue_ingest(&self.queue, &self.registry, &self.data_dir, lib, source).await
     }
 
     pub async fn list_documents(
         &self,
+        lib: Uuid,
         status: Option<&str>,
         cursor: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<DocumentDto>, WikiDocumentError> {
-        repo::list_documents(&self.pool, status, cursor, limit.min(200))
+        repo::list_documents(&self.pool, lib, status, cursor, limit.min(200))
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))
     }
 
-    pub async fn get_document(&self, id: Uuid) -> Result<DocumentDto, WikiDocumentError> {
-        repo::get_document(&self.pool, id)
+    pub async fn get_document(
+        &self,
+        lib: Uuid,
+        id: Uuid,
+    ) -> Result<DocumentDto, WikiDocumentError> {
+        repo::get_document(&self.pool, lib, id)
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))?
             .ok_or_else(|| WikiDocumentError::NotFound(format!("文档 {id} 不存在")))
@@ -84,17 +93,18 @@ impl WikiDocumentService {
 
     pub async fn chunks(
         &self,
+        lib: Uuid,
         id: Uuid,
         limit: i64,
     ) -> Result<Vec<(i32, String, bool)>, WikiDocumentError> {
-        repo::list_chunks(&self.pool, id, limit)
+        repo::list_chunks(&self.pool, lib, id, limit)
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))
     }
 
     /// 删除：级联 chunks + 文件。
-    pub async fn delete(&self, id: Uuid) -> Result<(), WikiDocumentError> {
-        let raw_path = repo::delete_document_returning_path(&self.pool, id)
+    pub async fn delete(&self, lib: Uuid, id: Uuid) -> Result<(), WikiDocumentError> {
+        let raw_path = repo::delete_document_returning_path(&self.pool, lib, id)
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))?
             .ok_or_else(|| WikiDocumentError::NotFound(format!("文档 {id} 不存在")))?;
@@ -111,8 +121,8 @@ impl WikiDocumentService {
     }
 
     /// 重新嵌入缺失块（K8：embed_failed / NULL 向量的显式恢复入口）。
-    pub async fn reembed(&self, id: Uuid) -> Result<(), WikiDocumentError> {
-        let status = repo::get_document_status(&self.pool, id)
+    pub async fn reembed(&self, lib: Uuid, id: Uuid) -> Result<(), WikiDocumentError> {
+        let status = repo::get_document_status(&self.pool, lib, id)
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
         match status.as_deref() {
@@ -136,6 +146,7 @@ impl WikiDocumentService {
     /// 混合检索 chunks（FTS + 向量 + RRF，带文档引用）。
     pub async fn search(
         &self,
+        lib: Uuid,
         query: &str,
         limit: i64,
     ) -> Result<Vec<ChunkHit>, WikiDocumentError> {
@@ -150,7 +161,7 @@ impl WikiDocumentService {
         if qv.is_none() && !has_query_tokens(query) {
             return Ok(vec![]);
         }
-        let rows = repo::search_chunks(&self.pool, &tsv_query_smart(query, 3), qv, limit)
+        let rows = repo::search_chunks(&self.pool, lib, &tsv_query_smart(query, 3), qv, limit)
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
         Ok(rows

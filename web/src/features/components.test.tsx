@@ -46,7 +46,7 @@ vi.mock('@/lib/api', () => {
     }),
     put: vi.fn(async (p: string) => {
       if (p.startsWith('/wiki/pages/')) {
-        const slug = decodeURIComponent(p.split('/').pop()!)
+        const slug = decodeURIComponent(p.split('?')[0].split('/').pop()!) // /wiki/* 现带 ?lib= 库参数——剥掉再解析 slug
         const cur = state.pages as unknown as { slug: string; content: string; version: number }[]
         const next = cur.map((pg) =>
           pg.slug === slug ? { ...pg, content: state.draftContent ?? pg.content, version: pg.version + 1 } : pg,
@@ -231,7 +231,7 @@ describe('Wiki 编辑器保存', () => {
     fireEvent.click(screen.getByRole('button', { name: /保存（人工版）/ }))
     await waitFor(() => {
       expect(api.put).toHaveBeenCalledWith(
-        '/wiki/pages/%E5%90%91%E9%87%8F%E6%A3%80%E7%B4%A2',
+        '/wiki/pages/%E5%90%91%E9%87%8F%E6%A3%80%E7%B4%A2?lib=main',
         expect.objectContaining({ title: '向量检索', content: mockState.draftContent }),
       )
     })

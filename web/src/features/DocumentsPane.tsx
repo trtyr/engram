@@ -1,5 +1,5 @@
 /** Wiki 文档面板：左目录右阅读的主从版式 + 摄取/URL + 文档检索。 */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { appConfirm } from '@/components/confirm'
 import { Link2, Search, Upload } from 'lucide-react'
 import { api, type ChunkHit, type Document } from '@/lib/api'
@@ -27,7 +27,7 @@ const MIME_LABEL: Record<string, string> = {
 const mimeTag = (m: string | null) =>
   m ? MIME_LABEL[m] ?? m.replace(/^application\//, '').slice(0, 8) : '—'
 
-export function DocumentsPane() {
+export function DocumentsPane({ libSlug }: { libSlug: string }) {
   const [docs, setDocs] = useState<Document[] | null>(null)
   const [err, setErr] = useState('')
   const [url, setUrl] = useState('')
@@ -41,10 +41,16 @@ export function DocumentsPane() {
   const [hits, setHits] = useState<ChunkHit[] | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const load = () => api.get<Document[]>('/wiki/documents?limit=100').then(setDocs).catch((e) => setErr(e.message))
+  /** 当前库注入：全部 /wiki/* 请求带 ?lib=（已有 query 用 & 拼接）；切库由 Wiki 侧 key=libSlug 重挂载刷新。 */
+  const withLib = (path: string) => `${path}${path.includes('?') ? '&' : '?'}lib=${encodeURIComponent(libSlug)}`
+
+  const load = useCallback(() => {
+    return api.get<Document[]>(withLib('/wiki/documents?limit=100')).then(setDocs).catch((e) => setErr(e.message))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libSlug])
   useEffect(() => {
     load()
-  }, [])
+  }, [load])
   // 存在处理中文档时轮询刷新（状态推进可视化；全部终态后停）
   useEffect(() => {
     if (!docs?.some((d) => ['pending', 'parsing', 'chunking', 'embedding'].includes(d.status))) return
@@ -57,7 +63,7 @@ export function DocumentsPane() {
     setIngesting(true)
     setNotice(`摄取中：${f.name}`)
     try {
-      await api.upload('/wiki/upload', f)
+      await api.upload(withLib('/wiki/upload'), f)
       setNotice(`已入列：${f.name}`)
       load()
     } catch (ex) {
@@ -121,7 +127,7 @@ export function DocumentsPane() {
               setIngesting(true)
               setNotice(`摄取中：${url}`)
               try {
-                await api.post('/wiki/documents', { url })
+                await api.post(withLib('/wiki/documents'), { url })
                 setNotice(`已提交：${url}`)
                 setUrl('')
                 load()
@@ -164,7 +170,7 @@ export function DocumentsPane() {
           if (searching || !q.trim()) return
           setSearching(true)
           try {
-            setHits(await api.post<ChunkHit[]>('/wiki/documents/search', { query: q, max_items: 10 }))
+            setHits(await api.post<ChunkHit[]>(withLib('/wiki/documents/search'), { query: q, max_items: 10 }))
           } finally {
             setSearching(false)
           }
@@ -268,6 +274,7 @@ export function DocumentsPane() {
               <DocReader
                 key={activeDoc.id}
                 doc={activeDoc}
+                libSlug={libSlug}
                 onDeleted={() => {
                   setSelected(null)
                   load()
@@ -286,13 +293,16 @@ export function DocumentsPane() {
 }
 
 /** 阅读区：文档头（标题/来源/状态/操作）+ 分块连成的整篇成文。 */
-function DocReader({ doc, onDeleted }: { doc: Document; onDeleted: () => void }) {
+function DocReader({ doc, libSlug, onDeleted }: { doc: Document; libSlug: string; onDeleted: () => void }) {
   const [rows, setRows] = useState<{ seq: number; content: string; embed_failed: boolean }[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   useEffect(() => {
-    api.get<typeof rows>(`/wiki/documents/${doc.id}/chunks`).then(setRows).catch(() => setRows([]))
-  }, [doc.id])
+    api
+      .get<typeof rows>(`/wiki/documents/${doc.id}/chunks?lib=${encodeURIComponent(libSlug)}`)
+      .then(setRows)
+      .catch(() => setRows([]))
+  }, [doc.id, libSlug])
   const failedCount = (rows ?? []).filter((c) => c.embed_failed).length
   return (
     <Card className="overflow-hidden">
@@ -327,7 +337,7 @@ function DocReader({ doc, onDeleted }: { doc: Document; onDeleted: () => void })
                 }))
               )
                 return
-              await api.del(`/wiki/documents/${doc.id}`)
+              await api.del(`/wiki/documents/${doc.id}?lib=${encodeURIComponent(libSlug)}`)
               onDeleted()
             }}
           >
@@ -353,7 +363,7 @@ function DocReader({ doc, onDeleted }: { doc: Document; onDeleted: () => void })
                     setBusy(true)
                     setMsg('')
                     try {
-                      await api.post(`/wiki/documents/${doc.id}/re-embed`)
+                      await api.post(`/wiki/documents/${doc.id}/re-embed?lib=${encodeURIComponent(libSlug)}`)
                       setMsg('重嵌任务已入队')
                     } catch (ex) {
                       setMsg(ex instanceof Error ? ex.message : '重嵌失败')

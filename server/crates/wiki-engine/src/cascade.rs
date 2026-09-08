@@ -8,6 +8,9 @@
 //!
 //! 所有写操作包进一个事务（R4）：删页/摘源/清 dead link/删 source 原子提交，
 //! 失败整体回滚；index.md 重建是派生数据，放在事务外幂等重算。
+//!
+//! 多库（0037）：library_id 从 source 行取定，其后所有 pages/links 操作
+//! 都按该库过滤——级联删除绝不越库。
 
 use engram_jobs::types::JobError;
 use sqlx::PgPool;
@@ -23,6 +26,7 @@ pub struct CascadeReport {
 }
 
 /// 删除一个 wiki_source 的全部下游（页面/链接/索引）。
+/// library_id 从 source 行取（源不存在沿用 NotFound 语义——报错而非静默空删）。
 pub async fn cascade_delete_source(
     pool: &PgPool,
     source_id: Uuid,
@@ -30,18 +34,27 @@ pub async fn cascade_delete_source(
     let mut report = CascadeReport::default();
     let sid = source_id.to_string();
 
+    // 0. 取源所属库（多库 0037）：源不存在 → NotFound 语义报错，不静默成功
+    let lib: Uuid = sqlx::query_scalar("SELECT library_id FROM wiki_sources WHERE id = $1")
+        .bind(source_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .ok_or_else(|| JobError::Permanent(format!("源 {source_id} 不存在")))?;
+
     // 事务包裹全部写操作，失败整体回滚
     let mut tx = pool
         .begin()
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    // 1. 引用了该 source 的全部页面（sources[] 数组包含）
+    // 1. 引用了该 source 的全部页面（sources[] 数组包含；库内）
     let linked: Vec<(Uuid, String, String)> = sqlx::query_as(
         "SELECT id, slug, page_type FROM wiki_pages \
-         WHERE frontmatter->'sources' @> to_jsonb(ARRAY[$1::text])",
+         WHERE frontmatter->'sources' @> to_jsonb(ARRAY[$1::text]) AND library_id = $2",
     )
     .bind(&sid)
+    .bind(lib)
     .fetch_all(&mut *tx)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -52,16 +65,19 @@ pub async fn cascade_delete_source(
         // 摘要页 = page_type='source' 且唯一来源 → 整页删
         // 共享页（entity/concept 多源）→ 仅从 sources[] 移除该 source，保留页面
         let source_count: i32 = sqlx::query_scalar(
-            "SELECT jsonb_array_length(frontmatter->'sources') FROM wiki_pages WHERE id = $1",
+            "SELECT jsonb_array_length(frontmatter->'sources') \
+             FROM wiki_pages WHERE id = $1 AND library_id = $2",
         )
         .bind(id)
+        .bind(lib)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
         if page_type == "source" && source_count <= 1 {
-            sqlx::query("DELETE FROM wiki_pages WHERE id = $1")
+            sqlx::query("DELETE FROM wiki_pages WHERE id = $1 AND library_id = $2")
                 .bind(id)
+                .bind(lib)
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -76,10 +92,11 @@ pub async fn cascade_delete_source(
                             jsonb_array_elements_text(frontmatter->'sources') s \
                             WHERE s != $2)), \
                     updated_at = now() \
-                 WHERE id = $1",
+                 WHERE id = $1 AND library_id = $3",
             )
             .bind(id)
             .bind(&sid)
+            .bind(lib)
             .execute(&mut *tx)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -87,11 +104,13 @@ pub async fn cascade_delete_source(
         }
     }
 
-    // 2. dead wikilink 清理：剩余页面中指向已删 slug 的 [[link]] 移除
+    // 2. dead wikilink 清理：剩余页面中指向已删 slug 的 [[link]] 移除（库内）
     if !delete_slugs.is_empty() {
         let remaining: Vec<(String, String)> = sqlx::query_as(
-            "SELECT slug, content FROM wiki_pages WHERE page_type NOT IN ('index','log')",
+            "SELECT slug, content FROM wiki_pages \
+             WHERE page_type NOT IN ('index','log') AND library_id = $1",
         )
+        .bind(lib)
         .fetch_all(&mut *tx)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -108,12 +127,16 @@ pub async fn cascade_delete_source(
                 cleaned = crate::markup::remove_wikilinks(&cleaned, d);
             }
             let cleaned = cleaned.replace("\n\n\n", "\n\n");
-            sqlx::query("UPDATE wiki_pages SET content = $2, updated_at = now() WHERE slug = $1")
-                .bind(&slug)
-                .bind(&cleaned)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| JobError::Retryable(e.to_string()))?;
+            sqlx::query(
+                "UPDATE wiki_pages SET content = $2, updated_at = now() \
+                 WHERE slug = $1 AND library_id = $3",
+            )
+            .bind(&slug)
+            .bind(&cleaned)
+            .bind(lib)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
             report.cleaned_links += dead.len();
         }
     }
@@ -128,30 +151,35 @@ pub async fn cascade_delete_source(
     // W5：幽灵边——指向已删页面的 wiki_links 边必须在事务内一并删除
     // （旧实现只清 content 里的 [[link]] 文本，边表残留悬空边污染图视图与洞察）
     if !delete_slugs.is_empty() {
-        sqlx::query("DELETE FROM wiki_links WHERE from_slug = ANY($1) OR to_slug = ANY($1)")
-            .bind(&delete_slugs)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| JobError::Retryable(e.to_string()))?;
+        sqlx::query(
+            "DELETE FROM wiki_links \
+             WHERE (from_slug = ANY($1) OR to_slug = ANY($1)) AND library_id = $2",
+        )
+        .bind(&delete_slugs)
+        .bind(lib)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
     }
 
     tx.commit()
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    // 4. index.md 同步（派生数据，事务外幂等重建）
+    // 4. index.md 同步（派生数据，事务外幂等重建；按库重建）
     if !delete_slugs.is_empty() {
-        crate::ingest::rebuild_index_page(pool).await?;
+        crate::ingest::rebuild_index_page(pool, lib).await?;
     }
 
     // 5. W5：无据边清理——摘源后，既无内容 wikilink 又无共享源的边不再成立，删除
-    //    （源重叠补边只在 ingest 时新增，从不回收——摘源后成为无据残留）
+    //    （源重叠补边只在 ingest 时新增，从不回收——摘源后成为无据残留；库内）
     for slug in report.updated_shared.clone() {
         let others: Vec<String> = sqlx::query_scalar(
-            "SELECT to_slug FROM wiki_links WHERE from_slug = $1 \
-             UNION SELECT from_slug FROM wiki_links WHERE to_slug = $1",
+            "SELECT to_slug FROM wiki_links WHERE from_slug = $1 AND library_id = $2 \
+             UNION SELECT from_slug FROM wiki_links WHERE to_slug = $1 AND library_id = $2",
         )
         .bind(&slug)
+        .bind(lib)
         .fetch_all(pool)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -159,9 +187,10 @@ pub async fn cascade_delete_source(
             let pages: Vec<(String, String, Vec<String>)> = sqlx::query_as(
                 "SELECT slug, content, \
                  ARRAY(SELECT jsonb_array_elements_text(frontmatter->'sources')) \
-                 FROM wiki_pages WHERE slug = ANY($1)",
+                 FROM wiki_pages WHERE slug = ANY($1) AND library_id = $2",
             )
             .bind(vec![slug.clone(), other.clone()])
+            .bind(lib)
             .fetch_all(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -175,10 +204,12 @@ pub async fn cascade_delete_source(
             if !direct && !shared {
                 sqlx::query(
                     "DELETE FROM wiki_links \
-                     WHERE (from_slug = $1 AND to_slug = $2) OR (from_slug = $2 AND to_slug = $1)",
+                     WHERE library_id = $3 \
+                       AND ((from_slug = $1 AND to_slug = $2) OR (from_slug = $2 AND to_slug = $1))",
                 )
                 .bind(&slug)
                 .bind(&other)
+                .bind(lib)
                 .execute(pool)
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -186,9 +217,9 @@ pub async fn cascade_delete_source(
         }
     }
 
-    // 6. W5：权重重算（删除/摘源后剩余边的 4 信号权重修正）
+    // 6. W5：权重重算（删除/摘源后剩余边的 4 信号权重修正；按库）
     if !delete_slugs.is_empty() || !report.updated_shared.is_empty() {
-        crate::relevance::rebuild_weights(pool).await?;
+        crate::relevance::rebuild_weights(pool, lib).await?;
     }
 
     Ok(report)

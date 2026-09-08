@@ -38,18 +38,22 @@ const KIND_STYLE: Record<string, { dot: string; text: string }> = {
 
 export default function InsightsPanel({
   onHighlight,
+  libSlug,
 }: {
   /** 点击洞察卡片 → 高亮对应图谱节点（传 slug 集） */
   onHighlight: (slugs: string[] | null) => void
+  /** 当前 wiki 库（多库：洞察按库计算） */
+  libSlug: string
 }) {
   const [report, setReport] = useState<InsightsReport | null>(null)
   const [err, setErr] = useState('')
   const [active, setActive] = useState<string | null>(null)
 
-  const load = () => api.post<InsightsReport>('/wiki/insights').then(setReport).catch((e) => setErr(e.message))
+  const load = () => api.post<InsightsReport>(`/wiki/insights?lib=${encodeURIComponent(libSlug)}`).then(setReport).catch((e) => setErr(e.message))
   useEffect(() => {
+    // eslint 由依赖数组驱动：切库重算洞察
     load()
-  }, [])
+  }, [libSlug])
 
   if (err) return <ErrorBox msg={err} />
   if (!report) return <Spinner label="洞察计算中…" />
@@ -65,7 +69,7 @@ export default function InsightsPanel({
           size="sm"
           variant="outline"
           onClick={async () => {
-            await api.post('/wiki/insights/reset')
+            await api.post(`/wiki/insights/reset?lib=${encodeURIComponent(libSlug)}`)
             load()
           }}
         >
@@ -108,7 +112,7 @@ export default function InsightsPanel({
                     variant="ghost"
                     onClick={async (e) => {
                       e.stopPropagation()
-                      await api.post('/wiki/insights/dismiss', { key: ins.key })
+                      await api.post(`/wiki/insights/dismiss?lib=${encodeURIComponent(libSlug)}`, { key: ins.key })
                       load()
                     }}
                   >

@@ -58,24 +58,25 @@ vi.mock('@/lib/api', () => {
   }
   const api = {
     get: vi.fn(async (p: string) => {
-      if (p.startsWith('/settings/llm/providers')) return state.providers
-      if (p.startsWith('/wiki/documents/') && p.endsWith('/chunks')) return state.chunks
-      if (p.startsWith('/wiki/documents')) return state.docs
-      if (p.startsWith('/memory/sessions')) return state.sessions
-      if (p.startsWith('/memory/atoms')) return state.atoms
-      if (p.startsWith('/memory/entities/graph')) return { nodes: [], edges: [] }
-      if (p.startsWith('/memory/entities/')) {
+      const path = p.split('?')[0] // /wiki/* 现带 ?lib= 库参数——统一剥掉 query 再做路径匹配
+      if (path.startsWith('/settings/llm/providers')) return state.providers
+      if (path.startsWith('/wiki/documents/') && path.endsWith('/chunks')) return state.chunks
+      if (path.startsWith('/wiki/documents')) return state.docs
+      if (path.startsWith('/memory/sessions')) return state.sessions
+      if (path.startsWith('/memory/atoms')) return state.atoms
+      if (path.startsWith('/memory/entities/graph')) return { nodes: [], edges: [] }
+      if (path.startsWith('/memory/entities/')) {
         return { entity: { id: 'e1', name: '张三', kind: 'person', summary: '同事，负责后端', atom_count: 0, updated_at: '2026-08-30T00:00:00Z' }, atoms: [], scenarios: [] }
       }
-      if (p.startsWith('/memory/entities')) return []
-      if (p.startsWith('/memory/scenarios')) return []
-      if (p.startsWith('/wiki/pages/')) return state.wikiPages.find((x) => p.endsWith(`/${x.slug}`)) ?? null
-      if (p.startsWith('/wiki/pages')) return state.wikiPages
-      if (p === '/wiki/purpose') return state.purpose
-      if (p.startsWith('/memory/persona')) return []
-      if (p.startsWith('/codegraph/projects')) return []
-      if (p.startsWith('/jobs')) return []
-      if (p.startsWith('/llm/usage')) return state.usage
+      if (path.startsWith('/memory/entities')) return []
+      if (path.startsWith('/memory/scenarios')) return []
+      if (path.startsWith('/wiki/pages/')) return state.wikiPages.find((x) => path.endsWith(`/${x.slug}`)) ?? null
+      if (path.startsWith('/wiki/pages')) return state.wikiPages
+      if (path === '/wiki/purpose') return state.purpose
+      if (path.startsWith('/memory/persona')) return []
+      if (path.startsWith('/codegraph/projects')) return []
+      if (path.startsWith('/jobs')) return []
+      if (path.startsWith('/llm/usage')) return state.usage
       return []
     }),
     post: vi.fn(async (p: string, _b?: unknown) => {
@@ -93,7 +94,7 @@ vi.mock('@/lib/api', () => {
     }),
     patch: vi.fn(async (_p: string, _b?: unknown) => ({})),
     put: vi.fn(async (p: string) => {
-      if (p === '/wiki/purpose') return undefined
+      if (p.split('?')[0] === '/wiki/purpose') return undefined
       return {}
     }),
     del: vi.fn(async () => undefined),
@@ -356,14 +357,14 @@ describe('Wiki 文档 re-embed', () => {
       { seq: 1, content: '块1', embed_failed: true },
       { seq: 2, content: '块2', embed_failed: false },
     ]
-    render(wrap(<DocumentsPane />))
+    render(wrap(<DocumentsPane libSlug="main" />))
     // 主从版式：目录项 + 阅读区标题都显示文档名
     await screen.findAllByText('doc')
     // 主从版式：首篇自动选中，阅读区直接可见
     await screen.findByText('1 个分块嵌入失败（FTS 降级）')
     fireEvent.click(screen.getByRole('button', { name: '重嵌缺失块' }))
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith('/wiki/documents/d1/re-embed')
+      expect(api.post).toHaveBeenCalledWith('/wiki/documents/d1/re-embed?lib=main')
     })
   })
 })
@@ -378,7 +379,7 @@ describe('Wiki 目标（purpose）', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => {
       expect(api.put).toHaveBeenCalledWith(
-        '/wiki/purpose',
+        '/wiki/purpose?lib=main',
         expect.objectContaining({ goals: ['构建知识库'], key_questions: ['什么？'], scope: ['Rust'] }),
       )
     })

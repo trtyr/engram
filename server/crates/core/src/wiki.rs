@@ -5,6 +5,8 @@
 pub use engram_wiki_engine::cascade::CascadeReport;
 pub use engram_wiki_engine::ingest::IngestOutcome;
 pub use engram_wiki_engine::insights::InsightsReport;
+// 多库（0037）：库管理（list/resolve/create/rename/delete）+ 库 DTO
+pub use engram_wiki_engine::libraries::{self, WikiLibraryDto};
 pub use engram_wiki_engine::purpose::Purpose;
 pub use engram_wiki_engine::review::ReviewItem;
 pub use engram_wiki_engine::service::GraphDto;

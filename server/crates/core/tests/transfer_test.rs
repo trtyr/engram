@@ -56,7 +56,7 @@ async fn transfer_roundtrip_and_idempotency() {
     sqlx::query("INSERT INTO skill_files (id, skill_id, path, content) VALUES ($1,$2,'scripts/run.sh','echo hi')")
         .bind(uuid::Uuid::now_v7()).bind(skid).execute(&pool).await.unwrap();
 
-    sqlx::query("INSERT INTO wiki_pages (id, slug, title, page_type, content, folder) VALUES ($1,'transfer-page','迁移页','concept','# 页面','docs')")
+    sqlx::query("INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, folder) VALUES ($1, (SELECT id FROM wiki_libraries WHERE slug = 'main'), 'transfer-page','迁移页','concept','# 页面','docs')")
         .bind(uuid::Uuid::now_v7()).execute(&pool).await.unwrap();
 
     let prj = uuid::Uuid::now_v7();

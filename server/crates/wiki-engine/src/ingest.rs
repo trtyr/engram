@@ -66,18 +66,22 @@ impl IngestOutcome {
 }
 
 /// 入队 ingest：source 内容（复用 wiki 文档的解析产物文本或直接文本）。
-/// sha 命中且已 ingest → 跳过（幂等）。
+/// sha 命中且已 ingest → 跳过（幂等）。多库（0037）：sha 去重按库隔离
+/// （同内容可在不同库各织一份），source 落到指定库。
 pub async fn enqueue_ingest(
     queue: &engram_jobs::JobQueue,
+    lib: Uuid,
     title: &str,
     text: &str,
 ) -> Result<IngestOutcome, JobError> {
     let sha = sha256_hex(text.as_bytes());
     // 同 sha 去重（D11 + D27 语义细化）：ready=已完成（跳过）/ pending|processing=在途
     // （返回 InFlight——调用方知道无需重提，也不再误以为丢失）/ failed 才允许重试重入队
+    // 多库：sha 全局唯一已降为 (library_id, sha256)，去重只在库内生效
     let existing: Option<(Uuid, String)> =
-        sqlx::query_as("SELECT id, status FROM wiki_sources WHERE sha256 = $1")
+        sqlx::query_as("SELECT id, status FROM wiki_sources WHERE sha256 = $1 AND library_id = $2")
             .bind(&sha)
+            .bind(lib)
             .fetch_optional(queue.pool())
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -109,13 +113,16 @@ pub async fn enqueue_ingest(
         .map_err(|e| JobError::Permanent(format!("写原料失败: {e}")))?;
 
     // RETURNING id：sha 冲突时返回旧行 id（payload 必须用它——曾因用新生成
-    // uuid 导致 analyze 读不到原料行 no-rows 死循环，Phase 7 审计修复）
+    // uuid 导致 analyze 读不到原料行 no-rows 死循环，Phase 7 审计修复）。
+    // 多库：冲突目标是 (library_id, sha256)
     let row = sqlx::query_as::<_, (Uuid,)>(
-        "INSERT INTO wiki_sources (id, sha256, raw_path, title, status) \
-         VALUES ($1, $2, $3, $4, 'pending') \
-         ON CONFLICT (sha256) DO UPDATE SET title = EXCLUDED.title, status = 'pending' RETURNING id",
+        "INSERT INTO wiki_sources (id, library_id, sha256, raw_path, title, status) \
+         VALUES ($1, $2, $3, $4, $5, 'pending') \
+         ON CONFLICT (library_id, sha256) \
+         DO UPDATE SET title = EXCLUDED.title, status = 'pending' RETURNING id",
     )
     .bind(id)
+    .bind(lib)
     .bind(&sha)
     .bind(path.to_string_lossy().as_ref())
     .bind(title)
@@ -233,6 +240,7 @@ pub async fn enqueue_ingest(
 }
 
 /// 第一步：分析。source 全文 + 既有 index → 结构化分析（存 wiki_sources.status + 事件）。
+/// 多库（0037）：library_id 从 source 行取定，全流程只在库内读写。
 pub async fn analyze_job(
     ctx: JobContext,
     llm: crate::service::LlmRef,
@@ -247,15 +255,18 @@ pub async fn analyze_job(
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| JobError::Permanent("payload 缺 source_id".into()))?;
 
-    sqlx::query("UPDATE wiki_sources SET status = 'processing' WHERE id = $1")
-        .bind(source_id)
-        .execute(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
+    // 置 processing 的同时取源所属库（同批一次往返；源不存在此处即 RowNotFound）
+    let lib: Uuid = sqlx::query_scalar(
+        "UPDATE wiki_sources SET status = 'processing' WHERE id = $1 RETURNING library_id",
+    )
+    .bind(source_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
 
     let text = read_source(pool, source_id).await?;
-    let index = read_index(pool).await?;
-    let purpose = crate::purpose::purpose_context(pool).await;
+    let index = read_index(pool, lib).await?;
+    let purpose = crate::purpose::purpose_context(pool, lib).await;
 
     let user = format!(
         "== 知识库 Purpose（方向意图，分析时纳入考量）==\n{purpose}\n\n== 现有页面目录 ==\n{index}\n\n== 源文档 ==\n{text}"
@@ -279,21 +290,23 @@ pub async fn analyze_job(
             .filter_map(|f| serde_json::from_value(f.clone()).ok())
             .collect();
         if !parsed.is_empty() {
-            let n = crate::review::create_items(pool, source_id, &parsed)
+            let n = crate::review::create_items(pool, lib, source_id, &parsed)
                 .await?
                 .len();
             ctx.emit(&format!("人审项 {n} 个已入队"), None).await.ok();
         }
     }
 
-    // purpose 建议（llm_wiki：LLM 可建议更新 purpose——经人审队列，不直接改）
+    // purpose 建议（llm_wiki：LLM 可建议更新 purpose——经人审队列，不直接改）。
+    // 建议项挂源所属库（wiki_review_items.library_id）。
     if let Some(sugg) = out.get("purpose_suggestion").filter(|v| v.is_object()) {
         let pid = Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO wiki_review_items (id, kind, payload, search_queries, source_id) \
-             VALUES ($1, 'flag', $2, '[]'::jsonb, $3)",
+            "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries, source_id) \
+             VALUES ($1, $2, 'flag', $3, '[]'::jsonb, $4)",
         )
         .bind(pid)
+        .bind(lib)
         .bind(sqlx::types::Json(sugg))
         .bind(source_id)
         .execute(pool)
@@ -344,10 +357,17 @@ pub async fn generate_job(
         .unwrap_or("未命名源")
         .to_string();
 
-    let text = read_source(pool, source_id).await?;
-    let existing_pages = read_index(pool).await?;
+    // 多库（0037）：取源所属库，全流程只在库内读写（源不存在此处即报错）
+    let lib: Uuid = sqlx::query_scalar("SELECT library_id FROM wiki_sources WHERE id = $1")
+        .bind(source_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    let purpose = crate::purpose::purpose_context(pool).await;
+    let text = read_source(pool, source_id).await?;
+    let existing_pages = read_index(pool, lib).await?;
+
+    let purpose = crate::purpose::purpose_context(pool, lib).await;
     let user = format!(
         "== 知识库 Purpose（方向意图，写作风格与侧重纳入考量）==\n{purpose}\n\n== 分析结果 ==\n{}\n\n== 源文档 ==\n{}\n\n== 既有页面集合（已存在，勿重建）==\n{}",
         serde_json::to_string_pretty(&analysis).unwrap_or_default(),
@@ -390,12 +410,14 @@ pub async fn generate_job(
     let mut proposals = 0usize;
     let mut all_slugs: Vec<String> = Vec::new();
 
-    // 链接规范化：查全库 slug 建 lowercase → real 映射，生成时对齐大小写变体
+    // 链接规范化：查库内 slug 建 lowercase → real 映射，生成时对齐大小写变体
     // （防 case_mismatch 落到事后 lint；只修大小写，不补死链）
-    let existing_slugs: Vec<String> = sqlx::query_scalar("SELECT slug FROM wiki_pages")
-        .fetch_all(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let existing_slugs: Vec<String> =
+        sqlx::query_scalar("SELECT slug FROM wiki_pages WHERE library_id = $1")
+            .bind(lib)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
     let lower_slug_map: std::collections::HashMap<String, String> = existing_slugs
         .into_iter()
         .map(|s| (s.to_lowercase(), s))
@@ -440,21 +462,23 @@ pub async fn generate_job(
         // W6：单语句 UPSERT——消除 check-then-act 竞态（并发 generate 不再撞
         // slug UNIQUE，也不会双 UPDATE 互相覆盖）。human 页保护语义收进
         // DO UPDATE 的 WHERE：冲突且 origin=human 时子句为假 → RETURNING 无行 → 提案路径。
+        // 多库：冲突目标 (library_id, slug)，页面落到源所属库
         let upserted: Option<bool> = sqlx::query_scalar(
-            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version, folder) \
-             VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'llm', 1, $8) \
-             ON CONFLICT (slug) DO UPDATE SET \
-                content = $5, \
-                folder = CASE WHEN wiki_pages.folder = '' THEN $8 ELSE wiki_pages.folder END, \
+            "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, folder) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'llm', 1, $9) \
+             ON CONFLICT (library_id, slug) DO UPDATE SET \
+                content = $6, \
+                folder = CASE WHEN wiki_pages.folder = '' THEN $9 ELSE wiki_pages.folder END, \
                 frontmatter = jsonb_set(wiki_pages.frontmatter, '{sources}', \
                     (SELECT COALESCE(jsonb_agg(DISTINCT s), '[]'::jsonb) FROM \
                         (SELECT jsonb_array_elements_text(wiki_pages.frontmatter->'sources') AS s \
-                         UNION ALL SELECT $7::text) sub)), \
+                         UNION ALL SELECT $8::text) sub)), \
                 version = wiki_pages.version + 1, updated_at = now() \
              WHERE wiki_pages.origin = 'llm' \
              RETURNING (xmax = 0)",
         )
         .bind(Uuid::now_v7())
+        .bind(lib)
         .bind(&slug)
         .bind(&title)
         .bind(page_type)
@@ -486,19 +510,30 @@ pub async fn generate_job(
         }
     }
 
-    // 链接图：本批页面的 wikilinks + 到既有页的边
-    rebuild_links(pool, &all_slugs).await?;
+    // 链接图：本批页面的 wikilinks + 到既有页的边（库内）
+    rebuild_links(pool, lib, &all_slugs).await?;
 
     // 索引 + 日志 + overview 维护
-    update_index_and_log(pool, source_id, &source_title, created, updated, proposals).await?;
+    update_index_and_log(
+        pool,
+        lib,
+        source_id,
+        &source_title,
+        created,
+        updated,
+        proposals,
+    )
+    .await?;
 
-    // 新/变页索引与嵌入（W2/W3 重构）
+    // 新/变页索引与嵌入（W2/W3 重构；库内回读）
     // W2：tsv 统一 title+content 口径（旧实现只嵌 slug——LLM 页内容词搜不到）；
     // W3：tsv 写入与嵌入解耦——嵌入失败只丢向量不丢 FTS 索引，页面不再从检索消失
     let pages: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT slug, COALESCE(frontmatter->>'title', slug), content FROM wiki_pages WHERE slug = ANY($1)",
+        "SELECT slug, COALESCE(frontmatter->>'title', slug), content FROM wiki_pages \
+         WHERE slug = ANY($1) AND library_id = $2",
     )
     .bind(&all_slugs)
+    .bind(lib)
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -506,8 +541,9 @@ pub async fn generate_job(
     let mut tsv_written = 0usize;
     for (slug, title, content) in &pages {
         let text = format!("{title}\n{content}");
-        sqlx::query("UPDATE wiki_pages SET tsv = to_tsvector('simple', $2) WHERE slug = $1")
+        sqlx::query("UPDATE wiki_pages SET tsv = to_tsvector('simple', $3) WHERE slug = $1 AND library_id = $2")
             .bind(slug)
+            .bind(lib)
             .bind(engram_search::tokenize::tsv_text(&text))
             .execute(pool)
             .await
@@ -540,12 +576,15 @@ pub async fn generate_job(
                     .ok();
                 } else {
                     for (i, (slug, _, _)) in pages.iter().enumerate() {
-                        sqlx::query("UPDATE wiki_pages SET embedding = $2 WHERE slug = $1")
-                            .bind(slug)
-                            .bind(pgvector::Vector::from(emb[i].clone()))
-                            .execute(pool)
-                            .await
-                            .map_err(|e| JobError::Retryable(e.to_string()))?;
+                        sqlx::query(
+                            "UPDATE wiki_pages SET embedding = $3 WHERE slug = $1 AND library_id = $2",
+                        )
+                        .bind(slug)
+                        .bind(lib)
+                        .bind(pgvector::Vector::from(emb[i].clone()))
+                        .execute(pool)
+                        .await
+                        .map_err(|e| JobError::Retryable(e.to_string()))?;
                         embedded_pages += 1;
                     }
                 }
@@ -571,10 +610,10 @@ pub async fn generate_job(
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    // overview.md 重生成 + 4 信号权重重算（llm_wiki：每次 ingest 后全局状态更新）
+    // overview.md 重生成 + 4 信号权重重算（llm_wiki：每次 ingest 后全局状态更新；按库）
     if created + updated > 0 {
-        rebuild_overview_page(pool).await?;
-        let n = crate::relevance::rebuild_weights(pool).await?;
+        rebuild_overview_page(pool, lib).await?;
+        let n = crate::relevance::rebuild_weights(pool, lib).await?;
         ctx.emit(&format!("相关性权重更新 {n} 条边"), None)
             .await
             .ok();
@@ -620,10 +659,13 @@ async fn read_source(pool: &sqlx::PgPool, id: Uuid) -> Result<String, JobError> 
         .map_err(|e| JobError::Permanent(format!("读原料失败: {e}")))
 }
 
-async fn read_index(pool: &sqlx::PgPool) -> Result<String, JobError> {
+/// 某库的既有页面目录（注入 LLM 用）。
+async fn read_index(pool: &sqlx::PgPool, lib: Uuid) -> Result<String, JobError> {
     let pages: Vec<(String, String)> = sqlx::query_as(
-        "SELECT slug, COALESCE(frontmatter->>'title', slug) FROM wiki_pages ORDER BY updated_at DESC LIMIT 200",
+        "SELECT slug, COALESCE(frontmatter->>'title', slug) FROM wiki_pages \
+         WHERE library_id = $1 ORDER BY updated_at DESC LIMIT 200",
     )
+    .bind(lib)
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -635,33 +677,38 @@ async fn read_index(pool: &sqlx::PgPool) -> Result<String, JobError> {
 }
 
 /// 重建给定页面的出边（wikilink 边）。W6：包事务——与并发 generate 的
-/// 链接重建交错时不再留 DELETE/INSERT 半态。
-async fn rebuild_links(pool: &sqlx::PgPool, slugs: &[String]) -> Result<(), JobError> {
+/// 链接重建交错时不再留 DELETE/INSERT 半态。多库：边挂库、删除/插入都限定库内。
+async fn rebuild_links(pool: &sqlx::PgPool, lib: Uuid, slugs: &[String]) -> Result<(), JobError> {
     let mut tx = pool
         .begin()
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
     for slug in slugs {
-        let content: Option<String> =
-            sqlx::query_scalar("SELECT content FROM wiki_pages WHERE slug = $1")
-                .bind(slug)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(|e| JobError::Retryable(e.to_string()))?
-                .flatten();
+        let content: Option<String> = sqlx::query_scalar(
+            "SELECT content FROM wiki_pages WHERE slug = $1 AND library_id = $2",
+        )
+        .bind(slug)
+        .bind(lib)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .flatten();
         let Some(content) = content else { continue };
-        sqlx::query("DELETE FROM wiki_links WHERE from_slug = $1")
+        sqlx::query("DELETE FROM wiki_links WHERE from_slug = $1 AND library_id = $2")
             .bind(slug)
+            .bind(lib)
             .execute(&mut *tx)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
         for target in extract_wikilinks(&content) {
             sqlx::query(
-                "INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, 3.0) \
-                 ON CONFLICT (from_slug, to_slug) DO NOTHING",
+                "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
+                 VALUES ($3, $1, $2, 3.0) \
+                 ON CONFLICT (library_id, from_slug, to_slug) DO NOTHING",
             )
             .bind(slug)
             .bind(&target)
+            .bind(lib)
             .execute(&mut *tx)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -673,16 +720,17 @@ async fn rebuild_links(pool: &sqlx::PgPool, slugs: &[String]) -> Result<(), JobE
     Ok(())
 }
 
-/// index/log/overview 系统页维护。
+/// index/log/overview 系统页维护（库内）。
 async fn update_index_and_log(
     pool: &sqlx::PgPool,
+    lib: Uuid,
     source_id: Uuid,
     source_title: &str,
     created: usize,
     updated: usize,
     proposals: usize,
 ) -> Result<(), JobError> {
-    rebuild_index_page(pool).await?;
+    rebuild_index_page(pool, lib).await?;
 
     // log：append 一行（存 latest 系统页；全量历史靠 job_events）
     let log_line = format!(
@@ -696,8 +744,9 @@ async fn update_index_and_log(
         }
     );
     let prev_log: Option<String> = sqlx::query_scalar(
-        "SELECT content FROM wiki_pages WHERE slug = 'log' AND page_type = 'log'",
+        "SELECT content FROM wiki_pages WHERE slug = 'log' AND page_type = 'log' AND library_id = $1",
     )
+    .bind(lib)
     .fetch_optional(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?
@@ -715,17 +764,18 @@ async fn update_index_and_log(
         log_md
     };
 
-    upsert_system_page(pool, "log", "log", "日志", &log_md).await?;
+    upsert_system_page(pool, lib, "log", "log", "日志", &log_md).await?;
     let _ = source_id;
     Ok(())
 }
 
-/// 重建 index 系统页（cascade 删除后同步复用）。
-pub async fn rebuild_index_page(pool: &sqlx::PgPool) -> Result<(), JobError> {
+/// 重建 index 系统页（cascade 删除后同步复用；按库重建）。
+pub async fn rebuild_index_page(pool: &sqlx::PgPool, lib: Uuid) -> Result<(), JobError> {
     let pages: Vec<(String, String)> = sqlx::query_as(
         "SELECT slug, COALESCE(frontmatter->>'title', slug) FROM wiki_pages \
-         WHERE page_type NOT IN ('index','log') ORDER BY updated_at DESC LIMIT 300",
+         WHERE page_type NOT IN ('index','log') AND library_id = $1 ORDER BY updated_at DESC LIMIT 300",
     )
+    .bind(lib)
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -737,15 +787,18 @@ pub async fn rebuild_index_page(pool: &sqlx::PgPool) -> Result<(), JobError> {
             .collect::<Vec<_>>()
             .join("\n")
     );
-    upsert_system_page(pool, "index", "index", "索引", &index_md).await?;
+    upsert_system_page(pool, lib, "index", "index", "索引", &index_md).await?;
     Ok(())
 }
 
-/// 重建 overview 系统页：全局摘要（每页一行标题+summary），ingest 后调用。
-pub async fn rebuild_overview_page(pool: &sqlx::PgPool) -> Result<(), JobError> {
+/// 重建 overview 系统页：全局摘要（每页一行标题+summary），ingest 后调用（按库）。
+pub async fn rebuild_overview_page(pool: &sqlx::PgPool, lib: Uuid) -> Result<(), JobError> {
     let pages: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT slug, COALESCE(frontmatter->>'title', slug), left(content, 120)          FROM wiki_pages WHERE page_type NOT IN ('index','log','overview')          ORDER BY updated_at DESC LIMIT 100",
+        "SELECT slug, COALESCE(frontmatter->>'title', slug), left(content, 120) FROM wiki_pages \
+         WHERE page_type NOT IN ('index','log','overview') AND library_id = $1 \
+         ORDER BY updated_at DESC LIMIT 100",
     )
+    .bind(lib)
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -758,23 +811,26 @@ pub async fn rebuild_overview_page(pool: &sqlx::PgPool) -> Result<(), JobError> 
         "# Overview\n\n知识库当前包含 {} 个页面。\n\n{body}\n",
         pages.len()
     );
-    upsert_system_page(pool, "overview", "overview", "总览", &overview_md).await?;
+    upsert_system_page(pool, lib, "overview", "overview", "总览", &overview_md).await?;
     Ok(())
 }
 
+/// 系统页 upsert（库内——多库后每库有自己的 index/log/overview）。
 async fn upsert_system_page(
     pool: &sqlx::PgPool,
+    lib: Uuid,
     slug: &str,
     page_type: &str,
     title: &str,
     content: &str,
 ) -> Result<(), JobError> {
     sqlx::query(
-        "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version, folder) \
-         VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, 'llm', 1, '系统') \
-         ON CONFLICT (slug) DO UPDATE SET content = $5, updated_at = now()",
+        "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, folder) \
+         VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, 'llm', 1, '系统') \
+         ON CONFLICT (library_id, slug) DO UPDATE SET content = $6, updated_at = now()",
     )
     .bind(Uuid::now_v7())
+    .bind(lib)
     .bind(slug)
     .bind(title)
     .bind(page_type)

@@ -31,20 +31,26 @@ pub struct InsightsReport {
 // CommunityInfo 统一由 service.rs 定义（含 sparse 旗标）——
 // 曾经两处同名结构体在 utoipa 撞名，schema 与实现互相漂移（top_slug/size 违约的根因）
 
-pub async fn compute_insights(pool: &PgPool) -> Result<InsightsReport, JobError> {
+/// 某库的图洞察计算（pages/links/dismissals 全部按 library_id 隔离）。
+pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport, JobError> {
     let pages: Vec<(String, String)> = sqlx::query_as(
-        "SELECT slug, page_type FROM wiki_pages WHERE page_type NOT IN ('index','log','overview')",
+        "SELECT slug, page_type FROM wiki_pages \
+         WHERE page_type NOT IN ('index','log','overview') AND library_id = $1",
     )
+    .bind(lib)
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
-    let edges: Vec<(String, String, f64)> =
-        sqlx::query_as("SELECT from_slug, to_slug, weight::float8 FROM wiki_links")
-            .fetch_all(pool)
-            .await
-            .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let edges: Vec<(String, String, f64)> = sqlx::query_as(
+        "SELECT from_slug, to_slug, weight::float8 FROM wiki_links WHERE library_id = $1",
+    )
+    .bind(lib)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
     let dismissed: Vec<String> =
-        sqlx::query_scalar("SELECT insight_key FROM wiki_insight_dismissals")
+        sqlx::query_scalar("SELECT insight_key FROM wiki_insight_dismissals WHERE library_id = $1")
+            .bind(lib)
             .fetch_all(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -202,10 +208,13 @@ pub async fn compute_insights(pool: &PgPool) -> Result<InsightsReport, JobError>
     })
 }
 
-pub async fn dismiss(pool: &PgPool, key: &str) -> Result<(), JobError> {
+/// dismiss 某库的一条洞察（upsert 复合主键 (library_id, insight_key)——洞察键跨库可同名）。
+pub async fn dismiss(pool: &PgPool, lib: Uuid, key: &str) -> Result<(), JobError> {
     sqlx::query(
-        "INSERT INTO wiki_insight_dismissals (insight_key) VALUES ($1) ON CONFLICT DO NOTHING",
+        "INSERT INTO wiki_insight_dismissals (library_id, insight_key) VALUES ($1, $2) \
+         ON CONFLICT (library_id, insight_key) DO NOTHING",
     )
+    .bind(lib)
     .bind(key)
     .execute(pool)
     .await
@@ -213,8 +222,10 @@ pub async fn dismiss(pool: &PgPool, key: &str) -> Result<(), JobError> {
     Ok(())
 }
 
-pub async fn reset_dismissals(pool: &PgPool) -> Result<(), JobError> {
-    sqlx::query("DELETE FROM wiki_insight_dismissals")
+/// 清空某库的 dismiss 记录（按库，不误伤他库）。
+pub async fn reset_dismissals(pool: &PgPool, lib: Uuid) -> Result<(), JobError> {
+    sqlx::query("DELETE FROM wiki_insight_dismissals WHERE library_id = $1")
+        .bind(lib)
         .execute(pool)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;

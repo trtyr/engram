@@ -18,7 +18,9 @@ vi.mock('@/lib/api', () => {
     dismissed: [],
   }
   const api = {
-    post: vi.fn(async (p: string, b?: unknown) => {
+    // 多库：URL 现在带 ?lib= 查询参数——剥掉再匹配（与 p3.test 同口径）
+    post: vi.fn(async (raw: string, b?: unknown) => {
+      const p = raw.split('?')[0]
       if (p === '/wiki/insights') return state.insights
       if (p === '/wiki/insights/dismiss') {
         state.dismissed.push((b as { key: string }).key)
@@ -32,7 +34,8 @@ vi.mock('@/lib/api', () => {
       if (p === '/wiki/queries/archive') return { skipped: false }
       return undefined
     }),
-    get: vi.fn(async (p: string) => {
+    get: vi.fn(async (raw: string) => {
+      const p = raw.split('?')[0]
       if (p === '/wiki/reviews') return state.reviews
       return []
     }),
@@ -72,7 +75,7 @@ describe('InsightsPanel（图洞察）', () => {
       total_pages: 8,
     }
     const onHighlight = vi.fn()
-    render(wrap(<InsightsPanel onHighlight={onHighlight} />))
+    render(wrap(<InsightsPanel onHighlight={onHighlight} libSlug="main" />))
 
     await screen.findByText('孤立页面：x')
     expect(screen.getByText('意外连接：a ↔ b')).toBeInTheDocument()
@@ -96,11 +99,14 @@ describe('InsightsPanel（图洞察）', () => {
       communities: [],
       total_pages: 1,
     }
-    render(wrap(<InsightsPanel onHighlight={() => {}} />))
+    render(wrap(<InsightsPanel onHighlight={() => {}} libSlug="main" />))
     await screen.findByText('孤立页面：y')
     fireEvent.click(screen.getByRole('button', { name: '忽略' }))
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith('/wiki/insights/dismiss', { key: 'isolated_page:y' })
+      expect(api.post).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/wiki\/insights\/dismiss\?lib=/),
+        { key: 'isolated_page:y' },
+      )
     })
   })
 })
@@ -118,7 +124,7 @@ describe('ReviewQueue（人审队列）', () => {
         created_at: '2026-08-21T00:00:00Z',
       },
     ]
-    render(wrap(<ReviewQueue />))
+    render(wrap(<ReviewQueue libSlug="main" />))
     await screen.findByText('新概念 X')
     expect(screen.getByText('值得建页')).toBeInTheDocument()
     expect(screen.getByText(/X 检索词/)).toBeInTheDocument()
@@ -126,13 +132,16 @@ describe('ReviewQueue（人审队列）', () => {
     // 预定义动作
     fireEvent.click(screen.getByTestId('review-action-创建页面'))
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith('/wiki/reviews/r1/resolve', { action: '创建页面' })
+      expect(api.post).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/wiki\/reviews\/r1\/resolve\?lib=/),
+        { action: '创建页面' },
+      )
     })
   })
 
   it('空队列显示提示', async () => {
     mockState.reviews = []
-    render(wrap(<ReviewQueue />))
+    render(wrap(<ReviewQueue libSlug="main" />))
     await screen.findByText(/人审队列为空/)
   })
 })

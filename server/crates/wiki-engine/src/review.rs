@@ -41,9 +41,10 @@ pub fn valid_kind(k: &str) -> bool {
     matches!(k, "create_page" | "deep_research" | "skip" | "flag")
 }
 
-/// ingest 内落库 review 项。
+/// ingest 内落库 review 项（人审项挂库——多库后按 library_id 归属）。
 pub async fn create_items(
     pool: &PgPool,
+    lib: Uuid,
     source_id: Uuid,
     flags: &[LlmReviewFlag],
 ) -> Result<Vec<Uuid>, JobError> {
@@ -55,10 +56,11 @@ pub async fn create_items(
         }
         let id = Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO wiki_review_items (id, kind, payload, search_queries, source_id) \
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries, source_id) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(id)
+        .bind(lib)
         .bind(&f.kind)
         .bind(serde_json::json!({
             "title": f.title,
@@ -75,10 +77,13 @@ pub async fn create_items(
     Ok(ids)
 }
 
-pub async fn list_open(pool: &PgPool) -> Result<Vec<ReviewItem>, JobError> {
+/// 某库的 open 审查项列表（按库过滤）。
+pub async fn list_open(pool: &PgPool, lib: Uuid) -> Result<Vec<ReviewItem>, JobError> {
     sqlx::query_as::<_, ReviewItem>(
-        "SELECT * FROM wiki_review_items WHERE status = 'open' ORDER BY created_at DESC LIMIT 200",
+        "SELECT * FROM wiki_review_items \
+         WHERE status = 'open' AND library_id = $1 ORDER BY created_at DESC LIMIT 200",
     )
+    .bind(lib)
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))

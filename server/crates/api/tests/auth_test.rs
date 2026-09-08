@@ -1524,6 +1524,8 @@ async fn openapi_snapshot() {
             "/wiki/insights",
             "/wiki/insights/dismiss",
             "/wiki/insights/reset",
+            "/wiki/libraries",
+            "/wiki/libraries/{slug}",
             "/wiki/links/rebuild",
             "/wiki/lint",
             "/wiki/pages",

@@ -1,33 +1,48 @@
 //! Wiki 级联删除集成测试（R4 事务）。
+//! 多库（0037）：直插的 pages/sources/chunks/documents 均带 library_id（main 主库）。
 
 mod support;
 
 use engram_wiki_engine::WikiService;
 use uuid::Uuid;
 
-async fn setup() -> (sqlx::PgPool, WikiService, support::TestPg) {
+async fn setup() -> (
+    sqlx::PgPool,
+    WikiService,
+    support::TestPg,
+    Uuid, // lib：main 主库 id
+) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
+    let lib = engram_wiki_engine::libraries::resolve(&pool, None)
+        .await
+        .expect("main 主库应存在");
     let registry = engram_llm::ProviderRegistry::new(
         pool.clone(),
         engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
-    (pool.clone(), WikiService::new(pool, registry), container)
+    (
+        pool.clone(),
+        WikiService::new(pool, registry),
+        container,
+        lib,
+    )
 }
 
 #[tokio::test]
 async fn cascade_delete_removes_source_and_downstream() {
-    let (pool, svc, _container) = setup().await;
+    let (pool, svc, _container, lib) = setup().await;
 
     // 直接构造：一个 source + 一个摘要页（唯一来源）+ 一个共享 concept 页
     let source_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO wiki_sources (id, sha256, raw_path, title, status) \
-         VALUES ($1, $2, '/tmp/x.md', '测试源', 'ready')",
+        "INSERT INTO wiki_sources (id, library_id, sha256, raw_path, title, status) \
+         VALUES ($1, $2, $3, '/tmp/x.md', '测试源', 'ready')",
     )
     .bind(source_id)
+    .bind(lib)
     .bind(format!("sha-{}", Uuid::now_v7()))
     .execute(&pool)
     .await
@@ -35,10 +50,11 @@ async fn cascade_delete_removes_source_and_downstream() {
 
     // 摘要页（page_type=source，唯一来源 → 整页删）
     sqlx::query(
-        "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
-         VALUES ($1, 'src-page', '摘要', 'source', '# 摘要', $2, 'llm', 1)",
+        "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version) \
+         VALUES ($1, $2, 'src-page', '摘要', 'source', '# 摘要', $3, 'llm', 1)",
     )
     .bind(Uuid::now_v7())
+    .bind(lib)
     .bind(sqlx::types::Json(serde_json::json!({
         "title": "摘要", "page_type": "source", "sources": [source_id.to_string()]
     })))
@@ -49,10 +65,11 @@ async fn cascade_delete_removes_source_and_downstream() {
     // 共享 concept 页（引用该 source，含指向摘要页的 wikilink）
     let concept_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
-         VALUES ($1, 'concept-page', '概念', 'concept', '参见 [[src-page]]', $2, 'llm', 1)",
+        "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version) \
+         VALUES ($1, $2, 'concept-page', '概念', 'concept', '参见 [[src-page]]', $3, 'llm', 1)",
     )
     .bind(concept_id)
+    .bind(lib)
     .bind(sqlx::types::Json(serde_json::json!({
         "title": "概念", "page_type": "concept", "sources": [source_id.to_string()]
     })))
@@ -62,7 +79,7 @@ async fn cascade_delete_removes_source_and_downstream() {
 
     // 级联删除
     let report = svc
-        .delete_source_cascade(source_id)
+        .delete_source_cascade(lib, source_id)
         .await
         .expect("级联删除");
 
@@ -116,23 +133,31 @@ async fn cascade_delete_removes_source_and_downstream() {
 
 #[tokio::test]
 async fn w5_cascade_cleans_dangling_and_baseless_edges() {
-    let (pool, wiki, _pg) = setup().await;
+    let (pool, wiki, _pg, lib) = setup().await;
 
     let sid = uuid::Uuid::now_v7();
-    sqlx::query("INSERT INTO wiki_sources (id, sha256, raw_path, title, status) VALUES ($1, $2, '/tmp/w5.md', 'W5源', 'ready')")
+    sqlx::query("INSERT INTO wiki_sources (id, library_id, sha256, raw_path, title, status) VALUES ($1, $2, $3, '/tmp/w5.md', 'W5源', 'ready')")
         .bind(sid)
+        .bind(lib)
         .bind(format!("sha-w5-{}", uuid::Uuid::now_v7().simple()))
         .execute(&pool)
         .await
         .unwrap();
 
-    async fn mk_page(pool: &sqlx::PgPool, slug: &str, pt: &str, sources: serde_json::Value) {
+    async fn mk_page(
+        pool: &sqlx::PgPool,
+        lib: uuid::Uuid,
+        slug: &str,
+        pt: &str,
+        sources: serde_json::Value,
+    ) {
         let id = uuid::Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, tsv) \
-             VALUES ($1, $2, $2, $3, $4, $5::jsonb, 'llm', NULL)",
+            "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, tsv) \
+             VALUES ($1, $2, $3, $3, $4, $5, $6::jsonb, 'llm', NULL)",
         )
         .bind(id)
+        .bind(lib)
         .bind(slug)
         .bind(pt)
         .bind(format!("# {slug}\n\n内容。"))
@@ -144,6 +169,7 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
     // 源摘要页（独源→整删）+ 两个共享页（摘源后不再有任何关联依据）
     mk_page(
         &pool,
+        lib,
         "w5-src",
         "source",
         serde_json::json!({"sources": [sid.to_string()]}),
@@ -151,6 +177,7 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
     .await;
     mk_page(
         &pool,
+        lib,
         "w5-a",
         "concept",
         serde_json::json!({"sources": [sid.to_string()]}),
@@ -158,6 +185,7 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
     .await;
     mk_page(
         &pool,
+        lib,
         "w5-b",
         "concept",
         serde_json::json!({"sources": [sid.to_string()]}),
@@ -165,7 +193,7 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
     .await;
 
     // 源重叠边生成（三页两两无向双插，与真实 ingest 相同路径）
-    engram_wiki_engine::relevance::rebuild_weights(&pool)
+    engram_wiki_engine::relevance::rebuild_weights(&pool, lib)
         .await
         .unwrap();
     let edges_before: i64 = sqlx::query_scalar(
@@ -177,7 +205,7 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
     assert!(edges_before >= 4, "源重叠边应已生成: {edges_before}");
 
     // 级联删除
-    let report = wiki.delete_source_cascade(sid).await.unwrap();
+    let report = wiki.delete_source_cascade(lib, sid).await.unwrap();
     assert_eq!(report.deleted_pages, vec!["w5-src".to_string()]);
     assert_eq!(report.updated_shared.len(), 2, "两个共享页摘源");
 
@@ -205,14 +233,15 @@ async fn w5_cascade_cleans_dangling_and_baseless_edges() {
 /// 不取消的话队列里的 analyze/generate 继续跑，边删边产页（实测 81→84）。
 #[tokio::test]
 async fn cascade_delete_cancels_inflight_weave_jobs() {
-    let (pool, svc, _container) = setup().await;
+    let (pool, svc, _container, lib) = setup().await;
 
     let source_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO wiki_sources (id, sha256, raw_path, title, status) \
-         VALUES ($1, $2, '/tmp/w16.md', '在途源', 'ready')",
+        "INSERT INTO wiki_sources (id, library_id, sha256, raw_path, title, status) \
+         VALUES ($1, $2, $3, '/tmp/w16.md', '在途源', 'ready')",
     )
     .bind(source_id)
+    .bind(lib)
     .bind(format!("sha-{}", Uuid::now_v7()))
     .execute(&pool)
     .await
@@ -245,7 +274,7 @@ async fn cascade_delete_cancels_inflight_weave_jobs() {
     .await
     .unwrap();
 
-    svc.delete_source_cascade(source_id)
+    svc.delete_source_cascade(lib, source_id)
         .await
         .expect("级联删除");
 

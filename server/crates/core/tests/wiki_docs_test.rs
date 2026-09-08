@@ -131,6 +131,14 @@ async fn setup() -> (sqlx::PgPool, WikiDocumentService, support::TestPg) {
     (pool, svc, container)
 }
 
+/// 默认主库 id（0037 多库：wiki_documents/wiki_chunks 的 library_id NOT NULL）。
+async fn main_lib(pool: &sqlx::PgPool) -> uuid::Uuid {
+    sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 /// 起 Runner 跑知识管道（无 LLM provider → embedding 全降级 FTS，仍 ready）。
 async fn run_jobs(pool: sqlx::PgPool) -> engram_jobs::RunnerHandle {
     let registry = ProviderRegistry::new(
@@ -155,10 +163,11 @@ async fn run_jobs(pool: sqlx::PgPool) -> engram_jobs::RunnerHandle {
 
 async fn wait_ready(
     svc: &WikiDocumentService,
+    lib: uuid::Uuid,
     id: uuid::Uuid,
 ) -> engram_core::wiki_docs::DocumentDto {
     for _ in 0..300 {
-        if let Ok(doc) = svc.get_document(id).await
+        if let Ok(doc) = svc.get_document(lib, id).await
             && matches!(doc.status.as_str(), "ready" | "failed")
         {
             return doc;
@@ -171,6 +180,7 @@ async fn wait_ready(
 #[tokio::test]
 async fn md_ingest_to_ready_and_chinese_fts_search() {
     let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
     let handle = run_jobs(pool.clone()).await;
 
     let md = format!(
@@ -179,35 +189,41 @@ async fn md_ingest_to_ready_and_chinese_fts_search() {
     );
     let md_bytes = md.into_bytes();
     let (id, deduped) = svc
-        .submit(IngestSource::Bytes {
-            name: "memory-guide.md".into(),
-            content: md_bytes.clone(),
-            content_type: Some("text/markdown".into()),
-        })
+        .submit(
+            lib,
+            IngestSource::Bytes {
+                name: "memory-guide.md".into(),
+                content: md_bytes.clone(),
+                content_type: Some("text/markdown".into()),
+            },
+        )
         .await
         .unwrap();
     assert!(!deduped);
 
-    let doc = wait_ready(&svc, id).await;
+    let doc = wait_ready(&svc, lib, id).await;
     assert_eq!(doc.status, "ready", "error: {:?}", doc.error);
 
     // 分块存在
-    let chunks = svc.chunks(id, 500).await.unwrap();
+    let chunks = svc.chunks(lib, id, 500).await.unwrap();
     assert!(chunks.len() >= 2, "长文应分多块: {}", chunks.len());
 
     // 中文 FTS 检索命中（无 embedding 通道 → 纯 FTS）
-    let hits = svc.search("Rust 记忆平台", 5).await.unwrap();
+    let hits = svc.search(lib, "Rust 记忆平台", 5).await.unwrap();
     assert!(!hits.is_empty(), "中文检索应有命中");
     assert!(hits[0].snippet.contains("Rust") || hits[0].snippet.contains("记忆"));
     assert_eq!(hits[0].document_id, id, "命中应带文档引用");
 
     // 重复上传 → 幂等秒回
     let (id2, deduped2) = svc
-        .submit(IngestSource::Bytes {
-            name: "memory-guide.md".into(),
-            content: md_bytes,
-            content_type: Some("text/markdown".into()),
-        })
+        .submit(
+            lib,
+            IngestSource::Bytes {
+                name: "memory-guide.md".into(),
+                content: md_bytes,
+                content_type: Some("text/markdown".into()),
+            },
+        )
         .await
         .unwrap();
     assert!(deduped2);
@@ -220,22 +236,26 @@ async fn md_ingest_to_ready_and_chinese_fts_search() {
 #[tokio::test]
 async fn html_ingest_and_corrupt_file_not_blocking() {
     let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
     let handle = run_jobs(pool.clone()).await;
 
     // HTML 摄取
     let html = "<html><head><title>知识图谱指南</title><style>.x{}</style></head><body><h1>知识图谱</h1><p>知识图谱把代码符号与调用关系组织成图结构。</p><script>alert(1)</script></body></html>";
     let (h_id, _) = svc
-        .submit(IngestSource::Bytes {
-            name: "graph.html".into(),
-            content: html.as_bytes().to_vec(),
-            content_type: Some("text/html".into()),
-        })
+        .submit(
+            lib,
+            IngestSource::Bytes {
+                name: "graph.html".into(),
+                content: html.as_bytes().to_vec(),
+                content_type: Some("text/html".into()),
+            },
+        )
         .await
         .unwrap();
-    let doc = wait_ready(&svc, h_id).await;
+    let doc = wait_ready(&svc, lib, h_id).await;
     assert_eq!(doc.status, "ready");
 
-    let hits = svc.search("知识图谱 调用关系", 5).await.unwrap();
+    let hits = svc.search(lib, "知识图谱 调用关系", 5).await.unwrap();
     assert!(!hits.is_empty());
     assert!(
         !hits.iter().any(|h| h.snippet.contains("alert")),
@@ -244,26 +264,32 @@ async fn html_ingest_and_corrupt_file_not_blocking() {
 
     // 损坏 PDF：failed 但不崩
     let (bad_id, _) = svc
-        .submit(IngestSource::Bytes {
-            name: "broken.pdf".into(),
-            content: b"this is not a pdf".to_vec(),
-            content_type: Some("application/pdf".into()),
-        })
+        .submit(
+            lib,
+            IngestSource::Bytes {
+                name: "broken.pdf".into(),
+                content: b"this is not a pdf".to_vec(),
+                content_type: Some("application/pdf".into()),
+            },
+        )
         .await
         .unwrap();
-    let bad = wait_ready(&svc, bad_id).await;
+    let bad = wait_ready(&svc, lib, bad_id).await;
     assert_eq!(bad.status, "failed", "损坏文件应 failed: {:?}", bad.error);
 
     // 队列不阻塞：后续任务照常
     let (ok_id, _) = svc
-        .submit(IngestSource::Bytes {
-            name: "after.md".into(),
-            content: "# 正常文档\n\n内容正常".as_bytes().to_vec(),
-            content_type: None,
-        })
+        .submit(
+            lib,
+            IngestSource::Bytes {
+                name: "after.md".into(),
+                content: "# 正常文档\n\n内容正常".as_bytes().to_vec(),
+                content_type: None,
+            },
+        )
         .await
         .unwrap();
-    let ok = wait_ready(&svc, ok_id).await;
+    let ok = wait_ready(&svc, lib, ok_id).await;
     assert_eq!(ok.status, "ready");
 
     handle.shutdown();
@@ -275,6 +301,7 @@ async fn html_ingest_and_corrupt_file_not_blocking() {
 #[tokio::test]
 async fn concurrent_same_sha_submit_is_idempotent() {
     let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
     // 不起 Runner：只验证提交路径本身的并发语义
     let content = b"# concurrent dedup test\nsame bytes here".to_vec();
     let mk = || IngestSource::Bytes {
@@ -284,14 +311,17 @@ async fn concurrent_same_sha_submit_is_idempotent() {
     };
 
     let s2 = svc.clone();
-    let (a, b) = tokio::join!(svc.submit(mk()), async move { s2.submit(mk()).await });
+    let (a, b) = tokio::join!(
+        svc.submit(lib, mk()),
+        async move { s2.submit(lib, mk()).await }
+    );
     let (id_a, dup_a) = a.expect("A 应成功");
     let (id_b, dup_b) = b.expect("B 应成功");
     assert_eq!(id_a, id_b, "并发同 sha 返回同一 id");
     assert!(dup_a ^ dup_b, "恰一方幂等命中（a={dup_a}, b={dup_b}）");
 
     // 串行重复 → 幂等命中
-    let (id3, dup3) = svc.submit(mk()).await.unwrap();
+    let (id3, dup3) = svc.submit(lib, mk()).await.unwrap();
     assert_eq!(id3, id_a);
     assert!(dup3);
 
@@ -325,6 +355,7 @@ async fn concurrent_same_sha_submit_is_idempotent() {
 #[tokio::test]
 async fn failed_doc_resubmit_self_heals() {
     let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
     let handle = run_jobs(pool.clone()).await;
 
     // 预置：曾抓取失败的文档（failed + error），但原始文件在盘上
@@ -350,10 +381,11 @@ async fn failed_doc_resubmit_self_heals() {
     std::fs::create_dir_all(svc.data_dir.join("uploads")).unwrap();
     std::fs::write(&path, content.as_bytes()).unwrap();
     sqlx::query(
-        "INSERT INTO wiki_documents (id, title, source_uri, mime, raw_path, sha256, status, error) \
-         VALUES ($1, $2, $2, $3, $4, $5, 'failed', 'URL 抓取失败: 网络抖动')",
+        "INSERT INTO wiki_documents (id, library_id, title, source_uri, mime, raw_path, sha256, status, error) \
+         VALUES ($1, $2, $3, $3, $4, $5, $6, 'failed', 'URL 抓取失败: 网络抖动')",
     )
     .bind(doc_id)
+    .bind(lib)
     .bind(name)
     .bind(&ct)
     .bind(path.to_string_lossy().as_ref())
@@ -364,21 +396,24 @@ async fn failed_doc_resubmit_self_heals() {
 
     // 重新提交同 sha → 幂等命中 + 自愈重置 + 重新入队
     let (rid, deduped) = svc
-        .submit(IngestSource::Bytes {
-            name: name.into(),
-            content: content.into_bytes(),
-            content_type: ct,
-        })
+        .submit(
+            lib,
+            IngestSource::Bytes {
+                name: name.into(),
+                content: content.into_bytes(),
+                content_type: ct,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(rid, doc_id, "幂等命中既有文档");
     assert!(deduped, "自愈走幂等语义（200）而非新建");
 
     // 走完整链路直至 ready
-    let doc = wait_ready(&svc, doc_id).await;
+    let doc = wait_ready(&svc, lib, doc_id).await;
     assert_eq!(doc.status, "ready", "自愈后应走完全链路: {:?}", doc.error);
     assert!(doc.error.is_none());
-    let chunks = svc.chunks(doc_id, 500).await.unwrap();
+    let chunks = svc.chunks(lib, doc_id, 500).await.unwrap();
     assert!(!chunks.is_empty(), "块应已生成");
 
     handle.shutdown();
@@ -388,18 +423,22 @@ async fn failed_doc_resubmit_self_heals() {
 #[tokio::test]
 async fn ready_doc_resubmit_does_not_reingest() {
     let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
     let handle = run_jobs(pool.clone()).await;
 
     let content = "# 就绪文档\n不再重摄取".repeat(10);
     let (id, _) = svc
-        .submit(IngestSource::Bytes {
-            name: "stable.md".into(),
-            content: content.clone().into_bytes(),
-            content_type: Some("text/markdown".into()),
-        })
+        .submit(
+            lib,
+            IngestSource::Bytes {
+                name: "stable.md".into(),
+                content: content.clone().into_bytes(),
+                content_type: Some("text/markdown".into()),
+            },
+        )
         .await
         .unwrap();
-    let doc = wait_ready(&svc, id).await;
+    let doc = wait_ready(&svc, lib, id).await;
     assert_eq!(doc.status, "ready");
 
     // ready 后重提交 → 不自愈、不入队（jobs 数不变）
@@ -408,11 +447,14 @@ async fn ready_doc_resubmit_does_not_reingest() {
         .await
         .unwrap();
     let (rid, deduped) = svc
-        .submit(IngestSource::Bytes {
-            name: "stable.md".into(),
-            content: content.into_bytes(),
-            content_type: Some("text/markdown".into()),
-        })
+        .submit(
+            lib,
+            IngestSource::Bytes {
+                name: "stable.md".into(),
+                content: content.into_bytes(),
+                content_type: Some("text/markdown".into()),
+            },
+        )
         .await
         .unwrap();
     assert_eq!(rid, id);
@@ -423,23 +465,29 @@ async fn ready_doc_resubmit_does_not_reingest() {
 
 // ---------- K4/K8：嵌入链（只补缺失 + 短响应守卫 + re-embed 端点） ----------
 
-async fn insert_ready_doc_with_chunks(pool: &sqlx::PgPool, with_embedding: bool) -> uuid::Uuid {
+async fn insert_ready_doc_with_chunks(
+    pool: &sqlx::PgPool,
+    lib: uuid::Uuid,
+    with_embedding: bool,
+) -> uuid::Uuid {
     let doc_id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO wiki_documents (id, title, source_uri, sha256, status) \
-         VALUES ($1, '补嵌测试', 'reembed.md', $2, 'ready')",
+        "INSERT INTO wiki_documents (id, library_id, title, source_uri, sha256, status) \
+         VALUES ($1, $2, '补嵌测试', 'reembed.md', $3, 'ready')",
     )
     .bind(doc_id)
+    .bind(lib)
     .bind(format!("sha-reembed-{}", uuid::Uuid::now_v7().simple()))
     .execute(pool)
     .await
     .unwrap();
     for seq in 0..2 {
         sqlx::query(
-            "INSERT INTO wiki_chunks (id, document_id, seq, content, embed_failed, embedding, tsv) \
-             VALUES ($1, $2, $3, $4, $5, $6, to_tsvector('simple', $4))",
+            "INSERT INTO wiki_chunks (id, library_id, document_id, seq, content, embed_failed, embedding, tsv) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, to_tsvector('simple', $5))",
         )
         .bind(uuid::Uuid::now_v7())
+        .bind(lib)
         .bind(doc_id)
         .bind(seq)
         .bind(format!("补嵌测试第 {seq} 段内容，关于 Rust 向量检索。"))
@@ -482,15 +530,16 @@ async fn wait_job_done(pool: &sqlx::PgPool, doc_id: uuid::Uuid, kind: &str) -> S
 #[tokio::test]
 async fn reembed_only_touches_missing_chunks() {
     let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
     let handle = run_jobs(pool.clone()).await;
 
-    let doc_id = insert_ready_doc_with_chunks(&pool, true).await;
+    let doc_id = insert_ready_doc_with_chunks(&pool, lib, true).await;
 
     // re-embed（无 provider → 缺失块维持降级，但已嵌入块绝不被碰）
-    svc.reembed(doc_id).await.unwrap();
+    svc.reembed(lib, doc_id).await.unwrap();
     let st = wait_job_done(&pool, doc_id, "embed_document").await;
     assert_eq!(st, "succeeded");
-    let doc = svc.get_document(doc_id).await.unwrap();
+    let doc = svc.get_document(lib, doc_id).await.unwrap();
     assert_eq!(doc.status, "ready");
 
     let rows: Vec<(bool, bool)> = sqlx::query_as(
@@ -508,15 +557,16 @@ async fn reembed_only_touches_missing_chunks() {
     // 非 ready 文档拒绝 re-embed
     let pending_id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO wiki_documents (id, title, source_uri, sha256, status) \
-         VALUES ($1, '未就绪', 'x.md', $2, 'pending')",
+        "INSERT INTO wiki_documents (id, library_id, title, source_uri, sha256, status) \
+         VALUES ($1, $2, '未就绪', 'x.md', $3, 'pending')",
     )
     .bind(pending_id)
+    .bind(lib)
     .bind(format!("sha-pending-{}", uuid::Uuid::now_v7().simple()))
     .execute(&pool)
     .await
     .unwrap();
-    let err = svc.reembed(pending_id).await.unwrap_err();
+    let err = svc.reembed(lib, pending_id).await.unwrap_err();
     assert!(
         matches!(
             err,
@@ -525,7 +575,7 @@ async fn reembed_only_touches_missing_chunks() {
         "{err:?}"
     );
     // 不存在的文档 → NotFound
-    let err = svc.reembed(uuid::Uuid::now_v7()).await.unwrap_err();
+    let err = svc.reembed(lib, uuid::Uuid::now_v7()).await.unwrap_err();
     assert!(
         matches!(err, engram_core::wiki_docs::WikiDocumentError::NotFound(_)),
         "{err:?}"
@@ -539,9 +589,10 @@ async fn reembed_only_touches_missing_chunks() {
 
 #[tokio::test]
 async fn k7_empty_token_query_returns_empty_not_error() {
-    let (_pool, svc, _pg) = setup().await; // 无 provider → 无查询向量 → 守卫短路
+    let (pool, svc, _pg) = setup().await; // 无 provider → 无查询向量 → 守卫短路
+    let lib = main_lib(&pool).await;
     for q in ["书", "的", "??", "a", "  "] {
-        let hits = svc.search(q, 5).await.unwrap();
+        let hits = svc.search(lib, q, 5).await.unwrap();
         assert!(hits.is_empty(), "「{q}」应短路返回空而非空跑 FTS");
     }
 }
@@ -549,6 +600,7 @@ async fn k7_empty_token_query_returns_empty_not_error() {
 #[tokio::test]
 async fn embed_short_response_marks_batch_failed_not_silent_null() {
     let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
     let handle = run_jobs(pool.clone()).await;
 
     // 本地 mock 嵌入网关：对任意输入只回 1 条向量（短响应）
@@ -601,11 +653,11 @@ async fn embed_short_response_marks_batch_failed_not_silent_null() {
     .unwrap();
 
     // 2 个缺失块 → 批次 2 条输入、响应只回 1 条 → K4 守卫应整批降级
-    let doc_id = insert_ready_doc_with_chunks(&pool, false).await;
-    svc.reembed(doc_id).await.unwrap();
+    let doc_id = insert_ready_doc_with_chunks(&pool, lib, false).await;
+    svc.reembed(lib, doc_id).await.unwrap();
     let st = wait_job_done(&pool, doc_id, "embed_document").await;
     assert_eq!(st, "succeeded", "短响应降级不是 job 失败");
-    let doc = svc.get_document(doc_id).await.unwrap();
+    let doc = svc.get_document(lib, doc_id).await.unwrap();
     assert_eq!(doc.status, "ready", "短响应降级不阻塞 ready");
 
     let rows: Vec<(bool, bool)> = sqlx::query_as(

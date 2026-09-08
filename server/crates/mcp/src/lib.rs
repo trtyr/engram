@@ -1074,6 +1074,13 @@ impl EngramMcpServer {
         engram_core::skills::SkillsService::new(self.state.pool.clone())
     }
 
+    /// wiki 库 slug → 库 id（缺省 main）。多库（2026-09-08）：所有 wiki 操作按库隔离。
+    async fn resolve_wiki_lib(&self, library: Option<&str>) -> Result<Uuid, rmcp::ErrorData> {
+        engram_core::wiki::libraries::resolve(&self.state.pool, library)
+            .await
+            .map_err(wiki::from_wiki)
+    }
+
     /// project_id / project_name 二选一定位项目 id（项目名唯一，可寻址）。
     async fn resolve_project(
         &self,
@@ -2339,8 +2346,9 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let wp = params.0;
+        let lib = self.resolve_wiki_lib(wp.library.as_deref()).await?;
         let result = wiki::svc(&self.state)
-            .search_with_purpose(&wp.query, wp.max_items.unwrap_or(20))
+            .search_with_purpose(lib, &wp.query, wp.max_items.unwrap_or(20))
             .await
             .map_err(wiki::from_wiki)?;
         let mut v = result;
@@ -2366,8 +2374,10 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let lp = params.0;
+        let lib = self.resolve_wiki_lib(lp.library.as_deref()).await?;
         let pages = wiki::svc(&self.state)
             .list_pages(
+                lib,
                 lp.page_type.as_deref(),
                 lp.limit.unwrap_or(100),
                 lp.cursor.as_deref(),
@@ -2392,8 +2402,9 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
         let page = wiki::svc(&self.state)
-            .get_page(&params.0.slug)
+            .get_page(lib, &params.0.slug)
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::to_value(&page).unwrap_or(serde_json::json!({})))
@@ -2413,8 +2424,10 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let wp = params.0;
+        let lib = self.resolve_wiki_lib(wp.library.as_deref()).await?;
         let page = wiki::svc(&self.state)
             .put_page(
+                lib,
                 &wp.slug,
                 &wp.title,
                 &wp.content,
@@ -2442,8 +2455,9 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let wp = params.0;
+        let lib = self.resolve_wiki_lib(wp.library.as_deref()).await?;
         let outcome = wiki::svc(&self.state)
-            .ingest(&wp.title, &wp.text)
+            .ingest(lib, &wp.title, &wp.text)
             .await
             .map_err(wiki::from_wiki)?;
         // D27 三态：已就绪（跳过）/ 在途（勿重提也非丢失）/ 新入队——此前三者不可分，
@@ -2496,8 +2510,9 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let qp = params.0;
+        let lib = self.resolve_wiki_lib(qp.library.as_deref()).await?;
         let skipped = wiki::svc(&self.state)
-            .archive_query(&qp.title, &qp.question, &qp.answer)
+            .archive_query(lib, &qp.title, &qp.question, &qp.answer)
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::json!({
@@ -2518,12 +2533,13 @@ impl EngramMcpServer {
     async fn wiki_graph(
         &self,
         ctx: RequestContext<RoleServer>,
-        _params: Parameters<wiki::WikiNoParams>,
+        Parameters(libp): Parameters<wiki::WikiLibParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
         let graph = wiki::svc(&self.state)
-            .graph()
+            .graph(lib)
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::to_value(&graph).unwrap_or(serde_json::json!({})))
@@ -2535,12 +2551,13 @@ impl EngramMcpServer {
     async fn wiki_lint(
         &self,
         ctx: RequestContext<RoleServer>,
-        _params: Parameters<wiki::WikiNoParams>,
+        Parameters(libp): Parameters<wiki::WikiLibParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
         let report = wiki::svc(&self.state)
-            .lint()
+            .lint(lib)
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
@@ -2556,8 +2573,9 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
         let deleted = wiki::svc(&self.state)
-            .delete_page(&params.0.slug)
+            .delete_page(lib, &params.0.slug)
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::json!({
@@ -2576,8 +2594,9 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
         let rows = wiki::svc(&self.state)
-            .page_versions(&params.0.slug)
+            .page_versions(lib, &params.0.slug)
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
@@ -2591,8 +2610,9 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
         let content = wiki::svc(&self.state)
-            .page_version_content(&params.0.slug, params.0.version)
+            .page_version_content(lib, &params.0.slug, params.0.version)
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::json!({
@@ -2612,8 +2632,9 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
         let page = wiki::svc(&self.state)
-            .restore_page_version(&params.0.slug, params.0.version)
+            .restore_page_version(lib, &params.0.slug, params.0.version)
             .await
             .map_err(wiki::from_wiki)?;
         let mut v = wiki::trim_page(serde_json::to_value(&page).unwrap_or(serde_json::json!({})));
@@ -2628,12 +2649,13 @@ impl EngramMcpServer {
     async fn wiki_sources(
         &self,
         ctx: RequestContext<RoleServer>,
-        _params: Parameters<wiki::WikiSourcesParams>,
+        Parameters(libp): Parameters<wiki::WikiLibParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
         let rows = wiki::svc(&self.state)
-            .list_sources()
+            .list_sources(lib)
             .await
             .map_err(wiki::from_wiki)?;
         let items: Vec<serde_json::Value> = rows
@@ -2657,14 +2679,27 @@ impl EngramMcpServer {
         wiki::require_wiki(&p)?;
         let id = Uuid::parse_str(&params.0.source_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "source_id 不是合法 UUID"))?;
+        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
         let report = wiki::svc(&self.state)
-            .delete_source_cascade(id)
+            .delete_source_cascade(lib, id)
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(
             serde_json::to_value(&report)
                 .unwrap_or(serde_json::json!({ "deleted": params.0.source_id })),
         )
+    }
+
+    /// 列出全部 wiki 库（多库；页面/原料计数一并返回）。建库/删库走 Web。
+    async fn wiki_libraries(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        _params: Parameters<wiki::WikiLibrariesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let rows = engram_core::wiki::libraries::list(&self.state.pool).await;
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
     }
 
     // ---------- 待办域工具（todos scope；第七域） ----------
@@ -2868,7 +2903,11 @@ impl EngramMcpServer {
             if !wik {
                 return None;
             }
-            let r = wiki::svc(&self.state).search(&q, max).await;
+            let lib = match engram_core::wiki::libraries::resolve(&self.state.pool, None).await {
+                Ok(l) => l,
+                Err(e) => return Some(json!({ "error": e.to_string() })),
+            };
+            let r = wiki::svc(&self.state).search(lib, &q, max).await;
             Some(match r {
                 Ok(pages) => json!(
                     pages
@@ -3439,6 +3478,13 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "libraries" => {
+                self.wiki_libraries(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "libraries", call.args)?),
+                )
+                .await
+            }
             "graph" => {
                 self.wiki_graph(
                     ctx,
@@ -3635,9 +3681,10 @@ skills 域用法：技能 = 可复用的指令包（SKILL.md 形态 + scripts/re
    改坏了 {\"action\":\"versions\"} 查历史、{\"action\":\"restore\"} 回滚；
 3. 用户给现成 SKILL.md：{\"action\":\"import\"}。
 
-wiki 域用法：世界知识库——Markdown 页面 + [[wikilink]] + 混合检索（FTS + 向量）。
-1. 查证事实性知识 → {\"action\":\"search\"}（命中带片段，全文 get_page）；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}；
-2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；
+wiki 域用法：多库知识库（Markdown 页面 + [[wikilink]] + 混合检索）。每个操作可选 \"library\":\"<库slug>\"
+（缺省 main 主库）；{\"action\":\"libraries\"} 列出全部库及页面计数，建库/删库在 Web。
+1. 查证事实性知识 → {\"action\":\"search\"}（命中带片段，全文 get_page）；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}（均按库）；
+2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步，产物落同库），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；
 3. 版本与原料：{\"action\":\"versions\"}/{\"action\":\"restore_version\"} 查历史与回滚（误删页可重建）；{\"action\":\"sources\"}/{\"action\":\"delete_source\"} 清理织入原料（lint 报 stale_source 时用）。
 
 todos 域用法：不绑定项目的快速待办（灵感/学习计划/系统操作/问题排查）。

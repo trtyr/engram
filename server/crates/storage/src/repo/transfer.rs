@@ -372,11 +372,16 @@ pub async fn import_skill(pool: &PgPool, v: &Value, files: &[Value]) -> StoreRes
 
 pub async fn import_wiki_page(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     let content = str_of(v, "content", "");
+    // 多库（2026-09-08）：迁移导入统一落主库（slug 冲突按库内判定）
+    let lib: Uuid = sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
+        .fetch_one(pool)
+        .await?;
     let res = sqlx::query(
-        "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version, folder, tsv, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_tsvector('simple', $5), $10, $11) ON CONFLICT (slug) DO NOTHING",
+        "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, folder, tsv, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, to_tsvector('simple', $6), $11, $12) ON CONFLICT (library_id, slug) DO NOTHING",
     )
     .bind(id_of(v, "id"))
+    .bind(lib)
     .bind(str_of(v, "slug", ""))
     .bind(str_of(v, "title", ""))
     .bind(str_of(v, "page_type", "concept"))

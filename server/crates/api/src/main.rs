@@ -109,10 +109,16 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             let registry = st.registry();
             let wiki = engram_core::wiki::WikiService::new(st.pool.clone(), registry);
-            match wiki.backfill_tsv().await {
-                Ok(n) if n > 0 => tracing::info!("wiki tsv 存量补数完成：{n} 页"),
-                Ok(_) => {}
-                Err(e) => tracing::warn!("wiki tsv 存量补数失败（下次启动重试）: {e}"),
+            for lib in engram_core::wiki::libraries::list(&st.pool).await {
+                match wiki.backfill_tsv(lib.id).await {
+                    Ok(n) if n > 0 => {
+                        tracing::info!("wiki tsv 存量补数完成：{}（{}）{n} 页", lib.slug, lib.name)
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!("wiki tsv 存量补数失败（{} 下次启动重试）: {e}", lib.slug)
+                    }
+                }
             }
         });
     }

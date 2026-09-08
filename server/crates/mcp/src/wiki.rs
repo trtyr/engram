@@ -100,6 +100,9 @@ pub struct WikiSearchParams {
     /// 返回条数（默认 20，上限 50）
     #[schemars(description = "返回条数，默认 20。")]
     pub max_items: Option<i64>,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -117,6 +120,9 @@ pub struct WikiListPagesParams {
     /// 返回条数（默认 100，单页上限 300——更多结果用 cursor 翻页）
     #[schemars(description = "返回条数，默认 100，单页上限 300——更多结果用 cursor 翻页。")]
     pub limit: Option<i64>,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -126,6 +132,9 @@ pub struct WikiGetPageParams {
         description = "页面 slug。对大小写与空格/连字符差异宽容；传页面标题（title 精确匹配）也可寻址。"
     )]
     pub slug: String,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -144,6 +153,9 @@ pub struct WikiWritePageParams {
     /// 目录树文件夹（Obsidian 式 / 分隔多级路径；缺省用页型默认目录）
     #[schemars(description = "可选：目录树文件夹（/ 分隔多级路径）。缺省按页型默认目录。")]
     pub folder: Option<String>,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -154,6 +166,9 @@ pub struct WikiIngestParams {
     /// 源文本（Markdown/纯文本；相同内容重复织入会被 sha 去重跳过）
     #[schemars(description = "源文本全文。内容相同（sha 命中）会跳过。")]
     pub text: String,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -167,6 +182,9 @@ pub struct WikiArchiveQueryParams {
     /// 最终回答
     #[schemars(description = "最终回答（值得沉淀的版本，不要贴过程流水账）。")]
     pub answer: String,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 /// 删除 Wiki 页面参数。
@@ -177,6 +195,9 @@ pub struct WikiDeletePageParams {
         description = "要删除的页面 slug（wiki_list_pages 返回；也接受页面标题）。不可逆——最后状态会留版本快照，可用 restore_version 重建。"
     )]
     pub slug: String,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 /// 页面版本列表参数（R 报告建议 #5）。
@@ -187,6 +208,9 @@ pub struct WikiVersionsParams {
         description = "页面 slug（或标题）。返回该页的历史版本（新→旧，含已删除页的最后状态）。"
     )]
     pub slug: String,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 /// 读取某版本正文参数（回滚前预览）。
@@ -198,6 +222,9 @@ pub struct WikiVersionContentParams {
     /// 版本号（versions 列表里的 version）
     #[schemars(description = "版本号（来自 versions 列表）。")]
     pub version: i32,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 /// 回滚到历史版本参数。
@@ -211,6 +238,9 @@ pub struct WikiRestoreVersionParams {
         description = "要恢复到的版本号（来自 versions 列表）。回滚本身也产生新版本，历史不丢。"
     )]
     pub version: i32,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }
 
 /// 无参操作（wiki sources 列表）占位。
@@ -225,4 +255,19 @@ pub struct WikiDeleteSourceParams {
         description = "原料 id（sources 列表返回）。级联删除：该源、其任务与由它产出的页面一并删除，不可逆。"
     )]
     pub source_id: String,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+/// 库列表参数。
+#[derive(Serialize, Deserialize, JsonSchema, Default)]
+pub struct WikiLibrariesParams {}
+
+/// graph/lint 等无参操作的库选择占位。
+#[derive(Serialize, Deserialize, JsonSchema, Default)]
+pub struct WikiLibParams {
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
 }

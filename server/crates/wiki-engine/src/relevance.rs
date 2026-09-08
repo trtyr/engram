@@ -49,15 +49,17 @@ where
         .sum()
 }
 
-/// 全量重算 wiki_links 权重（ingest 后调用；量大时 O(n²) 邻居对，百页级可接受）。
-pub async fn rebuild_weights(pool: &PgPool) -> Result<usize, JobError> {
-    // 页面集合：slug + type + sources[]
+/// 全量重算某库的 wiki_links 权重（ingest 后调用；量大时 O(n²) 邻居对，百页级可接受）。
+/// 页面集合、现有边、UPDATE/INSERT 全部按 library_id 隔离（多库 0037）。
+pub async fn rebuild_weights(pool: &PgPool, lib: uuid::Uuid) -> Result<usize, JobError> {
+    // 页面集合：slug + type + sources[]（库内）
     let pages: Vec<(String, String, Vec<String>)> =
         sqlx::query_as::<_, (String, String, Vec<String>)>(
             "SELECT slug, page_type, \
             ARRAY(SELECT jsonb_array_elements_text(frontmatter->'sources')) \
-         FROM wiki_pages WHERE page_type NOT IN ('index','log')",
+         FROM wiki_pages WHERE page_type NOT IN ('index','log') AND library_id = $1",
         )
+        .bind(lib)
         .fetch_all(pool)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -72,11 +74,13 @@ pub async fn rebuild_weights(pool: &PgPool) -> Result<usize, JobError> {
     let slug_sources: std::collections::HashMap<&str, &Vec<String>> =
         pages.iter().map(|(s, _, src)| (s.as_str(), src)).collect();
 
-    // 现有 wikilink 邻接
-    let links: Vec<(String, String)> = sqlx::query_as("SELECT from_slug, to_slug FROM wiki_links")
-        .fetch_all(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
+    // 现有 wikilink 邻接（库内边）
+    let links: Vec<(String, String)> =
+        sqlx::query_as("SELECT from_slug, to_slug FROM wiki_links WHERE library_id = $1")
+            .bind(lib)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
     let mut out_neighbors: std::collections::HashMap<&str, Vec<&str>> =
         std::collections::HashMap::new();
     let mut in_neighbors: std::collections::HashMap<&str, Vec<&str>> =
@@ -127,13 +131,17 @@ pub async fn rebuild_weights(pool: &PgPool) -> Result<usize, JobError> {
             ta == slug_type.get(to.as_str()).copied().unwrap_or(""),
         );
         let w = (w as f32).max(0.1);
-        sqlx::query("UPDATE wiki_links SET weight = $3 WHERE from_slug = $1 AND to_slug = $2")
-            .bind(from)
-            .bind(to)
-            .bind(w)
-            .execute(pool)
-            .await
-            .map_err(|e| JobError::Retryable(e.to_string()))?;
+        sqlx::query(
+            "UPDATE wiki_links SET weight = $3 \
+             WHERE from_slug = $1 AND to_slug = $2 AND library_id = $4",
+        )
+        .bind(from)
+        .bind(to)
+        .bind(w)
+        .bind(lib)
+        .execute(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
         updated += 1;
     }
 
@@ -154,15 +162,17 @@ pub async fn rebuild_weights(pool: &PgPool) -> Result<usize, JobError> {
             }
             let w = ((W_SOURCE_OVERLAP + if ta_ == tb_ { W_TYPE_AFFINITY } else { 0.0 }) as f32)
                 .max(0.1);
-            // 无向语义：两条有向边都补（与 wikilink 边形态一致）
+            // 无向语义：两条有向边都补（与 wikilink 边形态一致）；边挂库（0037 复合主键）
             for (a, b) in [(sa_, sb_), (sb_, sa_)] {
                 sqlx::query(
-                    "INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, $3) \
-                     ON CONFLICT (from_slug, to_slug) DO NOTHING",
+                    "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
+                     VALUES ($4, $1, $2, $3) \
+                     ON CONFLICT (library_id, from_slug, to_slug) DO NOTHING",
                 )
                 .bind(a)
                 .bind(b)
                 .bind(w)
+                .bind(lib)
                 .execute(pool)
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;

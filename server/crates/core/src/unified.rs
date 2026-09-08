@@ -78,11 +78,34 @@ impl UnifiedSearch {
         );
         let wiki = WikiService::new(self.pool.clone(), self.registry.clone());
 
+        // 多库（2026-09-08）：文档与 wiki 页按库各查一份再并集（RRF 归一化不变）
+        let lib_ids: Vec<Uuid> = crate::wiki::libraries::list(&self.pool)
+            .await
+            .iter()
+            .map(|l| l.id)
+            .collect();
+
         // 三域并行检索 + 实体层（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
         let (mem_res, know_res, wiki_res, ent_res, todo_res) = tokio::join!(
             mem.search(query, &["l1", "l2"], per_domain, true, false, None, None),
-            know.search(query, per_domain),
-            wiki.search(query, per_domain),
+            async {
+                let mut out = Vec::new();
+                for lib in &lib_ids {
+                    if let Ok(mut hits) = know.search(*lib, query, per_domain).await {
+                        out.append(&mut hits);
+                    }
+                }
+                Ok::<_, UnifiedError>(out)
+            },
+            async {
+                let mut out = Vec::new();
+                for lib in &lib_ids {
+                    if let Ok(mut hits) = wiki.search(*lib, query, per_domain).await {
+                        out.append(&mut hits);
+                    }
+                }
+                Ok::<_, UnifiedError>(out)
+            },
             async {
                 engram_search::search_entities(&self.pool, query, per_domain)
                     .await

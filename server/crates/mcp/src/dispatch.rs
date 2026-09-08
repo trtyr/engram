@@ -100,7 +100,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "import", false, "导入现成 SKILL.md（frontmatter 容错解析）" => crate::SkillsImportParams
         ],
         "wiki" => action_docs![
-            "search", false, "Wiki 检索（FTS + 向量融合；命中带片段，全文按需 get_page）" => crate::wiki::WikiSearchParams;
+            "search", false, "Wiki 检索（FTS + 向量融合；命中带片段，全文按需 get_page；按库）" => crate::wiki::WikiSearchParams;
             "list_pages", false, "浏览页面列表（可按页型过滤；不含正文）" => crate::wiki::WikiListPagesParams;
             "get_page", false, "读页面全文（含 frontmatter 与版本）" => crate::wiki::WikiGetPageParams;
             "write_page", false, "写/覆盖一个页面（Markdown + [[wikilink]]；覆盖前先 get_page，旧文自动留版本快照）" => crate::wiki::WikiWritePageParams;
@@ -111,8 +111,9 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "restore_version", false, "回滚到历史版本（已删除页面从快照重建）" => crate::wiki::WikiRestoreVersionParams;
             "sources", false, "列出织入原料（wiki_sources 及其状态；stale_source 清理的入口）" => crate::wiki::WikiSourcesParams;
             "delete_source", true, "删除一条织入原料及其全部产出（级联，不可逆）" => crate::wiki::WikiDeleteSourceParams;
-            "graph", false, "Wiki 链接图全貌（节点/边/社区划分）" => crate::wiki::WikiNoParams;
-            "lint", false, "Wiki 体检（死链/孤页/缺源；只报告不修改）" => crate::wiki::WikiNoParams;
+            "graph", false, "Wiki 链接图全貌（节点/边/社区划分；按库）" => crate::wiki::WikiLibParams;
+            "lint", false, "Wiki 体检（死链/孤页/缺源；只报告不修改；按库）" => crate::wiki::WikiLibParams;
+            "libraries", false, "列出全部 wiki 库（多库；页面/原料计数一并返回；建库/删库走 Web）" => crate::wiki::WikiLibrariesParams;
             "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
         ],
         "todos" => action_docs![

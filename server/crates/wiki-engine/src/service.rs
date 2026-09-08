@@ -1,4 +1,5 @@
 //! Wiki 服务层：页面 CRUD、图数据、ingest 入口、lint 调用。
+//! 多库（0037）：所有公开方法在 `&self` 后带 `lib: Uuid`，SQL 全部按库过滤/写入。
 
 use chrono::{DateTime, Utc};
 use engram_jobs::{JobQueue, JobTemplate};
@@ -140,8 +141,10 @@ impl WikiService {
 
     /// 触发两步 ingest（文本 + 标题）。返回三态（D27）：已就绪跳过 / 在途 / 新入队。
     /// D24：空标题/空文本响亮拒绝（空文本任务曾在队列里滞留不执行、空标题白烧一次 LLM）。
+    /// 多库：原料落到指定库（sha 去重也只在库内生效）。
     pub async fn ingest(
         &self,
+        lib: Uuid,
         title: &str,
         text: &str,
     ) -> Result<crate::ingest::IngestOutcome, WikiError> {
@@ -155,22 +158,26 @@ impl WikiService {
                 "text 不能为空——空文本织入只会浪费 LLM 调用".into(),
             ));
         }
-        Ok(ingest::enqueue_ingest(&self.queue, title, text).await?)
+        Ok(ingest::enqueue_ingest(&self.queue, lib, title, text).await?)
     }
 
     /// 从 wiki 文档触发织入（upload 与 URL 通用，2026-09-04 补 URL 兜底）：
     /// raw_path 有 → 重新读取原文件并解析（保留原行为）；
     /// raw_path 空（URL 摄取）→ 用已分块文本按 seq 拼接——此前 URL 文档既不能
     /// --doc-id 手动织入（404）也不会被自动织入静默跳过，两路都收敛到 ingest(title, text)。
+    /// 多库：文档按 (id, library_id) 匹配——跨库文档按不存在处理。
     pub async fn ingest_document(
         &self,
+        lib: Uuid,
         doc_id: Uuid,
     ) -> Result<crate::ingest::IngestOutcome, WikiError> {
-        let row: Option<(String, Option<String>, Option<String>)> =
-            sqlx::query_as("SELECT title, raw_path, mime FROM wiki_documents WHERE id = $1")
-                .bind(doc_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT title, raw_path, mime FROM wiki_documents WHERE id = $1 AND library_id = $2",
+        )
+        .bind(doc_id)
+        .bind(lib)
+        .fetch_optional(&self.pool)
+        .await?;
         let Some((title, raw_path, mime)) = row else {
             return Err(WikiError::NotFound(format!("文档 {doc_id} 不存在")));
         };
@@ -186,11 +193,13 @@ impl WikiService {
             engram_parsing::parse_bytes(&name, mime.as_deref(), &bytes)
                 .map_err(|e| WikiError::BadRequest(e.to_string()))?
         } else {
-            // URL 摄取：无本地文件，用 chunks 表已解析文本按序拼接
+            // URL 摄取：无本地文件，用 chunks 表已解析文本按序拼接（库内）
             let chunks: Vec<String> = sqlx::query_scalar(
-                "SELECT content FROM wiki_chunks WHERE document_id = $1 ORDER BY seq",
+                "SELECT c.content FROM wiki_chunks c \
+                 WHERE c.document_id = $1 AND c.library_id = $2 ORDER BY c.seq",
             )
             .bind(doc_id)
+            .bind(lib)
             .fetch_all(&self.pool)
             .await?;
             if chunks.is_empty() {
@@ -200,14 +209,16 @@ impl WikiService {
             }
             chunks.join("\n\n")
         };
-        self.ingest(&title, &text).await
+        self.ingest(lib, &title, &text).await
     }
 
     /// 页面列表（D28 keyset 分页，单页上限 300）：cursor = 上一页最后一条的
     /// `{updated_at ISO8601}|{id}`，首查不传。ORDER BY 带 id 决稳——
     /// 此前静默截断曾让最老的页面从列表「消失」（graph/lint 却可见）。
+    /// 多库：只列指定库的页面（slug 跨库可重名）。
     pub async fn list_pages(
         &self,
+        lib: Uuid,
         page_type: Option<&str>,
         limit: i64,
         cursor: Option<&str>,
@@ -236,9 +247,11 @@ impl WikiService {
         match cursor {
             None | Some("") => Ok(sqlx::query_as::<_, WikiPageDto>(
                 "SELECT * FROM wiki_pages \
-                     WHERE ($1::text IS NULL OR page_type = $1) AND page_type NOT IN ('log') \
-                     ORDER BY updated_at DESC, id DESC LIMIT $2",
+                     WHERE library_id = $1 AND ($2::text IS NULL OR page_type = $2) \
+                       AND page_type NOT IN ('log') \
+                     ORDER BY updated_at DESC, id DESC LIMIT $3",
             )
+            .bind(lib)
             .bind(page_type)
             .bind(limit.min(300))
             .fetch_all(&self.pool)
@@ -247,10 +260,12 @@ impl WikiService {
                 let (ts, id) = parse_cursor(raw)?;
                 Ok(sqlx::query_as::<_, WikiPageDto>(
                     "SELECT * FROM wiki_pages \
-                     WHERE ($1::text IS NULL OR page_type = $1) AND page_type NOT IN ('log') \
-                       AND (updated_at, id) < ($3::timestamptz, $4::uuid) \
-                     ORDER BY updated_at DESC, id DESC LIMIT $2",
+                     WHERE library_id = $1 AND ($2::text IS NULL OR page_type = $2) \
+                       AND page_type NOT IN ('log') \
+                       AND (updated_at, id) < ($4::timestamptz, $5::uuid) \
+                     ORDER BY updated_at DESC, id DESC LIMIT $3",
                 )
+                .bind(lib)
                 .bind(page_type)
                 .bind(limit.min(300))
                 .bind(ts)
@@ -261,30 +276,34 @@ impl WikiService {
         }
     }
 
-    pub async fn get_page(&self, slug: &str) -> Result<WikiPageDto, WikiError> {
-        // 先精确匹配；未中则按「小写 + 空格转连字符」宽容重查——LLM 生成正文时
-        // 常把双链写成标题原文（[[Rust 异步运行时]]），与真实 slug（rust-异步运行时）
-        // 只差大小写和分隔符，精确匹配 404 后点过去就"没反应"。
-        // R 报告 P1-11 双寻址：slug 未中再按 title 精确兜底（标题寻址）。
+    /// 读单页（库内）。先精确匹配；未中则按「小写 + 空格转连字符」宽容重查——LLM 生成正文时
+    /// 常把双链写成标题原文（[[Rust 异步运行时]]），与真实 slug（rust-异步运行时）
+    /// 只差大小写和分隔符，精确匹配 404 后点过去就"没反应"。
+    /// R 报告 P1-11 双寻址：slug 未中再按 title 精确兜底（标题寻址）。
+    pub async fn get_page(&self, lib: Uuid, slug: &str) -> Result<WikiPageDto, WikiError> {
         sqlx::query_as::<_, WikiPageDto>(
             "SELECT * FROM wiki_pages \
-             WHERE slug = $1 OR slug = lower(replace($1, ' ', '-')) OR title = $1 \
+             WHERE (slug = $1 OR slug = lower(replace($1, ' ', '-')) OR title = $1) \
+               AND library_id = $2 \
              ORDER BY (slug = $1) DESC, (title = $1) DESC LIMIT 1",
         )
         .bind(slug)
+        .bind(lib)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| WikiError::NotFound(format!("页面 {slug} 不存在")))
     }
 
-    /// slug/title 宽容解析成真实 slug（删除/版本操作用，与 get_page 同一匹配口径）。
-    async fn resolve_slug(&self, slug_or_title: &str) -> Result<String, WikiError> {
+    /// slug/title 宽容解析成真实 slug（删除/版本操作用，与 get_page 同一匹配口径；库内）。
+    async fn resolve_slug(&self, lib: Uuid, slug_or_title: &str) -> Result<String, WikiError> {
         let row: Option<String> = sqlx::query_scalar(
             "SELECT slug FROM wiki_pages \
-             WHERE slug = $1 OR slug = lower(replace($1, ' ', '-')) OR title = $1 \
+             WHERE (slug = $1 OR slug = lower(replace($1, ' ', '-')) OR title = $1) \
+               AND library_id = $2 \
              ORDER BY (slug = $1) DESC LIMIT 1",
         )
         .bind(slug_or_title)
+        .bind(lib)
         .fetch_optional(&self.pool)
         .await?;
         row.ok_or_else(|| WikiError::NotFound(format!("页面 {slug_or_title} 不存在")))
@@ -292,8 +311,10 @@ impl WikiService {
 
     /// 人工编辑：origin=human、版本递增、重嵌入。folder 可选（None=保持原值/默认空）。
     /// via 可选（S-7）：执行者标记（如 "ai"）——落 frontmatter.via，区分真人编辑与 AI 代执行。
+    /// 多库：快照/页面/链接全部按 (library_id, slug) 操作。
     pub async fn put_page(
         &self,
+        lib: Uuid,
         slug: &str,
         title: &str,
         content: &str,
@@ -320,27 +341,29 @@ impl WikiService {
         // 版本历史（R 报告建议 #5）：覆盖前先把现状快照进 wiki_page_versions——
         // 此前 version 只是计数器，覆盖即失忆。INSERT..SELECT 天然幂等（无旧页 0 行）。
         sqlx::query(
-            "INSERT INTO wiki_page_versions (id, slug, version, title, page_type, folder, content, origin) \
-             SELECT $1, slug, version, title, page_type, folder, content, origin \
-             FROM wiki_pages WHERE slug = $2",
+            "INSERT INTO wiki_page_versions (id, library_id, slug, version, title, page_type, folder, content, origin) \
+             SELECT $1, $3, slug, version, title, page_type, folder, content, origin \
+             FROM wiki_pages WHERE slug = $2 AND library_id = $3",
         )
         .bind(Uuid::now_v7())
         .bind(slug)
+        .bind(lib)
         .execute(&self.pool)
         .await?;
-        self.prune_page_versions(slug).await;
+        self.prune_page_versions(lib, slug).await;
         let row = sqlx::query_as::<_, WikiPageDto>(
-            "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
-             VALUES ($1, $2, $3, 'concept', COALESCE($4, ''), $5, $6::jsonb, 'human', 1, to_tsvector('simple', $7)) \
-             ON CONFLICT (slug) DO UPDATE SET \
-                title = $3, content = $5, origin = 'human', \
-                folder = COALESCE($4, wiki_pages.folder), \
-                frontmatter = wiki_pages.frontmatter || $8::jsonb, \
+            "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
+             VALUES ($1, $2, $3, $4, 'concept', COALESCE($5, ''), $6, $7::jsonb, 'human', 1, to_tsvector('simple', $8)) \
+             ON CONFLICT (library_id, slug) DO UPDATE SET \
+                title = $4, content = $6, origin = 'human', \
+                folder = COALESCE($5, wiki_pages.folder), \
+                frontmatter = wiki_pages.frontmatter || $9::jsonb, \
                 version = wiki_pages.version + 1, updated_at = now(), \
-                tsv = to_tsvector('simple', $7) \
+                tsv = to_tsvector('simple', $8) \
              RETURNING *",
         )
         .bind(Uuid::now_v7())
+        .bind(lib)
         .bind(slug)
         .bind(title)
         .bind(folder)
@@ -353,17 +376,20 @@ impl WikiService {
 
         // D4：落页后重算本页 wikilinks——graph/孤页检测与 lint 同源（此前
         // put_page 不写 wiki_links，AI 写页的互链对图与 lint 不可见）
-        sqlx::query("DELETE FROM wiki_links WHERE from_slug = $1")
+        sqlx::query("DELETE FROM wiki_links WHERE from_slug = $1 AND library_id = $2")
             .bind(slug)
+            .bind(lib)
             .execute(&self.pool)
             .await?;
         for target in crate::markup::extract_wikilinks(content) {
             sqlx::query(
-                "INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, 3.0) \
-                 ON CONFLICT (from_slug, to_slug) DO NOTHING",
+                "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
+                 VALUES ($3, $1, $2, 3.0) \
+                 ON CONFLICT (library_id, from_slug, to_slug) DO NOTHING",
             )
             .bind(slug)
             .bind(&target)
+            .bind(lib)
             .execute(&self.pool)
             .await
             .ok();
@@ -371,21 +397,26 @@ impl WikiService {
         Ok(row)
     }
 
-    /// 链接图（节点 = 页面，边 = wikilink；含 Louvain 社区 + 凝聚度）。
-    pub async fn graph(&self) -> Result<GraphDto, WikiError> {
+    /// 链接图（节点 = 页面，边 = wikilink；含 Louvain 社区 + 凝聚度；库内）。
+    pub async fn graph(&self, lib: Uuid) -> Result<GraphDto, WikiError> {
         // D23：排除系统 log 页（list_pages 不可见，图里也不该出现——否则节点无法溯源）
         let nodes: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type FROM wiki_pages \
-             WHERE page_type <> 'log'",
+             WHERE page_type <> 'log' AND library_id = $1",
         )
+        .bind(lib)
         .fetch_all(&self.pool)
         .await?;
-        // 边随节点过滤：任一端是 log 页的边一并剔除（防悬空引用进社区发现）
+        // 边随节点过滤：任一端是 log 页的边一并剔除（防悬空引用进社区发现）；边与两端都限库内
         let edges: Vec<(String, String, f32)> = sqlx::query_as(
             "SELECT l.from_slug, l.to_slug, l.weight FROM wiki_links l \
-             WHERE EXISTS (SELECT 1 FROM wiki_pages f WHERE f.slug = l.from_slug AND f.page_type <> 'log') \
-               AND EXISTS (SELECT 1 FROM wiki_pages t WHERE t.slug = l.to_slug AND t.page_type <> 'log')",
+             WHERE l.library_id = $1 \
+               AND EXISTS (SELECT 1 FROM wiki_pages f WHERE f.slug = l.from_slug \
+                           AND f.page_type <> 'log' AND f.library_id = $1) \
+               AND EXISTS (SELECT 1 FROM wiki_pages t WHERE t.slug = l.to_slug \
+                           AND t.page_type <> 'log' AND t.library_id = $1)",
         )
+        .bind(lib)
         .fetch_all(&self.pool)
         .await?;
         // 社区发现
@@ -445,25 +476,31 @@ impl WikiService {
         })
     }
 
-    pub async fn lint(&self) -> Result<lint::LintReport, WikiError> {
-        Ok(lint::lint(&self.pool).await?)
+    pub async fn lint(&self, lib: Uuid) -> Result<lint::LintReport, WikiError> {
+        Ok(lint::lint(&self.pool, lib).await?)
     }
 
     /// 提案合入（人审通过：把 job_events 里的 proposal 内容写入页面）。
     pub async fn apply_proposal(
         &self,
+        lib: Uuid,
         slug: &str,
         content: &str,
         title: &str,
         via: Option<&str>,
     ) -> Result<WikiPageDto, WikiError> {
         // human 合入：保持 origin=human 语义（人确认的内容）；via 落 frontmatter 区分执行者
-        self.put_page(slug, title, content, None, via).await
+        self.put_page(lib, slug, title, content, None, via).await
     }
 
-    /// Wiki 检索（FTS + 向量 RRF 融合；W2：向量通道落地）。
+    /// Wiki 检索（FTS + 向量 RRF 融合；W2：向量通道落地；库内检索）。
     /// purpose 注入：检索走 LLM 时（AI 客户端读 query_context.purpose）提供方向意图——对齐 llm_wiki 的 query 注入。
-    pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<WikiPageDto>, WikiError> {
+    pub async fn search(
+        &self,
+        lib: Uuid,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<WikiPageDto>, WikiError> {
         // K7：单字/纯标点无 token → 短路空结果（不再空跑 to_tsquery）
         if !engram_search::tokenize::has_query_tokens(query) {
             return Ok(vec![]);
@@ -480,19 +517,21 @@ impl WikiService {
             .and_then(|r| r.embeddings.first().cloned());
 
         if let Some(qv) = qv {
-            // FTS + ANN 双候选 + RRF 融合（与 wiki 文档同款模式）
+            // FTS + ANN 双候选 + RRF 融合（与 wiki 文档同款模式）；
+            // CTE 与外层都按 library_id 过滤——slug 跨库可重名，外层不过滤会串库
             let rows: Vec<WikiPageDto> = sqlx::query_as(
                 "WITH fts AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
-                 FROM wiki_pages, to_tsquery('simple', $1) q WHERE tsv @@ q LIMIT 100), \
-                 vec AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY embedding <=> $2) AS rank \
-                 FROM wiki_pages WHERE embedding IS NOT NULL LIMIT 100) \
+                 FROM wiki_pages, to_tsquery('simple', $2) q WHERE tsv @@ q AND library_id = $1 LIMIT 100), \
+                 vec AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY embedding <=> $3) AS rank \
+                 FROM wiki_pages WHERE embedding IS NOT NULL AND library_id = $1 LIMIT 100) \
                  SELECT p.* FROM wiki_pages p \
                  LEFT JOIN fts ON fts.slug = p.slug \
                  LEFT JOIN vec ON vec.slug = p.slug \
-                 WHERE fts.slug IS NOT NULL OR vec.slug IS NOT NULL \
+                 WHERE p.library_id = $1 AND (fts.slug IS NOT NULL OR vec.slug IS NOT NULL) \
                  ORDER BY (COALESCE(1.0/(60 + fts.rank), 0) + COALESCE(1.0/(60 + vec.rank), 0)) DESC \
-                 LIMIT $3",
+                 LIMIT $4",
             )
+            .bind(lib)
             .bind(tsq)
             .bind(pgvector::Vector::from(qv))
             .bind(limit)
@@ -501,9 +540,11 @@ impl WikiService {
             Ok(rows)
         } else {
             Ok(sqlx::query_as::<_, WikiPageDto>(
-                "SELECT * FROM wiki_pages, to_tsquery('simple', $1) q \
-                 WHERE tsv @@ q ORDER BY ts_rank(tsv, q) DESC LIMIT $2",
+                "SELECT * FROM wiki_pages, to_tsquery('simple', $2) q \
+                 WHERE tsv @@ q AND library_id = $1 \
+                 ORDER BY ts_rank(tsv, q) DESC LIMIT $3",
             )
+            .bind(lib)
             .bind(tsq)
             .bind(limit)
             .fetch_all(&self.pool)
@@ -511,23 +552,26 @@ impl WikiService {
         }
     }
 
-    /// W2 存量补数：LLM 页 tsv 曾只嵌 slug——重写为 title+content 口径。
+    /// W2 存量补数：LLM 页 tsv 曾只嵌 slug——重写为 title+content 口径（库内）。
     /// 幂等（值不变不写）；jieba 分词必须经 Rust，故逐页计算。
-    pub async fn backfill_tsv(&self) -> Result<u64, WikiError> {
+    pub async fn backfill_tsv(&self, lib: Uuid) -> Result<u64, WikiError> {
         let pages: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT slug, COALESCE(frontmatter->>'title', slug), content FROM wiki_pages \
-             WHERE origin = 'llm' AND page_type NOT IN ('index','log','overview')",
+             WHERE origin = 'llm' AND page_type NOT IN ('index','log','overview') AND library_id = $1",
         )
+        .bind(lib)
         .fetch_all(&self.pool)
         .await?;
         let mut n = 0u64;
         for (slug, title, content) in &pages {
             let text = format!("{title}\n{content}");
             let r = sqlx::query(
-                "UPDATE wiki_pages SET tsv = to_tsvector('simple', $2) \
-                 WHERE slug = $1 AND tsv IS DISTINCT FROM to_tsvector('simple', $2)",
+                "UPDATE wiki_pages SET tsv = to_tsvector('simple', $3) \
+                 WHERE slug = $1 AND library_id = $2 \
+                   AND tsv IS DISTINCT FROM to_tsvector('simple', $3)",
             )
             .bind(slug)
+            .bind(lib)
             .bind(engram_search::tokenize::tsv_text(&text))
             .execute(&self.pool)
             .await?;
@@ -537,16 +581,20 @@ impl WikiService {
     }
 
     /// 检索上下文包（query 时 purpose 注入的载体）：purpose + 命中页面，
-    /// AI 客户端把 purpose 作为 system context 前缀使用。
+    /// AI 客户端把 purpose 作为 system context 前缀使用（purpose 取该库的）。
     pub async fn search_with_purpose(
         &self,
+        lib: Uuid,
         query: &str,
         limit: i64,
     ) -> Result<serde_json::Value, WikiError> {
-        let pages = self.search(query, limit).await?;
+        let pages = self.search(lib, query, limit).await?;
         // W-10（2026-09-04）：未设 purpose 时返回 null，与 GET /wiki/purpose 一致；
         // 不再用 purpose_context 的默认模板——「读当前设置」与「注入 LLM」语义分开。
-        let purpose = crate::purpose::get_purpose(&self.pool).await.ok().flatten();
+        let purpose = crate::purpose::get_purpose(&self.pool, lib)
+            .await
+            .ok()
+            .flatten();
         Ok(serde_json::json!({
             "purpose": purpose,
             "pages": pages,
@@ -564,24 +612,31 @@ impl WikiService {
         Ok(())
     }
 
-    // ---------- purpose（wiki 灵魂） ----------
+    // ---------- purpose（wiki 灵魂；每库一份，键 wiki_purpose:{lib}） ----------
 
-    pub async fn get_purpose(&self) -> Result<Option<crate::purpose::Purpose>, WikiError> {
-        crate::purpose::get_purpose(&self.pool)
+    pub async fn get_purpose(
+        &self,
+        lib: Uuid,
+    ) -> Result<Option<crate::purpose::Purpose>, WikiError> {
+        crate::purpose::get_purpose(&self.pool, lib)
             .await
             .map_err(WikiError::from)
     }
 
-    pub async fn set_purpose(&self, p: &crate::purpose::Purpose) -> Result<(), WikiError> {
-        crate::purpose::set_purpose(&self.pool, p)
+    pub async fn set_purpose(
+        &self,
+        lib: Uuid,
+        p: &crate::purpose::Purpose,
+    ) -> Result<(), WikiError> {
+        crate::purpose::set_purpose(&self.pool, lib, p)
             .await
             .map_err(WikiError::from)
     }
 
     // ---------- Review ----------
 
-    pub async fn reviews(&self) -> Result<Vec<crate::review::ReviewItem>, WikiError> {
-        crate::review::list_open(&self.pool)
+    pub async fn reviews(&self, lib: Uuid) -> Result<Vec<crate::review::ReviewItem>, WikiError> {
+        crate::review::list_open(&self.pool, lib)
             .await
             .map_err(WikiError::from)
     }
@@ -606,9 +661,10 @@ impl WikiService {
 
     // ---------- queries 页型闭环 ----------
 
-    /// 检索结果/问答 → 直接落 queries 页型（人工归档）→ 同时入队再摄取吸收实体概念。
+    /// 检索结果/问答 → 直接落 queries 页型（人工归档）→ 同时入队再摄取吸收实体概念（库内）。
     pub async fn archive_query(
         &self,
+        lib: Uuid,
         title: &str,
         question: &str,
         answer: &str,
@@ -617,12 +673,14 @@ impl WikiService {
         // 不再落页 version+1 + 再摄取烧 LLM。
         let slug = format!("query-{title}");
         // D5：slug 或 title 任一命中即幂等跳过（此前仅 slug 检查，title 尾随差异漏网 → 覆盖旧答案）
-        let exists: Option<Uuid> =
-            sqlx::query_scalar("SELECT id FROM wiki_pages WHERE slug = $1 OR title = $2")
-                .bind(&slug)
-                .bind(title)
-                .fetch_optional(&self.pool)
-                .await?;
+        let exists: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM wiki_pages WHERE (slug = $1 OR title = $2) AND library_id = $3",
+        )
+        .bind(&slug)
+        .bind(title)
+        .bind(lib)
+        .fetch_optional(&self.pool)
+        .await?;
         if exists.is_some() {
             return Ok(true);
         }
@@ -634,11 +692,12 @@ impl WikiService {
         // 1) 直接落 queries 页（page_type=queries，origin=human——人触发的存档）
         let fm = serde_json::json!({"title": title, "page_type": "queries", "sources": []});
         sqlx::query(
-            "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
-             VALUES ($1, $2, $3, 'queries', '查询', $4, $5, 'human', 1, to_tsvector('simple', $6)) \
-             ON CONFLICT (slug) DO NOTHING",
+            "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
+             VALUES ($1, $2, $3, $4, 'queries', '查询', $5, $6, 'human', 1, to_tsvector('simple', $7)) \
+             ON CONFLICT (library_id, slug) DO NOTHING",
         )
         .bind(Uuid::now_v7())
+        .bind(lib)
         .bind(&slug)
         .bind(title)
         .bind(&content)
@@ -648,28 +707,34 @@ impl WikiService {
         .await?;
 
         // 2) 再摄取（实体概念网络吸收本次问答内容）——D27 三态：仅已就绪算 skipped
-        let outcome = crate::ingest::enqueue_ingest(&self.queue, title, &content).await?;
+        let outcome = crate::ingest::enqueue_ingest(&self.queue, lib, title, &content).await?;
         Ok(outcome.skipped())
     }
 
-    /// 存量回填（D4 遗留）：重析全部页面正文重建 wiki_links。
+    /// 存量回填（D4 遗留）：重析全部页面正文重建 wiki_links（库内）。
     /// 修复前写入的页面链接索引缺失——一次性全量重析（幂等，先清后建）。
-    pub async fn rebuild_all_links(&self) -> Result<u64, WikiError> {
-        let pages: Vec<(String, String)> =
-            sqlx::query_as("SELECT slug, content FROM wiki_pages ORDER BY slug")
-                .fetch_all(&self.pool)
-                .await?;
-        sqlx::query("DELETE FROM wiki_links")
+    pub async fn rebuild_all_links(&self, lib: Uuid) -> Result<u64, WikiError> {
+        let pages: Vec<(String, String)> = sqlx::query_as(
+            "SELECT slug, content FROM wiki_pages WHERE library_id = $1 ORDER BY slug",
+        )
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await?;
+        sqlx::query("DELETE FROM wiki_links WHERE library_id = $1")
+            .bind(lib)
             .execute(&self.pool)
             .await?;
         let mut n = 0;
         for (slug, content) in &pages {
             for target in crate::markup::extract_wikilinks(content) {
                 sqlx::query(
-                    "INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, 3.0)                      ON CONFLICT (from_slug, to_slug) DO NOTHING",
+                    "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
+                     VALUES ($3, $1, $2, 3.0) \
+                     ON CONFLICT (library_id, from_slug, to_slug) DO NOTHING",
                 )
                 .bind(slug)
                 .bind(&target)
+                .bind(lib)
                 .execute(&self.pool)
                 .await?;
                 n += 1;
@@ -681,47 +746,54 @@ impl WikiService {
     /// 删除页面（D10：MCP wiki_delete_page / HTTP DELETE /wiki/pages/{slug}）——
     /// 连带清理双向 wikilinks（图与孤页检测不留幽灵边）。
     /// 删除前快照最后状态进 wiki_page_versions——误删可经 restore_version 重建
-    /// （R 报告「删除抹掉全部历史」的回收通道；版本历史本身保留）。
-    pub async fn delete_page(&self, slug: &str) -> Result<bool, WikiError> {
-        let slug = self.resolve_slug(slug).await?;
+    /// （R 报告「删除抹掉全部历史」的回收通道；版本历史本身保留）。库内操作。
+    pub async fn delete_page(&self, lib: Uuid, slug: &str) -> Result<bool, WikiError> {
+        let slug = self.resolve_slug(lib, slug).await?;
         sqlx::query(
-            "INSERT INTO wiki_page_versions (id, slug, version, title, page_type, folder, content, origin) \
-             SELECT $1, slug, version, title, page_type, folder, content, origin \
-             FROM wiki_pages WHERE slug = $2",
+            "INSERT INTO wiki_page_versions (id, library_id, slug, version, title, page_type, folder, content, origin) \
+             SELECT $1, $3, slug, version, title, page_type, folder, content, origin \
+             FROM wiki_pages WHERE slug = $2 AND library_id = $3",
         )
         .bind(Uuid::now_v7())
         .bind(&slug)
+        .bind(lib)
         .execute(&self.pool)
         .await?;
-        self.prune_page_versions(&slug).await;
-        let n = sqlx::query("DELETE FROM wiki_pages WHERE slug = $1")
+        self.prune_page_versions(lib, &slug).await;
+        let n = sqlx::query("DELETE FROM wiki_pages WHERE slug = $1 AND library_id = $2")
             .bind(&slug)
+            .bind(lib)
             .execute(&self.pool)
             .await?
             .rows_affected();
         if n == 0 {
             return Err(WikiError::NotFound(format!("页面 {slug} 不存在")));
         }
-        sqlx::query("DELETE FROM wiki_links WHERE from_slug = $1 OR to_slug = $1")
-            .bind(&slug)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "DELETE FROM wiki_links WHERE (from_slug = $1 OR to_slug = $1) AND library_id = $2",
+        )
+        .bind(&slug)
+        .bind(lib)
+        .execute(&self.pool)
+        .await?;
         Ok(true)
     }
 
-    // ---------- 版本历史（R 报告建议 #5：列表 + 回滚） ----------
+    // ---------- 版本历史（R 报告建议 #5：列表 + 回滚；快照按 (library_id, slug) 隔离） ----------
 
     /// 每 slug 保留的版本快照上限（与 skill_revisions 同口径）。
     const VERSION_KEEP: i64 = 50;
 
     /// 裁剪旧快照（每 slug 只留最近 VERSION_KEEP 条；best-effort，不影响主流程）。
-    async fn prune_page_versions(&self, slug: &str) {
+    async fn prune_page_versions(&self, lib: Uuid, slug: &str) {
         sqlx::query(
-            "DELETE FROM wiki_page_versions WHERE slug = $1 AND id NOT IN ( \
-             SELECT id FROM wiki_page_versions WHERE slug = $1 \
-             ORDER BY created_at DESC, version DESC LIMIT $2)",
+            "DELETE FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 \
+             AND id NOT IN ( \
+             SELECT id FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 \
+             ORDER BY created_at DESC, version DESC LIMIT $3)",
         )
         .bind(slug)
+        .bind(lib)
         .bind(Self::VERSION_KEEP)
         .execute(&self.pool)
         .await
@@ -730,8 +802,12 @@ impl WikiService {
 
     /// 页面版本列表（新→旧；不带正文，content_chars 供决策）。
     /// 已删除的页面按 slug 直查快照表——恢复通道不因页面不在而 404。
-    pub async fn page_versions(&self, slug: &str) -> Result<Vec<WikiPageVersionDto>, WikiError> {
-        let slug = match self.resolve_slug(slug).await {
+    pub async fn page_versions(
+        &self,
+        lib: Uuid,
+        slug: &str,
+    ) -> Result<Vec<WikiPageVersionDto>, WikiError> {
+        let slug = match self.resolve_slug(lib, slug).await {
             Ok(s) => s,
             Err(WikiError::NotFound(_)) => slug.to_string(),
             Err(e) => return Err(e),
@@ -739,9 +815,11 @@ impl WikiService {
         Ok(sqlx::query_as::<_, WikiPageVersionDto>(
             "SELECT id, slug, version, title, page_type, folder, origin, \
              length(content)::bigint AS content_chars, created_at \
-             FROM wiki_page_versions WHERE slug = $1 ORDER BY version DESC, created_at DESC",
+             FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 \
+             ORDER BY version DESC, created_at DESC",
         )
         .bind(&slug)
+        .bind(lib)
         .fetch_all(&self.pool)
         .await?)
     }
@@ -749,18 +827,21 @@ impl WikiService {
     /// 读取一个版本快照的正文（回滚前预览用）。已删除页面按 slug 直查。
     pub async fn page_version_content(
         &self,
+        lib: Uuid,
         slug: &str,
         version: i32,
     ) -> Result<String, WikiError> {
-        let slug = match self.resolve_slug(slug).await {
+        let slug = match self.resolve_slug(lib, slug).await {
             Ok(s) => s,
             Err(WikiError::NotFound(_)) => slug.to_string(),
             Err(e) => return Err(e),
         };
         let row: Option<String> = sqlx::query_scalar(
-            "SELECT content FROM wiki_page_versions WHERE slug = $1 AND version = $2",
+            "SELECT content FROM wiki_page_versions \
+             WHERE slug = $1 AND library_id = $2 AND version = $3",
         )
         .bind(&slug)
+        .bind(lib)
         .bind(version)
         .fetch_optional(&self.pool)
         .await?;
@@ -772,17 +853,19 @@ impl WikiService {
     }
 
     /// 回滚到某个版本快照：以「当前版本 +1」落地（历史不可变，回滚也是新版本）。
-    /// 页面已被删除时从快照重建（沿用页型/目录，版本号接续快照史）。
+    /// 页面已被删除时从快照重建（沿用页型/目录，版本号接续快照史）。库内操作。
     pub async fn restore_page_version(
         &self,
+        lib: Uuid,
         slug: &str,
         version: i32,
     ) -> Result<WikiPageDto, WikiError> {
         let snap: (String, String, String, String, i32) = sqlx::query_as(
             "SELECT title, content, page_type, folder, version \
-             FROM wiki_page_versions WHERE slug = $1 AND version = $2",
+             FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 AND version = $3",
         )
         .bind(slug)
+        .bind(lib)
         .bind(version)
         .fetch_optional(&self.pool)
         .await?
@@ -792,29 +875,31 @@ impl WikiService {
             ))
         })?;
         let (title, content, page_type, folder, _) = snap;
-        match self.get_page(slug).await {
+        match self.get_page(lib, slug).await {
             Ok(_) => {
                 // 活页：走 put_page（快照现状 → 落目标内容 → 版本 +1、重算链接）
-                self.put_page(slug, &title, &content, Some(&folder), Some("restore"))
+                self.put_page(lib, slug, &title, &content, Some(&folder), Some("restore"))
                     .await
             }
             Err(WikiError::NotFound(_)) => {
                 // 死页重建：版本号接续快照史（避免清零后与历史快照版本撞号）
                 let next: i32 = sqlx::query_scalar(
                     "SELECT COALESCE(MAX(version), 0) + 1 \
-                     FROM (SELECT version FROM wiki_page_versions WHERE slug = $1 \
-                           UNION ALL SELECT version FROM wiki_pages WHERE slug = $1) t",
+                     FROM (SELECT version FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 \
+                           UNION ALL SELECT version FROM wiki_pages WHERE slug = $1 AND library_id = $2) t",
                 )
                 .bind(slug)
+                .bind(lib)
                 .fetch_one(&self.pool)
                 .await?;
                 let fm = serde_json::json!({"title": title, "sources": [], "via": "restore"});
                 let row = sqlx::query_as::<_, WikiPageDto>(
-                    "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'human', $8, to_tsvector('simple', $9)) \
+                    "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'human', $9, to_tsvector('simple', $10)) \
                      RETURNING *",
                 )
                 .bind(Uuid::now_v7())
+                .bind(lib)
                 .bind(slug)
                 .bind(&title)
                 .bind(&page_type)
@@ -827,11 +912,13 @@ impl WikiService {
                 .await?;
                 for target in crate::markup::extract_wikilinks(&content) {
                     sqlx::query(
-                        "INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, 3.0) \
-                         ON CONFLICT (from_slug, to_slug) DO NOTHING",
+                        "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
+                         VALUES ($3, $1, $2, 3.0) \
+                         ON CONFLICT (library_id, from_slug, to_slug) DO NOTHING",
                     )
                     .bind(slug)
                     .bind(&target)
+                    .bind(lib)
                     .execute(&self.pool)
                     .await
                     .ok();
@@ -846,8 +933,20 @@ impl WikiService {
 
     pub async fn delete_source_cascade(
         &self,
+        lib: Uuid,
         source_id: Uuid,
     ) -> Result<crate::cascade::CascadeReport, WikiError> {
+        // 源存在性前置检查（NotFound 语义）：按 (library_id, id) 匹配——
+        // 源不存在或属于其他库都按 404 处理（多库隔离）
+        let hit: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM wiki_sources WHERE id = $1 AND library_id = $2")
+                .bind(source_id)
+                .bind(lib)
+                .fetch_optional(&self.pool)
+                .await?;
+        if hit.is_none() {
+            return Err(WikiError::NotFound(format!("源 {source_id} 不存在")));
+        }
         // W-16（2026-09-04）：先取消该源在途的织入任务——否则级联删完，
         // 队列里 analyze/generate 继续跑，边删边产页（测试实测页面 81→84）。
         // running 中的任务若已过写库点仍可能落页，残留由 stale_source lint 报出。
@@ -875,36 +974,40 @@ impl WikiService {
 
     // ---------- 图洞察 ----------
 
-    pub async fn insights(&self) -> Result<crate::insights::InsightsReport, WikiError> {
-        crate::insights::compute_insights(&self.pool)
+    pub async fn insights(&self, lib: Uuid) -> Result<crate::insights::InsightsReport, WikiError> {
+        crate::insights::compute_insights(&self.pool, lib)
             .await
             .map_err(WikiError::from)
     }
 
-    pub async fn insight_dismiss(&self, key: &str) -> Result<(), WikiError> {
-        crate::insights::dismiss(&self.pool, key)
+    pub async fn insight_dismiss(&self, lib: Uuid, key: &str) -> Result<(), WikiError> {
+        crate::insights::dismiss(&self.pool, lib, key)
             .await
             .map_err(WikiError::from)
     }
 
-    pub async fn insight_reset(&self) -> Result<(), WikiError> {
-        crate::insights::reset_dismissals(&self.pool)
+    pub async fn insight_reset(&self, lib: Uuid) -> Result<(), WikiError> {
+        crate::insights::reset_dismissals(&self.pool, lib)
             .await
             .map_err(WikiError::from)
     }
 
-    /// 供 API 列出可删的 sources。
+    /// 供 API 列出可删的 sources（库内）。
     pub async fn list_sources(
         &self,
+        lib: Uuid,
     ) -> Result<Vec<(Uuid, Option<String>, String, String)>, WikiError> {
         Ok(sqlx::query_as(
-            "SELECT id, title, status, sha256 FROM wiki_sources ORDER BY created_at DESC",
+            "SELECT id, title, status, sha256 FROM wiki_sources \
+             WHERE library_id = $1 ORDER BY created_at DESC",
         )
+        .bind(lib)
         .fetch_all(&self.pool)
         .await?)
     }
 
     /// 审计行（清空不吞审计凭证）：破坏性操作落 jobs 成功行，best-effort。
+    /// jobs 表不挂库——审计链全库共享，故本方法不引入 lib 参数。
     pub async fn audit(&self, kind: &str, payload: serde_json::Value) {
         sqlx::query(
             "INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, \

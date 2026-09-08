@@ -7,6 +7,8 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct DocumentDto {
     pub id: Uuid,
+    /// 所属库（0037 多库；slug 见 /wiki/libraries）
+    pub library_id: Uuid,
     pub title: String,
     pub source_uri: String,
     pub mime: Option<String>,

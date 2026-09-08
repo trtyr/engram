@@ -1,10 +1,14 @@
 //! purpose.md（wiki 灵魂）：方向意图，ingest/query 注入，LLM 可建议更新。
-//! 存 settings 表（key=wiki_purpose），API 走系统页语义。
+//! 存 settings 表（key=wiki_purpose:{library_id}，多库后每库一份），API 走系统页语义。
 
 use engram_jobs::types::JobError;
 use sqlx::PgPool;
+use uuid::Uuid;
 
-const PURPOSE_KEY: &str = "wiki_purpose";
+/// purpose 的 settings 键：多库后按库隔离（0037）——每库一份方向意图。
+fn purpose_key(lib: Uuid) -> String {
+    format!("wiki_purpose:{lib}")
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub struct Purpose {
@@ -53,22 +57,24 @@ impl Purpose {
     }
 }
 
-pub async fn get_purpose(pool: &PgPool) -> Result<Option<Purpose>, JobError> {
+/// 读某库的 purpose（未设置 → None）。
+pub async fn get_purpose(pool: &PgPool, lib: Uuid) -> Result<Option<Purpose>, JobError> {
     let row: Option<(sqlx::types::Json<Purpose>,)> =
         sqlx::query_as("SELECT value FROM settings WHERE key = $1")
-            .bind(PURPOSE_KEY)
+            .bind(purpose_key(lib))
             .fetch_optional(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
     Ok(row.map(|(j,)| j.0))
 }
 
-pub async fn set_purpose(pool: &PgPool, p: &Purpose) -> Result<(), JobError> {
+/// 写某库的 purpose（upsert，键 wiki_purpose:{lib}）。
+pub async fn set_purpose(pool: &PgPool, lib: Uuid, p: &Purpose) -> Result<(), JobError> {
     sqlx::query(
         "INSERT INTO settings (key, value) VALUES ($1, $2) \
          ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = now()",
     )
-    .bind(PURPOSE_KEY)
+    .bind(purpose_key(lib))
     .bind(sqlx::types::Json(p))
     .execute(pool)
     .await
@@ -77,8 +83,8 @@ pub async fn set_purpose(pool: &PgPool, p: &Purpose) -> Result<(), JobError> {
 }
 
 /// ingest/query 注入用的 Markdown（无配置时给最小默认）。
-pub async fn purpose_context(pool: &PgPool) -> String {
-    match get_purpose(pool).await {
+pub async fn purpose_context(pool: &PgPool, lib: Uuid) -> String {
+    match get_purpose(pool, lib).await {
         Ok(Some(p)) => p.to_markdown(),
         _ => Purpose::default_for_user().to_markdown(),
     }

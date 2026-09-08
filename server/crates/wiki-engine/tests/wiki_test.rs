@@ -1,4 +1,5 @@
 //! Wiki 域集成测试：两步 ingest 全链路（mock LLM）。
+//! 多库（0037）：所有 svc 调用带 lib 参数——用 resolve(pool, None) 取 main 主库 id。
 
 mod support;
 
@@ -16,6 +17,7 @@ async fn setup(
     WikiService,
     engram_jobs::RunnerHandle,
     support::TestPg,
+    uuid::Uuid, // lib：main 主库 id
 ) {
     let llm: LlmRef = Arc::new(MockLlm::with_raw_chats(
         chats
@@ -30,6 +32,7 @@ async fn setup(
 }
 
 /// W3：可注入定制 MockLlm（如 embed_fail=true）的 setup。
+#[allow(clippy::type_complexity)]
 async fn setup_llm(
     llm: LlmRef,
 ) -> (
@@ -37,11 +40,15 @@ async fn setup_llm(
     WikiService,
     engram_jobs::RunnerHandle,
     support::TestPg,
+    uuid::Uuid, // lib：main 主库 id
 ) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
+    let lib = engram_wiki_engine::libraries::resolve(&pool, None)
+        .await
+        .expect("main 主库应存在");
 
     let l1 = llm.clone();
     let runner = engram_wiki_engine::ingest::register_handlers(
@@ -68,6 +75,7 @@ async fn setup_llm(
         WikiService::new(pool, registry),
         handle,
         container,
+        lib,
     )
 }
 
@@ -99,7 +107,7 @@ async fn wait_jobs(pool: &sqlx::PgPool, kinds: &[&str]) {
 /// 核心链路：两篇相关文档先后 ingest → 互链 + 第二篇更新既有页不重复建。
 #[tokio::test]
 async fn two_docs_interlinked_no_duplicate() {
-    let (pool, wiki, handle, _pg) = setup(vec![
+    let (pool, wiki, handle, _pg, lib) = setup(vec![
         // 文档1 分析
         json!({"entities": ["张三"], "concepts": ["向量检索"], "links": [], "conflicts": [], "source_title": "文档一"}),
         // 文档1 生成：新建 3 页 + synthesis（跨源综合）+ comparison（对比）
@@ -124,6 +132,7 @@ async fn two_docs_interlinked_no_duplicate() {
     // 文档 1
     let skipped = wiki
         .ingest(
+            lib,
             "文档一",
             "张三研究向量检索。向量检索是一种在高维空间寻找近邻的技术。",
         )
@@ -135,24 +144,24 @@ async fn two_docs_interlinked_no_duplicate() {
     ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
-    let pages = wiki.list_pages(None, 50, None).await.unwrap();
+    let pages = wiki.list_pages(lib, None, 50, None).await.unwrap();
     // 3 内容页 + synthesis + comparison + index
     assert!(
         pages.len() >= 6,
         "应含 synthesis/comparison: {}",
         pages.len()
     );
-    let synth = wiki.get_page("检索方法综合").await.unwrap();
+    let synth = wiki.get_page(lib, "检索方法综合").await.unwrap();
     assert_eq!(synth.page_type, "synthesis", "synthesis 页型应真实产出");
     assert!(synth.content.contains("[[向量检索]]"), "综合页应互链");
-    let comp = wiki.get_page("量化方法对比").await.unwrap();
+    let comp = wiki.get_page(lib, "量化方法对比").await.unwrap();
     assert_eq!(comp.page_type, "comparison", "comparison 页型应真实产出");
-    let vec_page = wiki.get_page("向量检索").await.unwrap();
+    let vec_page = wiki.get_page(lib, "向量检索").await.unwrap();
     assert_eq!(vec_page.version, 1);
 
     // 文档 2（相关内容）
     let skipped2 = wiki
-        .ingest("文档二", "近似搜索是向量检索的加速子方向，如 HNSW。")
+        .ingest(lib, "文档二", "近似搜索是向量检索的加速子方向，如 HNSW。")
         .await
         .unwrap();
     assert!(matches!(
@@ -162,18 +171,18 @@ async fn two_docs_interlinked_no_duplicate() {
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     // 不重复建页：向量检索 v2（更新）而非新 slug；张三仍 1 版
-    let vec_page = wiki.get_page("向量检索").await.unwrap();
+    let vec_page = wiki.get_page(lib, "向量检索").await.unwrap();
     assert_eq!(vec_page.version, 2, "第二次 ingest 应更新既有页（版本 2）");
     assert!(
         vec_page.content.contains("近似搜索"),
         "更新内容应并入: {}",
         vec_page.content
     );
-    let zhang = wiki.get_page("张三").await.unwrap();
+    let zhang = wiki.get_page(lib, "张三").await.unwrap();
     assert_eq!(zhang.version, 1, "未涉及的页不动");
 
     // 互链：图上有边
-    let graph = wiki.graph().await.unwrap();
+    let graph = wiki.graph(lib).await.unwrap();
     assert!(
         graph
             .edges
@@ -196,6 +205,7 @@ async fn two_docs_interlinked_no_duplicate() {
     // sha 幂等：同内容再次 ingest 秒跳过
     let skipped3 = wiki
         .ingest(
+            lib,
             "文档一",
             "张三研究向量检索。向量检索是一种在高维空间寻找近邻的技术。",
         )
@@ -212,6 +222,7 @@ async fn two_docs_interlinked_no_duplicate() {
     // queries 存档闭环：archive_query → wiki_analyze 入队（自动再摄取产页）
     let skipped_q = wiki
         .archive_query(
+            lib,
             "向量检索问答",
             "什么是向量检索？",
             "向量检索是在高维空间寻找最近邻的技术。",
@@ -220,7 +231,7 @@ async fn two_docs_interlinked_no_duplicate() {
         .unwrap();
     assert!(!skipped_q, "queries 存档应触发摄取");
     // queries 页型直接落库（不依赖 LLM 生成）
-    let qpage = wiki.get_page("query-向量检索问答").await.unwrap();
+    let qpage = wiki.get_page(lib, "query-向量检索问答").await.unwrap();
     assert_eq!(qpage.page_type, "queries", "存档应产 queries 页型");
     assert!(qpage.content.contains("**问**"), "queries 页应含问答结构");
     wait_jobs(&pool, &["wiki_analyze"]).await;
@@ -232,7 +243,7 @@ async fn two_docs_interlinked_no_duplicate() {
 /// 人写页面不被 LLM 覆盖 → proposal。
 #[tokio::test]
 async fn human_page_produces_proposal_not_overwrite() {
-    let (pool, wiki, handle, _pg) = setup(vec![
+    let (pool, wiki, handle, _pg, lib) = setup(vec![
         // 分析
         json!({"entities": ["张三"], "concepts": [], "links": [], "conflicts": [], "source_title": "文档"}),
         // 生成：试图写「张三」页（人写页）→ 提案
@@ -243,18 +254,25 @@ async fn human_page_produces_proposal_not_overwrite() {
     .await;
 
     // 人先写页面
-    wiki.put_page("张三", "张三", "# 张三\n\n人工编写的内容。", None, None)
-        .await
-        .unwrap();
-    let before = wiki.get_page("张三").await.unwrap();
+    wiki.put_page(
+        lib,
+        "张三",
+        "张三",
+        "# 张三\n\n人工编写的内容。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let before = wiki.get_page(lib, "张三").await.unwrap();
     assert_eq!(before.origin, "human");
     assert_eq!(before.version, 1);
 
-    wiki.ingest("文档", "张三的信息。").await.unwrap();
+    wiki.ingest(lib, "文档", "张三的信息。").await.unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    let after = wiki.get_page("张三").await.unwrap();
+    let after = wiki.get_page(lib, "张三").await.unwrap();
     assert_eq!(after.version, 1, "人写页不被覆盖");
     assert!(after.content.contains("人工编写"), "内容保持人工版");
 
@@ -283,6 +301,7 @@ async fn human_page_produces_proposal_not_overwrite() {
     // 人审合入
     let merged = wiki
         .apply_proposal(
+            lib,
             "张三",
             data["proposal_content"].as_str().unwrap(),
             "张三",
@@ -301,15 +320,16 @@ async fn human_page_produces_proposal_not_overwrite() {
 /// （raw_path=NULL）用 chunks 拼接兜底——此前 URL 文档 --doc-id 会 404 且自动织入静默跳过。
 #[tokio::test]
 async fn ingest_document_url_fallback_uses_chunks() {
-    let (pool, wiki, handle, _pg) = setup(vec![]).await;
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
 
-    // URL 式文档：raw_path NULL + 已分块文本
+    // URL 式文档：raw_path NULL + 已分块文本（挂 main 库——wiki_documents/chunks 均带 library_id）
     let doc_id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO wiki_documents (id, title, source_uri, status) \
-         VALUES ($1, 'URL 摄取的文档', 'https://example.com/article', 'ready')",
+        "INSERT INTO wiki_documents (id, library_id, title, source_uri, status) \
+         VALUES ($1, $2, 'URL 摄取的文档', 'https://example.com/article', 'ready')",
     )
     .bind(doc_id)
+    .bind(lib)
     .execute(&pool)
     .await
     .unwrap();
@@ -318,9 +338,10 @@ async fn ingest_document_url_fallback_uses_chunks() {
         (2, "第二段：tokio 与 async-std 的取舍。"),
     ] {
         sqlx::query(
-            "INSERT INTO wiki_chunks (id, document_id, seq, content) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO wiki_chunks (id, library_id, document_id, seq, content) VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(uuid::Uuid::now_v7())
+        .bind(lib)
         .bind(doc_id)
         .bind(seq)
         .bind(content)
@@ -329,7 +350,7 @@ async fn ingest_document_url_fallback_uses_chunks() {
         .unwrap();
     }
 
-    let skipped = wiki.ingest_document(doc_id).await.unwrap();
+    let skipped = wiki.ingest_document(lib, doc_id).await.unwrap();
     assert!(
         matches!(
             skipped,
@@ -345,7 +366,7 @@ async fn ingest_document_url_fallback_uses_chunks() {
     assert_eq!(n, 1, "URL 文档应织入 wiki_sources");
     // 幂等（pending 语义）：无 LLM 跑完 analysis 前，源停在 pending——重复织入
     // 不新建源（sha 去重，重置重跑），sources 仍 1 条；skipped=true 要等源 ready 才成立
-    let _ = wiki.ingest_document(doc_id).await.unwrap();
+    let _ = wiki.ingest_document(lib, doc_id).await.unwrap();
     let n2: i64 = sqlx::query_scalar("SELECT count(*) FROM wiki_sources")
         .fetch_one(&pool)
         .await
@@ -355,20 +376,21 @@ async fn ingest_document_url_fallback_uses_chunks() {
     // 无 raw_path 且无 chunks → 可行动 400
     let empty_doc = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO wiki_documents (id, title, source_uri, status) VALUES ($1, '空文档', 'https://x', 'pending')",
+        "INSERT INTO wiki_documents (id, library_id, title, source_uri, status) VALUES ($1, $2, '空文档', 'https://x', 'pending')",
     )
     .bind(empty_doc)
+    .bind(lib)
     .execute(&pool)
     .await
     .unwrap();
-    let err = wiki.ingest_document(empty_doc).await;
+    let err = wiki.ingest_document(lib, empty_doc).await;
     assert!(
         matches!(&err, Err(engram_wiki_engine::WikiError::BadRequest(m)) if m.contains("无可织入的分块")),
         "无文件无分块应 400 且文案可行动：{err:?}"
     );
 
     // 不存在 → 404
-    let ghost = wiki.ingest_document(uuid::Uuid::now_v7()).await;
+    let ghost = wiki.ingest_document(lib, uuid::Uuid::now_v7()).await;
     assert!(matches!(
         &ghost,
         Err(engram_wiki_engine::WikiError::NotFound(_))
@@ -382,10 +404,10 @@ async fn ingest_document_url_fallback_uses_chunks() {
 /// 后续不带 via 的更新不清除已有标记（merge 块为空对象时保持原值）。
 #[tokio::test]
 async fn put_page_via_lands_in_frontmatter() {
-    let (_pool, wiki, handle, _pg) = setup(vec![]).await;
+    let (_pool, wiki, handle, _pg, lib) = setup(vec![]).await;
 
     let p = wiki
-        .put_page("via-page", "V", "# V 内容", None, Some("ai"))
+        .put_page(lib, "via-page", "V", "# V 内容", None, Some("ai"))
         .await
         .unwrap();
     assert_eq!(
@@ -395,7 +417,7 @@ async fn put_page_via_lands_in_frontmatter() {
     );
 
     let p2 = wiki
-        .put_page("via-page", "V", "# V 内容 v2", None, None)
+        .put_page(lib, "via-page", "V", "# V 内容 v2", None, None)
         .await
         .unwrap();
     assert_eq!(
@@ -411,36 +433,44 @@ async fn put_page_via_lands_in_frontmatter() {
 /// lint：注入死链 + 孤儿页 → 全部报出。
 #[tokio::test]
 async fn lint_reports_dead_links_and_orphans() {
-    let (pool, wiki, handle, _pg) = setup(vec![]).await;
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
 
     // 正常互链两页 + 一个死链 + 一个孤儿
-    wiki.put_page("正常页A", "A", "内容链接 [[正常页B]]。", None, None)
+    wiki.put_page(lib, "正常页A", "A", "内容链接 [[正常页B]]。", None, None)
         .await
         .unwrap();
-    wiki.put_page("正常页B", "B", "回链 [[正常页A]]。", None, None)
+    wiki.put_page(lib, "正常页B", "B", "回链 [[正常页A]]。", None, None)
         .await
         .unwrap();
-    wiki.put_page("带死链", "D", "这里有个 [[不存在的页面]]。", None, None)
-        .await
-        .unwrap();
-    wiki.put_page("孤儿页", "O", "没有任何入链。", None, None)
+    wiki.put_page(
+        lib,
+        "带死链",
+        "D",
+        "这里有个 [[不存在的页面]]。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    wiki.put_page(lib, "孤儿页", "O", "没有任何入链。", None, None)
         .await
         .unwrap();
     // W-1：大小写变体链接（[[Engram]] vs slug=engram）——不判死链，报 case_mismatch
-    wiki.put_page("engram", "Engram", "实体页。", None, None)
+    wiki.put_page(lib, "engram", "Engram", "实体页。", None, None)
         .await
         .unwrap();
-    wiki.put_page("引用页", "R", "产品是 [[Engram]]。", None, None)
+    wiki.put_page(lib, "引用页", "R", "产品是 [[Engram]]。", None, None)
         .await
         .unwrap();
     // 手动建链接表（put_page 现已自动重算本页 wikilinks；此处补齐测试所需的其他边，
-    // ON CONFLICT 跳过与自动重算重叠的边）
-    sqlx::query("INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ('正常页A','正常页B',3.0), ('正常页B','正常页A',3.0), ('带死链','不存在的页面',3.0) ON CONFLICT (from_slug, to_slug) DO NOTHING")
+    // ON CONFLICT 跳过与自动重算重叠的边；边挂库）
+    sqlx::query("INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) VALUES ($1,'正常页A','正常页B',3.0), ($1,'正常页B','正常页A',3.0), ($1,'带死链','不存在的页面',3.0) ON CONFLICT (library_id, from_slug, to_slug) DO NOTHING")
+        .bind(lib)
         .execute(&pool)
         .await
         .unwrap();
 
-    let report = wiki.lint().await.unwrap();
+    let report = wiki.lint(lib).await.unwrap();
     let dead: Vec<_> = report
         .issues
         .iter()
@@ -492,20 +522,21 @@ async fn lint_reports_dead_links_and_orphans() {
 /// 曾因 uuid = text 类型错误 503——回归：带已 ingest 无引用 source 时 lint 正常完成并报 stale_source。
 #[tokio::test]
 async fn lint_with_ingested_source_reports_stale_without_type_error() {
-    let (pool, wiki, handle, _pg) = setup(vec![]).await;
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
 
     let sid = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO wiki_sources (id, sha256, raw_path, title, status, last_ingested_at) \
-         VALUES ($1, 'lint-stale-sha', '/tmp/lint-stale.md', 'lint-stale', 'ready', now())",
+        "INSERT INTO wiki_sources (id, library_id, sha256, raw_path, title, status, last_ingested_at) \
+         VALUES ($1, $2, 'lint-stale-sha', '/tmp/lint-stale.md', 'lint-stale', 'ready', now())",
     )
     .bind(sid)
+    .bind(lib)
     .execute(&pool)
     .await
     .unwrap();
 
     // 该 source 无任何页面引用 → 走 cnt 回查分支（修复前此处 uuid = text 直接 503）
-    let report = wiki.lint().await.unwrap();
+    let report = wiki.lint(lib).await.unwrap();
     assert!(
         report
             .issues
@@ -523,7 +554,7 @@ async fn lint_with_ingested_source_reports_stale_without_type_error() {
 /// 修复前 JobError::Permanent 被 From 统一映射成 Storage → 接口层 503。
 #[tokio::test]
 async fn review_resolve_miss_returns_not_found() {
-    let (pool, wiki, handle, _pg) = setup(vec![]).await;
+    let (pool, wiki, handle, _pg, _lib) = setup(vec![]).await;
 
     let miss = uuid::Uuid::now_v7();
     let err = wiki.review_resolve(miss, None, true).await.unwrap_err();
@@ -548,10 +579,10 @@ async fn w1_generate_failure_resubmit_recovers() {
     ]});
     let bad = serde_json::Value::String("{not json".into());
     // analyze ✓ → generate 两连坏 JSON 永久失败 → 重提交后新 generate ✓
-    let (pool, wiki, handle, _pg) = setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
+    let (pool, wiki, handle, _pg, lib) = setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
 
     let text = "# W1 死锁恢复测试\n这是独一无二的内容 w1-unique-123。";
-    let skipped = wiki.ingest("W1文档", text).await.unwrap();
+    let skipped = wiki.ingest(lib, "W1文档", text).await.unwrap();
     assert!(matches!(
         skipped,
         engram_wiki_engine::ingest::IngestOutcome::Enqueued(_, _)
@@ -574,7 +605,7 @@ async fn w1_generate_failure_resubmit_recovers() {
 
     // 重提交同 sha → 状态感知：从失败 job payload 取 analysis 直发新 generate
     // （旧逻辑：幂等键墙返回终态 job，链断死锁）
-    let skipped2 = wiki.ingest("W1文档", text).await.unwrap();
+    let skipped2 = wiki.ingest(lib, "W1文档", text).await.unwrap();
     assert!(
         matches!(
             skipped2,
@@ -608,7 +639,7 @@ async fn w1_generate_failure_resubmit_recovers() {
         .await
         .unwrap();
     assert_eq!(ready, "ready");
-    let page = wiki.get_page("w1-page").await.unwrap();
+    let page = wiki.get_page(lib, "w1-page").await.unwrap();
     assert!(page.content.contains("W1 内容词"));
 
     handle.shutdown();
@@ -625,15 +656,15 @@ async fn w2_content_word_search_hits_llm_pages() {
         {"slug": "w2-knowledge-graph", "page_type": "concept", "title": "知识图谱页",
          "content": "# 知识图谱页\n\n这里讨论分布式系统的一致性哈希与数据分片策略。"}
     ]});
-    let (pool, wiki, handle, _pg) = setup(vec![analysis, pages]).await;
+    let (pool, wiki, handle, _pg, lib) = setup(vec![analysis, pages]).await;
 
-    wiki.ingest("W2文档", "# W2 测试内容\n独一无二 w2-unique。")
+    wiki.ingest(lib, "W2文档", "# W2 测试内容\n独一无二 w2-unique。")
         .await
         .unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     // 内容词命中（slug 里完全没有这些词）
-    let hits = wiki.search("一致性哈希 数据分片", 10).await.unwrap();
+    let hits = wiki.search(lib, "一致性哈希 数据分片", 10).await.unwrap();
     assert!(!hits.is_empty(), "内容词应命中 LLM 生成页");
     assert_eq!(hits[0].slug, "w2-knowledge-graph");
 
@@ -662,9 +693,9 @@ async fn w3_embed_failure_keeps_fts_searchable() {
         ]}).to_string(),
     ]);
     mock.embed_fail = true;
-    let (pool, wiki, handle, _pg) = setup_llm(Arc::new(mock)).await;
+    let (pool, wiki, handle, _pg, lib) = setup_llm(Arc::new(mock)).await;
 
-    wiki.ingest("W3文档", "# W3 嵌入失败\nw3-unique-777。")
+    wiki.ingest(lib, "W3文档", "# W3 嵌入失败\nw3-unique-777。")
         .await
         .unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
@@ -686,7 +717,7 @@ async fn w3_embed_failure_keeps_fts_searchable() {
     assert_eq!(no_vec, 1, "嵌入失败 → 向量缺失");
     assert_eq!(tsv_null, 0, "tsv 必须已写（W3 解耦）");
 
-    let hits = wiki.search("故障恢复 降级", 10).await.unwrap();
+    let hits = wiki.search(lib, "故障恢复 降级", 10).await.unwrap();
     assert!(!hits.is_empty(), "嵌入失败后内容词仍可检索");
 
     // 失败事件留痕（可观测）
@@ -711,10 +742,10 @@ async fn w4_permanent_failure_marks_source_failed() {
         {"slug": "w4-page", "page_type": "concept", "title": "W4页", "content": "# W4\n\n恢复后的页面。"}
     ]});
     // analyze ✓ → generate 坏 JSON ×2 → Permanent → W4 标 failed → 重提交自愈 → ready
-    let (pool, wiki, handle, _pg) = setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
+    let (pool, wiki, handle, _pg, lib) = setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
 
     let text = "# W4 失败标记测试\nw4-unique-42。";
-    wiki.ingest("W4文档", text).await.unwrap();
+    wiki.ingest(lib, "W4文档", text).await.unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
     // W4 核心：generate Permanent 失败 → source='failed' + error 非空（旧实现永卡 processing）
@@ -730,7 +761,7 @@ async fn w4_permanent_failure_marks_source_failed() {
     );
 
     // 重提交同 sha → 自愈（W1 路径 + W4 状态重置）→ 最终 ready
-    wiki.ingest("W4文档", text).await.unwrap();
+    wiki.ingest(lib, "W4文档", text).await.unwrap();
     for _ in 0..300 {
         let (s, e): (String, Option<String>) =
             sqlx::query_as("SELECT status, error FROM wiki_sources")
@@ -761,8 +792,8 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
     let pages = json!({"pages": [
         {"slug": "w6-page", "page_type": "concept", "title": "W6页", "content": "# W6页\n\nLLM 生成的原始内容。"}
     ]});
-    let (pool, wiki, handle, _pg) = setup(vec![analysis, pages]).await;
-    wiki.ingest("W6文档", "# W6 首轮\nw6-unique-a")
+    let (pool, wiki, handle, _pg, lib) = setup(vec![analysis, pages]).await;
+    wiki.ingest(lib, "W6文档", "# W6 首轮\nw6-unique-a")
         .await
         .unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
@@ -770,6 +801,7 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
     // 人工接管该页
     let human = wiki
         .put_page(
+            lib,
             "w6-page",
             "W6页",
             "# W6页\n\n人工内容，不许覆盖。",
@@ -791,12 +823,13 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
     let _ = pages2;
 
     // 直接构造 generate job 的 UPSERT 语义验证：并发两次同 slug UPSERT（模拟两个 generate 竞态）
+    // 多库：冲突目标 (library_id, slug)
     let fm = serde_json::json!({"title": "W6页", "page_type": "concept", "sources": []});
     let upsert = || {
         sqlx::query_scalar::<_, bool>(
-            "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
-             VALUES ($1, $2, 'W6页', 'concept', $3, $4::jsonb, 'llm', 1) \
-             ON CONFLICT (slug) DO UPDATE SET content = $3, version = wiki_pages.version + 1, updated_at = now() \
+            "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version) \
+             VALUES ($1, $2, 'w6-race', 'W6页', 'concept', $3, $4::jsonb, 'llm', 1) \
+             ON CONFLICT (library_id, slug) DO UPDATE SET content = $3, version = wiki_pages.version + 1, updated_at = now() \
              WHERE wiki_pages.origin = 'llm' \
              RETURNING (xmax = 0)",
         )
@@ -806,7 +839,7 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
         async {
             upsert()
                 .bind(uuid::Uuid::now_v7())
-                .bind("w6-race")
+                .bind(lib)
                 .bind("并发写入A")
                 .bind(sqlx::types::Json(&fm))
                 .fetch_optional(&pool)
@@ -816,7 +849,7 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
         async {
             upsert()
                 .bind(uuid::Uuid::now_v7())
-                .bind("w6-race")
+                .bind(lib)
                 .bind("并发写入B")
                 .bind(sqlx::types::Json(&fm))
                 .fetch_optional(&pool)
@@ -839,13 +872,14 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
 
     // human 页：UPSERT 不生效（RETURNING None），内容与版本不动
     let blocked = sqlx::query_scalar::<_, bool>(
-        "INSERT INTO wiki_pages (id, slug, title, page_type, content, frontmatter, origin, version) \
-         VALUES ($1, 'w6-page', 'W6页', 'concept', 'LLM 想覆盖', $2::jsonb, 'llm', 1) \
-         ON CONFLICT (slug) DO UPDATE SET content = 'LLM 想覆盖', version = wiki_pages.version + 1 \
+        "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version) \
+         VALUES ($1, $2, 'w6-page', 'W6页', 'concept', 'LLM 想覆盖', $3::jsonb, 'llm', 1) \
+         ON CONFLICT (library_id, slug) DO UPDATE SET content = 'LLM 想覆盖', version = wiki_pages.version + 1 \
          WHERE wiki_pages.origin = 'llm' \
          RETURNING (xmax = 0)",
     )
     .bind(uuid::Uuid::now_v7())
+    .bind(lib)
     .bind(sqlx::types::Json(&fm))
     .fetch_optional(&pool)
     .await
@@ -873,30 +907,37 @@ async fn graph_community_sparse_flag_matches_insights_threshold() {
         engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
     let svc = engram_wiki_engine::WikiService::new(pool.clone(), registry);
+    let lib = engram_wiki_engine::libraries::resolve(&pool, None)
+        .await
+        .expect("main 主库应存在");
 
-    // 3 页同一社区：仅靠下限权重边（无 wikilink、无共享 source）→ 应判稀疏
+    // 3 页同一社区：仅靠下限权重边（无 wikilink、无共享 source）→ 应判稀疏（页面挂库）
     for slug in ["sp-a", "sp-b", "sp-c"] {
         sqlx::query(
-            "INSERT INTO wiki_pages (id, slug, title, content, page_type, origin, frontmatter)
-             VALUES ($2, $1, $1, 'x', 'concept', 'llm', '{}')",
+            "INSERT INTO wiki_pages (id, library_id, slug, title, content, page_type, origin, frontmatter)
+             VALUES ($3, $2, $1, $1, 'x', 'concept', 'llm', '{}')",
         )
         .bind(slug)
+        .bind(lib)
         .bind(uuid::Uuid::now_v7())
         .execute(&pool)
         .await
         .unwrap();
     }
-    // 手工放三条下限权重边（0.1）——Louvain 会聚成一个社区，cohesion = 0.3/3 = 0.1 < 0.15
+    // 手工放三条下限权重边（0.1）——Louvain 会聚成一个社区，cohesion = 0.3/3 = 0.1 < 0.15（边挂库）
     for (f, t) in [("sp-a", "sp-b"), ("sp-b", "sp-c"), ("sp-a", "sp-c")] {
-        sqlx::query("INSERT INTO wiki_links (from_slug, to_slug, weight) VALUES ($1, $2, 0.1)")
-            .bind(f)
-            .bind(t)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) VALUES ($3, $1, $2, 0.1)",
+        )
+        .bind(f)
+        .bind(t)
+        .bind(lib)
+        .execute(&pool)
+        .await
+        .unwrap();
     }
 
-    let g = svc.graph().await.unwrap();
+    let g = svc.graph(lib).await.unwrap();
     assert!(
         g.communities.iter().any(|c| c.sparse && c.size >= 3),
         "下限权重边社区应判 sparse（cohesion=0.1<0.15）：{:?}",
@@ -913,11 +954,17 @@ async fn graph_community_sparse_flag_matches_insights_threshold() {
 /// 不再落页 version+1 + 再摄取烧 LLM。
 #[tokio::test]
 async fn archive_query_is_idempotent_by_title() {
-    let (pool, wiki, handle, _pg) = setup(vec![]).await;
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
 
-    let first = wiki.archive_query("幂等存档", "问", "答").await.unwrap();
+    let first = wiki
+        .archive_query(lib, "幂等存档", "问", "答")
+        .await
+        .unwrap();
     assert!(!first, "首次存档 skipped=false");
-    let second = wiki.archive_query("幂等存档", "问", "答").await.unwrap();
+    let second = wiki
+        .archive_query(lib, "幂等存档", "问", "答")
+        .await
+        .unwrap();
     assert!(second, "重复存档应 skipped=true");
 
     let (n, ver): (i64, i32) = sqlx::query_as(
@@ -946,14 +993,14 @@ async fn generate_page_cap_truncates_and_warns() {
             })
         })
         .collect();
-    let (pool, wiki, handle, _pg) = setup(vec![
+    let (pool, wiki, handle, _pg, lib) = setup(vec![
         serde_json::json!({"entities": [], "concepts": [], "links": [], "conflicts": [], "source_title": "批量源"}),
         serde_json::json!({"pages": pages}),
     ])
     .await;
 
     let skipped = wiki
-        .ingest("批量源", "一篇覆盖大量主题的文档。")
+        .ingest(lib, "批量源", "一篇覆盖大量主题的文档。")
         .await
         .unwrap();
     assert!(matches!(
@@ -985,9 +1032,10 @@ async fn generate_page_cap_truncates_and_warns() {
 /// R9/D28：list_pages keyset 游标翻页——无重复、无丢失、垃圾游标响亮拒。
 #[tokio::test]
 async fn list_pages_cursor_pagination_walks_all() {
-    let (pool, wiki, _runner, _pg) = setup(vec![]).await;
+    let (pool, wiki, _runner, _pg, lib) = setup(vec![]).await;
     for i in 0..5 {
         wiki.put_page(
+            lib,
             &format!("d28-页-{i}"),
             &format!("D28 页 {i}"),
             &format!("第 {i} 页"),
@@ -1001,7 +1049,10 @@ async fn list_pages_cursor_pagination_walks_all() {
     let mut seen = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
-        let page = wiki.list_pages(None, 2, cursor.as_deref()).await.unwrap();
+        let page = wiki
+            .list_pages(lib, None, 2, cursor.as_deref())
+            .await
+            .unwrap();
         assert!(page.len() <= 2);
         if page.is_empty() {
             break;
@@ -1021,7 +1072,7 @@ async fn list_pages_cursor_pagination_walks_all() {
     );
     // 垃圾游标响亮拒
     let err = wiki
-        .list_pages(None, 2, Some("garbage"))
+        .list_pages(lib, None, 2, Some("garbage"))
         .await
         .expect_err("垃圾游标应被拒");
     assert!(err.to_string().contains("cursor"), "{err}");
@@ -1031,29 +1082,34 @@ async fn list_pages_cursor_pagination_walks_all() {
 /// R7/D23+D24：log 系统页不进 graph/lint 口径；ingest 空入参响亮拒绝。
 #[tokio::test]
 async fn log_page_excluded_from_graph_and_lint_and_empty_ingest_rejected() {
-    let (pool, svc, _runner, _pg) = setup(vec![]).await;
-    svc.put_page("普通页", "普通页", "正文 [[普通页]] 自链", None, None)
+    let (pool, svc, _runner, _pg, lib) = setup(vec![]).await;
+    svc.put_page(lib, "普通页", "普通页", "正文 [[普通页]] 自链", None, None)
         .await
         .unwrap();
-    // 直插一条系统 log 页（list_pages 不可见）
+    // 直插一条系统 log 页（list_pages 不可见；挂库）
     sqlx::query(
-        "INSERT INTO wiki_pages (id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv)          VALUES ($1, 'log', '审计日志', 'log', '系统', '日志内容', '{}', 'llm', 1, '')",
+        "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
+         VALUES ($1, $2, 'log', '审计日志', 'log', '系统', '日志内容', '{}', 'llm', 1, '')",
     )
     .bind(uuid::Uuid::now_v7())
+    .bind(lib)
     .execute(&pool)
     .await
     .unwrap();
 
     // D23：list_pages / lint / graph 三口径一致（都不含 log）
-    assert_eq!(svc.list_pages(None, 100, None).await.unwrap().len(), 1);
-    let lint = svc.lint().await.unwrap();
+    assert_eq!(svc.list_pages(lib, None, 100, None).await.unwrap().len(), 1);
+    let lint = svc.lint(lib).await.unwrap();
     assert_eq!(lint.checked_pages, 1, "log 页不应计入 lint：{lint:?}");
-    let graph = svc.graph().await.unwrap();
+    let graph = svc.graph(lib).await.unwrap();
     assert_eq!(graph.nodes.len(), 1, "log 页不应进图：{:?}", graph.nodes);
 
     // D24：空标题 / 空文本 / 纯空白，全部响亮拒绝不入队
     for (title, text) in [("", "正文"), ("标题", ""), ("  ", "  ")] {
-        let err = svc.ingest(title, text).await.expect_err("空入参应被拒");
+        let err = svc
+            .ingest(lib, title, text)
+            .await
+            .expect_err("空入参应被拒");
         assert!(
             err.to_string().contains("不能为空"),
             "({title:?}, {text:?}) 应报不能为空：{err}"

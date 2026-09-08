@@ -19,12 +19,15 @@ pub struct LintReport {
     pub checked_pages: usize,
 }
 
-/// 全量 lint：死链 / 孤儿 / 过时源 / 损坏 frontmatter / 重复实体。
-pub async fn lint(pool: &PgPool) -> Result<LintReport, sqlx::Error> {
+/// 全量 lint（某库）：死链 / 孤儿 / 过时源 / 损坏 frontmatter / 重复实体。
+/// pages/links/sources 全部按 library_id 隔离（多库 0037）。
+pub async fn lint(pool: &PgPool, lib: Uuid) -> Result<LintReport, sqlx::Error> {
     // D23：排除系统 log 页——list_pages 不可见的页不该进 lint 口径（此前 checked_pages 恒定 +1）
     let pages: Vec<(Uuid, String, String, String, serde_json::Value)> = sqlx::query_as(
-        "SELECT id, slug, page_type, content, frontmatter FROM wiki_pages WHERE page_type <> 'log'",
+        "SELECT id, slug, page_type, content, frontmatter FROM wiki_pages \
+         WHERE page_type <> 'log' AND library_id = $1",
     )
+    .bind(lib)
     .fetch_all(pool)
     .await?;
     let slugs: std::collections::HashSet<String> =
@@ -38,11 +41,13 @@ pub async fn lint(pool: &PgPool) -> Result<LintReport, sqlx::Error> {
     let system = ["index", "log", "overview"];
     let mut issues = Vec::new();
 
-    // 入链计数（wikilink 边）
-    let inlinks: Vec<(String, i64)> =
-        sqlx::query_as("SELECT to_slug, count(*) FROM wiki_links GROUP BY to_slug")
-            .fetch_all(pool)
-            .await?;
+    // 入链计数（wikilink 边，库内）
+    let inlinks: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT to_slug, count(*) FROM wiki_links WHERE library_id = $1 GROUP BY to_slug",
+    )
+    .bind(lib)
+    .fetch_all(pool)
+    .await?;
     let inlink_map: std::collections::HashMap<String, i64> = inlinks.into_iter().collect();
 
     for (_, slug, _page_type, content, fm) in &pages {
@@ -86,11 +91,12 @@ pub async fn lint(pool: &PgPool) -> Result<LintReport, sqlx::Error> {
         }
     }
 
-    // 4. 重复实体（同名标题不同 slug 的 entity/concept）
+    // 4. 重复实体（同名标题不同 slug 的 entity/concept，库内）
     let by_title: Vec<(String, String)> = sqlx::query_as(
         "SELECT COALESCE(frontmatter->>'title', slug), slug FROM wiki_pages \
-         WHERE page_type IN ('entity','concept')",
+         WHERE page_type IN ('entity','concept') AND library_id = $1",
     )
+    .bind(lib)
     .fetch_all(pool)
     .await?;
     let mut seen: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
@@ -107,14 +113,18 @@ pub async fn lint(pool: &PgPool) -> Result<LintReport, sqlx::Error> {
         }
     }
 
-    // 5. 过时源：sha 已变但页面未重新 ingest（原料目录与页面 sources 对比）
-    let sources: Vec<(String, chrono::DateTime<chrono::Utc>)> =
-        sqlx::query_as("SELECT id::text, COALESCE(last_ingested_at, created_at) FROM wiki_sources")
-            .fetch_all(pool)
-            .await?;
-    let page_source: Vec<String> = sqlx::query_scalar(
-        "SELECT jsonb_array_elements_text(frontmatter->'sources') FROM wiki_pages WHERE frontmatter->'sources' IS NOT NULL",
+    // 5. 过时源：sha 已变但页面未重新 ingest（原料目录与页面 sources 对比，库内）
+    let sources: Vec<(String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT id::text, COALESCE(last_ingested_at, created_at) FROM wiki_sources WHERE library_id = $1",
     )
+    .bind(lib)
+    .fetch_all(pool)
+    .await?;
+    let page_source: Vec<String> = sqlx::query_scalar(
+        "SELECT jsonb_array_elements_text(frontmatter->'sources') FROM wiki_pages \
+         WHERE frontmatter->'sources' IS NOT NULL AND library_id = $1",
+    )
+    .bind(lib)
     .fetch_all(pool)
     .await?;
     for (sid, _) in &sources {
@@ -122,9 +132,11 @@ pub async fn lint(pool: &PgPool) -> Result<LintReport, sqlx::Error> {
             // 原料存在但没有页面引用它（从未生成或已删）
             let cnt: i64 = sqlx::query_scalar(
                 // $1 是 id::text 查出的字符串，必须显式 cast 回 uuid（uuid = text 会 503）
-                "SELECT count(*) FROM wiki_sources WHERE id = $1::uuid AND last_ingested_at IS NOT NULL",
+                "SELECT count(*) FROM wiki_sources \
+                 WHERE id = $1::uuid AND library_id = $2 AND last_ingested_at IS NOT NULL",
             )
             .bind(sid)
+            .bind(lib)
             .fetch_one(pool)
             .await?;
             if cnt > 0 {
