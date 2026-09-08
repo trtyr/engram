@@ -22,8 +22,9 @@ describe('Settings 危险区：清空记忆库确认短语门禁', () => {
  * P3 功能测试：跨域 /search、provider 编辑/删除、re-embed。
  * 以 Dashboard GlobalSearch、Settings Providers、Wiki 文档 ChunksPanel 的行为面为对象。
  */
+import { GlobalConfirm } from '@/components/confirm'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 type WikiPageM = {
@@ -291,11 +292,13 @@ describe('Provider 编辑 / 删除', () => {
 
   it('删除：确认后 DELETE', async () => {
     mockState.providers = [p1]
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    render(wrap(<Settings />))
+    render(wrap(<><Settings /><GlobalConfirm /></>))
     fireEvent.click(screen.getByRole('button', { name: '供应商' }))
     await screen.findByText('openai')
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    // 应用内确认弹窗（非浏览器原生 confirm）：点弹窗内的确认键才执行
+    const dlg = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dlg).getByRole('button', { name: '删除' }))
     await waitFor(() => {
       expect(api.del).toHaveBeenCalledWith('/settings/llm/providers/p1')
     })

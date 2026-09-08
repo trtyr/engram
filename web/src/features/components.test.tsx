@@ -111,6 +111,7 @@ interface MockState {
 const mockState = (api as unknown as { __state: MockState }).__state
 
 import Memory from '@/features/Memory'
+import { GlobalConfirm } from '@/components/confirm'
 import Wiki from '@/features/Wiki'
 
 const wrap = (ui: React.ReactElement) => <MemoryRouter initialEntries={['/']}>{ui}</MemoryRouter>
@@ -186,7 +187,7 @@ describe('Persona 版本历史与回滚', () => {
       { id: 'p2', aspect: 'identity', content: '用户居住在北京。v2', version: 2, evidence_refs: {}, prompt_version: '1', created_at: '2026-08-20T02:00:00Z' },
       { id: 'p1', aspect: 'identity', content: '用户居住在上海。v1', version: 1, evidence_refs: {}, prompt_version: '1', created_at: '2026-08-20T01:00:00Z' },
     ]
-    render(wrap(<Memory />))
+    render(wrap(<><Memory /><GlobalConfirm /></>))
     fireEvent.click(screen.getByRole('button', { name: '画像' }))
     await screen.findByText('用户居住在北京。v2')
     // 历史 → 右侧抽屉（2026-08-31 P1 重构）
@@ -199,9 +200,10 @@ describe('Persona 版本历史与回滚', () => {
     const delSeg = [...dlg.querySelectorAll('span.bg-destructive\\/10')].map((s) => s.textContent).join('')
     expect(addSeg).toContain('北京')
     expect(delSeg).toContain('上海')
-    // 回滚走 body 形式（后端 Json<RollbackRequest>——query 形式会被 axum 拒）
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    // 回滚走 body 形式（后端 Json<RollbackRequest>——query 形式会被 axum 拒）；经应用内确认弹窗
     fireEvent.click(within(dlg).getByRole('button', { name: '回滚' }))
+    const confirmDlg = await screen.findByRole('alertdialog')
+    fireEvent.click(within(confirmDlg).getByRole('button', { name: '回滚' }))
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith('/memory/persona/rollback', { aspect: 'identity', to_version: 1 })
     })

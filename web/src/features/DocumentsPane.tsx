@@ -1,5 +1,6 @@
 /** Wiki 文档面板：左目录右阅读的主从版式 + 摄取/URL + 文档检索。 */
 import { useEffect, useRef, useState } from 'react'
+import { appConfirm } from '@/components/confirm'
 import { Link2, Search, Upload } from 'lucide-react'
 import { api, type ChunkHit, type Document } from '@/lib/api'
 import {
@@ -317,7 +318,15 @@ function DocReader({ doc, onDeleted }: { doc: Document; onDeleted: () => void })
             size="sm"
             className="hover:bg-destructive/10 hover:text-destructive"
             onClick={async () => {
-              if (!confirm(`删除文档「${doc.title}」？分块与嵌入向量将一并删除，不可恢复。`)) return
+              if (
+                !(await appConfirm({
+                  title: `删除文档「${doc.title}」？`,
+                  description: '分块与嵌入向量将一并删除，不可恢复。',
+                  destructive: true,
+                  confirmLabel: '删除',
+                }))
+              )
+                return
               await api.del(`/wiki/documents/${doc.id}`)
               onDeleted()
             }}

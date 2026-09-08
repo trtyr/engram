@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { appConfirm } from '@/components/confirm'
 import { api, type Persona, type Scenario } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -121,7 +122,14 @@ export function PersonaHistoryDrawer({ aspect, label, onClose, onGoScenario, onM
   )
 
   const rollback = async (toVersion: number) => {
-    if (!confirm(`回滚到 v${toVersion}？将以新版本号落地当前内容（历史不可变）。`)) return
+    if (
+      !(await appConfirm({
+        title: `回滚到 v${toVersion}？`,
+        description: '将以新版本号落地当前内容（历史不可变）。',
+        confirmLabel: '回滚',
+      }))
+    )
+      return
     await api.post('/memory/persona/rollback', { aspect, to_version: toVersion })
     const h = await api.get<Persona[]>(`/memory/persona/history?aspect=${aspect}`)
     setHistory(h)

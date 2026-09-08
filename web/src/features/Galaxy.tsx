@@ -3,6 +3,7 @@
  * 点击节点或列表项进入实体详情（画像摘要/原子时间线/相关场景/挂摘/合并）。
  */
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { appConfirm } from '@/components/confirm'
 import { Search } from 'lucide-react'
 import {
   api,
@@ -133,8 +134,16 @@ export default function Galaxy({
     URL.revokeObjectURL(url)
   }
   const doBatchDelete = async () => {
-    const phrase = window.prompt('输入确认短语「批量删除」以删除选中的实体（不可逆）：')
-    if (phrase !== '批量删除') return
+    if (
+      !(await appConfirm({
+        title: '批量删除选中的实体？',
+        description: '实体退场，原子本身保留。此操作不可逆。',
+        destructive: true,
+        confirmLabel: '批量删除',
+        inputMatch: '批量删除',
+      }))
+    )
+      return
     await api.post('/memory/entities/batch', { ids: [...selectedIds], confirm: '批量删除' })
     setSelectedIds(new Set())
     load()
@@ -520,7 +529,15 @@ function EntityDetailPane({
               size="sm"
               className="hover:bg-destructive/10 hover:text-destructive"
               onClick={async () => {
-                if (!confirm(`删除实体「${entity.name}」？原子本身保留，仅解除关联。`)) return
+                if (
+                  !(await appConfirm({
+                    title: `删除实体「${entity.name}」？`,
+                    description: '原子本身保留，仅解除关联。',
+                    destructive: true,
+                    confirmLabel: '删除',
+                  }))
+                )
+                  return
                 await api.del(`/memory/entities/${entity.id}`)
                 onBack()
                 onMutated()
@@ -768,7 +785,15 @@ function MergeForm({ entity, onDone }: { entity: EntityNode; onDone: () => void 
       onSubmit={async (e) => {
         e.preventDefault()
         if (!into) return
-        if (!confirm(`把「${entity.name}」合并进「${others.find((o) => o.id === into)?.name}」？原子关联全部转移，本实体退场。`)) return
+        if (
+          !(await appConfirm({
+            title: '确认合并实体？',
+            description: `把「${entity.name}」合并进「${others.find((o) => o.id === into)?.name}」——原子关联全部转移，本实体退场。`,
+            destructive: true,
+            confirmLabel: '合并',
+          }))
+        )
+          return
         try {
           await api.post(`/memory/entities/${entity.id}/merge`, { into })
           onDone()

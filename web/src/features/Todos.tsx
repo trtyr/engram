@@ -1,5 +1,6 @@
 /** 待办域（第七域）：不绑定项目的临时任务/灵感速记——速记→做完勾掉。 */
 import { useEffect, useMemo, useState } from 'react'
+import { appConfirm } from '@/components/confirm'
 import { Check, Trash2 } from 'lucide-react'
 import { api, type Todo } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
@@ -100,7 +101,14 @@ export default function Todos() {
   }
 
   async function doDelete(t: Todo) {
-    if (!confirm(`删除待办「${t.title}」？不可恢复。`)) return
+    if (
+      !(await appConfirm({
+        title: `删除待办「${t.title}」？`,
+        destructive: true,
+        confirmLabel: '删除',
+      }))
+    )
+      return
     setBusy(true)
     try {
       await api.del(`/todos/${t.id}`)

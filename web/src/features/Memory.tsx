@@ -17,6 +17,7 @@ import { fmtTime, relTime, inputCls, selectCls, tableCls } from '@/lib/ui'
 import { useSystemStatus } from '@/lib/status'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { appConfirm, type ConfirmOptions } from '@/components/confirm'
 
 type Tab = 'sessions' | 'atoms' | 'review' | 'scenarios' | 'persona' | 'search'
 
@@ -133,8 +134,8 @@ function Sessions() {
       else next.add(id)
       return next
     })
-  const runBulk = async (path: string, confirmMsg: string | null) => {
-    if (confirmMsg && !confirm(confirmMsg)) return
+  const runBulk = async (path: string, confirmOpts: ConfirmOptions | null) => {
+    if (confirmOpts && !(await appConfirm(confirmOpts))) return
     setBulkBusy(true)
     setNotice('')
     try {
@@ -205,10 +206,12 @@ function Sessions() {
             variant="destructive"
             disabled={bulkBusy}
             onClick={() =>
-              runBulk(
-                '/memory/sessions/batch-erase',
-                `擦除所选 ${selected.size} 条会话？物理删除（含蒸馏产物级联），不可恢复。`,
-              )
+              runBulk('/memory/sessions/batch-erase', {
+                title: `擦除所选 ${selected.size} 条会话？`,
+                description: '物理删除（含蒸馏产物级联），不可恢复。',
+                destructive: true,
+                confirmLabel: '擦除',
+              })
             }
           >
             {bulkBusy ? '处理中…' : '擦除所选'}
@@ -300,7 +303,15 @@ function Sessions() {
                                 variant="destructive"
                                 size="sm"
                                 onClick={async () => {
-                                  if (!confirm('擦除该会话？关联原子的溯源将标记为 erased，不可恢复。')) return
+                                  if (
+                                  !(await appConfirm({
+                                    title: '擦除该会话？',
+                                    description: '关联原子的溯源将标记为 erased，不可恢复。',
+                                    destructive: true,
+                                    confirmLabel: '擦除',
+                                  }))
+                                )
+                                  return
                                   await api.del(`/memory/sessions/${s.id}`)
                                   setOpenId(null)
                                   load()

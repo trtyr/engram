@@ -5,6 +5,7 @@
  * 云部署语义——文件按路径寻址随库走，客户端取走后本地执行。
  */
 import { useCallback, useEffect, useState } from 'react'
+import { appConfirm } from '@/components/confirm'
 import {
   api,
   type SkillFileInfoDto,
@@ -183,7 +184,15 @@ export default function Skills() {
   }
 
   async function doDelete(slug: string) {
-    if (!confirm(`删除技能「${slug}」？附属文件与版本快照一并删除，不可恢复。`)) return
+    if (
+      !(await appConfirm({
+        title: `删除技能「${slug}」？`,
+        description: '附属文件与版本快照一并删除，不可恢复。',
+        destructive: true,
+        confirmLabel: '删除',
+      }))
+    )
+      return
     setBusy(true)
     try {
       await api.del(`/skills/${slug}`)
@@ -370,7 +379,8 @@ export default function Skills() {
   }
 
   async function doDeleteFile(slug: string, path: string) {
-    if (!confirm(`删除附属文件「${path}」？`)) return
+    if (!(await appConfirm({ title: `删除附属文件「${path}」？`, destructive: true, confirmLabel: '删除' })))
+      return
     setBusy(true)
     try {
       await api.del(`/skills/${slug}/file?path=${encodeURIComponent(path)}`)

@@ -3,6 +3,7 @@
  * 索引/同步走平台 job 队列（202 入队）——页面在 indexing 时自动轮询刷新。
  */
 import { useEffect, useRef, useState } from 'react'
+import { appConfirm } from '@/components/confirm'
 import {
   api,
   type CgCliStatus,
@@ -186,8 +187,16 @@ function ProjectCard({ p, onChanged }: { p: CgProject; onChanged: () => void }) 
           size="sm"
           variant="ghost"
           disabled={busy}
-          onClick={() => {
-            if (!confirm(`删除项目「${p.name}」？索引数据一并清理（git clone 的工作目录会删除，本地路径项目不动源码）。`)) return
+          onClick={async () => {
+            if (
+              !(await appConfirm({
+                title: `删除项目「${p.name}」？`,
+                description: '索引数据一并清理（git clone 的工作目录会删除，本地路径项目不动源码）。',
+                destructive: true,
+                confirmLabel: '删除',
+              }))
+            )
+              return
             run(() => api.del(`/codegraph/projects/${p.id}`))
           }}
         >

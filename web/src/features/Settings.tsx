@@ -1,5 +1,6 @@
 /** Settings 域：LLM providers / 路由 / API keys / 节律。 */
 import { useEffect, useState } from 'react'
+import { appConfirm } from '@/components/confirm'
 import { api, type AdminSessionDto, type ApiKey, type Job, type Provider } from '@/lib/api'
 import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls, relTime, tableCls } from '@/lib/ui'
@@ -117,7 +118,15 @@ function AccountPane() {
   }
 
   async function doRevoke(id: string) {
-    if (!confirm(`吊销会话 ${id}？该设备下次请求需重新登录。`)) return
+    if (
+      !(await appConfirm({
+        title: '吊销该会话？',
+        description: `会话 ${id} 的设备下次请求需重新登录。`,
+        destructive: true,
+        confirmLabel: '吊销',
+      }))
+    )
+      return
     setBusy(true)
     try {
       await api.del(`/auth/sessions/${id}`)
@@ -131,7 +140,15 @@ function AccountPane() {
   }
 
   async function doRevokeOthers() {
-    if (!confirm('吊销除当前设备外的全部会话？')) return
+    if (
+      !(await appConfirm({
+        title: '吊销其他全部会话？',
+        description: '除当前设备外的所有登录都将失效。',
+        destructive: true,
+        confirmLabel: '吊销',
+      }))
+    )
+      return
     setBusy(true)
     try {
       const r = await api.post<{ revoked: number }>('/auth/sessions/revoke-others')
@@ -638,7 +655,15 @@ function Providers() {
                   size="sm"
                   variant="destructive"
                   onClick={async () => {
-                    if (!confirm(`删除「${p.name}」？该操作不可撤销。`)) return
+                    if (
+                      !(await appConfirm({
+                        title: `删除「${p.name}」？`,
+                        description: '该 provider 配置将移除，不可撤销。',
+                        destructive: true,
+                        confirmLabel: '删除',
+                      }))
+                    )
+                      return
                     try {
                       await api.del(`/settings/llm/providers/${p.id}`)
                       load()
@@ -921,7 +946,15 @@ function Keys() {
                 variant="destructive"
                 size="sm"
                 onClick={async () => {
-                  if (!confirm(`批量删除 ${selected.size} 把 key？使用它们的 AI 将立即失权。`)) return
+                  if (
+                    !(await appConfirm({
+                      title: `批量删除 ${selected.size} 把 key？`,
+                      description: '使用它们的 AI 将立即失权。',
+                      destructive: true,
+                      confirmLabel: '批量删除',
+                    }))
+                  )
+                    return
                   await api.post('/settings/api-keys/batch-revoke', { ids: [...selected] })
                   setSelected(new Set())
                   load()
@@ -970,7 +1003,15 @@ function Keys() {
                           variant="destructive"
                           size="sm"
                           onClick={async () => {
-                            if (!confirm(`删除 key「${k.name}」？使用它的 AI 将立即失权。`)) return
+                            if (
+                              !(await appConfirm({
+                                title: `删除 key「${k.name}」？`,
+                                description: '使用它的 AI 将立即失权。',
+                                destructive: true,
+                                confirmLabel: '删除',
+                              }))
+                            )
+                              return
                             await api.post(`/settings/api-keys/${k.id}/revoke`)
                             if (editing?.id === k.id) setEditing(null)
                             load()

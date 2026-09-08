@@ -2,9 +2,10 @@
  * 技能页测试（Wiki 式双栏）：目录渲染 / 新建 / 启停 / 删除确认 / 导入 / 搜索 / 版本 / 附属文件。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import Skills from './Skills'
+import { GlobalConfirm } from '@/components/confirm'
 
 // ---- api mock ----
 const state = {
@@ -109,7 +110,6 @@ describe('Skills 技能页（双栏）', () => {
     calls.post.length = 0
     calls.put.length = 0
     calls.del.length = 0
-    vi.stubGlobal('confirm', vi.fn(() => true))
   })
 
   it('左目录 + 右阅读：自动选中第一个技能并渲染 Markdown 正文', async () => {
@@ -152,17 +152,19 @@ describe('Skills 技能页（双栏）', () => {
     })
   })
 
-  it('目录切换选中：点 Deploy Check 后删除带确认', async () => {
-    render(<MemoryRouter><Skills /></MemoryRouter>)
+  it('目录切换选中：点 Deploy Check 后删除带应用内确认弹窗', async () => {
+    render(<MemoryRouter><><Skills /><GlobalConfirm /></></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('Deploy Check')).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: /Deploy Check/ }))
     await waitFor(() => expect(screen.getByRole('button', { name: '删除' })).toBeTruthy())
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    // 应用内确认弹窗：点弹窗内的确认键才执行
+    const dlg = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dlg).getByRole('button', { name: '删除' }))
     await waitFor(() => {
       expect(api.del).toHaveBeenCalledWith('/skills/deploy-check')
     })
-    expect(confirm).toHaveBeenCalled()
   })
 
   it('粘贴 SKILL.md 导入调用 POST /skills/import 并展示报告', async () => {
@@ -209,19 +211,20 @@ describe('Skills 技能页（双栏）', () => {
     })
   })
 
-  it('附属文件区：索引展示 + 点击查看脚本内容 + 删除带确认', async () => {
-    render(<MemoryRouter><Skills /></MemoryRouter>)
+  it('附属文件区：索引展示 + 点击查看脚本内容 + 删除带应用内确认弹窗', async () => {
+    render(<MemoryRouter><><Skills /><GlobalConfirm /></></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('附属文件')).toBeTruthy())
     await waitFor(() => expect(screen.getByText('scripts/check.py')).toBeTruthy())
     expect(screen.getByText('references/api.md')).toBeTruthy()
     expect(screen.getByText('128 B')).toBeTruthy()
 
-    // 删除文件带确认（索引按 path 排序，references/api.md 是第一个）
+    // 删除文件带应用内确认弹窗（索引按 path 排序，references/api.md 是第一个）
     fireEvent.click(screen.getAllByRole('button', { name: '删除文件' })[0])
+    const dlg = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dlg).getByRole('button', { name: '删除' }))
     await waitFor(() => {
       expect(api.del).toHaveBeenCalledWith('/skills/review-pr/file?path=references%2Fapi.md')
     })
-    expect(confirm).toHaveBeenCalled()
 
     // 查看脚本（GET file?path=…；索引按 path 排序，scripts/check.py 是第二个）
     fireEvent.click(screen.getAllByRole('button', { name: '查看' })[1])

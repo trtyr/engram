@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/ui-bits'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { CommandPalette } from '@/components/CommandPalette'
+import { GlobalConfirm } from './components/confirm'
 import Login from '@/features/Login'
 
 const Dashboard = lazy(() => import('@/features/Dashboard'))
@@ -330,6 +331,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         </div>
       </main>
       {paletteOpen && <CommandPalette onClose={() => setOpenedAt(null)} />}
+      <GlobalConfirm />
     </div>
   )
 }
