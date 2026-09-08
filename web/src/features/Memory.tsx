@@ -114,6 +114,8 @@ function Sessions() {
   const [openId, setOpenId] = useState<string | null>(null)
   const [err, setErr] = useState('')
   const [distillBusy, setDistillBusy] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [notice, setNotice] = useState('')
   const load = () => api.get<Session[]>('/memory/sessions?limit=50').then(setRows).catch((e) => setErr(e.message))
   useEffect(() => {
@@ -124,6 +126,33 @@ function Sessions() {
 
   // 积压（pending 未蒸馏）是存量不是进行时——灰字静默，不全局闪
   const backlog = rows.filter((s) => s.distill_status === 'pending').length
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const runBulk = async (path: string, confirmMsg: string | null) => {
+    if (confirmMsg && !confirm(confirmMsg)) return
+    setBulkBusy(true)
+    setNotice('')
+    try {
+      const r = await api.post<{ succeeded: number; failed: { id: string; error: string }[] }>(
+        path,
+        { ids: [...selected] },
+      )
+      setNotice(
+        `完成 ${r.succeeded} 条${r.failed.length > 0 ? `，失败 ${r.failed.length} 条（多为状态不符）` : ''}`,
+      )
+      load()
+      setSelected(new Set())
+    } catch (e) {
+      setNotice(e instanceof Error ? `操作失败：${e.message}` : '操作失败')
+    } finally {
+      setBulkBusy(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -157,6 +186,39 @@ function Sessions() {
         </Button>
       </div>
 
+      {/* 批量操作条：勾选即现——「全选已作废」直击测试残留清场场景 */}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+          <span className="text-xs text-muted-foreground">已选 {selected.size} 条</span>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(rows.filter((s) => s.distill_status === 'void').map((s) => s.id)))}>
+            全选已作废
+          </Button>
+          <Button
+            size="sm"
+            disabled={bulkBusy}
+            onClick={() => runBulk('/memory/sessions/batch-restore', null)}
+          >
+            {bulkBusy ? '处理中…' : '恢复所选'}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={bulkBusy}
+            onClick={() =>
+              runBulk(
+                '/memory/sessions/batch-erase',
+                `擦除所选 ${selected.size} 条会话？物理删除（含蒸馏产物级联），不可恢复。`,
+              )
+            }
+          >
+            {bulkBusy ? '处理中…' : '擦除所选'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+            取消选择
+          </Button>
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <Empty text="暂无会话——对话通过 API / MCP 写入后在此列出，蒸馏沉淀为 L1 原子" />
       ) : (
@@ -164,6 +226,16 @@ function Sessions() {
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
+                <th className={tableCls.th}>
+                  <input
+                    type="checkbox"
+                    aria-label="全选本页"
+                    checked={selected.size === rows.length && rows.length > 0}
+                    onChange={(e) =>
+                      setSelected(e.target.checked ? new Set(rows.map((s) => s.id)) : new Set())
+                    }
+                  />
+                </th>
                 <th className={tableCls.th}>预览</th>
                 <th className={tableCls.th}>Agent</th>
                 <th className={tableCls.th}>轮次</th>
@@ -176,6 +248,14 @@ function Sessions() {
               {rows.map((s) => (
                 <Fragment key={s.id}>
                   <tr className={tableCls.row}>
+                    <td className={tableCls.td}>
+                      <input
+                        type="checkbox"
+                        aria-label="选择该会话"
+                        checked={selected.has(s.id)}
+                        onChange={() => toggle(s.id)}
+                      />
+                    </td>
                     <td className={`${tableCls.td} max-w-96 truncate font-medium`} title={s.content?.[0]?.text ?? ''}>
                       {s.content?.[0]?.text ?? '（空会话）'}
                     </td>
@@ -199,7 +279,7 @@ function Sessions() {
                   {/* 手风琴：紧贴该行下方展开逐轮对话，视线不断裂 */}
                   {openId === s.id && (
                     <tr>
-                      <td colSpan={6} className="border-b border-border p-0">
+                      <td colSpan={7} className="border-b border-border p-0">
                         <div className="bg-muted/30 px-4 py-3">
                           <div className="mb-2.5 flex items-center justify-between">
                             <p className="font-mono text-xs text-muted-foreground">{s.id}</p>

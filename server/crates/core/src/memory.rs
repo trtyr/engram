@@ -73,6 +73,19 @@ pub struct SearchResponse {
     pub query: String,
 }
 
+/// 批量遗忘操作（恢复/擦除所选）的结果：逐条成败互不影响。
+#[derive(Debug, Default, Serialize, utoipa::ToSchema)]
+pub struct BatchOutcome {
+    pub succeeded: usize,
+    pub failed: Vec<BatchFailure>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct BatchFailure {
+    pub id: Uuid,
+    pub error: String,
+}
+
 // ---------- 实体（记忆星系） ----------
 
 /// 实体类型（迁移 0015 CHECK 枚举）。
@@ -1109,6 +1122,37 @@ impl MemoryService {
                 .ok();
         }
         Ok((row, restored))
+    }
+
+    /// 批量撤销作废（Web「恢复所选」）：逐条 unvoid，单条失败不影响其余——
+    /// 混合选择（含非 void）时失败项逐条带原因返回，前端据此汇总提示。
+    pub async fn unvoid_sessions(&self, ids: &[Uuid]) -> BatchOutcome {
+        let mut out = BatchOutcome::default();
+        for id in ids {
+            match self.unvoid_session(*id).await {
+                Ok(_) => out.succeeded += 1,
+                Err(e) => out.failed.push(BatchFailure {
+                    id: *id,
+                    error: e.to_string(),
+                }),
+            }
+        }
+        out
+    }
+
+    /// 批量擦除（Web「擦除所选」）：逐条 erase_session（含原子级联），逐条成败互不影响。
+    pub async fn erase_sessions(&self, ids: &[Uuid]) -> BatchOutcome {
+        let mut out = BatchOutcome::default();
+        for id in ids {
+            match self.erase_session(*id).await {
+                Ok(()) => out.succeeded += 1,
+                Err(e) => out.failed.push(BatchFailure {
+                    id: *id,
+                    error: e.to_string(),
+                }),
+            }
+        }
+        out
     }
 
     /// P11/SEC-E 按 agent 清场（测试隔离，2026-09-03 彻底化）：该 agent **全部**会话

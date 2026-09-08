@@ -653,3 +653,115 @@ async fn http_restore_endpoint_reverts_void() {
     let resp = post(&app, format!("/memory/sessions/{sid}/restore")).await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "重复恢复应 400");
 }
+
+/// Web 批量操作通道：batch-restore（逐条恢复、混合选择失败项带原因）+
+/// batch-erase（物理删除、需 erase scope——admin 全权）。
+#[tokio::test]
+async fn http_batch_restore_and_erase() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // 造 3 条会话：两条 void、一条 pending
+    let mut ids = Vec::new();
+    for text in ["批量靶1", "批量靶2", "批量靶3-保持pending"] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/memory/sessions")
+                    .header("authorization", format!("Bearer {admin}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({"distill": "off", "turns": [{"speaker": "user", "text": text}]})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let s: Value = serde_json::from_slice(&body).unwrap();
+        ids.push(s["id"].as_str().unwrap().to_string());
+    }
+    for sid in &ids[..2] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/memory/sessions/{sid}/void"))
+                    .header("authorization", format!("Bearer {admin}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    let post_json = |app: &Router, path: &'static str, body: Value| {
+        let app = app.clone();
+        let admin = admin.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("authorization", format!("Bearer {admin}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // batch-restore：两条 void 恢复 + 一条非 void 失败（带原因）
+    let resp = post_json(&app, "/memory/sessions/batch-restore", json!({"ids": ids})).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let r: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(r["succeeded"], 2, "{r}");
+    assert_eq!(r["failed"].as_array().unwrap().len(), 1, "{r}");
+    assert!(
+        r["failed"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("restore 只对 void")
+    );
+
+    // batch-erase：全部物理删除（含那条 pending）
+    let resp = post_json(&app, "/memory/sessions/batch-erase", json!({"ids": ids})).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let r: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(r["succeeded"], 3, "{r}");
+    assert_eq!(r["failed"].as_array().unwrap().len(), 0, "{r}");
+    // 复核：会话确实没了（get 404）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/memory/sessions/{}", ids[0]))
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND, "擦除后应 404");
+
+    // 空 ids / 超上限 → 400
+    let resp = post_json(&app, "/memory/sessions/batch-restore", json!({"ids": []})).await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}

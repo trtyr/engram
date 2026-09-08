@@ -370,6 +370,67 @@ pub async fn restore_session(
     })))
 }
 
+/// 批量遗忘请求：会话 id 列表。
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct BatchIdsRequest {
+    /// 要操作的会话 id 列表（1~200 条）
+    pub ids: Vec<Uuid>,
+}
+
+/// 批量撤销作废（Web「恢复所选」）：逐条恢复，单条失败不影响其余。
+/// 混合选择（含非 void）时 failed 逐条带原因。
+#[utoipa::path(post, path = "/memory/sessions/batch-restore",
+    request_body = BatchIdsRequest,
+    responses((status = 200, body = Object), (status = 400)))]
+pub async fn batch_restore_sessions(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<BatchIdsRequest>,
+) -> Result<Json<engram_core::memory::BatchOutcome>, ApiError> {
+    require_memory(&principal)?;
+    validate_batch(&req.ids)?;
+    Ok(Json(svc(&state).unvoid_sessions(&req.ids).await))
+}
+
+/// 批量擦除（Web「擦除所选」）：物理删除，逐条含原子级联；与单条擦除同级——需 erase scope。
+#[utoipa::path(post, path = "/memory/sessions/batch-erase",
+    request_body = BatchIdsRequest,
+    responses((status = 200, body = Object), (status = 400), (status = 403)))]
+pub async fn batch_erase_sessions(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<BatchIdsRequest>,
+) -> Result<Json<engram_core::memory::BatchOutcome>, ApiError> {
+    require_memory(&principal)?;
+    match &*principal {
+        Principal::Admin => {}
+        Principal::ApiKey { scopes, .. } if scopes.iter().any(|s| s == "erase") => {}
+        _ => {
+            return Err(ApiError::Forbidden(
+                "擦除需要 erase scope（不可逆操作，与读写分权）".into(),
+            ));
+        }
+    }
+    validate_batch(&req.ids)?;
+    Ok(Json(svc(&state).erase_sessions(&req.ids).await))
+}
+
+/// 批量清单校验：非空、单批上限 200（防一次勾几百条把请求拖成无超时慢查询）。
+fn validate_batch(ids: &[Uuid]) -> Result<(), ApiError> {
+    if ids.is_empty() {
+        return Err(ApiError::BadRequest(
+            "ids 不能为空——先勾选要操作的会话".into(),
+        ));
+    }
+    if ids.len() > 200 {
+        return Err(ApiError::BadRequest(format!(
+            "单批最多 200 条（收到 {}）——分批操作",
+            ids.len()
+        )));
+    }
+    Ok(())
+}
+
 /// P11 按 agent 清场（测试隔离）：会话置 void + 产出 active 原子归档（可恢复）。
 /// 破坏半径大——与 erase 同级，需 erase scope。
 #[derive(Deserialize, utoipa::ToSchema)]
