@@ -451,6 +451,11 @@ pub struct SearchParams {
     /// 时间范围终点
     #[schemars(description = "可选：时间范围终点，ISO8601。")]
     pub to: Option<String>,
+    /// 证据溯源（默认关）
+    #[schemars(
+        description = "可选：true = L3 画像命中携带 evidence_refs（溯源 ID 数组）。默认 false——检索消费者不用溯源 ID，与 context 同口径（验收遗留 #1）；审计需要时再开。"
+    )]
+    pub include_evidence: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -1129,7 +1134,8 @@ impl EngramMcpServer {
     /// 何时用：对话中需要回忆与当前话题相关的用户背景、既往决策、偏好、历史事件时。
     /// 何时不用：会话开场的全景装载用 memory_context；浏览全量列表用 memory_list_atoms。
     /// 命中会回写热度（hit_count），常被检索的内容会在整理中获得更高权重。
-    /// 敏感条目默认排除；返回 {entities, l1, l2, l3}，各元素含 score/title/snippet。
+    /// 敏感条目默认排除；返回 {entities, l1, l2, l3}，各元素含 score/title/snippet；
+    /// L3 画像默认不带 evidence_refs（与 context 同口径，include_evidence=true 开）。
     async fn memory_search(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -1154,7 +1160,12 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_memory)?;
-        ok_json(serde_json::to_value(&resp).unwrap_or(serde_json::json!({})))
+        let mut v = serde_json::to_value(&resp).unwrap_or(serde_json::json!({}));
+        // 与 context 同口径（验收遗留 #1）：L3 画像命中的 evidence_refs 默认不携带
+        if !sp.include_evidence.unwrap_or(false) {
+            strip_keys(&mut v, &["evidence_refs", "source_refs", "atom_refs"]);
+        }
+        ok_json(v)
     }
 
     /// 浏览 L1 原子事实列表（keyset 分页，可按类型/状态/待审过滤）。

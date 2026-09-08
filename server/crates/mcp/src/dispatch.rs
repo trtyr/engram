@@ -218,6 +218,9 @@ pub fn render_manual(domain: &str, disabled: &[String]) -> Value {
     json!({
         "domain": domain,
         "how_to_call": format!("{{\"action\":\"<操作名>\", ...该操作的参数（平铺）}}；本返回即 {domain} 域全部可用操作"),
+        // 验收反馈：search_all 是独立工具，不在任何域 help 里——每份手册顶部指路，
+        // 想跨域扫一遍时不用翻 tools/list
+        "cross_domain_hint": "另有独立工具 search_all（非本域操作）：一次查询并发 memory/wiki/skills/todos/projects 各回 top-k 摘要——不确定信息在哪域时用",
         "actions": actions,
     })
 }

@@ -252,6 +252,18 @@ async fn wiki_versions_restore_snippets_and_title_addressing() {
     let page = out_json(&v, "get_page by title");
     assert_eq!(page["slug"], "zz-vtest");
 
+    // list_pages 带 content_chars（P1-7，验收方空库未确认项）
+    let (_, v) = mcp_rpc(&app, &key, call(31, "wiki", "list_pages", json!({}))).await;
+    let rows = out_json(&v, "list_pages").as_array().unwrap().clone();
+    let row = rows
+        .iter()
+        .find(|r| r["slug"] == "zz-vtest")
+        .expect("列表含测试页");
+    assert!(
+        row["content_chars"].is_i64() && row["content_omitted"] == json!(true),
+        "list_pages 行应带 content_chars：{row}"
+    );
+
     // search 片段化（P0-2）：命中带片段与 content_chars，不再拖全文
     let (_, v) = mcp_rpc(
         &app,
@@ -484,5 +496,61 @@ async fn search_all_fans_out_across_scoped_domains() {
     assert!(
         r.get("projects").is_none(),
         "无 project scope 的域不出现：{r}"
+    );
+}
+
+/// 验收遗留 #1：memory search 的 L3 画像命中默认不带 evidence_refs（与 context 同口径）；
+/// include_evidence=true 显式开启。
+#[tokio::test]
+async fn memory_search_strips_l3_evidence_refs_by_default() {
+    let (app, pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["memory"]).await;
+
+    // 造一条画像分面（content 含检索词 zebra3k），evidence_refs 非空
+    let pool = sqlx::PgPool::connect(&support::connection_url(&pg).await.unwrap())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version)          VALUES ($1, 'preferences', '用户偏好 zebra3k 主题的一切内容', '[{\"session_id\": \"00000000-0000-0000-0000-000000000000\"}]'::jsonb, 1)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 默认：L3 命中不带 evidence_refs
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(1, "memory", "search", json!({"query": "zebra3k"})),
+    )
+    .await;
+    let r = out_json(&v, "search default");
+    let l3 = r["l3"].as_array().expect("l3 数组");
+    assert!(!l3.is_empty(), "L3 应命中画像分面：{r}");
+    assert!(
+        l3[0].get("evidence_refs").is_none(),
+        "默认不应携带 evidence_refs：{}",
+        l3[0]
+    );
+
+    // include_evidence=true：显式携带
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(
+            2,
+            "memory",
+            "search",
+            json!({"query": "zebra3k", "include_evidence": true}),
+        ),
+    )
+    .await;
+    let r = out_json(&v, "search include_evidence");
+    let l3 = r["l3"].as_array().expect("l3 数组");
+    assert!(
+        l3[0].get("evidence_refs").is_some(),
+        "显式开启应携带溯源：{}",
+        l3[0]
     );
 }
