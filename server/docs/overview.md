@@ -36,7 +36,7 @@ entities（记忆坐标系）          人物/项目/主题/群组/地点——�
 ```
 ┌──────────────── engram-api (bin)：HTTP + MCP 双适配器装配 ─────────────────┐
 │  axum Router                                                                │
-│  ├─ /mcp：engram-mcp 六域渐进式发现（rmcp Streamable HTTP，scope 分权）      │
+│  ├─ /mcp：engram-mcp 七工具渐进式发现（六域 + 跨域 search_all）（rmcp Streamable HTTP，scope 分权）      │
 │  ├─ 公开: /health /ready /openapi.json /auth/login                          │
 │  ├─ Bearer 认证层（admin 会话 ams_ / api key amk_；/jobs 对 text/html 分流 SPA）│
 │  └─ 9 个域路由: auth / memory / wiki / codegraph / project / jobs /         │

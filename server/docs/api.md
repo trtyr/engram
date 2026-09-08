@@ -1,6 +1,6 @@
 # API
 
-> 2026-09-06 从当日代码 `openapi-dump` 活体导出，共 **104 路径 / 136 方法注册**（GET 57 · POST 53 · PUT 10 · PATCH 3 · DELETE 13）。
+> 2026-09-08 刷新：共 **122 路径**（OpenAPI 快照测试 `openapi_snapshot` 活体校验）。
 >
 > 登录管理：POST /auth/login（**用户名+密码**，username 缺省 admin 向后兼容）· GET /auth/status（初始化态，无鉴权）· POST /auth/init（首次创建账号，无鉴权仅一次）· PUT /auth/account（改用户名/密码，改后自动吊销其他会话）· GET /auth/sessions（活跃会话列表，标记当前）· DELETE /auth/sessions/{id}（吊销指定）· POST /auth/sessions/revoke-others（吊销其他设备）· GET /auth/username（当前用户名）。密码 PBKDF2-HMAC-SHA256（120k 轮）落库 admin_account；env 密码仅作空表播种回退。
 > 认证：除 /health /ready /openapi.json /auth/login 外全部要求 `Authorization: Bearer <token>`；
@@ -137,10 +137,24 @@
 | GET/POST | /settings/api-keys | API Key 列表 / 签发（scope；明文只在创建时返回一次）——admin-only |
 | POST | /settings/api-keys/{id}/revoke | 删除（admin-only；物理删除不留记录，删除后 401 走通用文案） |
 | POST | /settings/api-keys/batch-revoke | 批量删除（{ids}；物理删除，返回 {revoked}） |
-| GET/PUT | /settings/mcp | MCP 服务信息 / 配置更新（服务总开关 + 整域/单操作两级开关 disabled_tools；admin-only）——工具面本体在 **POST /mcp**（Streamable HTTP JSON-RPC，非 OpenAPI 路径；复用 Bearer 认证，六域渐进式发现：6 域工具共 53 操作——memory 9 / projects 15 / skills 8 / wiki 9 / todos 6 / codegraph 6，调用形态 {"action":"…"}，help 取手册，scope 分权；关闭时 503） |
+| GET/PUT | /settings/mcp | MCP 服务信息 / 配置更新（服务总开关 + 整域/单操作两级开关 disabled_tools；admin-only）——工具面本体在 **POST /mcp**（Streamable HTTP JSON-RPC，非 OpenAPI 路径；复用 Bearer 认证，**七工具渐进式发现**：memory/projects/skills/wiki/todos/codegraph 六域 + 跨域 search_all，共 63 操作，调用形态 {"action":"…"}，help 取手册，scope 分权；关闭时 503；全表见 [mcp.md](mcp.md)） |
 
 ## 错误文案三问规范（2026-08-31 起）
 
 每个 4xx 回答三问：发生了什么（具体）/ 为什么（原因类别）/ 下一步（可执行指引）。
 六处先例：删除 key（物理删除不留记录，401 走通用文案）、ISO8601 时间格式、purge 确认短语、content 编辑 403 指路 correction、
 画像/实体 403 指路"由蒸馏维护"、UUID 解析。422 是 axum 纯文本（Json 提取先于鉴权）。
+
+## 2026-09-08 新增端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /wiki/libraries | 库列表（slug/名称/页面数/原料数） |
+| POST | /wiki/libraries | 建库（slug：小写字母数字连字符 ≤40；撞名 400） |
+| DELETE | /wiki/libraries/{slug}?force= | 删库（main 不可删；非空需 force=true 级联） |
+| POST | /memory/sessions/{id}/restore | 撤销会话作废（会话与原子一并还原） |
+| POST | /memory/sessions/batch-restore | 批量撤销作废（ids ≤200，逐条成败互不影响） |
+| POST | /memory/sessions/batch-erase | 批量物理擦除（需 erase scope） |
+
+> **多库语义**：全部 /wiki/* 端点接受 `?lib=<库slug>`（缺省 main 主库）；POST /wiki/search 亦可在
+> body 传 `library`。未知名 404。AI 侧见 [mcp.md](mcp.md)；现状见 [current-state.md](current-state.md)。

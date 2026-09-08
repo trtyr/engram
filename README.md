@@ -4,13 +4,13 @@
 
 ### 把 AI 的记忆，做成可蒸馏、可检索、可审计、可遗忘的资产
 
-**单用户 AI 长期记忆平台 · Rust 单二进制 · 六域 MCP 渐进式发现 · 全程可溯源**
+**单用户 AI 长期记忆平台 · Rust 单二进制 · 七域 MCP 渐进式发现 · Wiki 多库 · 全程可溯源**
 
 [![Rust](https://img.shields.io/badge/Rust-axum-DEA584?style=for-the-badge&logo=rust&logoColor=white)](server/)
 [![React](https://img.shields.io/badge/React_19-SPA-61DAFB?style=for-the-badge&logo=react&logoColor=black)](web/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL_17-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](server/crates/storage/)
-[![MCP](https://img.shields.io/badge/MCP-六域_渐进式发现-8A2BE2?style=for-the-badge)](#-mcp-六域工具面渐进式发现)
-[![Tests](https://img.shields.io/badge/tests-257_cargo_·_59_vitest-16C784?style=for-the-badge)](#-门禁)
+[![MCP](https://img.shields.io/badge/MCP-七工具_63操作_渐进式发现-8A2BE2?style=for-the-badge)](#-mcp-七工具工具面渐进式发现)
+[![Tests](https://img.shields.io/badge/tests-243_cargo_·_59_vitest-16C784?style=for-the-badge)](#-门禁)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=for-the-badge)](LICENSE)
 
 > **en·gram**（/ˈenɡræm/）*n.* 神经科学中的「记忆痕迹」——记忆在脑中留下的物理印记。
@@ -53,7 +53,7 @@ flowchart LR
 - **遗忘是断层**：memory 域 `forget`（void）会话作废，已蒸馏产物**级联归档**，检索立即失效
 - **实体坐标系**：人物 / 项目 / 主题 / 群组 / 地点，由蒸馏自动抽取，横向串联所有记忆
 
-## 🗂️ 六域资产
+## 🗂️ 七域资产
 
 | 域 | 记什么 | 形态 |
 |:--|:--|:--|
@@ -96,11 +96,11 @@ flowchart LR
 - **单二进制单端口**：一个 `engram-server` 同源托管 API + SPA + MCP，本地/Docker 单机部署
 - **中文友好**：jieba FTS + 向量混合检索（RRF 融合），零匹配时收紧向量阈值——返回空，不返回噪声
 
-## 🔌 MCP 六域工具面（渐进式发现）
+## 🔌 MCP 七工具工具面（渐进式发现）
 
 engram-server 内置 MCP 服务端（官方 Rust SDK `rmcp`，Streamable HTTP）。
-**工具面采用渐进式发现**：六个领域各一个入口工具（AI 常驻上下文只占 6 个工具位），
-域内操作通过 action 按需发现——
+**工具面采用渐进式发现**：六个领域各一个入口工具 + 跨域全局检索
+（AI 常驻上下文只占 7 个工具位），域内操作通过 action 按需发现——
 
 - **L0 常驻目录**：每个域工具的描述自带「一行一操作」的紧凑目录，模型多数时候直接调对，零发现轮次
 - **L1 按需手册**：`{"action":"help"}` 一轮取回全域操作的参数 JSON Schema
@@ -113,12 +113,13 @@ engram-server 内置 MCP 服务端（官方 Rust SDK `rmcp`，Streamable HTTP）
 
 | 域工具 | scope | 域内操作（action） |
 |:--|:--|:--|
-| 💬 `memory` | `memory` | `context`（冷启动上下文包）· `search` · `write_session` · `append_session` · `list_sessions` · `get_session` · `list_atoms` · `entities` · `forget`（共 9） |
-| 🧩 `projects` | `project` | `list` · `get` · `create` · `update` · `delete` · `batch_delete` · `types` · `location_add/update/delete` · `doc_add/get/search/update/delete`（共 15） |
-| 🪄 `skills` | `skills` | `list` · `get` · `create` · `update` · `delete` · `import` · `file_get` · `file_put`（附属文件按路径读写，脚本由客户端本地执行） |
-| 🕸️ `wiki` | `wiki` | `search`（混合检索+purpose）· `list_pages` · `get_page` · `write_page` · `ingest` · `archive_query` · `graph` · `lint` · `delete_page`（共 9） |
+| 💬 `memory` | `memory` | `context`（冷启动上下文包）· `search` · `remember`（一句话记忆）· `write_session` · `append_session` · `list_sessions` · `get_session` · `list_atoms`（默认 active）· `entities` · `forget`（void/erase/**restore**；共 10） |
+| 🧩 `projects` | `project` | `list` · `get` · `create` · `update` · `delete` · `batch_delete` · `types` · `location_add/update/delete` · `doc_add/get/search/update/delete` · **`doc_patch`**（行级补丁；共 16） |
+| 🪄 `skills` | `skills` | `list` · `get` · `create` · `update` · `delete` · `import` · `file_get` · `file_put` · **`versions`/`restore`**（版本回滚）·（附属文件按路径读写，脚本由客户端本地执行；共 10） |
+| 🕸️ `wiki` | `wiki` | `search`（片段化）· `list_pages` · `get_page` · `write_page` · `ingest` · `archive_query` · `graph` · `lint` · `delete_page` · **`versions`/`version_content`/`restore_version`**（版本回滚与删页重建）· **`sources`/`delete_source`**（原料清理）· **`libraries`**（多库列表；全 action 可选 `library` 参数——真多库隔离；共 15） |
 | ✅ `todos` | `todos` | `add` · `list` · `get` · `done` · `update` · `delete`（共 6） |
 | 🗺️ `codegraph` | `codegraph` | `list`（动态项目清单）· `register` · `index` · `sync`（走任务队列）· `query` · `delete`（共 6） |
+| 🌐 `search_all` | 任一域 scope | 一次查询并发 memory/wiki/skills/todos/projects 各回 top-k 摘要（跨域一次查，精确检索仍用单域工具） |
 
 按 key 的 scope 分权——AI 看到的工具面与它实际能调用的完全一致。
 控制台「MCP」页 = 服务总开关（关闭即整体 503）+ 整域开关 + **域内单操作开关**
@@ -181,7 +182,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_B" -H "Content-Type: application/j
 curl -X POST -H "Authorization: Bearer $ADMIN_B" -H "Content-Type: application/json"   -d '{"source_url":"http://a-host:8080","source_admin_password":"…"}' http://b-host:8080/migrate/pull
 ```
 
-覆盖六域全部业务数据（用户记忆五表 + 实体关系 / 技能含附属文件 / Wiki 页面 / 项目记忆 / 待办）；
+覆盖七域全部业务数据（用户记忆五表 + 实体关系 / 技能含附属文件 / Wiki 多库页面 / 项目记忆 / 待办）；
 向量与 codegraph 索引为派生数据不迁移，导入端重建。控制台「设置 → 数据迁移」有同能力 UI。
 
 ## ✅ 门禁

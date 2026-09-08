@@ -10,7 +10,7 @@ server/
 ├── migrations/             # 21 个 SQL 迁移（0001 起，含 CREATE EXTENSION vector）
 └── crates/
     ├── api/                # HTTP 门面（axum + utoipa + rust-embed）——唯一二进制出口
-    ├── mcp/                # MCP 适配器（rmcp Streamable HTTP）：六域渐进式发现工具面，与 HTTP 平级
+    ├── mcp/                # MCP 适配器（rmcp Streamable HTTP）：七工具渐进式发现（六域 + 跨域 search_all）工具面，与 HTTP 平级
     ├── core/               # 领域服务与编排（memory/project/skills/wiki_docs/unified）+ auth/state
     ├── storage/            # 仓储层：持久化模型（models）+ 领域表业务面 SQL 唯一收口（repo）
     ├── llm/                # LLM 网关：provider 管理、密钥加密、路由表、用量记账

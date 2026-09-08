@@ -1,66 +1,90 @@
-# 当前状态（2026-09-05 验证基线）
+# 当前状态（2026-09-08 验证基线）
 
-> 2026-08-30 初始化，09-01/09-03/09-04 多次全面更新。历史（CI 修复、Engram 重设计）见 git log 与根 docs/plantree/。
+> 初始化 2026-08-30；09-01/03/04/06 多轮更新；**2026-09-08 大版本刷新**（多库 Wiki、待办批量、
+> 会话恢复、MCP 七工具、字体定版）。历史演进见 git log 与根 [docs/plantree](../../docs/plantree/)。
 
 ## 一句话状态
 
-仓库收敛为单分支。Rust 侧全貌：**11 crates** 六域服务（memory / wiki / codegraph / project / skills / todos）+ **六域 MCP 适配器**（独立 crate engram-mcp；渐进式发现：`/mcp` 六个域入口工具共 53 操作按 action 分发——L0 描述内嵌目录 + L1 help 手册 + L2 错误自愈，scope 分权 + 整域/单操作两级开关，tools/list 按 key scope 过滤 + 动态资产清单织入描述）+ 持久化收口 `engram-storage::repo`（core/api src 层零 sqlx，双适配器共用 core 服务）+ embedding 切 Qwen3-Embedding-8B（查询侧指令包装 + 兜底双条件）。cargo **257** 测试 / **34 迁移** / **31 业务表**（+admin_account 单行管理员账号、entities.archived_at 实体归档标记）。
-**MCP 黑盒测试战役收尾**（zcode 五轮黑盒 + 六轮回归，90+ 真实调用）：16 项发现全部收口——D1 蒸馏静默失败（base_url /v1 双重约定 404 根因，normalize_base_url 规范化 + 未配 LLM manual 显式报错带 Web UI 引导）、D2 并发丢字段（COALESCE 部分更新）、D3 技能路径冒号绕过、D4/D5/D8 wiki 链接索引/幂等/title 同步（含 /wiki/links/rebuild 存量回填）、D6 sessions 元数据列表、D7 YAML 块列表 tags、D9/D10 删除工具、D11 织入去重三态、D13 空 target、D15 遗忘级联到 L2/L3、D16 遗忘级联到实体层（archived_at + 复活）；D12 上游 CLI 局限、D14 按用户决定不补 MCP 配置工具（D1 报错已带 Web UI 引导，闭案）。蒸馏全链路实测：manual 写会话 5s 出原子，质量佳。MCP 黑盒测试报告（zcode，90+ 调用）14 缺陷修复：D1 蒸馏未配 LLM 显式报错、D2 doc_update COALESCE 部分更新、D3 技能文件路径冒号拒绝、D4/D8 wiki 写页重算 links+frontmatter.title 同步、D5 archive 双保险幂等、D6 sessions 列表摘要、D7 frontmatter 块列表 tags、D9/D10 codegraph/wiki 删除工具、D13 空 target 拒绝、D14 MCP +2 llm 工具（45→49）。
+Rust 侧 **11 crates** 七域服务（memory / wiki（**多库**）/ codegraph / project / skills / todos）+
+**MCP 适配器**（独立 crate engram-mcp；渐进式发现：**7 个入口工具 = 六域 + 跨域 search_all，
+共 63 个域内 action**——L0 描述内嵌目录 + L1 `action="help"` 手册 + L2 错误自愈；scope 分权 +
+整域/单操作两级开关；写操作不回显正文只回元数据）+ 持久化收口 `engram-storage::repo`
+（core/api/mcp src 层零 sqlx，HTTP 与 MCP 双适配器共用 core 服务）+ embedding = Qwen3-Embedding-8B
+（查询侧指令包装 + 兜底双条件）。cargo **243** 测试 / **37 迁移** / **34 业务表**。前端 vitest **59**。
+
+## 各域当前形态
+
+### memory 用户记忆
+- 四层蒸馏：L0 raw_sessions → L1 atoms（八类）→ L2 scenarios → L3 persona_aspects（七分面）；
+  实体（entities + atom_entities + entity_relations）横向串联。
+- 写入校验全集：turns 逐条校验（speaker/text 上限/ts 可解析）、distill 枚举、负 limit、NUL 拒绝；
+  凭据类内容蒸馏**主动不落原子**（extract 提示词 v5 成文策略）；宠物等个体名 → person 实体。
+- 遗忘三态：void（作废，active+superseded 原子级联归档，pre_void 状态存 metadata）/
+  erase（物理删除 + 原子级联归档 + 孤儿实体清扫 + 场景收敛）/ **restore（撤销作废，原子按
+  superseded_by 各归其位）**。批量擦除/批量恢复（单批 ≤200）。
+- **画像**：F4 清退写空版本作退休标记；`persona_current` 排除退休空版本（Dashboard 计数与
+  画像页同源）；search 默认剥 L3 evidence_refs（include_evidence 开关）。
+- `list_atoms` 默认 active（"all" 显式全量）；分页 keyset；score 3 位舍入。
+- 一句话记忆 `remember`（单轮 write_session + auto 蒸馏）。
+
+### wiki 知识库（2026-09-08 起多库）
+- **库 = 一级命名空间**：`wiki_libraries` 表（main 主库自动创建，不可删）；pages/sources/
+  documents/chunks/links/review_items/page_versions/insight_dismissals 全挂 `library_id`；
+  slug/sha 唯一降为库内复合唯一；**purpose 每库一份**（settings key `wiki_purpose:{lib}`）。
+- 语义：同 slug 跨库共存合法；织入（ingest）产物落 source 所在库；检索/图谱/lint/原料/版本
+  全部库内收窄；级联删除（摘源/删页）按库；跨库搜索用统一检索 /search（全库并集）。
+- 版本化：覆盖/删除自动快照（每 slug 留 50 版）；versions / version_content / restore_version；
+  删除页可从快照重建（版本号接续快照史）。
+- 通道：write_page（human/ai，frontmatter.via）/ ingest 两步流水线（analyze→generate，sha 库内
+  去重、三态结果、0 产物提示）/ archive_query 幂等存档 / 文档上传（URL+文件，解析分块嵌入，
+  可再织入）。
+- 治理：lint（死链/孤页/缺源/相似目录）、图洞察（意外连接/孤立页/稀疏社区/桥节点 + dismiss）、
+  4 信号相关性权重、Louvain 社区、purpose 人审建议。
+- **多库入口**：HTTP 全部 `/wiki/*` 接 `?lib=<slug>`；MCP wiki 全 action 可选 `library` 参数 +
+  `libraries` 列表操作；库管理端点 GET/POST `/wiki/libraries`、DELETE `/wiki/libraries/{slug}`
+  （main 不可删、非空需 force）。
+
+### projects / skills / todos / codegraph
+- projects：目标/多主机位置登记/分类文档树；行级补丁 doc_patch（replace/insert/delete）；
+  doc_get 区间精读恒带行号。
+- skills：SKILL.md + 附属文件（路径校验禁盘符冒号）；三种消费形态（MCP 读/raw 单文件/zip 整包）；
+  版本快照（每语义变更自动留，50 版）+ MCP versions/restore；非 ASCII 名必须显式 slug。
+- todos：open/done/archived + 优先级/标签/截止；批量擦除/批量恢复（单批 ≤200）；done 幂等；
+  keyset 分页（三元组游标）；导出。
+- codegraph：CLI 1.5.0 pin 桥；search/explore（**默认符号大纲，include_source=true 才带源码**）/
+  node/callers/callees/impact；git URL 与本地路径注册（路径按服务端 FS 校验）；纯 README 仓库
+  0 符号为正常行为（index 提示已说明）。
+
+### MCP 工具面（详见 [mcp.md](mcp.md)）
+- **7 入口工具 / 63 域内 action**：memory 10、projects 16、skills 10、wiki 15、todos 6、
+  codegraph 6 + 跨域 search_all。
+- 写操作统一不回显正文（content_omitted + content_chars）；三级渐进式发现；
+  工具/操作两级停用开关；tools/list 按 key scope 过滤 + 动态资产清单（技能/项目/代码库）
+  织入描述；SERVER_INSTRUCTIONS 含各域用法与分权规则。
+
+### Web 门户
+- 记忆（会话批量勾选恢复/擦除、单会话恢复按钮、原子/画像/场景/检索）、圈子（实体星系）、
+  Wiki（**库切换器 + 库管理** + 目录树 + 图谱 + 收件箱 + 洞察 + 人审 + 提案 + 目标）、
+  代码图谱、项目、技能、待办、任务页、MCP 管理、设置。
+- 全局：Cmd+K 面板、统一跨域 /search、深链、暗/亮主题；
+  **字体**：英文 JetBrains Mono（本机 Nerd 变体优先）+ 中文霞鹭文楷（切片 woff2 按需加载），
+  等宽场景中文落文楷 Mono；确认弹窗全站应用内化（components/confirm.tsx，禁原生 confirm）。
 
 ## 当日验证矩阵
 
 | 命令 | 结果 |
 |---|---|
-| cargo fmt --check | exit 0 |
-| cargo clippy --workspace --all-targets -- -D warnings | 0 errors |
-| cargo test --workspace | 245 passed / 0 failed |
-| cargo run -q -p engram-api --bin openapi-dump | 104 路径 / 136 方法 |
+| `cargo test --workspace`（server/） | **243 passed / 0 failed**（另 wiki-engine 内 33 含于其中） |
+| `cargo clippy --workspace --all-targets` | 0 警告 |
+| `cd web && pnpm tsc -b && pnpm vitest run && pnpm oxlint src && pnpm build` | 0 错误 / 59 passed / 成功 |
+| 双库实机验收（HTTP 全链） | 12/12：建库、同名 slug 隔离、检索收窄、purpose 独立、未知库 404、织入落库、非空拒删、force 级联、main 不受波及 |
+| 多库黑盒专项（scripts/zztest_m10.py） | 27/27 PASS（报告：workspace/engram-mcp-test-report-m10.md） |
 
-## 2026-08-30 基线以来的落地（按主题）
+## 已知边界（非缺陷）
 
-| 主题 | 内容 | 代表提交 |
-|---|---|---|
-| 实体层 | 0015 迁移 + 9 API + 蒸馏抽取 + 圈子页 | 1067a21/8bfd330 |
-| 记忆模型九修 | 抽取放宽/实体档案/检索四层/re-embed/人审队列/一致性 | 595d5be..3dd210a |
-| 消费者契约面 | context_pack 实体透镜 + amk_ 全旅程测试 | 47c2caf/9b0e176 |
-| 时间表达力 | occurred_at/valid_until/place kind/今天锚 | c75f668 |
-| 敏感与清空 | sensitive 全链 + void/purge/export + F3 快照收敛 + F4 清退 | 3e205df/bfa2e3f/b7203e6 |
-| 编辑能力 | 分权/留痕/钉住 + Web 编辑面 | 0189b1b/534d701 |
-| 清空防线 | P-A 互斥/P-B 直写聚类/P-C 两阶段 | b044bf5/1472832 |
-| 登录态根修 | JobStatus cancelled + 探活 401-only | b5ac042 |
-| 圈子拆页 | /circle 独立页 + Memory 回归纯梯子 | 36342e8 |
-| e2e 自清 | journey 收尾清 agent/实体/key | a7ae4f4 |
-| 测试隔离 | E2E_BASE 必填 + 一次性栈 + 差分自清 | 399deab |
-| 双节律 | cron 兜底 + 心跳/status + cron scope 分权 | 775aea2/c1f877f/d7a8345 |
-| 会话敏感 + 直写残留 | raw_sessions.sensitive 蒸馏继承 + 无溯源原子打标 origin（0023/0024 迁移） | f6fca87/73d0d65 |
-| Wiki+Knowledge 合并 | 端点并入 /wiki（兼容别名）+ 上传自动织入 + 前端融合一个 Wiki 页 + 图谱 Obsidian 化 | bb98d07/c37ede3/a69fcb3/c1b5804 |
-| 供应商单模型 | llm_providers models→model_id+capability（0022）+ AI 路由建议 + 批量删除 | 50dc2d4 |
-| 权限收窄 | AI 直写加工权收回（atom/entity/relation/attach 403）+ erase 分权 + atom 输入校验 | 176b070/fa88777/e48cdc5 |
-| 二期三项 | 过期降权/过滤 + 文件批量导入（source=import）+ 检索时间范围过滤 | d9316b1/1f082e7/9c45889 |
-| **Wiki 目录树** | **0025 wiki_pages.folder**（/ 分隔层级，蒸馏按 page_type 归文件夹，PUT 可改）+ **GET /wiki/proposals** 聚合端点（修 N+1）+ wiki lint uuid cast/review 404 + 0022 测试拆分（PgPool 42P01） | e568732/adbc57e/952035f/a1aea80 |
-| 双链健壮性 | 取页 slug 宽容重查（标题原文双链不再 404） | 6d1fadc |
-| 项目记忆第五域 | 0026 三表（projects/locations/docs）+ 类型模板 + 15 端点 + Web 列表/详情 | 2661272/cdc27e1 |
-| 位置元数据 | 0027 project_locations.ip/os（多主机登记） | 270faab |
-| 项目域唯一约束 | 0028 name/doc title UNIQUE + Conflict 409 + 错误文案三问 | dffdd9a |
-| 产品更名 Engram | 仓库 trtyr/engram + 10 crate engram-* + 品牌面 + 根 README | 23cbdbb |
-| **持久化分层收敛** | SQL 全量收口 engram-storage::repo（8 域仓储 145+ 函数；core/api src 零 sqlx）；engram-mcp 独立 crate（11 crates，与 HTTP 平级双适配器）；Principal/AppState 上移 core；jobs 加 admin 管理面模块 | 本轮（无 commit 仓库） |
-| **技能 = 文件夹 + 三层消费** | 0032 skill_files（(skill_id,path) 唯一 + 路径校验）；skills_get 带 files 索引；MCP +2 skills_file_get/put；HTTP raw 单文件直下 + bundle 整包 zip（SKILL.md frontmatter 还原）；工具描述织入消费形态指南 | 本轮 |
-| **CodeGraph 重做** | index/sync 接任务队列（202 入队废除同步 10min）；DELETE/status/graph 三端点；graph 双模式（无 symbol=文件级全图 rusqlite 只读聚合 / 带 symbol=callers+callees 子图归一）；MCP +5 codegraph_*（45 工具五域）；Windows .cmd spawn 修复；stats 字段归一修复；同源查重 | 本轮 |
-
-## 当日落地：级联删除审计凭证
-
-- `WikiService::audit(kind, payload)`（jobs 表 succeeded 行，best-effort）接线到
-  `delete_source_cascade`——kind=`wiki_source_cascade_delete`，payload 含 source_id + CascadeReport；
-  破坏性操作不再无痕（与 memory 域「job 行即审计链」同哲学）。cascade_test 补落行断言。
-
-## 运行环境实况
-
-- **数据已由所有者主动清空**（2026-09-03 确认，非事故）：无生产数据在跑。
-- 本地 PG 已清理：仅存 postgres / project_manage；Engram 相关 11 库（含 agent_memory 老库、
-  am_design_audit 审计库）已删。:19180 审计栈进程已停。重建本地栈：
-  `psql -c "CREATE DATABASE am_dev"` + `AGENT_MEMORY_DATABASE_URL=… cargo run`（迁移自动跑）。
-
-## 已知未了项
-
-- skill 安装副本（~/.pi）非 git 跟踪，版本同步是已知风险——roadmap 0t
-- 无 provider 的 CI e2e 走部分旅程（蒸馏断言跳过，单测覆盖）
+- codegraph 宏内调用不可见（上游 CLI 局限）；纯 README 仓库索引 0 符号（CLI 正常行为）。
+- 凭据类内容蒸馏 0 产物（有意策略，提示词 v5 成文）。
+- 敏感会话蒸馏可能 0 产物（LLM 侧保守，继承 sensitive 标记）。
+- MCP 无 provider 配置工具（有意设计，报错引导 Web 设置页）。
+- main 库不可删除（缺省调用落点保护）；非空库删除需 force。
+- PG 全库 fsync 恢复在异常停机后可达 10+ 分钟（测试残留库放大）——测试后建议清理 am_test_% 库。

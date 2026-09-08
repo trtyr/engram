@@ -1,7 +1,6 @@
 # API（集成索引）
 
-全栈共一个 HTTP API，**104 路径 / 136 方法注册**（GET 57 · POST 53 · PUT 10 · PATCH 3 · DELETE 13，2026-09-06
-openapi-dump 活体导出；另有 MCP 端点 **POST /mcp**——Streamable HTTP JSON-RPC，不进 OpenAPI）。权威全表在 [server/docs/api.md](../server/docs/api.md)；
+全栈共一个 HTTP API，**122 路径**（2026-09-08 openapi_snapshot 活体校验；另有 MCP 端点 **POST /mcp**——Streamable HTTP JSON-RPC，不进 OpenAPI）。权威全表在 [server/docs/api.md](../server/docs/api.md)；
 前端消费约定（认证、类型双轨、/jobs 分流）在 [web/docs/api.md](../web/docs/api.md)。
 
 ## 域速览
@@ -19,7 +18,7 @@ openapi-dump 活体导出；另有 MCP 端点 **POST /mcp**——Streamable HTTP
 | settings | /settings/llm/providers、/settings/llm/routing（含 /suggest）、/settings/api-keys（含 /batch-revoke） | LLM 网关配置 |
 | projects | /projects、/projects/{id}/docs/{doc_id} | 项目记忆（多主机位置 + 分类文档 + 精确寻址读） |
 | skills | /skills、/skills/import、/skills/{slug}/revisions | 技能库（frontmatter 导入/版本快照回滚/全量导出） |
-| mcp | POST /mcp（Streamable HTTP JSON-RPC）、GET/PUT /settings/mcp | 六域 MCP 渐进式发现工具面（6 域工具共 53 操作：memory 9 + projects 15 + skills 8 + wiki 9 + todos 6 + codegraph 6；调用形态 {"action":"…"}，help 取手册，未知操作报错列清单；scope 分权；服务开关 + 整域/单操作两级开关，管理 admin-only） |
+| mcp | POST /mcp（Streamable HTTP JSON-RPC）、GET/PUT /settings/mcp | 七域 MCP 渐进式发现工具面（7 入口工具共 63 操作：memory 10 + projects 16 + skills 10 + wiki 15（**多库**，全 action 可选 library 参数）+ todos 6 + codegraph 6 + 跨域 search_all；调用形态 {"action":"…"}，help 取手册，未知操作报错列清单；scope 分权；服务开关 + 整域/单操作两级开关，管理 admin-only） |
 | search | POST /search | 跨域统一检索（含实体域） |
 | health | /health、/ready | 探针 |
 
