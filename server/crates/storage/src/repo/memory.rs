@@ -598,9 +598,13 @@ pub async fn list_scenarios_all(pool: &PgPool) -> StoreResult<Vec<ScenarioDto>> 
 // ---------- L3 画像 ----------
 
 /// 当前画像（每分面最新版）。
+/// 当前画像：每分面取最大版本。**空 content 的版本是蒸馏 F4 清退的退休标记**
+/// （分面引用了被移除的表述 → 写空版本退场）——退休中的分面没有「当前内容」，
+/// 不得返回：否则 Dashboard 把空壳算进画像数、context/search 把空分面注进预算
+/// （2026-09-08 用户：画像明明空的前端却写 6）。下一轮蒸馏重写真实内容后分面自然回归。
 pub async fn persona_current(pool: &PgPool) -> StoreResult<Vec<PersonaVersion>> {
     Ok(sqlx::query_as::<_, PersonaVersion>(
-        "SELECT DISTINCT ON (aspect) * FROM persona_aspects ORDER BY aspect, version DESC",
+        "SELECT * FROM (              SELECT DISTINCT ON (aspect) * FROM persona_aspects ORDER BY aspect, version DESC          ) t WHERE content <> '' ORDER BY aspect",
     )
     .fetch_all(pool)
     .await?)

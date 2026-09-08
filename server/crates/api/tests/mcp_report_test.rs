@@ -765,3 +765,75 @@ async fn http_batch_restore_and_erase() {
     let resp = post_json(&app, "/memory/sessions/batch-restore", json!({"ids": []})).await;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
+
+/// 画像退休语义（2026-09-08 用户：画像空的前端却写 6）：
+/// 分面最大版本为空 content（F4 清退退休标记）时，/memory/persona 不得返回该分面；
+/// 之后写入真实内容的新版本 → 分面回归。Dashboard 的 L3 计数与画像页因此同源一致。
+#[tokio::test]
+async fn persona_current_hides_retired_empty_facets() {
+    let (app, pg) = app().await;
+    let admin = login_token(&app).await;
+    let get_persona = |app: &Router, admin: &str| {
+        let app = app.clone();
+        let admin = admin.to_string();
+        async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/memory/persona")
+                        .header("authorization", format!("Bearer {admin}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let v: Value = serde_json::from_slice(&body).unwrap();
+            v.as_array().unwrap().clone()
+        }
+    };
+
+    let pool = sqlx::PgPool::connect(&support::connection_url(&pg).await.unwrap())
+        .await
+        .unwrap();
+    async fn ins(pool: &sqlx::PgPool, aspect: &str, version: i32, content: &str) {
+        sqlx::query(
+            "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version)                  VALUES ($1, $2, $3, '[]'::jsonb, $4)",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(aspect)
+        .bind(content)
+        .bind(version)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    // goals：v1 有内容 → v2 空退休（当前=空）；identity：只有空版本
+    ins(&pool, "goals", 1, "用户的目标是真内容").await;
+    ins(&pool, "goals", 2, "").await;
+    ins(&pool, "identity", 1, "").await;
+
+    let rows = get_persona(&app, &admin).await;
+    assert!(
+        !rows.iter().any(|p| p["aspect"] == "goals"),
+        "退休中的分面不应返回"
+    );
+    assert!(
+        !rows.iter().any(|p| p["aspect"] == "identity"),
+        "纯空分面不应返回"
+    );
+
+    // 新一轮蒸馏写出真实内容 v3 → 分面回归
+    ins(&pool, "goals", 3, "用户新目标：攀登").await;
+    let rows = get_persona(&app, &admin).await;
+    let goals = rows
+        .iter()
+        .find(|p| p["aspect"] == "goals")
+        .expect("goals 应回归");
+    assert_eq!(goals["version"], 3);
+    assert_eq!(goals["content"], "用户新目标：攀登");
+}
