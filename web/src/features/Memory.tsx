@@ -226,14 +226,13 @@ function Sessions() {
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
-                <th className={tableCls.th}>
-                  <input
-                    type="checkbox"
-                    aria-label="全选本页"
+                <th className={`${tableCls.th} w-10`}>
+                  <Checkbox
                     checked={selected.size === rows.length && rows.length > 0}
-                    onChange={(e) =>
-                      setSelected(e.target.checked ? new Set(rows.map((s) => s.id)) : new Set())
+                    onChange={(checked) =>
+                      setSelected(checked ? new Set(rows.map((s) => s.id)) : new Set())
                     }
+                    label="全选本页"
                   />
                 </th>
                 <th className={tableCls.th}>预览</th>
@@ -248,12 +247,11 @@ function Sessions() {
               {rows.map((s) => (
                 <Fragment key={s.id}>
                   <tr className={tableCls.row}>
-                    <td className={tableCls.td}>
-                      <input
-                        type="checkbox"
-                        aria-label="选择该会话"
+                    <td className={`${tableCls.td} w-10`}>
+                      <Checkbox
                         checked={selected.has(s.id)}
                         onChange={() => toggle(s.id)}
+                        label="选择该会话"
                       />
                     </td>
                     <td className={`${tableCls.td} max-w-96 truncate font-medium`} title={s.content?.[0]?.text ?? ''}>
