@@ -37,7 +37,7 @@ use utoipa::OpenApi;
         llm_api::batch_revoke_api_keys, llm_api::update_api_key, llm_api::fetch_models,
         crate::mcp_admin::settings_mcp, crate::mcp_admin::settings_mcp_update,
         memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
-        memory_api::erase_session, memory_api::append_session, memory_api::import_session, memory_api::void_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
+        memory_api::erase_session, memory_api::append_session, memory_api::import_session, memory_api::void_session, memory_api::restore_session, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
         memory_api::list_scenarios, memory_api::get_scenario,
         memory_api::get_persona, memory_api::persona_edit, memory_api::persona_history,
@@ -182,6 +182,10 @@ pub fn router(state: AppState) -> Router {
             post(memory_api::append_session),
         )
         .route("/memory/sessions/{id}/void", post(memory_api::void_session))
+        .route(
+            "/memory/sessions/{id}/restore",
+            post(memory_api::restore_session),
+        )
         .route("/memory/purge", post(memory_api::purge_agent))
         .route("/memory/export", get(memory_api::export_memory))
         .route("/memory/distill", post(memory_api::trigger_distill))

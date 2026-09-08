@@ -203,18 +203,34 @@ function Sessions() {
                         <div className="bg-muted/30 px-4 py-3">
                           <div className="mb-2.5 flex items-center justify-between">
                             <p className="font-mono text-xs text-muted-foreground">{s.id}</p>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={async () => {
-                                if (!confirm('擦除该会话？关联原子的溯源将标记为 erased，不可恢复。')) return
-                                await api.del(`/memory/sessions/${s.id}`)
-                                setOpenId(null)
-                                load()
-                              }}
-                            >
-                              擦除
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              {s.distill_status === 'void' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={async () => {
+                                    // 撤销作废：会话回作废前状态，被级联归档的原子一并恢复（非破坏性，无需确认）
+                                    await api.post(`/memory/sessions/${s.id}/restore`)
+                                    setOpenId(null)
+                                    load()
+                                  }}
+                                >
+                                  恢复
+                                </Button>
+                              )}
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={async () => {
+                                  if (!confirm('擦除该会话？关联原子的溯源将标记为 erased，不可恢复。')) return
+                                  await api.del(`/memory/sessions/${s.id}`)
+                                  setOpenId(null)
+                                  load()
+                                }}
+                              >
+                                擦除
+                              </Button>
+                            </div>
                           </div>
                           <div className="space-y-1.5">
                             {s.content?.map((t, i) => (

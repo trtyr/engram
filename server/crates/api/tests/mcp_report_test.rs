@@ -5,8 +5,12 @@
 
 mod support;
 
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
 use support::{app, create_key, expect_result, login_token, mcp_rpc, rpc};
+use tower::util::ServiceExt;
 
 /// 域工具调用：action + 平铺参数（渐进式发现语法；与 mcp_test 同款助手）。
 fn call(id: i64, tool: &str, action: &str, args: Value) -> Value {
@@ -553,4 +557,99 @@ async fn memory_search_strips_l3_evidence_refs_by_default() {
         "显式开启应携带溯源：{}",
         l3[0]
     );
+}
+
+/// Web 前端「恢复」按钮的 HTTP 通道：POST /memory/sessions/{id}/restore——
+/// void 后恢复回原状态、级联归档的原子还原；非 void 会话恢复 400。
+#[tokio::test]
+async fn http_restore_endpoint_reverts_void() {
+    let (app, pg) = app().await;
+    let admin = login_token(&app).await;
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/memory/sessions")
+                .header("authorization", format!("Bearer {admin}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"distill": "off", "turns": [{"speaker": "user", "text": "http 恢复通道"}]})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let session: Value = serde_json::from_slice(&body).unwrap();
+    let sid = session["id"].as_str().unwrap().to_string();
+
+    let pool = sqlx::PgPool::connect(&support::connection_url(&pg).await.unwrap())
+        .await
+        .unwrap();
+    // done + 一条源自该会话的 active 原子（void 级联才有东西可归档/恢复）
+    sqlx::query("UPDATE raw_sessions SET distill_status = 'done' WHERE id = $1")
+        .bind(sid.parse::<sqlx::types::Uuid>().unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, source_refs)          VALUES ($1, 'fact', 'http-恢复-靶原子', 'active', $2::jsonb)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(format!(r#"[{{"session_id":"{sid}"}}]"#))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let post = |app: &Router, path: String| {
+        let app = app.clone();
+        let admin = admin.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("authorization", format!("Bearer {admin}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let resp = post(&app, format!("/memory/sessions/{sid}/void")).await;
+    assert_eq!(resp.status(), StatusCode::OK, "void 应 200");
+    let (archived,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM atoms WHERE status = 'archived'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(archived, 1, "void 应级联归档");
+
+    let resp = post(&app, format!("/memory/sessions/{sid}/restore")).await;
+    assert_eq!(resp.status(), StatusCode::OK, "restore 应 200");
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let r: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        r["session"]["distill_status"], "done",
+        "恢复到作废前状态：{r}"
+    );
+    assert_eq!(r["restored_atoms"], 1, "{r}");
+    let (active,): (i64,) = sqlx::query_as("SELECT count(*) FROM atoms WHERE status = 'active'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(active, 1, "原子应回到 active");
+
+    // 重复恢复：非 void 状态 → 400
+    let resp = post(&app, format!("/memory/sessions/{sid}/restore")).await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "重复恢复应 400");
 }

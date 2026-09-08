@@ -353,6 +353,23 @@ pub async fn void_session(
     Ok(Json(svc(&state).void_session(id).await.map_err(me)?))
 }
 
+/// 撤销作废（Web 前端「恢复」按钮的通道，与 MCP forget mode=restore 同一 core 服务）：
+/// 会话状态照作废时存档还原，被级联归档的原子一并恢复。非破坏性——不需要 erase scope。
+#[utoipa::path(post, path = "/memory/sessions/{id}/restore",
+    responses((status = 200, body = Object), (status = 400, description = "不存在或非 void 状态")))]
+pub async fn restore_session(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_memory(&principal)?;
+    let (session, restored) = svc(&state).unvoid_session(id).await.map_err(me)?;
+    Ok(Json(serde_json::json!({
+        "session": session,
+        "restored_atoms": restored,
+    })))
+}
+
 /// P11 按 agent 清场（测试隔离）：会话置 void + 产出 active 原子归档（可恢复）。
 /// 破坏半径大——与 erase 同级，需 erase scope。
 #[derive(Deserialize, utoipa::ToSchema)]

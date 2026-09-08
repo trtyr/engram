@@ -1471,6 +1471,7 @@ async fn openapi_snapshot() {
             "/memory/sessions/import",
             "/memory/sessions/{id}",
             "/memory/sessions/{id}/append",
+            "/memory/sessions/{id}/restore",
             "/memory/sessions/{id}/void",
             "/memory/timeline",
             "/migrate/export",
