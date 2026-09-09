@@ -9,6 +9,7 @@
 import { Fragment, cloneElement, isValidElement, memo, useEffect, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useThemeTick } from '@/lib/theme'
 
@@ -87,7 +88,11 @@ function WikilinkText({ text, onNavigate }: { text: string; onNavigate: (slug: s
  * code/pre 内保持字面（代码里的 [[ 不是链接）。
  */
 function withWikilinks(node: ReactNode, onNavigate: (slug: string) => void): ReactNode {
-  if (typeof node === 'string') return <WikilinkText text={node} onNavigate={onNavigate} />
+  if (typeof node === 'string') {
+    // 快速路径：不含 [[ 的纯文本原样返回（避免无谓的 span 包裹，保持语义父级的直接子节点）
+    if (!node.includes('[[')) return node
+    return <WikilinkText text={node} onNavigate={onNavigate} />
+  }
   if (Array.isArray(node)) {
     return node.map((c, i) => (
       <Fragment key={i}>{withWikilinks(c, onNavigate)}</Fragment>
@@ -169,6 +174,7 @@ const WikiMarkdown = memo(function WikiMarkdown({
   return (
     <article className="engram-prose">
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           code({ className, node, ...props }) {
             const txt = hastText(node)
