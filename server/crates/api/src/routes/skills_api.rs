@@ -51,9 +51,27 @@ pub struct CreateSkillRequest {
     pub tags: Vec<String>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// 存储形态：text=整体入库（缺省）/ script=脚本存本地、库中只存指针
+    #[serde(default = "default_kind")]
+    pub kind: String,
+    /// 来源：self=自建（缺省）/ github=源自 GitHub / both=自建且已发布
+    #[serde(default = "default_origin")]
+    pub origin: String,
+    /// script 型必填：本地技能文件夹路径（含 SKILL.md）；text 型不接受
+    #[serde(default)]
+    pub local_path: Option<String>,
+    /// origin 含 github 时可填：仓库地址（纯元数据，不做远端拉取）
+    #[serde(default)]
+    pub repo_url: Option<String>,
 }
 fn default_enabled() -> bool {
     true
+}
+fn default_kind() -> String {
+    "text".into()
+}
+fn default_origin() -> String {
+    "self".into()
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -63,6 +81,15 @@ pub struct UpdateSkillRequest {
     pub content: Option<String>,
     pub tags: Option<Vec<String>>,
     pub enabled: Option<bool>,
+    /// 来源（终值语义；origin=self 时 repo_url 自动清空）
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// 仓库地址（origin 含 github 时有意义）
+    #[serde(default)]
+    pub repo_url: Option<String>,
+    /// script 型指针改址（script 型专用）
+    #[serde(default)]
+    pub local_path: Option<String>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -132,6 +159,10 @@ pub async fn create_skill(
             tags: &req.tags,
             enabled: req.enabled,
             source: "manual",
+            kind: &req.kind,
+            origin: &req.origin,
+            local_path: req.local_path.as_deref(),
+            repo_url: req.repo_url.as_deref(),
         })
         .await
         .map_err(se)?;
@@ -172,7 +203,7 @@ pub async fn export_skills(
     Ok(Json(svc(&state).export_skills().await.map_err(se)?))
 }
 
-/// 技能详情（含 markdown 正文）。
+/// 技能详情（含 markdown 正文；script 型从 local_path 现读，指针失效报 404）。
 #[utoipa::path(get, path = "/skills/{slug}",
     operation_id = "skills_get",
     responses((status = 200, body = SkillDto)))]
@@ -182,7 +213,12 @@ pub async fn get_skill(
     Path(slug): Path<String>,
 ) -> Result<Json<SkillDto>, ApiError> {
     require_skills(&principal)?;
-    Ok(Json(svc(&state).get_skill(&slug).await.map_err(se)?))
+    Ok(Json(
+        svc(&state)
+            .get_skill_with_content(&slug)
+            .await
+            .map_err(se)?,
+    ))
 }
 
 /// 编辑技能（语义字段变更留版本快照；enabled-only 不留）。
@@ -206,6 +242,9 @@ pub async fn update_skill(
                     content: req.content,
                     tags: req.tags,
                     enabled: req.enabled,
+                    origin: req.origin,
+                    repo_url: req.repo_url,
+                    local_path: req.local_path,
                 },
             )
             .await
@@ -317,49 +356,6 @@ pub async fn get_file(
         content,
     })
     .into_response())
-}
-
-/// 整包拉取（消费形态③）：skill = 文件夹 → 一个 zip（SKILL.md + scripts/ + references/…）。
-/// 客户端两条命令落盘即可执行：
-///   curl -s -H "Authorization: Bearer $KEY" {base}/skills/{slug}/bundle -o s.zip
-///   tar -xf s.zip（bsdtar 直接解 zip；或 unzip -o s.zip）
-/// 路径在写入侧已校验（禁 .. / 绝对路径 / 反斜杠），zip-slip 不可能。
-#[utoipa::path(get, path = "/skills/{slug}/bundle", params(("slug" = String, Path, description = "技能 slug")),
-    operation_id = "skills_bundle",
-    responses((status = 200, content_type = "application/zip")))]
-pub async fn bundle(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-    Path(slug): Path<String>,
-) -> Result<Response, ApiError> {
-    require_skills(&principal)?;
-    let e = svc(&state).export_one(&slug).await.map_err(se)?;
-    let io_err = |e: std::io::Error| ApiError::Internal(anyhow::anyhow!(e.to_string()));
-    let zip_err = |e: zip::result::ZipError| ApiError::Internal(anyhow::anyhow!(e.to_string()));
-    let mut buf = std::io::Cursor::new(Vec::new());
-    {
-        let mut zw = zip::ZipWriter::new(&mut buf);
-        let opts = zip::write::SimpleFileOptions::default();
-        zw.start_file("SKILL.md", opts).map_err(zip_err)?;
-        std::io::Write::write_all(
-            &mut zw,
-            engram_core::skills::render_skill_md(&e.skill).as_bytes(),
-        )
-        .map_err(io_err)?;
-        for f in &e.files {
-            zw.start_file(&f.path, opts).map_err(zip_err)?;
-            std::io::Write::write_all(&mut zw, f.content.as_bytes()).map_err(io_err)?;
-        }
-        zw.finish().map_err(zip_err)?;
-    }
-    Response::builder()
-        .header(header::CONTENT_TYPE, "application/zip")
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}.zip\"", e.skill.slug),
-        )
-        .body(Body::from(buf.into_inner()))
-        .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))
 }
 
 /// 写（upsert）一个附属文件；返回 path 与字节数。

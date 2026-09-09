@@ -18,6 +18,10 @@ const state = {
       tags: ['rust', 'review'],
       enabled: true,
       source: 'manual',
+      kind: 'text',
+      origin: 'self',
+      local_path: null,
+      repo_url: null,
       created_at: '2026-09-05T00:00:00Z',
       updated_at: '2026-09-05T00:00:00Z',
     },
@@ -29,6 +33,25 @@ const state = {
       tags: ['ops'],
       enabled: false,
       source: 'import',
+      kind: 'text',
+      origin: 'self',
+      local_path: null,
+      repo_url: null,
+      created_at: '2026-09-05T00:00:00Z',
+      updated_at: '2026-09-05T00:00:00Z',
+    },
+    {
+      id: 's3',
+      slug: 'local-tool',
+      name: '本地工具',
+      description: '脚本型：真身在本地',
+      tags: [],
+      enabled: true,
+      source: 'mcp',
+      kind: 'script',
+      origin: 'both',
+      local_path: '/opt/skills/local-tool',
+      repo_url: 'https://github.com/x/local-tool',
       created_at: '2026-09-05T00:00:00Z',
       updated_at: '2026-09-05T00:00:00Z',
     },
@@ -73,6 +96,8 @@ vi.mock('@/lib/api', () => {
       }
       if (p === '/skills/deploy-check') return { ...state.rows[1], content: '# 清单' }
       if (p === '/skills/deploy-check/files') return []
+      if (p === '/skills/local-tool') return { ...state.rows[2], content: '# 本地真身\n由指针现读。' }
+      if (p === '/skills/local-tool/files') return []
       if (p === '/skills/new-skill') {
         return { slug: 'new-skill', name: '新技能', description: '', content: '', tags: [], enabled: true, source: 'manual' }
       }
@@ -230,5 +255,57 @@ describe('Skills 技能页（双栏）', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '查看' })[1])
     await waitFor(() => expect(screen.getByText("print('hi')")).toBeTruthy())
     expect(screen.getByText('← 返回 SKILL.md')).toBeTruthy()
+  })
+
+  it('二态展示：text 型带「文本」徽标，script 型带「脚本」徽标且详情显示本地指针', async () => {
+    render(<MemoryRouter><Skills /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('PR 审查')).toBeTruthy())
+    // 列表徽标：两种形态都在目录里
+    expect(screen.getAllByText('文本').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('脚本').length).toBeGreaterThanOrEqual(1)
+
+    // 切到 script 型技能：详情头显示本地路径 + 仓库链接，版本按钮隐藏
+    fireEvent.click(screen.getByRole('button', { name: /本地工具/ }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '本地工具' })).toBeTruthy())
+    expect(screen.getAllByText(/\/opt\/skills\/local-tool/).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('https://github.com/x/local-tool')).toBeTruthy()
+    expect(screen.getByText('脚本型技能（本地指针）')).toBeTruthy()
+    // script 型：无「版本」按钮、无附属文件管理
+    expect(screen.queryByRole('button', { name: '版本' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '添加文件' })).toBeNull()
+    // 现读正文渲染
+    await waitFor(() => expect(screen.getByText('由指针现读。')).toBeTruthy())
+
+    // 切回 text 型：版本按钮回来、附属文件区正常
+    fireEvent.click(screen.getByRole('button', { name: /PR 审查/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '版本' })).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('附属文件')).toBeTruthy())
+  })
+
+  it('新建表单：切 script 型要求本地路径，POST body 携带 kind/origin/local_path/repo_url', async () => {
+    render(<MemoryRouter><Skills /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText('PR 审查')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: '新建' }))
+    fireEvent.change(screen.getByLabelText('技能名'), { target: { value: '带脚本技能' } })
+    fireEvent.change(screen.getByLabelText('存储形态'), { target: { value: 'script' } })
+    fireEvent.change(screen.getByLabelText('来源'), { target: { value: 'both' } })
+    fireEvent.change(screen.getByLabelText('本地路径'), { target: { value: '/opt/skills/with-script' } })
+    fireEvent.change(screen.getByLabelText('仓库地址'), { target: { value: 'https://github.com/x/y' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith(
+        '/skills',
+        expect.objectContaining({
+          name: '带脚本技能',
+          kind: 'script',
+          origin: 'both',
+          local_path: '/opt/skills/with-script',
+          repo_url: 'https://github.com/x/y',
+          content: '',
+        }),
+      )
+    })
   })
 })

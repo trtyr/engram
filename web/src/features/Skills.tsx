@@ -25,9 +25,22 @@ const SOURCE_LABEL: Record<string, string> = {
   mcp: 'MCP',
 }
 
+/** 存储形态标签：text=整体入库 / script=本地指针。 */
+const KIND_LABEL: Record<string, string> = {
+  text: '文本',
+  script: '脚本',
+}
+
+/** 来源标签。 */
+const ORIGIN_LABEL: Record<string, string> = {
+  self: '自建',
+  github: 'GitHub',
+  both: '自建+GitHub',
+}
+
 type PaneMode = 'read' | 'edit' | 'revs'
 
-/** 完整详情（含正文）+ 附属文件索引。 */
+/** 完整详情（含正文；script 型正文由后端从 local_path 现读）。 */
 interface SkillDetail {
   slug: string
   name: string
@@ -36,7 +49,13 @@ interface SkillDetail {
   tags: string[]
   enabled: boolean
   source: string
+  kind: string
+  origin: string
+  local_path: string | null
+  repo_url: string | null
 }
+
+const isScript = (d: { kind: string } | null) => d?.kind === 'script'
 
 export default function Skills() {
   const [rows, setRows] = useState<SkillSummaryDto[] | null>(null)
@@ -62,6 +81,11 @@ export default function Skills() {
   const [description, setDescription] = useState('')
   const [tags, setTags] = useState('')
   const [content, setContent] = useState('')
+  // 二态（0038）：text=入库 / script=本地指针
+  const [kind, setKind] = useState('text')
+  const [localPath, setLocalPath] = useState('')
+  const [origin, setOrigin] = useState('self')
+  const [repoUrl, setRepoUrl] = useState('')
 
   // 导入表单
   const [importText, setImportText] = useState('')
@@ -110,7 +134,7 @@ export default function Skills() {
     load()
   }, [load])
 
-  // 选中变化 → 拉详情与文件索引
+  // 选中变化 → 拉详情；text 型顺带拉附属文件索引（script 型无入库文件）
   useEffect(() => {
     if (!selected) {
       setDetail(null)
@@ -119,14 +143,20 @@ export default function Skills() {
     }
     let alive = true
     setDetailErr('')
-    Promise.all([
-      api.get<SkillDetail>(`/skills/${selected}`),
-      api.get<SkillFileInfoDto[]>(`/skills/${selected}/files`),
-    ])
-      .then(([s, fs]) => {
+    api
+      .get<SkillDetail>(`/skills/${selected}`)
+      .then((s) => {
         if (!alive) return
         setDetail(s)
-        setFiles(fs)
+        if (s.kind === 'script') {
+          setFiles([])
+          return Promise.resolve()
+        }
+        return api
+          .get<SkillFileInfoDto[]>(`/skills/${selected}/files`)
+          .then((fs) => {
+            if (alive) setFiles(fs)
+          })
       })
       .catch((e) => {
         if (!alive) return
@@ -150,12 +180,14 @@ export default function Skills() {
     if (!editName.trim()) return
     setBusy(true)
     try {
-      await api.put(`/skills/${slug}`, {
+      const body: Record<string, unknown> = {
         name: editName.trim(),
         description: editDescription.trim(),
-        content: editContent,
         tags: editTags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
-      })
+      }
+      // script 型正文不入库（SKILL.md 在本地）——不发 content
+      if (!isScript(detail)) body.content = editContent
+      await api.put(`/skills/${slug}`, body)
       setMode('read')
       setErr('')
       await load()
@@ -216,14 +248,22 @@ export default function Skills() {
         name: name.trim(),
         slug: slug.trim() || null,
         description: description.trim(),
-        content,
+        content: kind === 'script' ? '' : content,
         tags: tags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+        kind,
+        origin,
+        local_path: kind === 'script' ? localPath.trim() || null : null,
+        repo_url: origin === 'self' ? null : repoUrl.trim() || null,
       })
       setName('')
       setSlug('')
       setDescription('')
       setTags('')
       setContent('')
+      setKind('text')
+      setLocalPath('')
+      setOrigin('self')
+      setRepoUrl('')
       setPanel(null)
       setErr('')
       await load(false)
@@ -322,7 +362,7 @@ export default function Skills() {
     URL.revokeObjectURL(url)
   }
 
-  /** 消费形态②：单文件直下（raw）。 */
+  /** 单文件直下（raw）。 */
   async function downloadFile(slug: string, path: string) {
     setBusy(true)
     try {
@@ -331,20 +371,6 @@ export default function Skills() {
       setErr('')
     } catch (e) {
       setErr(e instanceof Error ? e.message : '下载失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  /** 消费形态③：整包下载（SKILL.md + 全部附属文件，zip）。 */
-  async function downloadBundle(slug: string) {
-    setBusy(true)
-    try {
-      const blob = await api.download(`/skills/${slug}/bundle`)
-      await saveBlob(blob, `${slug}.zip`)
-      setErr('')
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '整包下载失败')
     } finally {
       setBusy(false)
     }
@@ -467,16 +493,66 @@ export default function Skills() {
               value={tags}
               onChange={(e) => setTags(e.target.value)}
             />
+            <select
+              className={selectCls}
+              aria-label="存储形态"
+              title="text=整体入库；script=带脚本，真身存本地文件夹，系统只存指针"
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+            >
+              <option value="text">文本（入库）</option>
+              <option value="script">脚本（本地指针）</option>
+            </select>
+            <select
+              className={selectCls}
+              aria-label="来源"
+              value={origin}
+              onChange={(e) => setOrigin(e.target.value)}
+            >
+              <option value="self">自建</option>
+              <option value="github">GitHub</option>
+              <option value="both">自建+GitHub</option>
+            </select>
           </div>
-          <textarea
-            className={`${inputCls} h-40 w-full font-mono`}
-            placeholder="SKILL.md 正文（markdown）——写清这个技能做什么、怎么做、何时用；脚本/参考资料创建后从右栏添加文件"
-            aria-label="技能正文"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-          />
+          {kind === 'script' && (
+            <div className="flex flex-wrap gap-2">
+              <input
+                className={`${inputCls} flex-1 font-mono`}
+                placeholder="本地技能文件夹路径（必填，含 SKILL.md，如 /opt/skills/my-tool）"
+                aria-label="本地路径"
+                value={localPath}
+                onChange={(e) => setLocalPath(e.target.value)}
+              />
+              {origin !== 'self' && (
+                <input
+                  className={`${inputCls} w-72 font-mono`}
+                  placeholder="https://github.com/user/repo（可选）"
+                  aria-label="仓库地址"
+                  value={repoUrl}
+                  onChange={(e) => setRepoUrl(e.target.value)}
+                />
+              )}
+            </div>
+          )}
+          {kind === 'script' ? (
+            <p className="text-[11px] leading-4 text-muted-foreground">
+              脚本型：SKILL.md 与脚本（scripts/*.py 等）放本地文件夹，系统只存指针——正文不入库、文件/版本操作走本地，get 时现读。
+            </p>
+          ) : (
+            <textarea
+              className={`${inputCls} h-40 w-full font-mono`}
+              placeholder="SKILL.md 正文（markdown）——写清这个技能做什么、怎么做、何时用；纯文本参考资料创建后从右栏添加文件（不允许 .py/.sh 等脚本文件）"
+              aria-label="技能正文"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+            />
+          )}
           <div className="flex gap-2">
-            <Button size="sm" disabled={busy || !name.trim()} onClick={doCreate}>
+            <Button
+              size="sm"
+              disabled={busy || !name.trim() || (kind === 'script' && !localPath.trim())}
+              onClick={doCreate}
+            >
               创建
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setPanel(null)}>
@@ -580,6 +656,16 @@ export default function Skills() {
                       </p>
                       <p className="mt-0.5 flex items-center gap-1.5 pl-3.5">
                         <code className="font-mono text-[11px] text-muted-foreground">{s.slug}</code>
+                        <span
+                          className={cn(
+                            'rounded border px-1 text-[10px] leading-3.5',
+                            s.kind === 'script'
+                              ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                              : 'border-border text-muted-foreground',
+                          )}
+                        >
+                          {KIND_LABEL[s.kind] ?? s.kind}
+                        </span>
                         <span className="rounded border border-border px-1 text-[10px] leading-3.5 text-muted-foreground">
                           {SOURCE_LABEL[s.source] ?? s.source}
                         </span>
@@ -623,6 +709,20 @@ export default function Skills() {
                       <span className="rounded border border-border px-1.5 py-0.5">
                         {SOURCE_LABEL[detail.source] ?? detail.source}
                       </span>
+                      <span
+                        className={cn(
+                          'rounded border px-1.5 py-0.5',
+                          isScript(detail)
+                            ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                            : 'border-border',
+                        )}
+                        title={isScript(detail) ? '脚本存本地文件夹，系统只存指针' : '整体入库'}
+                      >
+                        {KIND_LABEL[detail.kind] ?? detail.kind}
+                      </span>
+                      <span className="rounded border border-border px-1.5 py-0.5">
+                        {ORIGIN_LABEL[detail.origin] ?? detail.origin}
+                      </span>
                       <span className={detail.enabled ? 'text-emerald-600' : ''}>● {detail.enabled ? '启用' : '停用'}</span>
                       {(detail.tags ?? []).map((t) => (
                         <span key={t} className="rounded border border-border px-1.5 py-0.5">
@@ -630,6 +730,25 @@ export default function Skills() {
                         </span>
                       ))}
                     </p>
+                    {isScript(detail) && (
+                      <p className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                        <span>📁 本地：</span>
+                        <code className="max-w-full break-all font-mono">{detail.local_path ?? '（未设置）'}</code>
+                        {detail.repo_url && (
+                          <>
+                            <span>·</span>
+                            <a
+                              className="max-w-full break-all underline decoration-dotted hover:text-foreground"
+                              href={detail.repo_url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {detail.repo_url}
+                            </a>
+                          </>
+                        )}
+                      </p>
+                    )}
                   </div>
                   <div className="flex shrink-0 gap-1">
                     <Button size="sm" variant="ghost" onClick={() => setMode('read')} disabled={mode === 'read'}>
@@ -638,23 +757,16 @@ export default function Skills() {
                     <Button size="sm" variant="ghost" onClick={() => startEdit(detail.slug)} disabled={mode === 'edit'}>
                       编辑
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => showRevs(detail.slug)} disabled={mode === 'revs'}>
-                      版本
-                    </Button>
+                    {!isScript(detail) && (
+                      <Button size="sm" variant="ghost" onClick={() => showRevs(detail.slug)} disabled={mode === 'revs'}>
+                        版本
+                      </Button>
+                    )}
                     <Button size="sm" variant="ghost" disabled={busy} onClick={() => doToggle(detail.slug, !detail.enabled)}>
                       {detail.enabled ? '停用' : '启用'}
                     </Button>
                     <Button size="sm" variant="ghost" disabled={busy} onClick={() => doDelete(detail.slug)}>
                       删除
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy}
-                      title="整包下载：SKILL.md + scripts/ + references/（zip）"
-                      onClick={() => downloadBundle(detail.slug)}
-                    >
-                      整包下载
                     </Button>
                   </div>
                 </div>
@@ -692,8 +804,19 @@ export default function Skills() {
                       <>
                         <WikiMarkdown content={detail.content} />
 
-                        {/* 附属文件（folder 形态） */}
-                        <div className="mt-8 border-t border-border pt-4">
+                        {isScript(detail) ? (
+                          /* script 型：真身在本地，系统只存指针——不显示附属文件管理 */
+                          <div className="mt-8 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs leading-5 text-muted-foreground">
+                            <p className="font-medium text-foreground">脚本型技能（本地指针）</p>
+                            <p className="mt-1">
+                              真身存放在本地文件夹 <code className="break-all font-mono">{detail.local_path ?? '（未设置）'}</code>
+                              （SKILL.md + scripts/），系统只存指针与来源，正文不入库、版本由本地 git 管理。
+                              修改脚本请直接编辑本地文件；路径失效时详情会报「指针失效」。
+                            </p>
+                          </div>
+                        ) : (
+                          /* text 型：附属文件随库走 */
+                          <div className="mt-8 border-t border-border pt-4">
                           <div className="flex items-center justify-between">
                             <h3 className="text-sm font-semibold">
                               附属文件
@@ -772,7 +895,8 @@ export default function Skills() {
                               ))}
                             </ul>
                           )}
-                        </div>
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -802,12 +926,20 @@ export default function Skills() {
                         onChange={(e) => setEditTags(e.target.value)}
                       />
                     </div>
-                    <textarea
-                      className={`${inputCls} h-64 w-full font-mono`}
-                      aria-label="编辑技能正文"
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                    />
+                    {isScript(detail) ? (
+                      <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs leading-5 text-muted-foreground">
+                        脚本型技能正文不入库——SKILL.md 请直接编辑本地文件{' '}
+                        <code className="break-all font-mono">{detail.local_path ?? '（未设置）'}</code>
+                        ，此处只可改名称/描述/标签。
+                      </p>
+                    ) : (
+                      <textarea
+                        className={`${inputCls} h-64 w-full font-mono`}
+                        aria-label="编辑技能正文"
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                      />
+                    )}
                     <div className="flex gap-2">
                       <Button size="sm" disabled={busy} onClick={() => doEdit(detail.slug)}>
                         保存

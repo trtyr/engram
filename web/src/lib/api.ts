@@ -501,6 +501,14 @@ export interface SkillSummaryDto {
   tags: string[]
   enabled: boolean
   source: string
+  /** 存储形态：text=整体入库 / script=脚本存本地、库中只存指针 */
+  kind: string
+  /** 来源：self=自建 / github=源自 GitHub / both=自建且已发布 */
+  origin: string
+  /** script 型指针：本地技能文件夹路径 */
+  local_path: string | null
+  /** GitHub 仓库地址（origin 含 github 时） */
+  repo_url: string | null
   created_at: string
   updated_at: string
 }

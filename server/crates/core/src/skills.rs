@@ -4,6 +4,12 @@
 //! 语义字段每次变更前留版本快照（skill_revisions，保留最近 50 版），可回滚。
 //! 批量导入直接吃 SKILL.md 全文（frontmatter 容错解析），迁移现有技能库零改写。
 //!
+//! 二态存储（0038）：text = 整体入库（无脚本，或依赖走 npm/cargo 全局二进制——全是文本）；
+//! script = 真身只存本地文件夹（SKILL.md + scripts/ 等），库中只存指针（local_path）+ 来源
+//! （origin: self/github/both，github 侧可记 repo_url）——content 不入库（get 现读、
+//! 指针失效明确报错）、file_*/versions/restore 一律拒绝并指引本地操作、不产 revisions
+//! 快照（版本归本地 git 管）。
+//!
 //! 持久化在 `engram_storage::repo::skills`（本文件只保留校验、冲突语义与编排；
 //! 快照+变更的事务整体落在 repo 的 `*_tx` 函数内）。
 
@@ -33,6 +39,32 @@ impl From<StoreError> for SkillsError {
 
 /// 版本快照保留上限（防膨胀；更老的自动淘汰）。
 pub use engram_storage::repo::skills::MAX_REVISIONS;
+
+// ---------- 二态存储（0038）：text=入库 / script=本地指针 ----------
+
+/// 合法存储形态。
+pub const KINDS: &[&str] = &["text", "script"];
+
+/// 合法来源：self=自建未发布 / github=源自 GitHub / both=自建且已发布。
+pub const ORIGINS: &[&str] = &["self", "github", "both"];
+
+/// 「真脚本」后缀清单：text 型技能的附属文件命中即拒绝（这类技能应整体走本地 + 指针）。
+/// npm/cargo 全局二进制依赖只出现在 SKILL.md 说明文字里，不在附属文件，不受影响。
+pub const SCRIPT_EXTS: &[&str] = &[
+    "py", "sh", "bash", "zsh", "fish", "rb", "pl", "lua", "ps1", "bat", "cmd", "js", "mjs", "cjs",
+    "ts",
+];
+
+/// 附属文件路径是否是「真脚本」（按后缀判定，大小写不敏感）。
+pub fn is_script_path(path: &str) -> bool {
+    path.rsplit('.')
+        .next()
+        .map(|ext| SCRIPT_EXTS.iter().any(|e| ext.eq_ignore_ascii_case(e)))
+        .unwrap_or(false)
+}
+
+/// local_path 上限（本地文件系统路径的合理长度）。
+pub const LOCAL_PATH_MAX: usize = 1024;
 
 // ---------- frontmatter 容错解析 ----------
 
@@ -314,6 +346,8 @@ pub struct SkillsService {
 }
 
 /// 新建参数束（create_skill 入参 > 7 个会触发 clippy::too_many_arguments，收拢成结构体）。
+/// kind="script" 时 local_path 必填、content 须为空、不产 create 快照；
+/// origin 含 github 时可带 repo_url；kind="text" 时 local_path 必须为 None。
 #[derive(Debug, Clone, Copy)]
 pub struct NewSkill<'a> {
     pub slug: Option<&'a str>,
@@ -323,9 +357,14 @@ pub struct NewSkill<'a> {
     pub tags: &'a [String],
     pub enabled: bool,
     pub source: &'a str,
+    pub kind: &'a str,
+    pub origin: &'a str,
+    pub local_path: Option<&'a str>,
+    pub repo_url: Option<&'a str>,
 }
 
 /// 新建/更新的可选语义字段（None = 不动）。
+/// origin/repo_url/local_path 为终值语义（服务层与现状合并计算，见 update_skill）。
 #[derive(Debug, Default, Clone)]
 pub struct SkillPatch {
     pub name: Option<String>,
@@ -333,6 +372,19 @@ pub struct SkillPatch {
     pub content: Option<String>,
     pub tags: Option<Vec<String>>,
     pub enabled: Option<bool>,
+    pub origin: Option<String>,
+    pub repo_url: Option<String>,
+    pub local_path: Option<String>,
+}
+
+/// 二态字段规范化结果（validate_two_kind 返回束）。
+struct NormalizedKind {
+    kind: String,
+    origin: String,
+    local_path: Option<String>,
+    repo_url: Option<String>,
+    /// script 型不产 create 快照（正文不在库中，无内容可快照）
+    snapshot: bool,
 }
 
 impl SkillsService {
@@ -351,6 +403,66 @@ impl SkillsService {
             return Err(SkillsError::BadRequest("技能名过长（>200 字符）".into()));
         }
         Ok(())
+    }
+    /// 二态字段校验（create 用）。
+    /// 规则：script 型 local_path 必填且 content 须为空；text 型不接受 local_path；
+    /// origin=self 不接受 repo_url。script 型不产 create 快照。
+    fn validate_two_kind(
+        kind: &str,
+        origin: &str,
+        content: &str,
+        local_path: Option<&str>,
+        repo_url: Option<&str>,
+    ) -> Result<NormalizedKind, SkillsError> {
+        let kind = kind.trim();
+        if !KINDS.contains(&kind) {
+            return Err(SkillsError::BadRequest(format!(
+                "kind {kind:?} 不合法——只支持 text（纯文本入库）/ script（脚本存本地、库中存指针）"
+            )));
+        }
+        let origin = origin.trim();
+        if !ORIGINS.contains(&origin) {
+            return Err(SkillsError::BadRequest(format!(
+                "origin {origin:?} 不合法——只支持 self（自建）/ github（源自 GitHub）/ both（自建且已发布）"
+            )));
+        }
+        let local_path = local_path.map(str::trim).filter(|p| !p.is_empty());
+        let repo_url = repo_url.map(str::trim).filter(|u| !u.is_empty());
+        if kind == "script" {
+            let Some(p) = local_path else {
+                return Err(SkillsError::BadRequest(
+                    "script 型技能必须给 local_path（本地技能文件夹路径，含 SKILL.md）——系统只存指针，正文不入库"
+                        .into(),
+                ));
+            };
+            if p.len() > LOCAL_PATH_MAX {
+                return Err(SkillsError::BadRequest(format!(
+                    "local_path 过长（>{LOCAL_PATH_MAX} 字符）"
+                )));
+            }
+            if !content.trim().is_empty() {
+                return Err(SkillsError::BadRequest(
+                    "script 型技能正文不入库——content 须为空；SKILL.md 真身放 local_path 下，get 时由系统现读"
+                        .into(),
+                ));
+            }
+        } else if local_path.is_some() {
+            return Err(SkillsError::BadRequest(
+                "text 型技能整体入库，不接受 local_path——脚本存本地的请用 kind=script".into(),
+            ));
+        }
+        if origin == "self" && repo_url.is_some() {
+            return Err(SkillsError::BadRequest(
+                "origin=self 不接受 repo_url——带仓库地址请用 origin=github 或 both".into(),
+            ));
+        }
+        Ok(NormalizedKind {
+            kind: kind.to_string(),
+            origin: origin.to_string(),
+            local_path: local_path.map(str::to_string),
+            repo_url: repo_url.map(str::to_string),
+            snapshot: kind != "script",
+        })
     }
 
     fn resolve_slug(slug: Option<&str>, name: &str) -> Result<String, SkillsError> {
@@ -385,6 +497,7 @@ impl SkillsService {
         Self::validate_name(s.name)?;
         let name = s.name.trim();
         let slug = Self::resolve_slug(s.slug, s.name)?;
+        let nk = Self::validate_two_kind(s.kind, s.origin, s.content, s.local_path, s.repo_url)?;
         let id = Uuid::now_v7();
         let inserted = repo::create_skill_tx(
             &self.pool,
@@ -397,6 +510,11 @@ impl SkillsService {
                 tags: s.tags,
                 enabled: s.enabled,
                 source: s.source,
+                kind: &nk.kind,
+                origin: &nk.origin,
+                local_path: nk.local_path.as_deref(),
+                repo_url: nk.repo_url.as_deref(),
+                snapshot: nk.snapshot,
             },
         )
         .await?;
@@ -433,12 +551,43 @@ impl SkillsService {
         })
     }
 
+    /// 详情读取（含正文）：script 型从 local_path/SKILL.md 现读组装（指针语义——库中不存正文）。
+    /// 指针失效（目录缺失 / SKILL.md 不可读）报 NotFound 带本地路径指引。
+    /// text 型与 get_skill 等价。
+    pub async fn get_skill_with_content(&self, slug: &str) -> Result<SkillDto, SkillsError> {
+        let mut s = self.get_skill(slug).await?;
+        if s.kind == "script" {
+            let path = s.local_path.clone().unwrap_or_default();
+            let md = std::fs::read_to_string(std::path::Path::new(&path).join("SKILL.md"))
+                .map_err(|e| {
+                    SkillsError::NotFound(format!(
+                        "指针失效：无法读取 {path}/SKILL.md（{e}）——确认本地技能文件夹就位，或更新 local_path"
+                    ))
+                })?;
+            s.content = md;
+        }
+        Ok(s)
+    }
+
+    /// script 型技能的文件/版本操作统一拒绝（真身在本地，系统只存指针）。
+    fn reject_script_ops(s: &SkillDto, op: &str) -> Result<(), SkillsError> {
+        if s.kind == "script" {
+            return Err(SkillsError::BadRequest(format!(
+                "{op} 对 script 型技能不可用——文件真身在本地 {}，请直接操作本地文件夹（系统只存指针）",
+                s.local_path.as_deref().unwrap_or("(local_path 缺失)")
+            )));
+        }
+        Ok(())
+    }
+
     /// slug/name → 真实 slug（更新/删除/文件操作寻址用；slug 优先，name 精确兜底）。
     async fn resolve(&self, slug_or_name: &str) -> Result<String, SkillsError> {
         Ok(self.get_skill(slug_or_name).await?.slug)
     }
 
-    /// 语义字段更新：先快照现状（origin=update），再落变更；enabled-only 不留版本。
+    /// 语义字段更新：text 型先快照现状（origin=update）再落变更；enabled-only 不留版本。
+    /// script 型：正文不入库（patch content 拒绝）、任何变更都不留快照（版本归本地 git 管）；
+    /// origin/repo_url/local_path 按终值语义合并后全量写（origin=self 时 repo_url 联动清空）。
     pub async fn update_skill(
         &self,
         slug: &str,
@@ -446,24 +595,82 @@ impl SkillsService {
     ) -> Result<SkillDto, SkillsError> {
         let slug = self.resolve(slug).await?;
         let current = self.get_skill(&slug).await?;
+        if current.kind == "script" && patch.content.is_some() {
+            return Err(SkillsError::BadRequest(format!(
+                "script 型技能正文不入库——改 SKILL.md 请直接编辑本地 {}（系统只存指针）",
+                current.local_path.as_deref().unwrap_or("(local_path 缺失)")
+            )));
+        }
+        let origin = patch
+            .origin
+            .clone()
+            .unwrap_or_else(|| current.origin.clone());
+        if !ORIGINS.contains(&origin.as_str()) {
+            return Err(SkillsError::BadRequest(format!(
+                "origin {origin:?} 不合法——只支持 self（自建）/ github（源自 GitHub）/ both（自建且已发布）"
+            )));
+        }
+        let local_path: Option<String> = if current.kind == "script" {
+            match patch
+                .local_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+            {
+                Some(p) => {
+                    if p.len() > LOCAL_PATH_MAX {
+                        return Err(SkillsError::BadRequest(format!(
+                            "local_path 过长（>{LOCAL_PATH_MAX} 字符）"
+                        )));
+                    }
+                    Some(p.to_string())
+                }
+                None => current.local_path.clone(),
+            }
+        } else {
+            if patch.local_path.is_some() {
+                return Err(SkillsError::BadRequest(
+                    "text 型技能整体入库，不接受 local_path——脚本存本地的请用 kind=script".into(),
+                ));
+            }
+            None
+        };
+        let repo_url: Option<String> = if origin == "self" {
+            None // 改回自建 → 仓库地址联动清空
+        } else {
+            patch
+                .repo_url
+                .clone()
+                .map(|u| u.trim().to_string())
+                .filter(|u| !u.is_empty())
+                .or(current.repo_url.clone())
+        };
         let semantic_change = patch.name.is_some()
             || patch.description.is_some()
             || patch.content.is_some()
             || patch.tags.is_some();
-        let snapshot = semantic_change.then(|| repo::SkillSnapshot {
-            skill_id: current.id,
-            name: &current.name,
-            description: &current.description,
-            content: &current.content,
-            tags: &current.tags,
-            origin: "update",
-        });
+        let is_script = current.kind == "script";
+        let snapshot = if semantic_change && !is_script {
+            Some(repo::SkillSnapshot {
+                skill_id: current.id,
+                name: &current.name,
+                description: &current.description,
+                content: &current.content,
+                tags: &current.tags,
+                origin: "update",
+            })
+        } else {
+            None
+        };
         let patch_data = repo::SkillPatchData {
             name: patch.name.as_deref().map(str::trim),
             description: patch.description.as_deref().map(str::trim),
             content: patch.content.as_deref(),
             tags: &patch.tags,
             enabled: patch.enabled,
+            origin: &origin,
+            repo_url: repo_url.as_deref(),
+            local_path: local_path.as_deref(),
         };
         let updated =
             repo::update_skill_tx(&self.pool, current.id, snapshot.as_ref(), &patch_data).await?;
@@ -574,6 +781,9 @@ impl SkillsService {
                             content: Some(body),
                             tags: Some(tags),
                             enabled: None,
+                            origin: None,
+                            repo_url: None,
+                            local_path: None,
                         },
                     )
                     .await
@@ -596,6 +806,10 @@ impl SkillsService {
                     tags: &tags,
                     enabled: true,
                     source,
+                    kind: "text",
+                    origin: "self",
+                    local_path: None,
+                    repo_url: None,
                 })
                 .await
             {
@@ -610,19 +824,32 @@ impl SkillsService {
         }
     }
 
-    /// 全量导出（含正文，按 slug 排序——数据主权：技能库随时整体带走）。
     /// 单技能导出（bundle 整包用）：本体 + 全部附属文件。
+    /// 纯库读（不走 get_skill_with_content）：script 型导出指针元数据（content 恒空、无附属文件），
+    /// 不把本地正文卷进导出——导出的是「库」，不是本地文件系统。
     pub async fn export_one(&self, slug: &str) -> Result<SkillExportDto, SkillsError> {
-        let skill = self.get_skill(slug).await?;
-        let files = repo::skill_file_contents(&self.pool, skill.id)
+        let skill = repo::get_skill(&self.pool, slug)
             .await?
-            .into_iter()
-            .map(|(path, content)| SkillFileEntryDto { path, content })
-            .collect();
+            .or(repo::get_skill_by_name(&self.pool, slug).await?)
+            .ok_or_else(|| {
+                SkillsError::NotFound(format!(
+                    "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"
+                ))
+            })?;
+        let files = if skill.kind == "script" {
+            Vec::new()
+        } else {
+            repo::skill_file_contents(&self.pool, skill.id)
+                .await?
+                .into_iter()
+                .map(|(path, content)| SkillFileEntryDto { path, content })
+                .collect()
+        };
         Ok(SkillExportDto { skill, files })
     }
 
     /// 全量导出（含附属文件——folder 形态整体带走，数据主权）。
+    /// script 型天然只带走元数据（content 恒空、skill_files 无行）——指针与来源随行。
     pub async fn export_skills(&self) -> Result<Vec<SkillExportDto>, SkillsError> {
         let mut files_by_skill: std::collections::HashMap<Uuid, Vec<SkillFileEntryDto>> =
             std::collections::HashMap::new();
@@ -656,6 +883,7 @@ impl SkillsService {
     /// 附属文件索引（path + 字节大小，按 path 排序）。
     pub async fn list_files(&self, slug: &str) -> Result<Vec<SkillFileInfoDto>, SkillsError> {
         let s = self.get_skill(slug).await?;
+        Self::reject_script_ops(&s, "文件列表")?;
         Ok(repo::list_skill_files(&self.pool, s.id)
             .await?
             .into_iter()
@@ -667,6 +895,7 @@ impl SkillsService {
     pub async fn get_file(&self, slug: &str, path: &str) -> Result<String, SkillsError> {
         Self::validate_file_path(path)?;
         let s = self.get_skill(slug).await?;
+        Self::reject_script_ops(&s, "文件读取")?;
         repo::get_skill_file(&self.pool, s.id, path.trim())
             .await?
             .ok_or_else(|| {
@@ -692,6 +921,13 @@ impl SkillsService {
             )));
         }
         let s = self.get_skill(slug).await?;
+        Self::reject_script_ops(&s, "文件写入")?;
+        // 判型主规则：text 型的附属文件不允许是「真脚本」——这类技能应整体走 script 型
+        if is_script_path(path) {
+            return Err(SkillsError::BadRequest(format!(
+                "text 型技能不允许附属脚本文件 {path:?}（命中脚本后缀清单）——这类技能请整体走 script 型：真身存本地文件夹（SKILL.md + scripts/），系统只存指针 local_path"
+            )));
+        }
         let existing = repo::list_skill_files(&self.pool, s.id).await?;
         if existing.len() >= SKILL_FILES_MAX && !existing.iter().any(|(p, _)| p == path) {
             return Err(SkillsError::BadRequest(format!(
@@ -708,6 +944,7 @@ impl SkillsService {
     pub async fn delete_file(&self, slug: &str, path: &str) -> Result<(), SkillsError> {
         Self::validate_file_path(path)?;
         let s = self.get_skill(slug).await?;
+        Self::reject_script_ops(&s, "文件删除")?;
         let n = repo::delete_skill_file(&self.pool, s.id, path.trim()).await?;
         if n == 0 {
             return Err(SkillsError::NotFound(format!("文件 {path:?} 不存在")));
@@ -749,6 +986,7 @@ impl SkillsService {
 
     pub async fn list_revisions(&self, slug: &str) -> Result<Vec<SkillRevisionDto>, SkillsError> {
         let skill = self.get_skill(slug).await?;
+        Self::reject_script_ops(&skill, "版本列表")?;
         Ok(repo::list_revisions(&self.pool, skill.id).await?)
     }
 
@@ -759,6 +997,7 @@ impl SkillsService {
         revision_id: Uuid,
     ) -> Result<SkillDto, SkillsError> {
         let skill = self.get_skill(slug).await?;
+        Self::reject_script_ops(&skill, "版本回滚")?;
         let rev = repo::get_revision(&self.pool, revision_id, skill.id)
             .await?
             .ok_or_else(|| {
@@ -921,5 +1160,72 @@ description: |
         assert!(!valid_slug("Has Upper"));
         assert!(!valid_slug("中文"));
         assert!(!valid_slug(&"a".repeat(81)));
+    }
+
+    #[test]
+    fn script_ext_detection() {
+        assert!(is_script_path("scripts/run.py"));
+        assert!(is_script_path("run.sh"));
+        assert!(is_script_path("a/b/c.PY")); // 大小写不敏感
+        assert!(is_script_path("tools/x.ts"));
+        assert!(is_script_path("x.mjs"));
+        assert!(!is_script_path("references/api.md"));
+        assert!(!is_script_path("README"));
+        assert!(!is_script_path("data.json")); // json 不在清单（数据文件不是脚本）
+    }
+
+    #[test]
+    fn two_kind_validation() {
+        // script 缺 local_path
+        assert!(SkillsService::validate_two_kind("script", "self", "", None, None).is_err());
+        // script 带 content（正文不入库）
+        assert!(
+            SkillsService::validate_two_kind("script", "self", "正文", Some("/tmp/sk"), None)
+                .is_err()
+        );
+        // text 带 local_path
+        assert!(
+            SkillsService::validate_two_kind("text", "self", "", Some("/tmp/sk"), None).is_err()
+        );
+        // origin=self 带 repo_url
+        assert!(
+            SkillsService::validate_two_kind(
+                "text",
+                "self",
+                "",
+                None,
+                Some("https://github.com/a/b")
+            )
+            .is_err()
+        );
+        // 非法 kind / origin
+        assert!(SkillsService::validate_two_kind("zip", "self", "", None, None).is_err());
+        assert!(SkillsService::validate_two_kind("text", "mirror", "", None, None).is_err());
+        // 合法 text（github 来源 + repo_url）
+        let nk = SkillsService::validate_two_kind(
+            "text",
+            "github",
+            "正文",
+            None,
+            Some("https://github.com/a/b"),
+        )
+        .unwrap();
+        assert_eq!((nk.kind.as_str(), nk.origin.as_str()), ("text", "github"));
+        assert_eq!(nk.local_path, None);
+        assert_eq!(nk.repo_url.as_deref(), Some("https://github.com/a/b"));
+        assert!(nk.snapshot);
+        // 合法 script（trim 生效、不产快照）
+        let nk = SkillsService::validate_two_kind(
+            "script",
+            "both",
+            "",
+            Some(" /tmp/my-skill "),
+            Some(" https://github.com/a/b "),
+        )
+        .unwrap();
+        assert_eq!((nk.kind.as_str(), nk.origin.as_str()), ("script", "both"));
+        assert_eq!(nk.local_path.as_deref(), Some("/tmp/my-skill"));
+        assert_eq!(nk.repo_url.as_deref(), Some("https://github.com/a/b"));
+        assert!(!nk.snapshot);
     }
 }

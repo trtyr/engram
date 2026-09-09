@@ -88,16 +88,16 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "doc_delete", true, "删除项目文档（不可逆）" => crate::ProjectDocDeleteParams
         ],
         "skills" => action_docs![
-            "list", false, "列出技能（q/tag/enabled 过滤，不含正文）" => crate::SkillsListParams;
-            "get", false, "读技能全文（正文即指令——照做即复用）" => crate::SkillsGetParams;
-            "file_get", false, "读技能附属文件（scripts/references 等）" => crate::SkillsFileGetParams;
-            "file_put", false, "写技能附属文件（同路径覆盖；SKILL.md 本体走 update）" => crate::SkillsFilePutParams;
-            "create", false, "沉淀新技能（正文 + 可选 slug/描述/标签）" => crate::SkillsCreateParams;
-            "update", false, "更新技能（语义变更自动留版本快照）" => crate::SkillsUpdateParams;
-            "versions", false, "版本快照列表（改坏前看历史 / 找回滚 revision_id）" => crate::SkillsVersionsParams;
-            "restore", false, "回滚到历史版本（回滚本身也留快照）" => crate::SkillsRestoreParams;
+            "list", false, "列出技能（q/tag/enabled 过滤，不含正文；kind=script 的条目带 local_path 指针）" => crate::SkillsListParams;
+            "get", false, "读技能全文（script 型从 local_path 现读，指针失效报错）" => crate::SkillsGetParams;
+            "file_get", false, "读技能附属文件（scripts/references 等；script 型不可用——文件在本地，系统只存指针）" => crate::SkillsFileGetParams;
+            "file_put", false, "写技能附属文件（同路径覆盖；SKILL.md 本体走 update；script 型不可用；text 型禁 .py/.sh 等脚本后缀）" => crate::SkillsFilePutParams;
+            "create", false, "沉淀新技能（默认 text 整体入库；带 .py/.sh 等脚本的用 kind=script + local_path 存本地指针）" => crate::SkillsCreateParams;
+            "update", false, "更新技能（语义变更自动留版本快照；script 型改正文拒绝、可改 origin/repo_url/local_path）" => crate::SkillsUpdateParams;
+            "versions", false, "版本快照列表（改坏前看历史 / 找回滚 revision_id；script 型不可用——版本归本地 git）" => crate::SkillsVersionsParams;
+            "restore", false, "回滚到历史版本（回滚本身也留快照；script 型不可用）" => crate::SkillsRestoreParams;
             "delete", true, "删除技能（级联删版本快照，不可逆；仅限用户明确要求）" => crate::SkillsDeleteParams;
-            "import", false, "导入现成 SKILL.md（frontmatter 容错解析）" => crate::SkillsImportParams
+            "import", false, "导入现成 SKILL.md（frontmatter 容错解析；导入为 text 型）" => crate::SkillsImportParams
         ],
         "wiki" => action_docs![
             "search", false, "Wiki 检索（FTS + 向量融合；命中带片段，全文按需 get_page；按库）" => crate::wiki::WikiSearchParams;

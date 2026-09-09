@@ -13,12 +13,13 @@ use crate::models::skills::{SkillDto, SkillRevisionDto, SkillSummaryDto};
 /// 版本快照保留上限（防膨胀；更老的自动淘汰）。
 pub const MAX_REVISIONS: i32 = 50;
 
-const SUMMARY_COLS: &str = "id, slug, name, description, tags, enabled, source, length(content)::bigint AS content_chars, created_at, updated_at";
-const FULL_COLS: &str =
-    "id, slug, name, description, content, tags, enabled, source, created_at, updated_at";
+const SUMMARY_COLS: &str = "id, slug, name, description, tags, enabled, source, length(content)::bigint AS content_chars, kind, origin, local_path, repo_url, created_at, updated_at";
+const FULL_COLS: &str = "id, slug, name, description, content, tags, enabled, source, kind, origin, local_path, repo_url, created_at, updated_at";
 const REV_COLS: &str = "id, skill_id, rev, name, description, content, tags, origin, created_at";
 
 /// 新建参数束（create_skill_tx 入参收拢）。
+/// kind/origin/local_path/repo_url：二态存储（0038）——script 型带 local_path 指针；
+/// snapshot=false（script 型）时不产 create 快照（无入库正文可快照）。
 #[derive(Debug, Clone, Copy)]
 pub struct NewSkillRow<'a> {
     pub id: Uuid,
@@ -29,6 +30,11 @@ pub struct NewSkillRow<'a> {
     pub tags: &'a [String],
     pub enabled: bool,
     pub source: &'a str,
+    pub kind: &'a str,
+    pub origin: &'a str,
+    pub local_path: Option<&'a str>,
+    pub repo_url: Option<&'a str>,
+    pub snapshot: bool,
 }
 
 /// 版本快照内容束（insert_revision_tx 入参收拢）。
@@ -43,6 +49,7 @@ pub struct SkillSnapshot<'a> {
 }
 
 /// 更新的可选语义字段（None = 不动；COALESCE 语义）。
+/// origin/repo_url/local_path 为全量写（服务层先读现状算好终值，与 kind 约束一致性由服务层保证）。
 #[derive(Debug, Clone, Copy)]
 pub struct SkillPatchData<'a> {
     pub name: Option<&'a str>,
@@ -50,6 +57,9 @@ pub struct SkillPatchData<'a> {
     pub content: Option<&'a str>,
     pub tags: &'a Option<Vec<String>>,
     pub enabled: Option<bool>,
+    pub origin: &'a str,
+    pub repo_url: Option<&'a str>,
+    pub local_path: Option<&'a str>,
 }
 
 /// 事务内写一条版本快照 + 淘汰超限旧版。
@@ -93,8 +103,8 @@ async fn prune_old_revisions(conn: &mut sqlx::PgConnection, skill_id: Uuid) -> S
 pub async fn create_skill_tx(pool: &PgPool, row: NewSkillRow<'_>) -> StoreResult<u64> {
     let mut tx = pool.begin().await?;
     let res = sqlx::query(
-        "INSERT INTO skills (id, slug, name, description, content, tags, enabled, source) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+        "INSERT INTO skills (id, slug, name, description, content, tags, enabled, source, kind, origin, local_path, repo_url) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) \
          ON CONFLICT (slug) DO NOTHING",
     )
     .bind(row.id)
@@ -105,23 +115,29 @@ pub async fn create_skill_tx(pool: &PgPool, row: NewSkillRow<'_>) -> StoreResult
     .bind(row.tags)
     .bind(row.enabled)
     .bind(row.source)
+    .bind(row.kind)
+    .bind(row.origin)
+    .bind(row.local_path)
+    .bind(row.repo_url)
     .execute(&mut *tx)
     .await?;
     if res.rows_affected() == 0 {
         return Ok(0);
     }
-    insert_revision_tx(
-        &mut tx,
-        &SkillSnapshot {
-            skill_id: row.id,
-            name: row.name,
-            description: row.description,
-            content: row.content,
-            tags: row.tags,
-            origin: "create",
-        },
-    )
-    .await?;
+    if row.snapshot {
+        insert_revision_tx(
+            &mut tx,
+            &SkillSnapshot {
+                skill_id: row.id,
+                name: row.name,
+                description: row.description,
+                content: row.content,
+                tags: row.tags,
+                origin: "create",
+            },
+        )
+        .await?;
+    }
     tx.commit().await?;
     Ok(res.rows_affected())
 }
@@ -240,6 +256,9 @@ pub async fn update_skill_tx(
             content = COALESCE($4, content), \
             tags = COALESCE($5, tags), \
             enabled = COALESCE($6, enabled), \
+            origin = $7, \
+            repo_url = $8, \
+            local_path = $9, \
             updated_at = now() \
          WHERE id = $1",
     )
@@ -249,6 +268,9 @@ pub async fn update_skill_tx(
     .bind(patch.content)
     .bind(patch.tags)
     .bind(patch.enabled)
+    .bind(patch.origin)
+    .bind(patch.repo_url)
+    .bind(patch.local_path)
     .execute(&mut *tx)
     .await?;
     if res.rows_affected() == 0 {

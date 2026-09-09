@@ -992,6 +992,26 @@ pub struct SkillsCreateParams {
     /// 可选标签
     #[schemars(description = "可选：标签列表，便于分类过滤。")]
     pub tags: Option<Vec<String>>,
+    /// 可选：存储形态（text/script）
+    #[schemars(
+        description = "可选：text=整体入库（默认，纯文本技能，依赖走 npm/cargo 全局二进制时也用这个）；script=带 .py/.sh 等真脚本的技能——真身存本地文件夹（SKILL.md+scripts/），库中只存指针，正文不入库（get 现读），file/versions 操作不可用。"
+    )]
+    pub kind: Option<String>,
+    /// 可选：来源（self/github/both）
+    #[schemars(
+        description = "可选：self=自建未发布（默认）/ github=源自 GitHub / both=自建且已发布。"
+    )]
+    pub origin: Option<String>,
+    /// script 型必填：本地技能文件夹路径
+    #[schemars(
+        description = "kind=script 时必填：本地技能文件夹绝对路径（含 SKILL.md），系统只存指针。kind=text 时不要传。"
+    )]
+    pub local_path: Option<String>,
+    /// 可选：GitHub 仓库地址（元数据）
+    #[schemars(
+        description = "可选：GitHub 仓库地址（origin=github 或 both 时填）。纯元数据，不做远端拉取。"
+    )]
+    pub repo_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -1016,6 +1036,17 @@ pub struct SkillsUpdateParams {
         description = "可选：true=启用 / false=停用。停用后不再出现在 enabled=true 过滤里；缺省列表是管理视角仍会显示（停用技能不被删除）。"
     )]
     pub enabled: Option<bool>,
+    /// 可选：改来源（self/github/both）
+    #[schemars(
+        description = "可选：改来源。self=自建未发布 / github=源自 GitHub / both=自建且已发布。origin 改回 self 时 repo_url 自动清空。"
+    )]
+    pub origin: Option<String>,
+    /// 可选：改仓库地址
+    #[schemars(description = "可选：改 GitHub 仓库地址（origin 含 github 时有意义）。")]
+    pub repo_url: Option<String>,
+    /// 可选：script 型指针改址
+    #[schemars(description = "可选：script 型技能改本地路径（指针搬家）。text 型不可用。")]
+    pub local_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -2146,6 +2177,10 @@ impl EngramMcpServer {
                 tags: &cp.tags.unwrap_or_default(),
                 enabled: true,
                 source: "mcp",
+                kind: cp.kind.as_deref().unwrap_or("text"),
+                origin: cp.origin.as_deref().unwrap_or("self"),
+                local_path: cp.local_path.as_deref(),
+                repo_url: cp.repo_url.as_deref(),
             })
             .await
             .map_err(from_skills)?;
@@ -2176,6 +2211,9 @@ impl EngramMcpServer {
                     content: up.content,
                     tags: up.tags,
                     enabled: up.enabled,
+                    origin: up.origin,
+                    repo_url: up.repo_url,
+                    local_path: up.local_path,
                 },
             )
             .await
@@ -2305,6 +2343,9 @@ impl EngramMcpServer {
                         content: Some(body),
                         tags: Some(meta.tags),
                         enabled: None,
+                        origin: None,
+                        repo_url: None,
+                        local_path: None,
                     },
                 )
                 .await
@@ -2319,6 +2360,10 @@ impl EngramMcpServer {
                     tags: &meta.tags,
                     enabled: true,
                     source: "mcp",
+                    kind: "text",
+                    origin: "self",
+                    local_path: None,
+                    repo_url: None,
                 })
                 .await
                 .map(|s| ("imported", s))

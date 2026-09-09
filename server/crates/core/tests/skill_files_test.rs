@@ -24,16 +24,20 @@ async fn file_crud_roundtrip() {
         tags: &[],
         enabled: true,
         source: "manual",
+        kind: "text",
+        origin: "self",
+        local_path: None,
+        repo_url: None,
     })
     .await
     .expect("建技能");
 
     // 写两个文件
     let (path, size) = svc
-        .put_file("review-pr", "scripts/check.py", "print('hi')\n")
+        .put_file("review-pr", "scripts/check.txt", "print('hi')\n")
         .await
         .expect("put file");
-    assert_eq!(path, "scripts/check.py");
+    assert_eq!(path, "scripts/check.txt");
     assert!(size > 0);
     svc.put_file("review-pr", "references/api.md", "# API 参考")
         .await
@@ -42,17 +46,17 @@ async fn file_crud_roundtrip() {
     // 索引（按 path 排序）
     let files = svc.list_files("review-pr").await.expect("index");
     let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
-    assert_eq!(paths, vec!["references/api.md", "scripts/check.py"]);
+    assert_eq!(paths, vec!["references/api.md", "scripts/check.txt"]);
 
     // 读回
     let content = svc
-        .get_file("review-pr", "scripts/check.py")
+        .get_file("review-pr", "scripts/check.txt")
         .await
         .expect("get");
     assert_eq!(content, "print('hi')\n");
 
     // 覆盖更新（同路径幂等）
-    svc.put_file("review-pr", "scripts/check.py", "print('ok')")
+    svc.put_file("review-pr", "scripts/check.txt", "print('ok')")
         .await
         .expect("overwrite");
     let files = svc.list_files("review-pr").await.expect("index 2");
@@ -77,6 +81,10 @@ async fn path_validation_rejects_escape_and_entry() {
         tags: &[],
         enabled: true,
         source: "manual",
+        kind: "text",
+        origin: "self",
+        local_path: None,
+        repo_url: None,
     })
     .await
     .expect("建技能");
@@ -101,10 +109,14 @@ async fn export_includes_files() {
         tags: &[],
         enabled: true,
         source: "manual",
+        kind: "text",
+        origin: "self",
+        local_path: None,
+        repo_url: None,
     })
     .await
     .expect("建技能");
-    svc.put_file("with-files", "scripts/run.sh", "echo hi")
+    svc.put_file("with-files", "scripts/run.txt", "echo hi")
         .await
         .expect("put file");
 
@@ -114,7 +126,7 @@ async fn export_includes_files() {
         .find(|e| e.skill.slug == "with-files")
         .expect("entry");
     assert_eq!(entry.files.len(), 1);
-    assert_eq!(entry.files[0].path, "scripts/run.sh");
+    assert_eq!(entry.files[0].path, "scripts/run.txt");
     assert_eq!(entry.files[0].content, "echo hi");
 }
 
@@ -129,16 +141,20 @@ async fn bundle_export_roundtrip() {
         tags: &["ops".to_string()],
         enabled: true,
         source: "manual",
+        kind: "text",
+        origin: "self",
+        local_path: None,
+        repo_url: None,
     })
     .await
     .expect("建技能");
-    svc.put_file("bundle-me", "scripts/run.sh", "echo hi")
+    svc.put_file("bundle-me", "scripts/run.txt", "echo hi")
         .await
         .expect("put file");
 
     let e = svc.export_one("bundle-me").await.expect("export_one");
     assert_eq!(e.files.len(), 1);
-    assert_eq!(e.files[0].path, "scripts/run.sh");
+    assert_eq!(e.files[0].path, "scripts/run.txt");
 
     // SKILL.md 还原：import ↔ export 往返不丢元信息
     let md = engram_core::skills::render_skill_md(&e.skill);

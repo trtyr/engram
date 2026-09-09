@@ -317,6 +317,8 @@ pub async fn import_entity_relation(pool: &PgPool, v: &Value) -> StoreResult<boo
 }
 
 /// 技能：slug 冲突跳过；新插入时随行导入附属文件。返回 (skill_imported, files_imported)。
+/// 二态字段（0038）随行：script 型只导元数据（content 空、files 无行）——指针与来源照收，
+/// 导入端标记待本地就位（local_path 在新机器可能失效，get 时现读校验）。
 pub async fn import_skill(pool: &PgPool, v: &Value, files: &[Value]) -> StoreResult<(bool, usize)> {
     let tags: Vec<String> = v
         .get("tags")
@@ -327,9 +329,29 @@ pub async fn import_skill(pool: &PgPool, v: &Value, files: &[Value]) -> StoreRes
                 .collect()
         })
         .unwrap_or_default();
+    let kind = {
+        let k = str_of(v, "kind", "text");
+        if k == "script" { "script" } else { "text" }
+    };
+    let local_path: Option<String> = v
+        .get("local_path")
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.is_empty());
+    // script 型必须有指针（源导出保证；防御：缺失则降级 text，避免落地即违反 CHECK）
+    let kind = if kind == "script" && local_path.is_none() {
+        "text"
+    } else {
+        kind
+    };
+    let repo_url: Option<String> = v
+        .get("repo_url")
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.is_empty());
     let res = sqlx::query(
-        "INSERT INTO skills (id, slug, name, description, content, tags, enabled, source, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'import', $8, $9) ON CONFLICT (slug) DO NOTHING",
+        "INSERT INTO skills (id, slug, name, description, content, tags, enabled, source, kind, origin, local_path, repo_url, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'import', $8, $9, $10, $11, $12, $13) ON CONFLICT (slug) DO NOTHING",
     )
     .bind(id_of(v, "id"))
     .bind(str_of(v, "slug", ""))
@@ -338,12 +360,20 @@ pub async fn import_skill(pool: &PgPool, v: &Value, files: &[Value]) -> StoreRes
     .bind(str_of(v, "content", ""))
     .bind(&tags)
     .bind(v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true))
+    .bind(kind)
+    .bind(str_of(v, "origin", "self"))
+    .bind(local_path)
+    .bind(repo_url)
     .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
     .bind(ts(v, "updated_at").unwrap_or_else(Utc::now))
     .execute(pool)
     .await?;
     if res.rows_affected() == 0 {
         return Ok((false, 0));
+    }
+    // script 型不导入附属文件（真身在导入端本地，系统只存指针）
+    if kind == "script" {
+        return Ok((true, 0));
     }
     let skill_id: Uuid = sqlx::query_scalar("SELECT id FROM skills WHERE slug = $1")
         .bind(str_of(v, "slug", ""))

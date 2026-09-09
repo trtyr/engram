@@ -191,3 +191,72 @@ async fn export_roundtrip_skills_files_count() {
     assert_eq!(skills[0].1.len(), 1);
     assert_eq!(skills[0].1[0]["path"], "a/b.txt");
 }
+
+/// 二态（0038）：script 型技能迁移 = 只导元数据（指针 + 来源），
+/// A 机导出 → B 机导入，指针照收（导入端待本地就位）。
+#[tokio::test]
+async fn transfer_script_skill_metadata_only() {
+    let pg_a = support::start_pgvector().await.expect("A 机测试库");
+    let url_a = support::connection_url(&pg_a).await.expect("A 连接串");
+    let pool_a = support::connect_with_retry(&url_a).await.expect("A 连接");
+    engram_storage::run_migrations(&pool_a)
+        .await
+        .expect("A 迁移");
+    let pg_b = support::start_pgvector().await.expect("B 机测试库");
+    let url_b = support::connection_url(&pg_b).await.expect("B 连接串");
+    let pool_b = support::connect_with_retry(&url_b).await.expect("B 连接");
+    engram_storage::run_migrations(&pool_b)
+        .await
+        .expect("B 迁移");
+
+    // A 机：script 型技能（指针 + 来源，无附属文件）
+    trepo::import_skill(
+        &pool_a,
+        &serde_json::json!({
+            "id": uuid::Uuid::now_v7(), "slug":"remote-tool","name":"远程工具",
+            "description":"","content":"","tags":[],"enabled":true,
+            "kind":"script","origin":"both",
+            "local_path":"/opt/skills/remote-tool","repo_url":"https://github.com/x/remote-tool"
+        }),
+        &[],
+    )
+    .await
+    .expect("A 机导入 script 技能");
+
+    // A 机导出：script 型无 files 行、元数据随行
+    let skills = trepo::export_skills_with_files(&pool_a)
+        .await
+        .expect("A 机导出");
+    let entry = skills
+        .iter()
+        .find(|(s, _)| s["slug"] == "remote-tool")
+        .expect("导出应含 remote-tool");
+    assert_eq!(entry.1.len(), 0, "script 型不应带附属文件");
+    assert_eq!(entry.0["kind"], "script");
+    assert_eq!(entry.0["origin"], "both");
+    assert_eq!(entry.0["local_path"], "/opt/skills/remote-tool");
+    assert_eq!(entry.0["repo_url"], "https://github.com/x/remote-tool");
+
+    // B 机导入：指针照收（先转成 export_bundle 同构形态：skill 对象 + files 字段）
+    let payload: Vec<Value> = skills
+        .into_iter()
+        .map(|(mut s, files)| {
+            s["files"] = serde_json::json!(files);
+            s
+        })
+        .collect();
+    let report = engram_core::transfer::import_skills_bundle(&pool_b, &serde_json::json!(payload))
+        .await
+        .expect("B 机导入");
+    assert_eq!(report["imported"], 1);
+    assert_eq!(report["files_imported"], 0, "script 型不导文件");
+    let (kind, origin, lp, ru): (String, String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT kind, origin, local_path, repo_url FROM skills WHERE slug='remote-tool'",
+    )
+    .fetch_one(&pool_b)
+    .await
+    .unwrap();
+    assert_eq!((kind.as_str(), origin.as_str()), ("script", "both"));
+    assert_eq!(lp.as_deref(), Some("/opt/skills/remote-tool"));
+    assert_eq!(ru.as_deref(), Some("https://github.com/x/remote-tool"));
+}

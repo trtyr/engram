@@ -1506,7 +1506,6 @@ async fn openapi_snapshot() {
             "/skills/import",
             "/skills/import-transfer",
             "/skills/{slug}",
-            "/skills/{slug}/bundle",
             "/skills/{slug}/file",
             "/skills/{slug}/files",
             "/skills/{slug}/revisions",

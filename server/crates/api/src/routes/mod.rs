@@ -80,7 +80,6 @@ use utoipa::OpenApi;
         skills_api::delete_skill, skills_api::list_revisions, skills_api::restore_revision,
         skills_api::import_transfer,
         skills_api::list_files, skills_api::get_file, skills_api::put_file, skills_api::delete_file,
-        skills_api::bundle,
     ),
 )]
 pub(crate) struct ApiDoc;
@@ -380,7 +379,6 @@ pub fn router(state: AppState) -> Router {
         // 技能域：import/export 先于 {slug}，避免被当作 slug 解析
         .route("/skills/import", post(skills_api::import_skills))
         .route("/skills/{slug}/files", get(skills_api::list_files))
-        .route("/skills/{slug}/bundle", get(skills_api::bundle))
         .route(
             "/skills/{slug}/file",
             get(skills_api::get_file)
