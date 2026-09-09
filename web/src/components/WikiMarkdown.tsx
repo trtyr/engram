@@ -179,8 +179,10 @@ const WikiMarkdown = memo(function WikiMarkdown({
           code({ className, node, ...props }) {
             const txt = hastText(node)
             if (/language-mermaid/.test(className ?? '')) return <MermaidBlock code={txt} />
+            // 行内 code（非 ``` 代码块）：长 token 允许任意断行，防止把 flex 链顶出横向滚动
+            const isBlock = /language-/.test(className ?? '')
             return (
-              <code className={className} {...props}>
+              <code className={isBlock ? className : 'break-all'} {...props}>
                 {txt}
               </code>
             )
@@ -211,6 +213,13 @@ const WikiMarkdown = memo(function WikiMarkdown({
           },
           blockquote({ children, node, ...props }) {
             return <blockquote {...props}>{withWikilinks(children, goto)}</blockquote>
+          },
+          table({ children, node, ...props }) {
+            return (
+              <div className="w-full overflow-x-auto [scrollbar-gutter:stable]">
+                <table className="w-full" {...props}>{withWikilinks(children, goto)}</table>
+              </div>
+            )
           },
           td({ children, node, ...props }) {
             return <td {...props}>{withWikilinks(children, goto)}</td>

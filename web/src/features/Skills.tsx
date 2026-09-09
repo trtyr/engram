@@ -607,7 +607,7 @@ export default function Skills() {
       {err && <ErrorBox msg={err} />}
 
       {/* 双栏：目录 + 阅读（有面板打开时退到自然流） */}
-      <div className={cn('flex min-h-0 flex-1 flex-col gap-4 lg:flex-row', !bounded && 'min-h-[60vh]')}>
+      <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col gap-4 lg:flex-row', !bounded && 'min-h-[60vh]')}>
         {/* 左栏：技能目录（独立滚动） */}
         <Card className={cn('w-full shrink-0 overflow-hidden lg:w-72', bounded && 'min-h-0')}>
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
@@ -679,7 +679,7 @@ export default function Skills() {
         </Card>
 
         {/* 右栏：阅读 / 编辑 / 版本 */}
-        <div className={cn('flex min-h-[45vh] flex-1 flex-col lg:min-h-0', !bounded && 'min-h-[60vh]')}>
+        <div className={cn('flex min-h-[45vh] min-w-0 flex-1 flex-col lg:min-h-0', !bounded && 'min-h-[60vh]')}>
           {!selected || !detail ? (
             <Card className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
               {detailErr ? (
@@ -691,7 +691,7 @@ export default function Skills() {
               )}
             </Card>
           ) : (
-            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               {/* 阅读头：名称 + 元信息 + 治理动作 */}
               <div className="shrink-0 border-b border-border px-4 py-2.5 md:px-6">
                 <div className="flex flex-wrap items-start justify-between gap-2">
