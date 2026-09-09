@@ -8,6 +8,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, type ProjectDetailDto, type ProjectDocDto, type ProjectLocationDto } from '@/lib/api'
 import { Card, ErrorBox, Spinner } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls } from '@/lib/ui'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import WikiMarkdown from '@/components/WikiMarkdown'
 
@@ -23,6 +24,120 @@ type Sel =
   | { kind: 'overview' }
   | { kind: 'location'; loc: ProjectLocationDto }
   | { kind: 'doc'; doc: ProjectDocDto }
+
+/** folder 树节点（category 内的子目录递归结构）。 */
+interface FolderNode {
+  name: string
+  path: string
+  folders: FolderNode[]
+  docs: ProjectDocDto[]
+}
+
+function buildFolderTree(docs: ProjectDocDto[]): { rootDocs: ProjectDocDto[]; folders: FolderNode[] } {
+  const rootDocs: ProjectDocDto[] = []
+  const folders: FolderNode[] = []
+  for (const d of docs) {
+    const segs = (d.folder ?? '').split('/').filter(Boolean)
+    let list = folders
+    let node: FolderNode | undefined
+    let path = ''
+    for (const seg of segs) {
+      path = path ? `${path}/${seg}` : seg
+      node = list.find((n) => n.name === seg)
+      if (!node) {
+        node = { name: seg, path, folders: [], docs: [] }
+        list.push(node)
+      }
+      list = node.folders
+    }
+    if (node) node.docs.push(d)
+    else rootDocs.push(d)
+  }
+  const sortRec = (ns: FolderNode[]) => {
+    ns.sort((a, b) => a.name.localeCompare(b.name))
+    ns.forEach((n) => {
+      n.docs.sort((a, b) => a.title.localeCompare(b.title))
+      sortRec(n.folders)
+    })
+  }
+  sortRec(folders)
+  rootDocs.sort((a, b) => a.title.localeCompare(b.title))
+  return { rootDocs, folders }
+}
+
+function countAll(n: FolderNode): number {
+  return n.docs.length + n.folders.reduce((s, f) => s + countAll(f), 0)
+}
+
+/** 递归 folder 树：folder 节点可折叠，叶子为文档。 */
+function FolderTreeView({
+  folders,
+  rootDocs,
+  treeKey,
+  depth,
+  collapsed,
+  onToggle,
+  selectedId,
+  onSelect,
+}: {
+  folders: FolderNode[]
+  rootDocs: ProjectDocDto[]
+  treeKey: string
+  depth: number
+  collapsed: Set<string>
+  onToggle: (key: string) => void
+  selectedId: string | null
+  onSelect: (d: ProjectDocDto) => void
+}) {
+  const pad = { paddingLeft: 8 + depth * 10 }
+  return (
+    <>
+      {folders.map((n) => {
+        const key = `${treeKey}/${n.path}`
+        const open = !collapsed.has(key)
+        return (
+          <div key={n.path}>
+            <button
+              type="button"
+              onClick={() => onToggle(key)}
+              className="block w-full truncate rounded px-2 py-1 text-left text-xs font-medium text-muted-foreground hover:bg-muted"
+              style={pad}
+            >
+              {open ? '▾' : '▸'} 📁 {n.name}
+              <span className="ml-1 text-[10px] opacity-70">({countAll(n)})</span>
+            </button>
+            {open && (
+              <FolderTreeView
+                folders={n.folders}
+                rootDocs={n.docs}
+                treeKey={key}
+                depth={depth + 1}
+                collapsed={collapsed}
+                onToggle={onToggle}
+                selectedId={selectedId}
+                onSelect={onSelect}
+              />
+            )}
+          </div>
+        )
+      })}
+      {rootDocs.map((d) => (
+        <button
+          key={d.id}
+          type="button"
+          onClick={() => onSelect(d)}
+          className={cn(
+            'block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted',
+            selectedId === d.id ? 'bg-muted font-medium' : 'text-muted-foreground',
+          )}
+          style={pad}
+        >
+          {d.title}
+        </button>
+      ))}
+    </>
+  )
+}
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
@@ -58,25 +173,26 @@ export default function ProjectDetail() {
   const docsByCat = (cat: string) => detail.docs.filter((d) => d.category === cat)
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Link to="/projects" className="text-sm text-muted-foreground hover:text-foreground">
-          ← 项目
-        </Link>
-        <h2 className="text-lg font-semibold">{detail.name}</h2>
-        <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-          {TYPE_LABEL[detail.type] ?? detail.type}
-        </span>
-        <span className="text-xs text-muted-foreground">{STATUS_LABEL[detail.status] ?? detail.status}</span>
+    <div className="flex flex-col gap-4 lg:h-[calc(100vh-3rem)]">
+      <div className="shrink-0">
+        <div className="flex items-center gap-3">
+          <Link to="/projects" className="text-sm text-muted-foreground hover:text-foreground">
+            ← 项目
+          </Link>
+          <h2 className="text-lg font-semibold">{detail.name}</h2>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+            {TYPE_LABEL[detail.type] ?? detail.type}
+          </span>
+          <span className="text-xs text-muted-foreground">{STATUS_LABEL[detail.status] ?? detail.status}</span>
+        </div>
+        {detail.description && <p className="mt-1 text-sm text-muted-foreground">{detail.description}</p>}
       </div>
 
-      {detail.description && <p className="text-sm text-muted-foreground">{detail.description}</p>}
-
-      <div className="flex gap-4">
-        {/* 左树 */}
-        <div className="w-64 shrink-0">
-          <Card className="p-2">
-            <nav aria-label="项目目录" className="space-y-0.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+        {/* 左树（独立滚动） */}
+        <div className="flex w-full shrink-0 flex-col lg:w-64">
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
+            <nav aria-label="项目目录" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
               <GroupHeader label="📄 文档" count={detail.docs.length} open={!collapsed.has('docs')} onToggle={() => toggleGroup('docs')} />
 
               {!collapsed.has('docs') &&
@@ -104,16 +220,21 @@ export default function ProjectDetail() {
                         </button>
                       </div>
                       {!collapsed.has(key) &&
-                        docs.map((d) => (
-                          <button
-                            key={d.id}
-                            type="button"
-                            onClick={() => setSel({ kind: 'doc', doc: d })}
-                            className="block w-full truncate rounded px-2 py-1 pl-4 text-left text-sm text-muted-foreground hover:bg-muted"
-                          >
-                            {d.title}
-                          </button>
-                        ))}
+                        (() => {
+                          const tree = buildFolderTree(docsByCat(cat))
+                          return (
+                            <FolderTreeView
+                              folders={tree.folders}
+                              rootDocs={tree.rootDocs}
+                              treeKey={key}
+                              depth={1}
+                              collapsed={collapsed}
+                              onToggle={toggleGroup}
+                              selectedId={sel.kind === 'doc' ? sel.doc.id : null}
+                              onSelect={(d) => setSel({ kind: 'doc', doc: d })}
+                            />
+                          )
+                        })()}
                     </div>
                   )
                 })}
@@ -121,8 +242,8 @@ export default function ProjectDetail() {
           </Card>
         </div>
 
-        {/* 右内容 */}
-        <div className="min-w-0 flex-1">
+        {/* 右内容（独立滚动） */}
+        <div className="flex min-h-[45vh] min-w-0 flex-1 flex-col lg:min-h-0">
           {sel.kind === 'overview' && (
             <OverviewPane detail={detail} onOpenLoc={(loc) => setSel({ kind: 'location', loc })} onAddLoc={() => setSel({ kind: 'location', loc: NEW_LOC })} onOpenDoc={(d) => setSel({ kind: 'doc', doc: d })} />
           )}
@@ -173,6 +294,7 @@ function newDoc(category: string): ProjectDocDto {
     id: '',
     project_id: '',
     category,
+    folder: '',
     title: '',
     content: '',
     frontmatter: {},
@@ -222,7 +344,7 @@ function OverviewPane({
   onOpenDoc: (doc: ProjectDocDto) => void
 }) {
   return (
-    <div className="space-y-4">
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto [scrollbar-gutter:stable] lg:pr-1">
       <Card className="p-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">📍 位置（{detail.locations.length}）</h3>
@@ -334,7 +456,7 @@ function LocationPane({
   }
 
   return (
-    <Card className="space-y-3 p-4">
+    <Card className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 [scrollbar-gutter:stable]">
       <h3 className="text-sm font-semibold">{isNew ? '新增位置' : '编辑位置'}</h3>
       <input className={`${inputCls} w-full`} placeholder="IP（内网/公网/IPv6，如 192.168.1.5 / 82.157.147.224）" value={ip} onChange={(e) => setIp(e.target.value)} />
       <input className={`${inputCls} w-full`} placeholder="主机名（如 tencent-beijing / MacBook Pro）" value={host} onChange={(e) => setHost(e.target.value)} />
@@ -371,6 +493,7 @@ function DocPane({
   const isNew = doc.id === ''
   const [editing, setEditing] = useState(isNew)
   const [category, setCategory] = useState(doc.category)
+  const [folder, setFolder] = useState(doc.folder ?? '')
   const [title, setTitle] = useState(doc.title)
   const [content, setContent] = useState(doc.content)
   const [busy, setBusy] = useState(false)
@@ -380,10 +503,11 @@ function DocPane({
     if (!title.trim()) return
     setBusy(true)
     try {
+      const body = { category, folder: folder.trim(), title: title.trim(), content }
       if (isNew) {
-        await api.post(`/projects/${projectId}/docs`, { category, title: title.trim(), content })
+        await api.post(`/projects/${projectId}/docs`, body)
       } else {
-        await api.put(`/projects/${projectId}/docs/${doc.id}`, { category, title: title.trim(), content })
+        await api.put(`/projects/${projectId}/docs/${doc.id}`, body)
       }
       onChanged()
     } catch (e) {
@@ -407,26 +531,33 @@ function DocPane({
   }
 
   return (
-    <Card className="space-y-3 p-4">
+    <Card className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
       {editing ? (
         <>
-          <div className="flex gap-2">
+          <div className="flex shrink-0 gap-2">
             <select className={selectCls} value={category} onChange={(e) => setCategory(e.target.value)}>
               {categories.map((c) => (
                 <option key={c}>{c}</option>
               ))}
               {!categories.includes(category) && <option>{category}</option>}
             </select>
+            <input
+              className={`${inputCls} w-44 font-mono`}
+              placeholder="子文件夹（可选，如 审计）"
+              aria-label="文档 folder"
+              value={folder}
+              onChange={(e) => setFolder(e.target.value)}
+            />
             <input className={`${inputCls} flex-1`} placeholder="文档标题" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
           <textarea
-            className={`${inputCls} min-h-[40vh] w-full font-mono text-sm`}
+            className={`${inputCls} min-h-[200px] w-full flex-1 resize-none font-mono text-sm leading-5`}
             placeholder="# Markdown 正文"
             value={content}
             onChange={(e) => setContent(e.target.value)}
           />
-          {err && <ErrorBox msg={err} />}
-          <div className="flex gap-2">
+          {err && <div className="shrink-0"><ErrorBox msg={err} /></div>}
+          <div className="flex shrink-0 gap-2">
             <Button size="sm" disabled={busy || !title.trim()} onClick={save}>
               {isNew ? '创建' : '保存'}
             </Button>
@@ -442,7 +573,7 @@ function DocPane({
         </>
       ) : (
         <>
-          <div className="flex items-center justify-between">
+          <div className="flex shrink-0 items-center justify-between">
             <div>
               <h3 className="text-base font-semibold">{doc.title}</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -453,7 +584,9 @@ function DocPane({
               编辑
             </Button>
           </div>
-          <WikiMarkdown content={doc.content} />
+          <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] lg:pr-1">
+            <WikiMarkdown content={doc.content} />
+          </div>
         </>
       )}
     </Card>

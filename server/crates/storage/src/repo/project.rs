@@ -14,7 +14,7 @@ const PROJECT_COLS: &str =
 const LOCATION_COLS: &str =
     "id, project_id, ip, host, os, path, purpose, sort_order, created_at, updated_at";
 const DOC_COLS: &str =
-    "id, project_id, category, title, content, frontmatter, created_at, updated_at";
+    "id, project_id, category, folder, title, content, frontmatter, created_at, updated_at";
 
 pub async fn insert_project(
     pool: &PgPool,
@@ -249,17 +249,19 @@ pub async fn insert_doc(
     id: Uuid,
     project_id: Uuid,
     category: &str,
+    folder: &str,
     title: &str,
     content: &str,
 ) -> StoreResult<u64> {
     let res = sqlx::query(
-        "INSERT INTO project_docs (id, project_id, category, title, content) \
-         VALUES ($1, $2, $3, $4, $5) \
-         ON CONFLICT (project_id, category, title) DO NOTHING",
+        "INSERT INTO project_docs (id, project_id, category, folder, title, content) \
+         VALUES ($1, $2, $3, $4, $5, $6) \
+         ON CONFLICT (project_id, category, folder, title) DO NOTHING",
     )
     .bind(id)
     .bind(project_id)
     .bind(category)
+    .bind(folder)
     .bind(title)
     .bind(content)
     .execute(pool)
@@ -273,16 +275,18 @@ pub async fn update_doc(
     pool: &PgPool,
     id: Uuid,
     category: Option<&str>,
+    folder: Option<&str>,
     title: Option<&str>,
     content: Option<&str>,
 ) -> StoreResult<u64> {
     let res = sqlx::query(
-        "UPDATE project_docs SET category = COALESCE($2, category), title = COALESCE($3, title), \
-         content = COALESCE($4, content), updated_at = now() \
+        "UPDATE project_docs SET category = COALESCE($2, category), folder = COALESCE($3, folder), \
+         title = COALESCE($4, title), content = COALESCE($5, content), updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
     .bind(category)
+    .bind(folder)
     .bind(title)
     .bind(content)
     .execute(pool)

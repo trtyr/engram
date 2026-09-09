@@ -34,6 +34,7 @@ vi.mock('@/lib/api', () => {
         id: 'd1',
         project_id: 'p1',
         category: '后端',
+        folder: '',
         title: 'api.md',
         content: '# API 设计',
         frontmatter: {},
@@ -44,8 +45,20 @@ vi.mock('@/lib/api', () => {
         id: 'd2',
         project_id: 'p1',
         category: '规划',
+        folder: '',
         title: '路线图.md',
         content: '# 路线图',
+        frontmatter: {},
+        created_at: '2026-09-04T00:00:00Z',
+        updated_at: '2026-09-04T00:00:00Z',
+      },
+      {
+        id: 'd3',
+        project_id: 'p1',
+        category: '后端',
+        folder: '审计/wiki',
+        title: 'wiki-audit.md',
+        content: '# 审计',
         frontmatter: {},
         created_at: '2026-09-04T00:00:00Z',
         updated_at: '2026-09-04T00:00:00Z',
@@ -103,5 +116,23 @@ describe('ProjectDetail 详情页', () => {
     await waitFor(() => {
       expect(screen.getByText('API 设计')).toBeTruthy()
     })
+  })
+
+  it('folder 树：多级子文件夹默认展开可折叠，文档挂对应层级', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getAllByText('api.md').length).toBeGreaterThan(0))
+
+    // folder="审计/wiki" 默认展开：📁 审计 与子级 📁 wiki 都可见，文档挂对应层级
+    expect(screen.getAllByText(/📁 审计/).length).toBeGreaterThan(0)
+    await waitFor(() => expect(screen.getAllByText(/📁 wiki/).length).toBeGreaterThan(0))
+    expect(screen.getAllByText('wiki-audit.md').length).toBeGreaterThan(0)
+
+    // 点击 📁 审计 → 折叠：子级 📁 wiki 隐藏（概览页同名列表不受影响）
+    fireEvent.click(screen.getAllByText(/📁 审计/)[0])
+    await waitFor(() => expect(screen.queryAllByText(/📁 wiki/).length).toBe(0))
+
+    // 再点 → 重新展开
+    fireEvent.click(screen.getAllByText(/📁 审计/)[0])
+    await waitFor(() => expect(screen.getAllByText(/📁 wiki/).length).toBeGreaterThan(0))
   })
 })

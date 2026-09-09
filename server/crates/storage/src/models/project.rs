@@ -38,6 +38,8 @@ pub struct ProjectDocDto {
     pub id: Uuid,
     pub project_id: Uuid,
     pub category: String,
+    /// 子文件夹相对路径（/ 分隔，'' = 分类根下；树形呈现 = category → folder → 文档）
+    pub folder: String,
     pub title: String,
     pub content: String,
     #[schema(value_type = Object)]

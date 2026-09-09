@@ -100,6 +100,9 @@ pub struct LocationRequest {
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct DocRequest {
     pub category: String,
+    /// 子文件夹相对路径（/ 分隔，'' = 分类根下；如 审计、归档/ai-permissions）
+    #[serde(default)]
+    pub folder: String,
     pub title: String,
     pub content: String,
 }
@@ -327,7 +330,7 @@ pub async fn add_doc(
 ) -> Result<(StatusCode, Json<ProjectDocDto>), ApiError> {
     require_project(&principal)?;
     let doc = svc(&state)
-        .add_doc(id, &req.category, &req.title, &req.content)
+        .add_doc(id, &req.category, &req.folder, &req.title, &req.content)
         .await
         .map_err(pe)?;
     Ok((StatusCode::CREATED, Json(doc)))
@@ -364,6 +367,7 @@ pub async fn update_doc(
         s.update_doc(
             doc_id,
             Some(&req.category),
+            Some(&req.folder),
             Some(&req.title),
             Some(&req.content),
         )

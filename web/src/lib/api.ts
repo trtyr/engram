@@ -465,6 +465,8 @@ export interface ProjectDocDto {
   id: string
   project_id: string
   category: string
+  /** 子文件夹相对路径（/ 分隔，'' = 分类根下；树形呈现 = category → folder → 文档） */
+  folder: string
   title: string
   content: string
   frontmatter: Record<string, unknown>

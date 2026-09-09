@@ -330,10 +330,35 @@ impl ProjectService {
         ))
     }
 
+    /// folder 路径校验：/ 分隔、禁 .. 与绝对路径/反斜杠/冒号、≤200 字符；'' = 分类根下。
+    fn validate_doc_folder(folder: &str) -> Result<String, ProjectError> {
+        let f = folder.trim().trim_matches('/');
+        if f.is_empty() {
+            return Ok(String::new());
+        }
+        if f.len() > 200 {
+            return Err(ProjectError::BadRequest("folder 过长（>200 字符）".into()));
+        }
+        if f.contains('\\') || f.contains(':') {
+            return Err(ProjectError::BadRequest(
+                "folder 用 / 分隔；不允许反斜杠/盘符冒号".into(),
+            ));
+        }
+        if f.split('/')
+            .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+        {
+            return Err(ProjectError::BadRequest(
+                "folder 含空段或 . / .. 段——用规范相对路径（如 审计、归档/ai-permissions）".into(),
+            ));
+        }
+        Ok(f.to_string())
+    }
+
     pub async fn add_doc(
         &self,
         project_id: Uuid,
         category: &str,
+        folder: &str,
         title: &str,
         content: &str,
     ) -> Result<ProjectDocDto, ProjectError> {
@@ -341,12 +366,15 @@ impl ProjectService {
         if !project.categories.iter().any(|c| c == category) {
             return Err(Self::category_error(category, &project.categories));
         }
+        let folder = Self::validate_doc_folder(folder)?;
         let id = Uuid::now_v7();
-        let inserted =
-            repo::insert_doc(&self.pool, id, project_id, category, title, content).await?;
+        let inserted = repo::insert_doc(
+            &self.pool, id, project_id, category, &folder, title, content,
+        )
+        .await?;
         if inserted == 0 {
             return Err(ProjectError::Conflict(format!(
-                "文档「{title}」在分类「{category}」下已存在——同项目同分类 title 唯一，请 doc-update 已有文档或改 title"
+                "文档「{title}」在分类「{category}」的 folder「{folder}」下已存在——同路径 title 唯一，请 doc-update 已有文档或改 title"
             )));
         }
         self.get_doc(id).await
@@ -357,6 +385,7 @@ impl ProjectService {
         &self,
         id: Uuid,
         category: Option<&str>,
+        folder: Option<&str>,
         title: Option<&str>,
         content: Option<&str>,
     ) -> Result<ProjectDocDto, ProjectError> {
@@ -370,7 +399,12 @@ impl ProjectService {
                 return Err(Self::category_error(category, &project.categories));
             }
         }
-        let updated = repo::update_doc(&self.pool, id, category, title, content).await?;
+        let folder = match folder {
+            Some(f) => Some(Self::validate_doc_folder(f)?),
+            None => None,
+        };
+        let updated =
+            repo::update_doc(&self.pool, id, category, folder.as_deref(), title, content).await?;
         if updated == 0 {
             return Err(ProjectError::NotFound(format!(
                 "文档 {id} 不存在——先 project-get <项目> 看 docs 列表取 id"
@@ -551,6 +585,6 @@ impl ProjectService {
             }
         }
         let patched = lines.join("\n");
-        self.update_doc(id, None, None, Some(&patched)).await
+        self.update_doc(id, None, None, None, Some(&patched)).await
     }
 }

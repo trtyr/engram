@@ -761,8 +761,13 @@ pub struct ProjectDocAddParams {
     )]
     pub category: String,
     /// 文档标题
-    #[schemars(description = "文档标题（同项目同分类下唯一）。")]
+    #[schemars(description = "文档标题（同项目同分类同 folder 下唯一）。")]
     pub title: String,
+    /// 可选：子文件夹相对路径
+    #[schemars(
+        description = "可选：子文件夹相对路径（/ 分隔多级，如 审计、归档/ai-permissions；'' = 分类根下）。树形呈现：分类 → folder → 文档。"
+    )]
+    pub folder: Option<String>,
     /// Markdown 正文
     #[schemars(description = "Markdown 正文。沉淀进展、结论、决策时写清楚背景与结果。")]
     pub content: String,
@@ -812,6 +817,11 @@ pub struct ProjectDocUpdateParams {
     /// 新分类
     #[schemars(description = "可选：移到新分类（须是项目已有分类）。不传不改。")]
     pub category: Option<String>,
+    /// 新子文件夹
+    #[schemars(
+        description = "可选：改子文件夹相对路径（/ 分隔多级；'' = 移到分类根下）。不传不改。"
+    )]
+    pub folder: Option<String>,
     /// 新标题
     #[schemars(description = "可选：新标题。不传不改。")]
     pub title: Option<String>,
@@ -1734,7 +1744,13 @@ impl EngramMcpServer {
         // 分类归属由 service 校验（防孤儿分类，报错列出现有分类）
         let doc = self
             .svc_project()
-            .add_doc(id, &dp.category, &dp.title, &dp.content)
+            .add_doc(
+                id,
+                &dp.category,
+                dp.folder.as_deref().unwrap_or(""),
+                &dp.title,
+                &dp.content,
+            )
             .await
             .map_err(from_project)?;
         // P0-1：刚发送的正文不回显
@@ -1845,6 +1861,7 @@ impl EngramMcpServer {
             .update_doc(
                 id,
                 dp.category.as_deref(),
+                dp.folder.as_deref(),
                 dp.title.as_deref(),
                 dp.content.as_deref(),
             )
