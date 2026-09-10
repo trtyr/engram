@@ -578,8 +578,19 @@ async fn w1_generate_failure_resubmit_recovers() {
         {"slug": "w1-page", "page_type": "concept", "title": "W1页", "content": "# W1页\n\nW1 内容词可检索。"}
     ]});
     let bad = serde_json::Value::String("{not json".into());
-    // analyze ✓ → generate 两连坏 JSON 永久失败 → 重提交后新 generate ✓
-    let (pool, wiki, handle, _pg, lib) = setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
+    // 新语义：坏 JSON 是 Retryable（任务级重试 3 次 × 应用内 2 次调用）——
+    // 6 个坏响应保证 3 次尝试全失败 → 任务 dead + source 标 failed；重提交后消费 pages_ok 自愈。
+    let (pool, wiki, handle, _pg, lib) = setup(vec![
+        analysis,
+        bad.clone(),
+        bad.clone(),
+        bad.clone(),
+        bad.clone(),
+        bad.clone(),
+        bad,
+        pages_ok,
+    ])
+    .await;
 
     let text = "# W1 死锁恢复测试\n这是独一无二的内容 w1-unique-123。";
     let skipped = wiki.ingest(lib, "W1文档", text).await.unwrap();
@@ -589,14 +600,14 @@ async fn w1_generate_failure_resubmit_recovers() {
     ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
-    // 第一轮：generate 永久失败，source 未 ready
+    // 第一轮：generate 重试耗尽，任务进终态（Retryable 耗尽 → dead），source 未 ready
     let failed: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM jobs WHERE kind='wiki_generate' AND status='failed'",
+        "SELECT count(*) FROM jobs WHERE kind='wiki_generate' AND status IN ('failed','dead')",
     )
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(failed, 1, "第一轮 generate 应 failed");
+    assert_eq!(failed, 1, "第一轮 generate 应失败（重试耗尽终态）");
     let src_status: String = sqlx::query_scalar("SELECT status FROM wiki_sources")
         .fetch_one(&pool)
         .await
@@ -741,8 +752,18 @@ async fn w4_permanent_failure_marks_source_failed() {
     let pages_ok = json!({"pages": [
         {"slug": "w4-page", "page_type": "concept", "title": "W4页", "content": "# W4\n\n恢复后的页面。"}
     ]});
-    // analyze ✓ → generate 坏 JSON ×2 → Permanent → W4 标 failed → 重提交自愈 → ready
-    let (pool, wiki, handle, _pg, lib) = setup(vec![analysis, bad.clone(), bad, pages_ok]).await;
+    // analyze ✓ → generate 坏 JSON ×6（3 次尝试全败，Retryable 耗尽转 dead）→ W4 标 failed → 重提交自愈 → ready
+    let (pool, wiki, handle, _pg, lib) = setup(vec![
+        analysis,
+        bad.clone(),
+        bad.clone(),
+        bad.clone(),
+        bad.clone(),
+        bad.clone(),
+        bad,
+        pages_ok,
+    ])
+    .await;
 
     let text = "# W4 失败标记测试\nw4-unique-42。";
     wiki.ingest(lib, "W4文档", text).await.unwrap();

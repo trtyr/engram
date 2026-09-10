@@ -42,7 +42,9 @@ fn to_job_err(e: LlmError) -> JobError {
     }
 }
 
-/// 去 markdown 围栏后解析 JSON。
+/// 去 markdown 围栏后解析 JSON；失败时依次尝试容错提取：
+/// ①截取首个 `{`/`[` 到末个 `}`/`]`（剥掉 LLM 在 JSON 前后附加的说明文字）；
+/// ②修复对象/数组字面量中的尾逗号（`,}` `,]`，字符串字面量内不动）。
 pub fn parse_json_lenient(text: &str) -> Result<serde_json::Value, String> {
     let trimmed = text.trim();
     let body = if let Some(rest) = trimmed.strip_prefix("```json") {
@@ -52,7 +54,71 @@ pub fn parse_json_lenient(text: &str) -> Result<serde_json::Value, String> {
     } else {
         trimmed
     };
-    serde_json::from_str(body.trim()).map_err(|e| format!("JSON 解析失败: {e}"))
+    let body = body.trim();
+    if let Ok(v) = serde_json::from_str(body) {
+        return Ok(v);
+    }
+    let extracted = extract_json_body(body);
+    let repaired = repair_trailing_commas(extracted);
+    serde_json::from_str(repaired.trim()).map_err(|e| format!("JSON 解析失败: {e}"))
+}
+
+/// 截取首个 `{`/`[` 到末个 `}`/`]` 的片段；找不到结构边界则原样返回。
+fn extract_json_body(s: &str) -> &str {
+    let start = s.find(['{', '[']);
+    let end = s.rfind(['}', ']']);
+    match (start, end) {
+        (Some(a), Some(b)) if b > a => &s[a..=b],
+        _ => s,
+    }
+}
+
+/// 删除对象/数组字面量中紧邻 `}`/`]` 的尾逗号；跳过字符串字面量（防误伤内容）。
+fn repair_trailing_commas(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut in_str = false;
+    let mut escaped = false;
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if in_str {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_str = false;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            b'"' => {
+                in_str = true;
+                out.push(c);
+                i += 1;
+            }
+            b',' => {
+                let mut j = i + 1;
+                while j < b.len() && b[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j < b.len() && (b[j] == b'}' || b[j] == b']') {
+                    i += 1; // 丢弃尾逗号
+                } else {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+            _ => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
 /// 统一入口：chat 一次 → 解析失败带追加指令重试一次（所有实现共用）。
@@ -199,7 +265,11 @@ impl DistillLlm for GatewayLlm {
     > {
         Box::pin(async move {
             let (content, _used) = self.chat_once(purpose, system, user, job_id, false).await?;
-            parse_json_lenient(&content).map_err(JobError::Permanent)
+            // LLM 输出非法 JSON 是暂时性错误（输出有随机性，任务级重试常能自愈）——
+            // 分类为 Retryable 让队列的 max_attempts 生效；Permanent 会放弃剩余重试直接 failed。
+            parse_json_lenient(&content).map_err(|e| {
+                JobError::Retryable(format!("LLM 输出非法 JSON（已重试一次仍失败）: {e}"))
+            })
         })
     }
 
@@ -286,7 +356,8 @@ impl DistillLlm for MockLlm {
             self.sent_user.lock().unwrap().push(_user.to_string());
             let mut q = self.chats.lock().unwrap();
             match q.pop_front() {
-                Some(s) => parse_json_lenient(&s).map_err(JobError::Permanent),
+                Some(s) => parse_json_lenient(&s)
+                    .map_err(|e| JobError::Retryable(format!("LLM 输出非法 JSON: {e}"))),
                 None => Err(JobError::Permanent("MockLlm 响应耗尽".into())),
             }
         })
@@ -323,3 +394,67 @@ impl DistillLlm for MockLlm {
 }
 
 pub type LlmRef = Arc<dyn DistillLlm>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lenient_plain_json() {
+        let v = parse_json_lenient(r#"{"a": 1}"#).unwrap();
+        assert_eq!(v["a"], 1);
+    }
+
+    #[test]
+    fn lenient_code_fence() {
+        let v = parse_json_lenient("```json\n{\"a\": [1, 2]}\n```").unwrap();
+        assert_eq!(v["a"][1], 2);
+    }
+
+    #[test]
+    fn lenient_prose_around_json() {
+        // LLM 在 JSON 前后加说明文字——截取结构主体
+        let raw = "好的，以下是分析结果：\n{\"topic\": \"场景\", \"score\": 0.9}\n希望有帮助！";
+        let v = parse_json_lenient(raw).unwrap();
+        assert_eq!(v["topic"], "场景");
+    }
+
+    #[test]
+    fn lenient_trailing_commas() {
+        let v = parse_json_lenient("{\"a\": 1, \"list\": [1, 2,],}").unwrap();
+        assert_eq!(v["list"][1], 2);
+        // 字符串字面量里的 ,} 不被误伤
+        let v2 = parse_json_lenient("{\"text\": \"值A,}值B\", \"n\": 1}").unwrap();
+        assert_eq!(v2["text"], "值A,}值B");
+    }
+
+    #[test]
+    fn lenient_prose_plus_trailing_comma() {
+        let raw = "结果如下：{\"items\": [{\"id\": \"x\",},],}\n以上。";
+        let v = parse_json_lenient(raw).unwrap();
+        assert_eq!(v["items"][0]["id"], "x");
+    }
+
+    #[test]
+    fn lenient_garbage_still_rejected() {
+        let err = parse_json_lenient("这不是 JSON，真的不是").unwrap_err();
+        assert!(err.contains("JSON 解析失败"));
+    }
+
+    #[tokio::test]
+    async fn mock_chat_json_parse_failure_is_retryable() {
+        // 解析失败必须分类为 Retryable——Permanent 会让队列放弃 max_attempts 剩余重试
+        let mock = MockLlm::with_raw_chats(vec!["完全不是 JSON".into()]);
+        let r = mock.chat_json(
+            engram_llm::types::Purpose::Organize,
+            "sys",
+            "user",
+            uuid::Uuid::nil(),
+        );
+        let err = r.await.unwrap_err();
+        assert!(
+            matches!(err, JobError::Retryable(_)),
+            "应为 Retryable，实际 {err:?}"
+        );
+    }
+}

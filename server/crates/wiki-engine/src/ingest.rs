@@ -873,8 +873,8 @@ pub fn register_handlers(
                 let pool = ctx.pool().clone();
                 let job = ctx.job.clone();
                 let r = analyze_job(ctx, llm).await;
-                if let Err(engram_jobs::types::JobError::Permanent(msg)) = &r {
-                    mark_source_failed(&pool, &job, msg).await;
+                if let Err(msg) = source_failure_msg(&job, &r) {
+                    mark_source_failed(&pool, &job, &msg).await;
                 }
                 r
             }
@@ -885,10 +885,25 @@ pub fn register_handlers(
                 let pool = ctx.pool().clone();
                 let job = ctx.job.clone();
                 let r = generate_job(ctx, llm).await;
-                if let Err(engram_jobs::types::JobError::Permanent(msg)) = &r {
-                    mark_source_failed(&pool, &job, msg).await;
+                if let Err(msg) = source_failure_msg(&job, &r) {
+                    mark_source_failed(&pool, &job, &msg).await;
                 }
                 r
             }
         })
+}
+
+/// source 标 failed 的判定：Permanent 立即标；Retryable 在末次尝试（重试耗尽将转 dead）也标，
+/// 否则 source 永卡 processing 无人报错。
+fn source_failure_msg(
+    job: &engram_jobs::types::Job,
+    r: &Result<serde_json::Value, JobError>,
+) -> Result<(), String> {
+    match r {
+        Err(JobError::Permanent(msg)) => Err(msg.clone()),
+        Err(JobError::Retryable(msg)) if job.attempts >= job.max_attempts => {
+            Err(format!("重试耗尽（{msg}）"))
+        }
+        _ => Ok(()),
+    }
 }
