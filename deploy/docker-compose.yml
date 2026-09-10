@@ -8,7 +8,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置}
       POSTGRES_DB: ${POSTGRES_DB:-engram}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # 数据存宿主本地：PG 数据目录 bind mount（Time Machine/手工备份友好）
+      - ${ENGRAM_DATA_HOME:-~/.engram}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-engram}"]
       interval: 5s
@@ -20,6 +21,12 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # 构建期代理：宿主 Clash TUN 会污染容器直连出网（见文件头注释）。
+        # 本机构建传：HTTP_PROXY=http://host.docker.internal:12543（按实际端口改）
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,db}
     depends_on:
       db:
         condition: service_healthy
@@ -33,12 +40,16 @@ services:
       AGENT_MEMORY_ADMIN_PASSWORD: ${AGENT_MEMORY_ADMIN_PASSWORD:?AGENT_MEMORY_ADMIN_PASSWORD 未设置}
       AGENT_MEMORY_MASTER_KEY: ${AGENT_MEMORY_MASTER_KEY:?AGENT_MEMORY_MASTER_KEY 未设置}
       RUST_LOG: ${RUST_LOG:-info}
+      # 运行时出网代理（LLM API / URL 摄取）：宿主 Clash TUN fake-ip 会污染容器直连。
+      # ~/.engram/.env 里配 HTTPS_PROXY=http://host.docker.internal:<宿主代理端口>，常规环境留空即可。
+      HTTP_PROXY: ${HTTPS_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,db}
     ports:
       - "${AGENT_MEMORY_PORT:-8080}:8080"
     volumes:
-      - appdata:/app/data
+      # 数据存宿主本地：uploads / wiki-sources / codegraph
+      - ${ENGRAM_DATA_HOME:-~/.engram}/app:/app/data
     restart: unless-stopped
 
-volumes:
-  pgdata:
-  appdata:
+# 数据卷已 bind mount 到宿主 ~/.engram/（见各服务 volumes），不再使用 named volume
