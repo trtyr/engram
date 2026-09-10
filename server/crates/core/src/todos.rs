@@ -349,6 +349,19 @@ impl TodoService {
                 "severity 仅工单（kind=ticket）可用".into(),
             ));
         }
+        // 工单转 resolved/verified 必须带解决记录（0041 CHECK 兜底前的友好版）
+        if kind == "ticket"
+            && let Some(st) = status
+            && ["resolved", "verified"].contains(&st)
+            && resolution
+                .map(str::trim)
+                .filter(|r| !r.is_empty())
+                .is_none()
+        {
+            return Err(TodoError::BadRequest(
+                "工单转 resolved/verified 必须填写解决记录（resolution）——做了什么/怎么修的".into(),
+            ));
+        }
         let n = repo::update(
             &self.pool,
             id,
