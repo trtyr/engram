@@ -120,11 +120,11 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
         ],
         "todos" => action_docs![
-            "add", false, "快速记一条待办（灵感/计划/操作/排查；不绑定项目）" => crate::TodoAddParams;
-            "list", false, "待办列表（open 优先；status/priority/tag/q 过滤）" => crate::TodoListParams;
-            "get", false, "待办详情" => crate::TodoIdParams;
-            "done", false, "标记完成（记 done_at）" => crate::TodoIdParams;
-            "update", false, "编辑待办（标题/详情/优先级/状态/截止；补丁式）" => crate::TodoUpdateParams;
+            "add", false, "记一条（默认 todo 行动项；kind=ticket 开工单——结构化问题跟踪，建议填 severity/symptom/acceptance）" => crate::TodoAddParams;
+            "list", false, "列表（open 优先；status/priority/tag/q 过滤；ticket 状态含 confirmed/in_progress/resolved/verified）" => crate::TodoListParams;
+            "get", false, "详情（含工单的 severity/symptom/acceptance/resolution）" => crate::TodoIdParams;
+            "done", false, "标记完成（记 done_at；仅 kind=todo——工单用 update 转 resolved）" => crate::TodoIdParams;
+            "update", false, "编辑（标题/详情/优先级/状态/截止/工单字段；状态机按 kind 校验）" => crate::TodoUpdateParams;
             "delete", true, "删除待办（不可逆）" => crate::TodoIdParams
         ],
         "codegraph" => action_docs![

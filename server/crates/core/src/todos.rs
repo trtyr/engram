@@ -1,6 +1,6 @@
-//! 待办域服务（第七域）：不绑定项目的临时任务/灵感速记。
-//!
-//! 定位：轻量「速记 → 做完勾掉」，非工单（无指派/SLA/流程）。
+//! 待办域服务（第七域）：0041 起双形态——
+//! **todo**（微软式行动项：速记→做完勾掉，轻量两态）与
+//! **ticket**（工单：结构化问题跟踪，severity/症状/复现/验收 + 五态状态机）。
 //! 场景靠 tags + priority + due_at + project_hint（纯文本提示，不做 FK 绑定）表达。
 
 use chrono::{DateTime, Utc};
@@ -26,36 +26,78 @@ impl From<StoreError> for TodoError {
 }
 
 pub const STATUSES: &[&str] = &["open", "done", "archived"];
+pub const TICKET_STATUSES: &[&str] = &[
+    "open",
+    "confirmed",
+    "in_progress",
+    "resolved",
+    "verified",
+    "archived",
+];
+pub const SEVERITIES: &[&str] = &["P0", "P1", "P2", "P3"];
 pub const PRIORITIES: &[&str] = &["low", "normal", "high"];
+
+/// kind + status 组合合法性（与 0041 联合 CHECK 同构——应用层先友好报错）。
+pub fn valid_status(kind: &str, status: &str) -> bool {
+    match kind {
+        "todo" => STATUSES.contains(&status),
+        "ticket" => TICKET_STATUSES.contains(&status),
+        _ => false,
+    }
+}
+
+fn status_error(kind: &str, status: &str) -> TodoError {
+    let allowed = match kind {
+        "ticket" => TICKET_STATUSES.join("/"),
+        _ => STATUSES.join("/"),
+    };
+    TodoError::BadRequest(format!(
+        "kind={kind} 的 status 仅接受 {allowed}（收到 {status}）"
+    ))
+}
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct TodoDto {
     pub id: Uuid,
     pub title: String,
     pub body: String,
+    pub kind: String,
     pub status: String,
     pub priority: String,
+    pub severity: Option<String>,
+    pub symptom: String,
+    pub reproduce: String,
+    pub acceptance: String,
+    pub resolution: String,
     pub tags: Vec<String>,
     pub due_at: Option<DateTime<Utc>>,
     pub project_hint: Option<String>,
     pub done_at: Option<DateTime<Utc>>,
+    pub resolved_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-fn to_dto(t: engram_storage::repo::todos::TodoTuple) -> TodoDto {
+fn to_dto(t: repo::TodoRow) -> TodoDto {
     TodoDto {
-        id: t.0,
-        title: t.1,
-        body: t.2,
-        status: t.3,
-        priority: t.4,
-        tags: t.5,
-        due_at: t.6,
-        project_hint: t.7,
-        done_at: t.8,
-        created_at: t.9,
-        updated_at: t.10,
+        id: t.id,
+        title: t.title,
+        body: t.body,
+        kind: t.kind,
+        status: t.status,
+        priority: t.priority,
+        severity: t.severity,
+        symptom: t.symptom,
+        reproduce: t.reproduce,
+        acceptance: t.acceptance,
+        resolution: t.resolution,
+        tags: t.tags,
+        due_at: t.due_at,
+        project_hint: t.project_hint,
+        done_at: t.done_at,
+        resolved_at: t.resolved_at,
+        created_at: t.created_at,
+        updated_at: t.updated_at,
     }
 }
 
@@ -97,12 +139,18 @@ impl TodoService {
             .collect()
     }
 
-    /// 新建待办。
+    /// 新建待办/工单（kind 决定形态：todo=行动项 / ticket=工单）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         title: &str,
         body: &str,
+        kind: &str,
         priority: &str,
+        severity: Option<&str>,
+        symptom: &str,
+        reproduce: &str,
+        acceptance: &str,
         tags: &[String],
         due_at: Option<DateTime<Utc>>,
         project_hint: Option<&str>,
@@ -116,6 +164,25 @@ impl TodoService {
         }
         Self::reject_nul("title", title)?;
         Self::reject_nul("body", body)?;
+        if kind != "todo" && kind != "ticket" {
+            return Err(TodoError::BadRequest(
+                "kind 仅接受 todo（行动项）/ ticket（工单）".into(),
+            ));
+        }
+        if let Some(sv) = severity {
+            if !SEVERITIES.contains(&sv) {
+                return Err(TodoError::BadRequest(format!(
+                    "severity 仅接受 {}（收到 {sv}）",
+                    SEVERITIES.join("/")
+                )));
+            }
+            if kind != "ticket" {
+                return Err(TodoError::BadRequest(
+                    "severity 仅工单（kind=ticket）可用——todo 不需要严重度".into(),
+                ));
+            }
+        }
+        // 工单建议带症状描述（不强制——建票后可补）
         let tags = Self::normalize_tags(tags);
         for t in &tags {
             Self::reject_nul("tags", t)?;
@@ -128,7 +195,12 @@ impl TodoService {
                 id,
                 title,
                 body: body.trim(),
+                kind,
                 priority,
+                severity,
+                symptom: symptom.trim(),
+                reproduce: reproduce.trim(),
+                acceptance: acceptance.trim(),
                 tags: &tags,
                 due_at,
                 project_hint: project_hint.map(str::trim).filter(|s| !s.is_empty()),
@@ -211,7 +283,8 @@ impl TodoService {
             .ok_or_else(|| TodoError::NotFound(format!("待办 {id} 不存在")))
     }
 
-    /// 更新（部分字段，None 不动）。
+    /// 更新（部分字段，None 不动）。status 合法性按该条的 kind 校验
+    /// （todo 拒工单态 / ticket 拒 done——0041 联合 CHECK 的应用层友好版）。
     #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
@@ -220,10 +293,19 @@ impl TodoService {
         body: Option<&str>,
         priority: Option<&str>,
         status: Option<&str>,
+        severity: Option<Option<&str>>,
+        symptom: Option<&str>,
+        reproduce: Option<&str>,
+        acceptance: Option<&str>,
+        resolution: Option<&str>,
         due_at: Option<Option<DateTime<Utc>>>,
         project_hint: Option<Option<&str>>,
         tags: Option<&[String]>,
     ) -> Result<TodoDto, TodoError> {
+        let existing = repo::get(&self.pool, id)
+            .await?
+            .ok_or_else(|| TodoError::NotFound(format!("待办 {id} 不存在")))?;
+        let kind = existing.kind.clone();
         if let Some(t) = title {
             let t = t.trim();
             if t.is_empty() {
@@ -244,12 +326,22 @@ impl TodoService {
             Self::validate_priority(p)?;
         }
         if let Some(s) = status
-            && !STATUSES.contains(&s)
+            && !valid_status(&kind, s)
+        {
+            return Err(status_error(&kind, s));
+        }
+        if let Some(Some(sv)) = severity
+            && !SEVERITIES.contains(&sv)
         {
             return Err(TodoError::BadRequest(format!(
-                "status 仅接受 {}（收到 {s}）",
-                STATUSES.join("/")
+                "severity 仅接受 {}（收到 {sv}）",
+                SEVERITIES.join("/")
             )));
+        }
+        if kind != "ticket" && severity.is_some() {
+            return Err(TodoError::BadRequest(
+                "severity 仅工单（kind=ticket）可用".into(),
+            ));
         }
         let n = repo::update(
             &self.pool,
@@ -259,6 +351,11 @@ impl TodoService {
                 body,
                 priority,
                 status,
+                severity,
+                symptom,
+                reproduce,
+                acceptance,
+                resolution,
                 due_at,
                 project_hint,
                 tags: tags.as_deref(),

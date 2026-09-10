@@ -111,7 +111,17 @@ impl UnifiedSearch {
                     .await
                     .map_err(engram_storage::StoreError::from)
             },
-            async { engram_storage::repo::todos::search_open(&self.pool, query, per_domain).await },
+            async move {
+                engram_storage::repo::todos::search_open(&self.pool, query, per_domain)
+                    .await
+                    .map(|rows| {
+                        rows.into_iter()
+                            .map(|(id, kind, title, body, priority)| {
+                                (id, format!("{kind}:{title}"), body, priority)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            },
         );
 
         let mut merged: Vec<UnifiedHit> = Vec::new();

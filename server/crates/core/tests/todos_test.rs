@@ -20,33 +20,101 @@ async fn setup() -> (PgPool, TodoService, support::TestPg) {
 async fn done_is_idempotent_keeps_first_done_at() {
     let (_pool, svc, _pg) = setup().await;
     let t = svc
-        .create("D17 幂等", "", "normal", &[], None, None)
+        .create(
+            "D17 幂等",
+            "",
+            "todo",
+            "normal",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(t.status, "open");
     assert!(t.done_at.is_none());
 
     let done1 = svc
-        .update(t.id, None, None, None, Some("done"), None, None, None)
+        .update(
+            t.id,
+            None,
+            None,
+            None,
+            Some("done"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     let first = done1.done_at.expect("首次完成应有 done_at");
 
     // 再 done：done_at 保持首值（此前被刷新成第二次 now()）
     let done2 = svc
-        .update(t.id, None, None, None, Some("done"), None, None, None)
+        .update(
+            t.id,
+            None,
+            None,
+            None,
+            Some("done"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(done2.done_at, Some(first), "重复 done 不得改写 done_at");
 
     // done → open 清空；open → done 重新盖新时间戳（新的一次完成）
     let reopened = svc
-        .update(t.id, None, None, None, Some("open"), None, None, None)
+        .update(
+            t.id,
+            None,
+            None,
+            None,
+            Some("open"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(reopened.done_at.is_none());
     let redone = svc
-        .update(t.id, None, None, None, Some("done"), None, None, None)
+        .update(
+            t.id,
+            None,
+            None,
+            None,
+            Some("done"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(redone.done_at.unwrap() >= first);
@@ -77,7 +145,19 @@ async fn nul_bytes_are_rejected() {
     for (field, title, body) in [("title", "坏\0标题", ""), ("body", "正常标题", "正\0文")]
     {
         let err = svc
-            .create(title, body, "normal", &[], None, None)
+            .create(
+                title,
+                body,
+                "todo",
+                "normal",
+                None,
+                "",
+                "",
+                "",
+                &[],
+                None,
+                None,
+            )
             .await
             .expect_err("NUL 应被拒");
         assert!(
@@ -87,11 +167,37 @@ async fn nul_bytes_are_rejected() {
     }
     // update 通道同样拒绝
     let t = svc
-        .create("D20 更新通道", "", "normal", &[], None, None)
+        .create(
+            "D20 更新通道",
+            "",
+            "todo",
+            "normal",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
         .await
         .unwrap();
     let err = svc
-        .update(t.id, Some("坏\0标题"), None, None, None, None, None, None)
+        .update(
+            t.id,
+            Some("坏\0标题"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .expect_err("update NUL 应被拒");
     assert!(err.to_string().contains("NUL"), "{err}");
@@ -106,12 +212,38 @@ async fn cursor_pagination_walks_all_without_loss() {
     for i in 0..12 {
         let status = if i % 2 == 0 { None } else { Some("done") };
         let t = svc
-            .create(&format!("R9D29-{i:02}"), "", "normal", &[], None, None)
+            .create(
+                &format!("R9D29-{i:02}"),
+                "",
+                "todo",
+                "normal",
+                None,
+                "",
+                "",
+                "",
+                &[],
+                None,
+                None,
+            )
             .await
             .unwrap();
         let t = match status {
             Some(s) => svc
-                .update(t.id, None, None, None, Some(s), None, None, None)
+                .update(
+                    t.id,
+                    None,
+                    None,
+                    None,
+                    Some(s),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
                 .await
                 .unwrap(),
             None => t,
@@ -174,7 +306,12 @@ async fn empty_tags_are_normalized() {
         .create(
             "tag 规整",
             "",
+            "todo",
             "normal",
+            None,
+            "",
+            "",
+            "",
             &["  学习  ".into(), "".into(), "   ".into()],
             None,
             None,

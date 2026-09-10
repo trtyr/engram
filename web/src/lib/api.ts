@@ -328,12 +328,21 @@ export interface Todo {
   id: string
   title: string
   body: string
-  status: 'open' | 'done' | 'archived'
+  /** todo=行动项 / ticket=工单（0041） */
+  kind: 'todo' | 'ticket'
+  status: string
   priority: 'low' | 'normal' | 'high'
+  /** 工单严重度（仅 kind=ticket） */
+  severity: 'P0' | 'P1' | 'P2' | 'P3' | null
+  symptom: string
+  reproduce: string
+  acceptance: string
+  resolution: string
   tags: string[]
   due_at: string | null
   project_hint: string | null
   done_at: string | null
+  resolved_at: string | null
   created_at: string
   updated_at: string
 }

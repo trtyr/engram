@@ -44,8 +44,20 @@ pub struct CreateTodoRequest {
     pub title: String,
     #[serde(default)]
     pub body: String,
+    /// 可选：todo（行动项，默认）/ ticket（工单）
+    #[serde(default)]
+    pub kind: Option<String>,
     #[serde(default = "default_priority")]
     pub priority: String,
+    /// 可选：工单严重度 P0-P3（仅 kind=ticket）
+    #[serde(default)]
+    pub severity: Option<String>,
+    #[serde(default)]
+    pub symptom: String,
+    #[serde(default)]
+    pub reproduce: String,
+    #[serde(default)]
+    pub acceptance: String,
     #[serde(default)]
     pub tags: Vec<String>,
     pub due_at: Option<DateTime<Utc>>,
@@ -62,8 +74,14 @@ pub struct UpdateTodoRequest {
     pub title: Option<String>,
     pub body: Option<String>,
     pub priority: Option<String>,
-    /// open | done | archived
+    /// todo: open | done | archived；ticket: open | confirmed | in_progress | resolved | verified | archived
     pub status: Option<String>,
+    /// 可选：工单严重度 P0-P3（仅 kind=ticket）
+    pub severity: Option<Option<String>>,
+    pub symptom: Option<String>,
+    pub reproduce: Option<String>,
+    pub acceptance: Option<String>,
+    pub resolution: Option<String>,
     pub due_at: Option<Option<DateTime<Utc>>>,
     pub project_hint: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
@@ -106,7 +124,12 @@ pub async fn create_todo(
         .create(
             &req.title,
             &req.body,
+            req.kind.as_deref().unwrap_or("todo"),
             &req.priority,
+            req.severity.as_deref(),
+            &req.symptom,
+            &req.reproduce,
+            &req.acceptance,
             &req.tags,
             req.due_at,
             req.project_hint.as_deref(),
@@ -145,6 +168,11 @@ pub async fn update_todo(
                 req.body.as_deref(),
                 req.priority.as_deref(),
                 req.status.as_deref(),
+                req.severity.as_ref().map(|o| o.as_deref()),
+                req.symptom.as_deref(),
+                req.reproduce.as_deref(),
+                req.acceptance.as_deref(),
+                req.resolution.as_deref(),
                 req.due_at,
                 req.project_hint.as_ref().map(|o| o.as_deref()),
                 req.tags.as_deref(),
