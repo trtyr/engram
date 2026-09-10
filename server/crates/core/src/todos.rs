@@ -213,9 +213,11 @@ impl TodoService {
     /// 列表：open 优先；status/priority/tag/q 过滤。
     /// cursor（D29 keyset 分页，单页上限 500）：上一页最后一条的
     /// `{1|0}|{updated_at ISO8601}|{id}`——1 表示该条 status=open。首查不传。
+    #[allow(clippy::too_many_arguments)]
     pub async fn list(
         &self,
         status: Option<&str>,
+        kind: Option<&str>,
         priority: Option<&str>,
         tag: Option<&str>,
         q: Option<&str>,
@@ -267,13 +269,20 @@ impl TodoService {
                 PRIORITIES.join("/")
             )));
         }
-        Ok(
-            repo::list(&self.pool, status, priority, tag, q, cursor, limit.min(500))
-                .await?
-                .into_iter()
-                .map(to_dto)
-                .collect(),
+        Ok(repo::list(
+            &self.pool,
+            status,
+            kind,
+            priority,
+            tag,
+            q,
+            cursor,
+            limit.min(500),
         )
+        .await?
+        .into_iter()
+        .map(to_dto)
+        .collect())
     }
 
     pub async fn get(&self, id: Uuid) -> Result<TodoDto, TodoError> {

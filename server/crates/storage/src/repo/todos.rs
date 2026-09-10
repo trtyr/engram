@@ -79,6 +79,7 @@ pub async fn insert(pool: &PgPool, t: &NewTodo<'_>) -> StoreResult<()> {
 pub async fn list(
     pool: &PgPool,
     status: Option<&str>,
+    kind: Option<&str>,
     priority: Option<&str>,
     tag: Option<&str>,
     q: Option<&str>,
@@ -103,6 +104,7 @@ pub async fn list(
         .bind(priority)
         .bind(tag)
         .bind(q)
+        .bind(kind)
         .bind(limit)
         .bind(flag)
         .bind(ts)
@@ -126,6 +128,7 @@ pub async fn list(
         .bind(priority)
         .bind(tag)
         .bind(q)
+        .bind(kind)
         .bind(limit)
         .fetch_all(pool)
         .await?)

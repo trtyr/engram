@@ -378,6 +378,9 @@ pub struct TodoListParams {
     /// open | done | archived（缺省全部，open 优先展示）
     #[schemars(description = "可选状态过滤：open/done/archived。缺省全部（open 优先）。")]
     pub status: Option<String>,
+    /// 可选：todo / ticket
+    #[schemars(description = "可选形态过滤：todo / ticket。")]
+    pub kind: Option<String>,
     /// low | normal | high
     #[schemars(description = "可选优先级过滤。")]
     pub priority: Option<String>,
@@ -2911,6 +2914,7 @@ impl EngramMcpServer {
         let rows = todo_svc(&self.state)
             .list(
                 lp.status.as_deref(),
+                lp.kind.as_deref(),
                 lp.priority.as_deref(),
                 lp.tag.as_deref(),
                 lp.q.as_deref(),
@@ -3136,7 +3140,7 @@ impl EngramMcpServer {
                 return None;
             }
             match todo_svc(&self.state)
-                .list(None, None, None, Some(&q), None, max)
+                .list(None, None, None, None, Some(&q), None, max)
                 .await
             {
                 Ok(rows) => Some(json!(

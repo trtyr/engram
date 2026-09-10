@@ -31,6 +31,8 @@ fn svc(state: &AppState) -> TodoService {
 #[derive(Deserialize, utoipa::IntoParams)]
 pub struct ListTodosParams {
     pub status: Option<String>,
+    /// 可选：todo / ticket
+    pub kind: Option<String>,
     pub priority: Option<String>,
     pub tag: Option<String>,
     pub q: Option<String>,
@@ -102,6 +104,7 @@ pub async fn list_todos(
         svc(&state)
             .list(
                 p.status.as_deref(),
+                p.kind.as_deref(),
                 p.priority.as_deref(),
                 p.tag.as_deref(),
                 p.q.as_deref(),

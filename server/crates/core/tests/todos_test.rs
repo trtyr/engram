@@ -129,7 +129,7 @@ async fn done_is_idempotent_keeps_first_done_at() {
 async fn negative_limit_is_rejected() {
     let (_pool, svc, _pg) = setup().await;
     let err = svc
-        .list(None, None, None, None, None, -1)
+        .list(None, None, None, None, None, None, -1)
         .await
         .expect_err("负 limit 应报错");
     assert!(
@@ -137,7 +137,7 @@ async fn negative_limit_is_rejected() {
         "应报参数错误而非存储故障：{err}"
     );
     // 上限 clamp 语义保持：超大 limit 合法
-    svc.list(None, None, None, None, None, 100000)
+    svc.list(None, None, None, None, None, None, 100000)
         .await
         .unwrap();
 }
@@ -261,7 +261,7 @@ async fn cursor_pagination_walks_all_without_loss() {
     let mut cursor: Option<String> = None;
     loop {
         let c = cursor.as_deref();
-        let page = svc.list(None, None, None, None, c, 5).await.unwrap();
+        let page = svc.list(None, None, None, None, None, c, 5).await.unwrap();
         assert!(page.len() <= 5);
         if page.is_empty() {
             break;
@@ -298,7 +298,7 @@ async fn cursor_pagination_walks_all_without_loss() {
     assert_eq!(ids, expect, "翻页集合应与全量一致");
     // 垃圾游标响亮拒
     let err = svc
-        .list(None, None, None, None, Some("garbage"), 5)
+        .list(None, None, None, None, None, Some("garbage"), 5)
         .await
         .expect_err("垃圾游标应被拒");
     assert!(err.to_string().contains("cursor"), "{err}");
