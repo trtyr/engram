@@ -676,7 +676,7 @@ pub async fn put_routing(
 ) -> Result<StatusCode, ApiError> {
     require_llm(&principal)?;
 
-    const VALID_PURPOSES: [&str; 8] = [
+    const VALID_PURPOSES: [&str; 9] = [
         "extract",
         "arbitrate",
         "embed",
@@ -685,6 +685,7 @@ pub async fn put_routing(
         "wiki_analysis",
         "persona",
         "wiki_generation",
+        "wiki_lint",
     ];
 
     // 一次取全部 provider（name → model_id，一个 provider 一个模型）
