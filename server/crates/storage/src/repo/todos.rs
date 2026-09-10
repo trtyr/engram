@@ -94,9 +94,10 @@ pub async fn list(
                  AND ($2::text IS NULL OR priority = $2) \
                  AND ($3::text IS NULL OR tags @> ARRAY[$3::text]) \
                  AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%') \
-                 AND (CASE WHEN status = 'open' THEN 1 ELSE 0 END, updated_at, id) < ($6::int, $7::timestamptz, $8::uuid) \
+                 AND ($5::text IS NULL OR kind = $5) \
+                 AND (CASE WHEN status = 'open' THEN 1 ELSE 0 END, updated_at, id) < ($7::int, $8::timestamptz, $9::uuid) \
                  ORDER BY (status = 'open') DESC, updated_at DESC, id DESC \
-                 LIMIT $5"
+                 LIMIT $6"
             )
             .as_str(),
         )
@@ -119,8 +120,9 @@ pub async fn list(
                  AND ($2::text IS NULL OR priority = $2) \
                  AND ($3::text IS NULL OR tags @> ARRAY[$3::text]) \
                  AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%') \
+                 AND ($5::text IS NULL OR kind = $5) \
                  ORDER BY (status = 'open') DESC, updated_at DESC, id DESC \
-                 LIMIT $5"
+                 LIMIT $6"
             )
             .as_str(),
         )
