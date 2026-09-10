@@ -9,12 +9,36 @@ export default function Jobs() {
   const [rows, setRows] = useState<Job[] | null>(null)
   const [status, setStatus] = useState('')
   const [open, setOpen] = useState<Job | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const PAGE = 50
   const load = () => {
-    const p = new URLSearchParams({ limit: '50' })
+    // 自动刷新重拉当前已加载体量（上限 200），不打断已翻页的视图
+    const size = Math.min(Math.max(rows?.length ?? 0, PAGE), 200)
+    const p = new URLSearchParams({ limit: String(size) })
     if (status) p.set('status', status)
     api.get<Job[]>(`/jobs?${p}`).then(setRows).catch(() => {})
   }
-  useEffect(load, [status])
+  const loadMore = async () => {
+    if (!rows?.length) return
+    setLoadingMore(true)
+    const p = new URLSearchParams({ limit: String(PAGE), cursor: rows[rows.length - 1].created_at })
+    if (status) p.set('status', status)
+    try {
+      const more = await api.get<Job[]>(`/jobs?${p}`)
+      // 按去重合并（游标重叠防御）
+      const seen = new Set(rows.map((r) => r.id))
+      setRows([...rows, ...more.filter((m) => !seen.has(m.id))])
+    } catch {
+      /* 保持现状 */
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+  useEffect(() => {
+    setRows(null)
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status])
   // 5s 自动刷新
   useEffect(() => {
     const t = setInterval(load, 5000)
@@ -61,6 +85,13 @@ export default function Jobs() {
             </tbody>
           </table>
         </Card>
+      )}
+      {rows.length > 0 && rows.length % PAGE === 0 && (
+        <div className="flex justify-center">
+          <Button variant="outline" size="sm" disabled={loadingMore} onClick={loadMore}>
+            {loadingMore ? '加载中…' : `加载更多（已显示 ${rows.length} 条）`}
+          </Button>
+        </div>
       )}
       {open && <EventTimeline job={open} onClose={() => setOpen(null)} />}
     </div>
