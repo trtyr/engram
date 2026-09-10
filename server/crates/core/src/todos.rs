@@ -289,6 +289,7 @@ impl TodoService {
     pub async fn update(
         &self,
         id: Uuid,
+        kind: Option<&str>,
         title: Option<&str>,
         body: Option<&str>,
         priority: Option<&str>,
@@ -305,7 +306,12 @@ impl TodoService {
         let existing = repo::get(&self.pool, id)
             .await?
             .ok_or_else(|| TodoError::NotFound(format!("待办 {id} 不存在")))?;
-        let kind = existing.kind.clone();
+        let kind = kind.unwrap_or(existing.kind.as_str()).to_string();
+        if kind != "todo" && kind != "ticket" {
+            return Err(TodoError::BadRequest(
+                "kind 仅接受 todo（行动项）/ ticket（工单）".into(),
+            ));
+        }
         if let Some(t) = title {
             let t = t.trim();
             if t.is_empty() {
@@ -347,6 +353,7 @@ impl TodoService {
             &self.pool,
             id,
             &engram_storage::repo::todos::TodoPatch {
+                kind: Some(&kind),
                 title,
                 body,
                 priority,

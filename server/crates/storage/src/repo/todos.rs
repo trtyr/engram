@@ -145,6 +145,8 @@ pub async fn get(pool: &PgPool, id: Uuid) -> StoreResult<Option<TodoRow>> {
 /// todo：done 盖 done_at（首次完成不刷新，D17）、回 open 清空；ticket：resolved 盖
 /// resolved_at、回非 resolved 态清空。todos.status 引用更新前旧值。
 pub struct TodoPatch<'a> {
+    /// 形态转换（todo ↔ ticket；转换时 status/severity 等以新 kind 校验）
+    pub kind: Option<&'a str>,
     pub title: Option<&'a str>,
     pub body: Option<&'a str>,
     pub priority: Option<&'a str>,
@@ -162,7 +164,7 @@ pub struct TodoPatch<'a> {
 pub async fn update(pool: &PgPool, id: Uuid, p: &TodoPatch<'_>) -> StoreResult<u64> {
     let res = sqlx::query(
         "UPDATE todos SET \
-            title = COALESCE($2, title), \
+            kind = COALESCE($14, kind),             title = COALESCE($2, title), \
             body = COALESCE($3, body), \
             priority = COALESCE($4, priority), \
             status = COALESCE($5, status), \
@@ -198,6 +200,7 @@ pub async fn update(pool: &PgPool, id: Uuid, p: &TodoPatch<'_>) -> StoreResult<u
     .bind(p.due_at)
     .bind(p.project_hint)
     .bind(p.tags)
+    .bind(p.kind)
     .execute(pool)
     .await?;
     Ok(res.rows_affected())

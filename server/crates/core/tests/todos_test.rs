@@ -44,6 +44,7 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
+            None,
             Some("done"),
             None,
             None,
@@ -62,6 +63,7 @@ async fn done_is_idempotent_keeps_first_done_at() {
     let done2 = svc
         .update(
             t.id,
+            None,
             None,
             None,
             None,
@@ -86,6 +88,7 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
+            None,
             Some("open"),
             None,
             None,
@@ -102,6 +105,7 @@ async fn done_is_idempotent_keeps_first_done_at() {
     let redone = svc
         .update(
             t.id,
+            None,
             None,
             None,
             None,
@@ -185,6 +189,7 @@ async fn nul_bytes_are_rejected() {
     let err = svc
         .update(
             t.id,
+            None,
             Some("坏\0标题"),
             None,
             None,
@@ -231,6 +236,7 @@ async fn cursor_pagination_walks_all_without_loss() {
             Some(s) => svc
                 .update(
                     t.id,
+                    None,
                     None,
                     None,
                     None,

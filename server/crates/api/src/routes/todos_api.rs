@@ -71,6 +71,8 @@ fn default_priority() -> String {
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateTodoRequest {
+    /// 可选：形态转换 todo ↔ ticket
+    pub kind: Option<String>,
     pub title: Option<String>,
     pub body: Option<String>,
     pub priority: Option<String>,
@@ -164,6 +166,7 @@ pub async fn update_todo(
         svc(&state)
             .update(
                 id,
+                req.kind.as_deref(),
                 req.title.as_deref(),
                 req.body.as_deref(),
                 req.priority.as_deref(),

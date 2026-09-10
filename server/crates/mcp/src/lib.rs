@@ -410,6 +410,9 @@ pub struct TodoUpdateParams {
     /// 待办 id（todo_list 返回）
     #[schemars(description = "待办 id（todo_list 返回）。")]
     pub id: String,
+    /// 可选：形态转换 todo ↔ ticket
+    #[schemars(description = "可选：形态转换 todo ↔ ticket（转换后工单字段生效）。")]
+    pub kind: Option<String>,
     /// 新标题（可选）
     #[schemars(description = "可选新标题。")]
     pub title: Option<String>,
@@ -2949,6 +2952,7 @@ impl EngramMcpServer {
                 None,
                 None,
                 None,
+                None,
                 Some("done"),
                 None,
                 None,
@@ -2979,6 +2983,7 @@ impl EngramMcpServer {
         let dto = todo_svc(&self.state)
             .update(
                 id,
+                params.0.kind.as_deref(),
                 params.0.title.as_deref(),
                 params.0.body.as_deref(),
                 params.0.priority.as_deref(),
