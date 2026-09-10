@@ -564,10 +564,10 @@ pub async fn suggest_routing(
         .collect::<Vec<_>>()
         .join("\n");
     let system = "你是 AI 配置助手，为单用户 AI 长期记忆系统生成 LLM 路由表。\
-        \n系统有 8 个用途：extract（抽取）、arbitrate（仲裁）、embed（嵌入）、organize（组织）、consolidate（整理）、wiki_analysis（Wiki 分析）、persona（画像）、wiki_generation（Wiki 生成）。\
+        \n系统有 9 个用途：extract（抽取）、arbitrate（仲裁）、embed（嵌入）、organize（组织）、consolidate（整理）、wiki_analysis（Wiki 分析）、persona（画像）、wiki_generation（Wiki 生成）、wiki_lint（Wiki 语义检查）。\
         \n规则：1) embed 用途必须用 embedding 能力的供应商；2) 其余用途用 chat 能力的供应商；3) 高频低成本的用途（extract / arbitrate / embed）优先便宜的模型，低频高价值的（persona / wiki_generation）优先强的模型；4) provider 与 model 必须来自下面给定的列表，不得臆造。";
     let user = format!(
-        "可用的供应商：\n{provider_desc}\n\n请为 8 个用途生成路由建议，每个用途一条回退链（至少一条）。只输出严格 JSON，形如 {{\"extract\":[{{\"provider\":\"...\",\"model\":\"...\"}}],\"embed\":[...]}}。"
+        "可用的供应商：\n{provider_desc}\n\n请为 9 个用途生成路由建议，每个用途一条回退链（至少一条）。只输出严格 JSON，形如 {{\"extract\":[{{\"provider\":\"...\",\"model\":\"...\"}}],\"embed\":[...]}}。"
     );
 
     let cipher = cipher_from(&state)?;

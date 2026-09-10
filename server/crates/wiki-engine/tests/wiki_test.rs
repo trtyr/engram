@@ -1148,6 +1148,8 @@ async fn lint_deep_writes_review_items() {
              "detail": "ldp-a 说上限 25 主题，ldp-b 说 30 主题", "suggestion": "统一口径"},
             {"type": "missing_concept", "pages": [],
              "detail": "蒸馏被反复引用但无独立页", "suggestion": "建 slug=distillation"},
+            {"type": "stale", "pages": ["ldp-a"],
+             "detail": "ldp-a 的 25 主题声明已被 ldp-b 的 30 主题取代", "suggestion": "更新 ldp-a"},
         ]
     });
     // lint_deep 页面直接 put 进库（不经 ingest 流水线），mock 队列只给 lint 一发
@@ -1191,7 +1193,7 @@ async fn lint_deep_writes_review_items() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(n, 2, "应落 2 条语义 lint 发现（矛盾 + 缺页）");
+    assert_eq!(n, 3, "应落 3 条语义 lint 发现（矛盾 + 缺页 + 过时）");
 
     let first: String = sqlx::query_scalar(
         "SELECT payload->>'lint_type' FROM wiki_review_items WHERE payload->>'via'='semantic_lint' ORDER BY payload->>'lint_type' LIMIT 1",
@@ -1278,7 +1280,10 @@ async fn archive_creates_synthesis_with_bidirectional_links() {
         )
         .await
         .unwrap();
-    assert_eq!(page.page_type, "synthesis", "归档页应为 synthesis 类型");
+    assert_eq!(
+        page.page_type, "analysis",
+        "归档页应为 analysis 类型（0040）"
+    );
 
     let a: i64 = sqlx::query_scalar(
         "SELECT count(*)::bigint FROM wiki_links WHERE library_id=$1 AND from_slug='ar-answer' AND to_slug='ar-src'",

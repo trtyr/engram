@@ -2668,7 +2668,7 @@ impl EngramMcpServer {
 
     /// 问答/分析产物归档（karpathy LLM Wiki：好答案不该消失在聊天记录里）。
     ///
-    /// 何时用：一段有价值的综合分析/对比/结论值得长期沉淀时——以 synthesis 类型
+    /// 何时用：一段有价值的分析/对比/结论值得长期沉淀时——以 analysis 类型（0040）
     /// 落页（复用版本快照），related 列表自动建双向 wikilinks 融入链接图。
     async fn wiki_archive(
         &self,

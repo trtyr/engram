@@ -521,7 +521,7 @@ impl WikiService {
     }
 
     /// 问答/分析产物归档（karpathy LLM Wiki：好答案不该消失在聊天记录里）——
-    /// 以 page_type=synthesis 落页（复用 put_page 的版本快照与 wikilinks 重算），
+    /// 以 page_type=analysis 落页（0040）（复用 put_page 的版本快照与 wikilinks 重算），
     /// 再对 related 页面补双向链接（归档页 ↔ 相关页）。
     pub async fn archive_answer(
         &self,
@@ -539,12 +539,12 @@ impl WikiService {
         let mut page = self
             .put_page(lib, slug, title, content, None, Some("archive"))
             .await?;
-        // 归档页固定为 synthesis 类型（put_page 硬编码 concept，这里矫正）
-        sqlx::query("UPDATE wiki_pages SET page_type = 'synthesis' WHERE id = $1")
+        // 归档页固定为 analysis 类型（put_page 硬编码 concept，这里矫正；analysis 由 0040 加入 CHECK）
+        sqlx::query("UPDATE wiki_pages SET page_type = 'analysis' WHERE id = $1")
             .bind(page.id)
             .execute(&self.pool)
             .await?;
-        page.page_type = "synthesis".into();
+        page.page_type = "analysis".into();
         // related 双向链接（归档页 ↔ 相关页；目标不存在时跳过该条——与 wikilink 死链语义一致，由 lint 报告）
         for target in related {
             if target == slug {
