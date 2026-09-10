@@ -349,12 +349,15 @@ impl TodoService {
                 "severity 仅工单（kind=ticket）可用".into(),
             ));
         }
-        // 工单转 resolved/verified 必须带解决记录（0041 CHECK 兜底前的友好版）
+        // 工单转 resolved/verified 必须带解决记录（0041 CHECK 兜底前的友好版；
+        // verified 从 resolved 来时 resolution 已有，不再强制重填）
         if kind == "ticket"
             && let Some(st) = status
             && ["resolved", "verified"].contains(&st)
             && resolution
                 .map(str::trim)
+                .filter(|r| !r.is_empty())
+                .or(Some(existing.resolution.as_str()))
                 .filter(|r| !r.is_empty())
                 .is_none()
         {

@@ -331,3 +331,262 @@ async fn empty_tags_are_normalized() {
         t.tags
     );
 }
+
+/// ── 0041 双形态：kind 分支 / 工单状态机 / 字段存取 ──
+/// todo 型拒绝工单状态；ticket 型拒绝 done（联合 CHECK 的应用层友好版）
+#[tokio::test]
+async fn kind_rejects_foreign_status() {
+    let (_pool, svc, _pg) = setup().await;
+    let t = svc
+        .create(
+            "混合状态机",
+            "",
+            "todo",
+            "normal",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let e = svc
+        .update(
+            t.id,
+            None,
+            None,
+            None,
+            None,
+            Some("in_progress"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("kind=todo"), "{e}");
+    let t2 = svc
+        .create(
+            "工单拒done",
+            "",
+            "ticket",
+            "normal",
+            Some("P2"),
+            "症状",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let e2 = svc
+        .update(
+            t2.id,
+            None,
+            None,
+            None,
+            None,
+            Some("done"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(e2.to_string().contains("kind=ticket"), "{e2}");
+}
+
+/// ticket 字段存取：severity/symptom/reproduce/acceptance 全量往返
+#[tokio::test]
+async fn ticket_fields_roundtrip() {
+    let (_pool, svc, _pg) = setup().await;
+    let t = svc
+        .create(
+            "工单字段存取",
+            "详情",
+            "ticket",
+            "high",
+            Some("P1"),
+            "搜索命中不稳",
+            "doc_search 查宽泛词",
+            "首屏可定位",
+            &["工单".into()],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(t.severity.as_deref(), Some("P1"));
+    assert_eq!(t.symptom, "搜索命中不稳");
+    assert_eq!(t.reproduce, "doc_search 查宽泛词");
+    assert_eq!(t.acceptance, "首屏可定位");
+    assert_eq!(t.status, "open");
+}
+
+/// 工单状态机：resolved 无 resolution 拒（应用层 400）→ 带 resolution 过 → verified；resolved_at 自动记
+#[tokio::test]
+async fn ticket_state_machine_and_resolution_gate() {
+    let (_pool, svc, _pg) = setup().await;
+    let t = svc
+        .create(
+            "状态机工单",
+            "",
+            "ticket",
+            "normal",
+            Some("P2"),
+            "问题现象",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    // todo→ticket 转换路径：update kind 生效后 severity 可写
+    assert_eq!(t.kind, "ticket");
+    for s in ["confirmed", "in_progress"] {
+        svc.update(
+            t.id,
+            None,
+            None,
+            None,
+            None,
+            Some(s),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    }
+    // resolved 无 resolution → 应用层拒绝（不触 CHECK）
+    let e = svc
+        .update(
+            t.id,
+            None,
+            None,
+            None,
+            None,
+            Some("resolved"),
+            None,
+            None,
+            None,
+            Some(""),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("解决记录"), "{e}");
+    // 带 resolution → resolved（resolved_at 自动记）
+    let r = svc
+        .update(
+            t.id,
+            None,
+            None,
+            None,
+            None,
+            Some("resolved"),
+            None,
+            None,
+            None,
+            None,
+            Some("0041 修复完成"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status, "resolved");
+    assert!(r.resolved_at.is_some(), "resolved 应自动记时间戳");
+    // verified
+    let v = svc
+        .update(
+            t.id,
+            None,
+            None,
+            None,
+            None,
+            Some("verified"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(v.status, "verified");
+}
+
+/// kind 转换：todo → ticket（update kind），转换后 severity 生效
+#[tokio::test]
+async fn kind_conversion_todo_to_ticket() {
+    let (_pool, svc, _pg) = setup().await;
+    let t = svc
+        .create(
+            "行动项转工单",
+            "",
+            "todo",
+            "normal",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(t.kind, "todo");
+    let u = svc
+        .update(
+            t.id,
+            Some("ticket"),
+            None,
+            None,
+            None,
+            None,
+            Some(Some("P3")),
+            Some("转换后补症状"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(u.kind, "ticket");
+    assert_eq!(u.severity.as_deref(), Some("P3"));
+    assert_eq!(u.symptom, "转换后补症状");
+}
