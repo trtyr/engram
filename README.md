@@ -140,9 +140,14 @@ claude mcp add --transport http engram http://localhost:8080/mcp \
 
 ```bash
 git clone https://github.com/trtyr/engram && cd engram/deploy
-docker compose up
-# 控制台 → http://localhost:8080（管理员密码见 .env）
+cp .env.example .env      # 改掉全部 change-me 项（主密钥生成：openssl rand -hex 32）
+docker compose up -d --build
+# 控制台 → http://localhost:8080（端口/密码见 .env）
 ```
+
+- **数据全在宿主**：PG 数据与应用文件 bind mount 到 `~/.engram/`（`postgres/`、`app/`、`backups/`），备份这一个目录即可
+- 已有本地实例？`deploy/migrate-from-local.sh` 一键 pg_dump → 容器 restore（含关键表行数对照）
+- 宿主跑 Clash TUN 类代理工具时容器直连出网会被污染：构建期传 `HTTP(S)_PROXY=http://host.docker.internal:<端口>` build args，运行时在 `.env` 配 `HTTPS_PROXY`（ OrbStack 还需检查 `~/.orbstack/vmconfig.json` 的 `network_proxy`）
 
 ### 本地开发
 
@@ -160,16 +165,12 @@ cd web && pnpm install && pnpm dev
 
 ## 📖 文档
 
-三层档案，各管一层视角：
+**文档即数据**——全部沉淀在 engram 自身的 projects 域（本项目 `name=engram`），
+按「总览 / 架构与实现 / 运维 / 产品 / 规划 / 决策 / 历史」组织，本地仓库不留文档
+（仅保留本 README 作为 GitHub 门面）。
 
-| 层 | 入口 | 看什么 |
-|:--|:--|:--|
-| 🌐 全栈 | [docs/](docs/README.md) | 仓库整体、前后端接缝、跨栈约定 |
-| ⚙️ 后端 | [server/docs/](server/docs/README.md) | Rust workspace 完整档案 |
-| 🎨 前端 | [web/docs/](web/docs/README.md) | Engram SPA 完整档案 |
-
-- 📐 产品事实与设计系统：[PRODUCT.md](PRODUCT.md) · [DESIGN.md](DESIGN.md)
-- 🧭 接手第一步读 [docs/current-state.md](docs/current-state.md)
+- 控制台：`/projects` → engram
+- MCP：`projects` 工具的 `list` / `doc_search` / `doc_get`
 
 ## 🔁 数据迁移
 
