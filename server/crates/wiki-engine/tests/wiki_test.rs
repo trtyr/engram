@@ -1137,3 +1137,176 @@ async fn log_page_excluded_from_graph_and_lint_and_empty_ingest_rejected() {
         );
     }
 }
+
+/// ── 语义 lint / index / archive（karpathy LLM Wiki 三增量）──
+/// lint_deep：LLM 报告页面间矛盾 → review_items 落库（via=semantic_lint）
+#[tokio::test]
+async fn lint_deep_writes_review_items() {
+    let issues_json = serde_json::json!({
+        "issues": [
+            {"type": "contradiction", "pages": ["ldp-a", "ldp-b"],
+             "detail": "ldp-a 说上限 25 主题，ldp-b 说 30 主题", "suggestion": "统一口径"},
+            {"type": "missing_concept", "pages": [],
+             "detail": "蒸馏被反复引用但无独立页", "suggestion": "建 slug=distillation"},
+        ]
+    });
+    // lint_deep 页面直接 put 进库（不经 ingest 流水线），mock 队列只给 lint 一发
+    let (pool, wiki, _handle, _pg, lib) = setup(vec![issues_json]).await;
+    wiki.put_page(
+        lib,
+        "ldp-a",
+        "A 页",
+        "# A\n\n软上限复测共 25 个主题。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    wiki.put_page(
+        lib,
+        "ldp-b",
+        "B 页",
+        "# B\n\n软上限复测共 30 个主题，见 [[ldp-a]]。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let job_id = wiki
+        .lint_deep_enqueue(lib, Some(vec!["ldp-a".into(), "ldp-b".into()]))
+        .await
+        .unwrap();
+    wait_jobs(&pool, &["wiki_lint_deep"]).await;
+    let j: (String, i32) = sqlx::query_as("SELECT status::text, attempts FROM jobs WHERE id = $1")
+        .bind(job_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(j.0, "succeeded", "lint_deep 任务应成功");
+
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_review_items WHERE payload->>'via' = 'semantic_lint'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 2, "应落 2 条语义 lint 发现（矛盾 + 缺页）");
+
+    let first: String = sqlx::query_scalar(
+        "SELECT payload->>'lint_type' FROM wiki_review_items WHERE payload->>'via'='semantic_lint' ORDER BY payload->>'lint_type' LIMIT 1",
+    ).fetch_one(&pool).await.unwrap();
+    assert!(first == "contradiction" || first == "missing_concept");
+}
+
+/// index：动态分组目录，只读不落库
+#[tokio::test]
+async fn index_groups_by_page_type() {
+    let (pool, wiki, _handle, _pg, lib) = setup(vec![]).await;
+    wiki.put_page(
+        lib,
+        "ix-entity",
+        "实体页",
+        "# 实体页\n\n测试实体。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    wiki.put_page(
+        lib,
+        "ix-concept",
+        "概念页",
+        "# 概念页\n\n测试概念，参见 [[ix-entity]]。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    // put_page 固定 concept 类型——手工改一个为 entity 以验证分组
+    sqlx::query(
+        "UPDATE wiki_pages SET page_type='entity' WHERE slug='ix-entity' AND library_id=$1",
+    )
+    .bind(lib)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let idx = wiki.index(lib).await.unwrap();
+    let groups = idx["groups"].as_object().unwrap();
+    assert!(
+        groups.contains_key("entity") && groups.contains_key("concept"),
+        "分组应含 entity/concept"
+    );
+    let concept = groups["concept"].as_array().unwrap();
+    assert_eq!(concept[0]["slug"], "ix-concept");
+    // ix-concept 的正文引用了 [[ix-entity]]，因此 ix-entity 有入链
+    let entity = groups["entity"].as_array().unwrap();
+    assert_eq!(entity[0]["slug"], "ix-entity");
+    assert!(
+        entity[0]["inlinks"].as_i64().unwrap() >= 1,
+        "ix-entity 应有入链（被 ix-concept 引用）"
+    );
+    assert!(
+        idx.to_string().contains("测试概念"),
+        "首段摘要应包含正文片段"
+    );
+}
+
+/// archive：归档 synthesis 页 + related 双向 wikilinks
+#[tokio::test]
+async fn archive_creates_synthesis_with_bidirectional_links() {
+    let (pool, wiki, _handle, _pg, lib) = setup(vec![]).await;
+    wiki.put_page(
+        lib,
+        "ar-src",
+        "来源页",
+        "# 来源页\n\n背景知识。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let page = wiki
+        .archive_answer(
+            lib,
+            "ar-answer",
+            "对比分析",
+            "# 对比分析\n\n结论：A 优于 B，依据 [[ar-src]]。",
+            &["ar-src".into()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.page_type, "synthesis", "归档页应为 synthesis 类型");
+
+    let a: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM wiki_links WHERE library_id=$1 AND from_slug='ar-answer' AND to_slug='ar-src'",
+    ).bind(lib).fetch_one(&pool).await.unwrap();
+    let b: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM wiki_links WHERE library_id=$1 AND from_slug='ar-src' AND to_slug='ar-answer'",
+    ).bind(lib).fetch_one(&pool).await.unwrap();
+    assert!(
+        a >= 1 && b >= 1,
+        "related 应建双向链接（正向 {a} 反向 {b}）"
+    );
+
+    // 再归档同 slug → 覆盖 + 版本快照（复用 put_page 版本语义）
+    wiki.archive_answer(
+        lib,
+        "ar-answer",
+        "对比分析 v2",
+        "# 对比分析\n\n修订结论。",
+        &[],
+    )
+    .await
+    .unwrap();
+    let ver: i32 = sqlx::query_scalar(
+        "SELECT version FROM wiki_pages WHERE slug='ar-answer' AND library_id=$1",
+    )
+    .bind(lib)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ver, 2, "覆盖归档应递增版本");
+}

@@ -77,6 +77,38 @@ pub async fn create_items(
     Ok(ids)
 }
 
+/// 语义 lint（lint_deep）产出的问题项落库——无 source_id（来源是页面集合而非单一原料），
+/// kind="flag" 复用现有 review 动作白名单，payload 带 lint 上下文供人审 UI 展示。
+pub async fn create_lint_items(
+    pool: &PgPool,
+    lib: Uuid,
+    issues: &[crate::lint_deep::SemanticIssue],
+) -> Result<Vec<Uuid>, JobError> {
+    let mut ids = Vec::new();
+    for it in issues {
+        let id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries, source_id) \
+             VALUES ($1, $2, 'flag', $3, '[]'::jsonb, NULL)",
+        )
+        .bind(id)
+        .bind(lib)
+        .bind(serde_json::json!({
+            "title": it.title(),
+            "via": "semantic_lint",
+            "lint_type": it.r#type,
+            "pages": it.pages,
+            "reason": it.detail,
+            "suggestion": it.suggestion,
+        }))
+        .execute(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
 /// 某库的 open 审查项列表（按库过滤）。
 pub async fn list_open(pool: &PgPool, lib: Uuid) -> Result<Vec<ReviewItem>, JobError> {
     sqlx::query_as::<_, ReviewItem>(

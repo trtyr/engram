@@ -23,6 +23,8 @@ pub enum Purpose {
     Persona,
     /// Wiki 生成（高档）
     WikiGeneration,
+    /// Wiki 语义 lint（中档——页面间矛盾/过时/缺页检查）
+    WikiLint,
 }
 
 impl Purpose {
@@ -36,6 +38,7 @@ impl Purpose {
             Purpose::WikiAnalysis => "wiki_analysis",
             Purpose::Persona => "persona",
             Purpose::WikiGeneration => "wiki_generation",
+            Purpose::WikiLint => "wiki_lint",
         }
     }
 }

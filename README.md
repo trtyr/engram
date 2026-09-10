@@ -116,7 +116,7 @@ engram-server 内置 MCP 服务端（官方 Rust SDK `rmcp`，Streamable HTTP）
 | 💬 `memory` | `memory` | `context`（冷启动上下文包）· `search` · `remember`（一句话记忆）· `write_session` · `append_session` · `list_sessions` · `get_session` · `list_atoms`（默认 active）· `entities` · `forget`（void/erase/**restore**；共 10） |
 | 🧩 `projects` | `project` | `list` · `get` · `create` · `update` · `delete` · `batch_delete` · `types` · `location_add/update/delete` · `doc_add/get/search/update/delete` · **`doc_patch`**（行级补丁；共 16） |
 | 🪄 `skills` | `skills` | `list` · `get` · `create` · `update` · `delete` · `import` · `file_get` · `file_put` · **`versions`/`restore`**（版本回滚）·（附属文件按路径读写，脚本由客户端本地执行；共 10） |
-| 🕸️ `wiki` | `wiki` | `search`（片段化）· `list_pages` · `get_page` · `write_page` · `ingest` · `archive_query` · `graph` · `lint` · `delete_page` · **`versions`/`version_content`/`restore_version`**（版本回滚与删页重建）· **`sources`/`delete_source`**（原料清理）· **`libraries`**（多库列表；全 action 可选 `library` 参数——真多库隔离；共 15） |
+| 🕸️ `wiki` | `wiki` | `search`（片段化）· `list_pages` · `get_page` · `write_page` · `ingest` · `archive_query` · `graph` · `lint` · **`lint_deep`**（LLM 语义检查：矛盾/过时/缺页，产出入人审队列）· **`index`**（内容目录：按页型分组/入链数/摘要）· **`archive`**（问答产物归档为 synthesis 页+双向链接）· `delete_page` · **`versions`/`version_content`/`restore_version`**（版本回滚与删页重建）· **`sources`/`delete_source`**（原料清理）· **`libraries`**（多库列表；全 action 可选 `library` 参数——真多库隔离；共 18） |
 | ✅ `todos` | `todos` | `add` · `list` · `get` · `done` · `update` · `delete`（共 6） |
 | 🗺️ `codegraph` | `codegraph` | `list`（动态项目清单）· `register` · `index` · `sync`（走任务队列）· `query` · `delete`（共 6） |
 | 🌐 `search_all` | 任一域 scope | 一次查询并发 memory/wiki/skills/todos/projects 各回 top-k 摘要（跨域一次查，精确检索仍用单域工具） |

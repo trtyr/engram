@@ -113,6 +113,9 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "delete_source", true, "删除一条织入原料及其全部产出（级联，不可逆）" => crate::wiki::WikiDeleteSourceParams;
             "graph", false, "Wiki 链接图全貌（节点/边/社区划分；按库）" => crate::wiki::WikiLibParams;
             "lint", false, "Wiki 体检（死链/孤页/缺源；只报告不修改；按库）" => crate::wiki::WikiLibParams;
+            "lint_deep", false, "语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步任务，产出入人审队列；slugs 可限定范围控成本）" => crate::wiki::WikiLintDeepParams;
+            "index", false, "内容目录（按页型分组的全库目录：slug/标题/入链数/首段摘要；只读动态聚合）" => crate::wiki::WikiLibParams;
+            "archive", false, "问答/分析产物归档为 synthesis 页（related 自动建双向 wikilinks——好答案不该消失在聊天记录里）" => crate::wiki::WikiArchiveParams;
             "libraries", false, "列出全部 wiki 库（多库；页面/原料计数一并返回；建库/删库走 Web）" => crate::wiki::WikiLibrariesParams;
             "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
         ],

@@ -172,6 +172,37 @@ pub struct WikiIngestParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiLintDeepParams {
+    /// 可选：限定检查的页面 slug 集合（缺省全库非系统页）——控制 LLM 成本
+    #[schemars(
+        description = "可选：限定检查的页面 slug 集合（缺省全库非系统页）——控制 LLM 成本。"
+    )]
+    pub slugs: Option<Vec<String>>,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiArchiveParams {
+    /// 归档页 slug
+    #[schemars(description = "归档页 slug（仅字母/数字/-/_/·，≤80 字符）。")]
+    pub slug: String,
+    /// 归档页标题
+    #[schemars(description = "归档页标题。")]
+    pub title: String,
+    /// 归档正文（Markdown；支持 [[wikilink]] 互链）
+    #[schemars(description = "归档正文（Markdown，支持 [[wikilink]]）。")]
+    pub content: String,
+    /// 可选：相关页面 slug 列表——自动建双向 wikilinks（karpathy LLM Wiki：好答案该归档，不该消失在聊天记录里）
+    #[schemars(description = "可选：相关页面 slug 列表——自动建双向 wikilinks。")]
+    pub related: Option<Vec<String>>,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiArchiveQueryParams {
     /// 存档标题（同标题已存档会幂等跳过）
     #[schemars(description = "存档标题。同标题已存档 → 幂等跳过（skipped=true）。")]

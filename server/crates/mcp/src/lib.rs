@@ -2625,6 +2625,67 @@ impl EngramMcpServer {
         ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
     }
 
+    /// 语义 lint（LLM 深度检查：页面间矛盾 / 过时声明 / 重要概念缺页）。
+    ///
+    /// 何时用：结构 lint（lint action）干净后的进阶健康检查——语义维度只有 LLM 能做。
+    /// 异步任务：入队返回 job_id，产出写入人审队列（控制台 ReviewQueue 处理），
+    /// 不自动改写页面。slugs 可限定范围控制 LLM 成本。
+    async fn wiki_lint_deep(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(dp): Parameters<wiki::WikiLintDeepParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(dp.library.as_deref()).await?;
+        let job_id = wiki::svc(&self.state)
+            .lint_deep_enqueue(lib, dp.slugs)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::json!({
+            "job_id": job_id,
+            "hint": "语义 lint 异步执行（LLM 逐批检查）——产出写入人审队列（reviews），稍后 wiki reviews 查看发现",
+        }))
+    }
+
+    /// 内容目录（index）：按 page_type 分组的全库页面目录（slug/标题/入链数/首段摘要）。
+    ///
+    /// 何时用：回答「这个库里有什么」/为深入检索做导航——只读动态聚合，零 LLM 成本。
+    async fn wiki_index(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(libp): Parameters<wiki::WikiLibParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
+        let idx = wiki::svc(&self.state)
+            .index(lib)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(idx)
+    }
+
+    /// 问答/分析产物归档（karpathy LLM Wiki：好答案不该消失在聊天记录里）。
+    ///
+    /// 何时用：一段有价值的综合分析/对比/结论值得长期沉淀时——以 synthesis 类型
+    /// 落页（复用版本快照），related 列表自动建双向 wikilinks 融入链接图。
+    async fn wiki_archive(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(ap): Parameters<wiki::WikiArchiveParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(ap.library.as_deref()).await?;
+        let related = ap.related.unwrap_or_default();
+        let page = wiki::svc(&self.state)
+            .archive_answer(lib, &ap.slug, &ap.title, &ap.content, &related)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::to_value(&page).unwrap_or(serde_json::json!({})))
+    }
+
     /// 删除 Wiki 页面（不可逆——连带清理双向 wikilinks；最后状态留版本快照可重建）。
     ///
     /// 何时用：页面作废/测试数据清理。只对明确表达的删除请求使用。
@@ -3558,6 +3619,27 @@ impl EngramMcpServer {
                 self.wiki_lint(
                     ctx,
                     Parameters(dispatch::from_args("wiki", "lint", call.args)?),
+                )
+                .await
+            }
+            "lint_deep" => {
+                self.wiki_lint_deep(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "lint_deep", call.args)?),
+                )
+                .await
+            }
+            "index" => {
+                self.wiki_index(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "index", call.args)?),
+                )
+                .await
+            }
+            "archive" => {
+                self.wiki_archive(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "archive", call.args)?),
                 )
                 .await
             }

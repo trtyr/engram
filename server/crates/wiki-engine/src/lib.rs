@@ -11,6 +11,7 @@ pub mod ingest;
 pub mod insights;
 pub mod libraries;
 pub mod lint;
+pub mod lint_deep;
 pub mod markup;
 pub mod prompts;
 pub mod purpose;

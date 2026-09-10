@@ -866,6 +866,7 @@ pub fn register_handlers(
 ) -> engram_jobs::Runner {
     let l1 = llm.clone();
     let l2 = llm.clone();
+    let l3 = llm.clone();
     runner
         .register("wiki_analyze", move |ctx| {
             let llm = l1.clone();
@@ -890,6 +891,10 @@ pub fn register_handlers(
                 }
                 r
             }
+        })
+        .register("wiki_lint_deep", move |ctx| {
+            let llm = l3.clone();
+            async move { crate::lint_deep::lint_deep_job(&ctx, &llm).await }
         })
 }
 

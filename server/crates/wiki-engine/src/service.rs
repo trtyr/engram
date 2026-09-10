@@ -480,6 +480,100 @@ impl WikiService {
         Ok(lint::lint(&self.pool, lib).await?)
     }
 
+    /// 入队语义 lint（lint_deep）任务——LLM 深度检查矛盾/过时/缺页，产出入人审队列。
+    pub async fn lint_deep_enqueue(
+        &self,
+        lib: Uuid,
+        slugs: Option<Vec<String>>,
+    ) -> Result<Uuid, WikiError> {
+        Ok(crate::lint_deep::enqueue(&self.pool, lib, slugs).await?)
+    }
+
+    /// 内容目录（karpathy LLM Wiki 的 index 页等价物）：按 page_type 分组的动态聚合，
+    /// 只读不落库。每页含入链数与首段摘要——人读与 LLM 导航双用途。
+    pub async fn index(&self, lib: Uuid) -> Result<serde_json::Value, WikiError> {
+        let rows: Vec<(String, String, String, String, Option<i64>)> = sqlx::query_as(
+            "SELECT p.page_type, p.slug, p.title, \
+                    COALESCE(split_part(left(regexp_replace(p.content, E'[\\n\\r]+', ' ', 'g'), 160), '。', 1), '') AS summary, \
+                    (SELECT count(*)::bigint FROM wiki_links l WHERE l.to_slug = p.slug AND l.library_id = p.library_id) AS inlinks \
+             FROM wiki_pages p WHERE p.library_id = $1 AND p.page_type <> 'log' \
+             ORDER BY p.page_type, p.slug",
+        )
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut groups: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+            std::collections::BTreeMap::new();
+        for (page_type, slug, title, summary, inlinks) in rows {
+            groups
+                .entry(page_type)
+                .or_default()
+                .push(serde_json::json!({
+                    "slug": slug, "title": title,
+                    "summary": summary, "inlinks": inlinks.unwrap_or(0),
+                }));
+        }
+        let pages: serde_json::Map<String, serde_json::Value> = groups
+            .into_iter()
+            .map(|(k, v)| (k, serde_json::json!(v)))
+            .collect();
+        Ok(serde_json::json!({ "groups": pages }))
+    }
+
+    /// 问答/分析产物归档（karpathy LLM Wiki：好答案不该消失在聊天记录里）——
+    /// 以 page_type=synthesis 落页（复用 put_page 的版本快照与 wikilinks 重算），
+    /// 再对 related 页面补双向链接（归档页 ↔ 相关页）。
+    pub async fn archive_answer(
+        &self,
+        lib: Uuid,
+        slug: &str,
+        title: &str,
+        content: &str,
+        related: &[String],
+    ) -> Result<WikiPageDto, WikiError> {
+        if !crate::markup::is_valid_slug(slug) {
+            return Err(WikiError::BadRequest(
+                "slug 非法：仅允许字母/数字/-/_/·，≤80 字符，不含空格与路径分隔符".into(),
+            ));
+        }
+        let mut page = self
+            .put_page(lib, slug, title, content, None, Some("archive"))
+            .await?;
+        // 归档页固定为 synthesis 类型（put_page 硬编码 concept，这里矫正）
+        sqlx::query("UPDATE wiki_pages SET page_type = 'synthesis' WHERE id = $1")
+            .bind(page.id)
+            .execute(&self.pool)
+            .await?;
+        page.page_type = "synthesis".into();
+        // related 双向链接（归档页 ↔ 相关页；目标不存在时跳过该条——与 wikilink 死链语义一致，由 lint 报告）
+        for target in related {
+            if target == slug {
+                continue;
+            }
+            sqlx::query(
+                "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
+                 VALUES ($3, $1, $2, 3.0) ON CONFLICT (library_id, from_slug, to_slug) DO NOTHING",
+            )
+            .bind(slug)
+            .bind(target)
+            .bind(lib)
+            .execute(&self.pool)
+            .await
+            .ok();
+            sqlx::query(
+                "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
+                 VALUES ($3, $1, $2, 3.0) ON CONFLICT (library_id, from_slug, to_slug) DO NOTHING",
+            )
+            .bind(target)
+            .bind(slug)
+            .bind(lib)
+            .execute(&self.pool)
+            .await
+            .ok();
+        }
+        Ok(page)
+    }
+
     /// 提案合入（人审通过：把 job_events 里的 proposal 内容写入页面）。
     pub async fn apply_proposal(
         &self,
