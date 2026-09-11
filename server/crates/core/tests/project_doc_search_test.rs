@@ -175,7 +175,7 @@ async fn whole_word_and_line_start_bonus() {
     let hits = svc.search_doc_lines(p.id, "workbuddy", 50).await.unwrap();
     assert_eq!(hits.len(), 3, "三行都应命中（OR 子串）");
     // 整词行 > 子串行；行首+整词行 > 整词行
-    let by_title = |t: &str| hits.iter().find(|h| h.title == t).unwrap().clone();
+    let by_title = |t: &str| hits.iter().find(|h| h.title == t).unwrap();
     let alert = by_title("告警页");
     let mixed = by_title("混入页");
     let first = by_title("行首页");
