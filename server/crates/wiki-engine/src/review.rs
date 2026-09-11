@@ -109,13 +109,27 @@ pub async fn create_lint_items(
     Ok(ids)
 }
 
-/// 某库的 open 审查项列表（按库过滤）。
-pub async fn list_open(pool: &PgPool, lib: Uuid) -> Result<Vec<ReviewItem>, JobError> {
+/// 某库的审查项列表（按库过滤；status 缺省 open，可查 resolved/dismissed 全态）。
+pub async fn list_by_status(
+    pool: &PgPool,
+    lib: Uuid,
+    status: Option<&str>,
+) -> Result<Vec<ReviewItem>, JobError> {
+    // 白名单校验——防笔误静默返回空
+    if let Some(s) = status {
+        if !matches!(s, "open" | "resolved" | "dismissed") {
+            return Err(JobError::Permanent(format!(
+                "status 仅接受 open/resolved/dismissed（收到 {s}）"
+            )));
+        }
+    }
+    let s = status.unwrap_or("open");
     sqlx::query_as::<_, ReviewItem>(
         "SELECT * FROM wiki_review_items \
-         WHERE status = 'open' AND library_id = $1 ORDER BY created_at DESC LIMIT 200",
+         WHERE status = $2 AND library_id = $1 ORDER BY created_at DESC LIMIT 200",
     )
     .bind(lib)
+    .bind(s)
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))

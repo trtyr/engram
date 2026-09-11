@@ -173,6 +173,9 @@ pub struct WikiIngestParams {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiReviewsParams {
+    /// 可选：按状态过滤（open/resolved/dismissed；缺省 open）
+    #[schemars(description = "可选：按状态过滤（open/resolved/dismissed；缺省 open）。")]
+    pub status: Option<String>,
     /// 可选：库 slug（缺省 main 主库）
     #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
     pub library: Option<String>,

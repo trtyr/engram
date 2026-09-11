@@ -1199,6 +1199,26 @@ async fn lint_deep_writes_review_items() {
         "SELECT payload->>'lint_type' FROM wiki_review_items WHERE payload->>'via'='semantic_lint' ORDER BY payload->>'lint_type' LIMIT 1",
     ).fetch_one(&pool).await.unwrap();
     assert!(first == "contradiction" || first == "missing_concept");
+
+    // reviews status 过滤：缺省=open（3 条）；resolve 一条后 resolved=1、open=2；非法 status 拒
+    let item_id: uuid::Uuid = sqlx::query_scalar(
+        "SELECT id FROM wiki_review_items WHERE payload->>'via'='semantic_lint' ORDER BY created_at LIMIT 1",
+    ).fetch_one(&pool).await.unwrap();
+    wiki.review_resolve(item_id, Some("skip"), false)
+        .await
+        .unwrap();
+    assert_eq!(
+        wiki.reviews(lib, None).await.unwrap().len(),
+        2,
+        "缺省应只列 open"
+    );
+    assert_eq!(wiki.reviews(lib, Some("open")).await.unwrap().len(), 2);
+    assert_eq!(wiki.reviews(lib, Some("resolved")).await.unwrap().len(), 1);
+    assert_eq!(wiki.reviews(lib, Some("dismissed")).await.unwrap().len(), 0);
+    assert!(
+        wiki.reviews(lib, Some("bogus")).await.is_err(),
+        "非法 status 应报错而非静默空"
+    );
 }
 
 /// index：动态分组目录，只读不落库

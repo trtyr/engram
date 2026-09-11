@@ -2700,7 +2700,7 @@ impl EngramMcpServer {
         wiki::require_wiki(&p)?;
         let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
         let items = wiki::svc(&self.state)
-            .reviews(lib)
+            .reviews(lib, libp.status.as_deref())
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::json!({

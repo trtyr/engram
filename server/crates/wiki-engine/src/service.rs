@@ -729,8 +729,12 @@ impl WikiService {
 
     // ---------- Review ----------
 
-    pub async fn reviews(&self, lib: Uuid) -> Result<Vec<crate::review::ReviewItem>, WikiError> {
-        crate::review::list_open(&self.pool, lib)
+    pub async fn reviews(
+        &self,
+        lib: Uuid,
+        status: Option<&str>,
+    ) -> Result<Vec<crate::review::ReviewItem>, WikiError> {
+        crate::review::list_by_status(&self.pool, lib, status)
             .await
             .map_err(WikiError::from)
     }
