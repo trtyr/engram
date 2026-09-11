@@ -422,7 +422,7 @@ pub async fn list_reviews(
 ) -> Result<Json<Vec<ReviewItem>>, ApiError> {
     require_wiki(&principal)?;
     let lib = resolve_lib(&state, p.lib.as_deref()).await?;
-    Ok(Json(svc(&state).reviews(lib).await.map_err(we)?))
+    Ok(Json(svc(&state).reviews(lib, None).await.map_err(we)?))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
