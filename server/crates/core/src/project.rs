@@ -564,7 +564,7 @@ impl ProjectService {
         }
 
         // 排序：文档按 doc_score 降序，文档内行按行分降序 + 行号升序
-        results.sort_by(|a, b| b.doc_score.cmp(&a.doc_score));
+        results.sort_by_key(|d| std::cmp::Reverse(d.doc_score));
         let mut hits = Vec::new();
         'outer: for mut d in results {
             d.lines.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
@@ -580,7 +580,7 @@ impl ProjectService {
                     line,
                     text,
                     score: d.doc_score,
-                    doc_hit_count: doc_hit_count,
+                    doc_hit_count,
                 });
                 let _ = line_score;
             }
