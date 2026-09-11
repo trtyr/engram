@@ -67,7 +67,20 @@ pub struct ProjectTypeDto {
 
 pub use engram_storage::models::project::{ProjectDocDto, ProjectDto, ProjectLocationDto};
 
+/// 检索归一化：lowercase + 空白/中英标点忽略（与 web Galaxy 页的重复实体归一化规则一致）——
+/// 「WorkBuddy」与「Work Buddy」、「部署。」与「部署」互相可召回。
+fn normalize_for_search(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .filter(|c| {
+            !c.is_whitespace() && !"·.-_()（）【】《》，,、。：:；;！!？?\"'`~".contains(*c)
+        })
+        .collect()
+}
+
 /// 文档行检索命中（grep 式定位：行号 + 原文行；配合 read_doc_lines 区间精读）。
+/// 0042 检索升级后按文档相关性聚合排序：score = 文档评分（title 加权 + 命中密度），
+/// doc_hit_count = 该文档内命中行数——AI 可据此先读高分文档。
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct DocLineHitDto {
     pub doc_id: Uuid,
@@ -76,6 +89,12 @@ pub struct DocLineHitDto {
     /// 1-based 行号（基于文档当前版本）
     pub line: i64,
     pub text: String,
+    /// 文档相关性评分（0042）
+    #[serde(default)]
+    pub score: i64,
+    /// 该文档内命中行数（0042）
+    #[serde(default)]
+    pub doc_hit_count: i64,
 }
 
 /// 项目详情（本体 + 位置 + 文档），Web 详情页左树右内容用。
@@ -474,28 +493,96 @@ impl ProjectService {
         query: &str,
         limit: i64,
     ) -> Result<Vec<DocLineHitDto>, ProjectError> {
-        let q = query.trim().to_lowercase();
-        if q.is_empty() {
+        // 0042 检索升级：评分制多词行检索（工单「文档检索可用性」）。
+        // 旧实现逐行 substring 顺序截断——零相关性排序，宽泛词首屏全泡在一篇长文里。
+        let terms: Vec<String> = query
+            .split_whitespace()
+            .map(normalize_for_search)
+            .filter(|t| !t.is_empty())
+            .collect();
+        if terms.is_empty() {
             return Err(ProjectError::BadRequest("检索词不能为空".to_string()));
         }
         self.get_project_bare(project_id).await?;
         let docs = repo::list_doc_contents(&self.pool, project_id).await?;
-        let mut hits = Vec::new();
+
+        struct DocHits {
+            doc_id: Uuid,
+            title: String,
+            category: String,
+            doc_score: i64,
+            lines: Vec<(i64, String, i64)>, // (行号, 原文, 行分)
+        }
+        let mut results: Vec<DocHits> = Vec::new();
         let cap = limit.clamp(1, 500) as usize;
+
         for (id, title, category, content) in docs {
+            let title_norm = normalize_for_search(&title);
+            // 文档级：title 命中加权（title 是文档最强信号）
+            let title_score: i64 = terms
+                .iter()
+                .map(|t| {
+                    if title_norm.contains(t.as_str()) {
+                        50
+                    } else {
+                        0
+                    }
+                })
+                .sum();
+            let mut lines: Vec<(i64, String, i64)> = Vec::new();
             for (i, line) in content.lines().enumerate() {
+                let line_norm = normalize_for_search(line);
+                // 行分：命中词数（多词共现 +2/词）+ 覆盖全部词的行额外 +10
+                let mut hit_terms = 0usize;
+                let mut line_score = 0i64;
+                for t in &terms {
+                    if line_norm.contains(t.as_str()) {
+                        hit_terms += 1;
+                        line_score += 3;
+                    }
+                }
+                if hit_terms > 0 {
+                    if hit_terms == terms.len() && terms.len() > 1 {
+                        line_score += 10;
+                    }
+                    lines.push((i as i64 + 1, line.to_string(), line_score));
+                }
+            }
+            if lines.is_empty() {
+                continue;
+            }
+            // 文档分 = title 加权 + 命中密度（行数 × 5）+ 行分总和
+            let doc_score =
+                title_score + lines.len() as i64 * 5 + lines.iter().map(|l| l.2).sum::<i64>();
+            results.push(DocHits {
+                doc_id: id,
+                title,
+                category,
+                doc_score,
+                lines,
+            });
+        }
+
+        // 排序：文档按 doc_score 降序，文档内行按行分降序 + 行号升序
+        results.sort_by(|a, b| b.doc_score.cmp(&a.doc_score));
+        let mut hits = Vec::new();
+        'outer: for mut d in results {
+            d.lines.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
+            let doc_hit_count = d.lines.len() as i64;
+            for (line, text, line_score) in d.lines {
                 if hits.len() >= cap {
-                    return Ok(hits);
+                    break 'outer;
                 }
-                if line.to_lowercase().contains(&q) {
-                    hits.push(DocLineHitDto {
-                        doc_id: id,
-                        title: title.clone(),
-                        category: category.clone(),
-                        line: i as i64 + 1,
-                        text: line.to_string(),
-                    });
-                }
+                hits.push(DocLineHitDto {
+                    doc_id: d.doc_id,
+                    title: d.title.clone(),
+                    category: d.category.clone(),
+                    line,
+                    text,
+                    score: d.doc_score,
+                    doc_hit_count: doc_hit_count,
+                });
+                let _ = line_score;
             }
         }
         Ok(hits)
