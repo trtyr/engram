@@ -1069,8 +1069,8 @@ async fn wiki_mcp_tools_listed() {
     assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
     assert_eq!(
         wiki_tools[0]["actions"].as_array().unwrap().len(),
-        18,
-        "wiki 域应展示 18 个操作（含版本/原料/libraries/lint_deep/index/archive）"
+        20,
+        "wiki 域应展示 20 个操作（含版本/原料/libraries/lint_deep/index/archive/reviews/review_resolve）"
     );
 
     // instructions 应覆盖 wiki 域
