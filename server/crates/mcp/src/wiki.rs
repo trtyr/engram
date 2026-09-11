@@ -172,6 +172,29 @@ pub struct WikiIngestParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiReviewsParams {
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiReviewResolveParams {
+    /// 评审项 id（reviews 返回的 id）
+    #[schemars(description = "评审项 id（reviews 返回的 id）。")]
+    pub id: String,
+    /// 可选：处置动作标签（如 create_page / deep_research / skip——记录到提案）
+    #[schemars(description = "可选：处置动作标签（如 create_page / deep_research / skip）。")]
+    pub action: Option<String>,
+    /// 是否驳回作废（缺省 false = 标记已处理 resolved）
+    #[schemars(description = "可选：是否驳回作废（dismiss）；缺省 false = 已处理（resolved）。")]
+    pub dismiss: Option<bool>,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiLintDeepParams {
     /// 可选：限定检查的页面 slug 集合（缺省全库非系统页）——控制 LLM 成本
     #[schemars(

@@ -822,11 +822,20 @@ async fn run_cli(
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     if let Some(dir) = cwd {
+        // 先探 cwd：NotFound 无法区分「二进制缺失」还是「工作目录缺失」——显式检查给出可行动文案
+        if !dir.exists() {
+            return Err(CgError::CliUnavailable(format!(
+                "项目路径不存在: {}（容器部署下宿主路径不可见——需挂载该目录，或仅宿主 dev 形态使用 codegraph）",
+                dir.display()
+            )));
+        }
         cmd.current_dir(dir);
     }
-    let child = cmd
-        .spawn()
-        .map_err(|e| CgError::CliUnavailable(format!("spawn 失败（codegraph 未安装?）: {e}")))?;
+    let child = cmd.spawn().map_err(|e| {
+        CgError::CliUnavailable(format!(
+            "spawn 失败（codegraph CLI 未安装或不在 PATH）: {e}"
+        ))
+    })?;
 
     match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(Ok(out)) if out.status.success() => Ok(out),
