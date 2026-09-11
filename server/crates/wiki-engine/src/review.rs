@@ -116,12 +116,12 @@ pub async fn list_by_status(
     status: Option<&str>,
 ) -> Result<Vec<ReviewItem>, JobError> {
     // 白名单校验——防笔误静默返回空
-    if let Some(s) = status {
-        if !matches!(s, "open" | "resolved" | "dismissed") {
-            return Err(JobError::Permanent(format!(
-                "status 仅接受 open/resolved/dismissed（收到 {s}）"
-            )));
-        }
+    if let Some(s) = status
+        && !matches!(s, "open" | "resolved" | "dismissed")
+    {
+        return Err(JobError::Permanent(format!(
+            "status 仅接受 open/resolved/dismissed（收到 {s}）"
+        )));
     }
     let s = status.unwrap_or("open");
     sqlx::query_as::<_, ReviewItem>(
