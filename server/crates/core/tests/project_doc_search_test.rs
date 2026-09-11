@@ -143,3 +143,52 @@ async fn empty_query_and_no_hit_boundaries() {
         .unwrap();
     assert!(hits.is_empty());
 }
+
+/// 整词/行首命中加分：WorkBuddy.exe 行（整词+4）应高于子串混入行（workbuddyxyz 无加分）；
+/// 行首命中行（归一化后以词开头）再 +5。
+#[tokio::test]
+async fn whole_word_and_line_start_bonus() {
+    let (_pool, svc, _pg) = setup().await;
+    let p = svc
+        .create_project("整词加分", "dev", None)
+        .await
+        .expect("建项目");
+    // 行1：整词命中（WorkBuddy 左右边界清晰）
+    svc.add_doc(
+        p.id,
+        "部署",
+        "",
+        "告警页",
+        "告警：WorkBuddy.exe 执行了任务。",
+    )
+    .await
+    .unwrap();
+    // 行2：子串混入（workbuddyxyz——不是 WorkBuddy 这个词）
+    svc.add_doc(p.id, "部署", "", "混入页", "这行混入了 workbuddyxyz 字样。")
+        .await
+        .unwrap();
+    // 行3：行首命中
+    svc.add_doc(p.id, "部署", "", "行首页", "WorkBuddy 是产品名。")
+        .await
+        .unwrap();
+
+    let hits = svc.search_doc_lines(p.id, "workbuddy", 50).await.unwrap();
+    assert_eq!(hits.len(), 3, "三行都应命中（OR 子串）");
+    // 整词行 > 子串行；行首+整词行 > 整词行
+    let by_title = |t: &str| hits.iter().find(|h| h.title == t).unwrap().clone();
+    let alert = by_title("告警页");
+    let mixed = by_title("混入页");
+    let first = by_title("行首页");
+    assert!(
+        alert.score > mixed.score,
+        "整词行分应高于子串行: {} vs {}",
+        alert.score,
+        mixed.score
+    );
+    assert!(
+        first.score > alert.score,
+        "行首命中应再加分: {} vs {}",
+        first.score,
+        alert.score
+    );
+}

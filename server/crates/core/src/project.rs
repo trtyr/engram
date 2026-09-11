@@ -67,6 +67,32 @@ pub struct ProjectTypeDto {
 
 pub use engram_storage::models::project::{ProjectDocDto, ProjectDto, ProjectLocationDto};
 
+/// 轻归一化：lowercase + 空白折叠（保留标点——整词/行首判定的边界来源）。
+fn light_normalize(s: &str) -> String {
+    s.to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 整词命中判定（仅纯 ASCII 词——中文无词边界概念跳过）：
+/// 归一化行中该词左右边界均非 ASCII 字母数字。
+fn is_whole_word_hit(norm_line: &str, term: &str) -> bool {
+    if !term.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return false;
+    }
+    match norm_line.find(term) {
+        Some(pos) => {
+            let bytes = norm_line.as_bytes();
+            let before_ok = pos == 0 || !bytes[pos - 1].is_ascii_alphanumeric();
+            let after = pos + term.len();
+            let after_ok = after >= bytes.len() || !bytes[after].is_ascii_alphanumeric();
+            before_ok && after_ok
+        }
+        None => false,
+    }
+}
+
 /// 检索归一化：lowercase + 空白/中英标点忽略（与 web Galaxy 页的重复实体归一化规则一致）——
 /// 「WorkBuddy」与「Work Buddy」、「部署。」与「部署」互相可召回。
 fn normalize_for_search(s: &str) -> String {
@@ -532,13 +558,21 @@ impl ProjectService {
             let mut lines: Vec<(i64, String, i64)> = Vec::new();
             for (i, line) in content.lines().enumerate() {
                 let line_norm = normalize_for_search(line);
-                // 行分：命中词数（多词共现 +2/词）+ 覆盖全部词的行额外 +10
+                // 轻归一化版保留标点边界——整词/行首判定用
+                let line_light = light_normalize(line);
+                // 行分：命中词 +3/词；行首命中 +5；整词命中 +4；全词共现 +10
                 let mut hit_terms = 0usize;
                 let mut line_score = 0i64;
                 for t in &terms {
                     if line_norm.contains(t.as_str()) {
                         hit_terms += 1;
                         line_score += 3;
+                        if line_light.starts_with(t.as_str()) {
+                            line_score += 5;
+                        }
+                        if is_whole_word_hit(&line_light, t) {
+                            line_score += 4;
+                        }
                     }
                 }
                 if hit_terms > 0 {
