@@ -470,6 +470,62 @@ pub struct ContextParams {
     pub include_evidence: Option<bool>,
 }
 
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryKvPutParams {
+    /// 键（唯一；同 key 再写 = 就地覆盖更新，不产生历史链）
+    #[schemars(description = "键（唯一，≤200 字符）。同 key 再次写入 = 覆盖更新（就地改值）。")]
+    pub key: String,
+    /// 值（逐字保存——蒸馏永不加工；序列号/UUID/IP/端口等精确值原样存）
+    #[schemars(
+        description = "值（逐字保存，零加工）。精确值如序列号/UUID/IP:PORT 原样存，禁概括。"
+    )]
+    pub value: String,
+    /// 可选：说明（这是哪台机器的什么值、怎么探到的）
+    #[schemars(description = "可选：上下文说明。")]
+    pub context: Option<String>,
+    /// 可选：标签
+    #[schemars(description = "可选：标签数组。")]
+    pub tags: Option<Vec<String>>,
+    /// 可选：来源 user_stated/verified_probe/agent_inferred/doc（缺省 user_stated）
+    #[schemars(
+        description = "可选：值来源。user_stated=用户明示, verified_probe=实测探得, agent_inferred=推断, doc=文档。"
+    )]
+    pub source: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryDistillResultParams {
+    /// 会话 id（write_session 返回的 id）
+    #[schemars(description = "会话 id（write_session 返回的 id）。")]
+    pub session_id: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryKvGetParams {
+    /// 键
+    #[schemars(description = "要读的键。")]
+    pub key: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryKvListParams {
+    /// 返回上限（默认 50，≤500）
+    #[schemars(description = "可选：返回上限（按 updated_at 倒序）。默认 50。")]
+    pub limit: Option<i64>,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryKvSearchParams {
+    /// 字面量（≥3 字符；key/value/context ILIKE 直查——精确值不依赖分词）
+    #[schemars(
+        description = "字面量检索词（≥3 字符）。对 key/value/context 做 ILIKE 直查——序列号等精确值用这个，不依赖分词。"
+    )]
+    pub query: String,
+    /// 返回上限（默认 20，≤100）
+    #[schemars(description = "可选：返回上限。默认 20。")]
+    pub limit: Option<i64>,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SearchParams {
     /// 检索词
@@ -1295,6 +1351,103 @@ impl EngramMcpServer {
             .await
             .map_err(from_memory)?;
         ok_json(serde_json::to_value(&atoms).unwrap_or(serde_json::json!([])))
+    }
+
+    // ---------- KV 值保值通道（蒸馏零介入——精确值原样透传） ----------
+
+    /// 写入/更新结构化值（kv_put）：同 key 就地覆盖——序列号/UUID/IP:PORT 等精确值的正道。
+    async fn memory_kv_put(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<MemoryKvPutParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let kp = params.0;
+        let row = self
+            .svc()
+            .kv_put(
+                &kp.key,
+                &kp.value,
+                kp.context.as_deref(),
+                kp.tags,
+                kp.source.as_deref(),
+            )
+            .await
+            .map_err(from_memory)?;
+        ok_json(serde_json::to_value(&row).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 蒸馏回执（distill_result）：查一次会话蒸馏产出了哪些原子（id/内容/强度/状态）。
+    async fn memory_distill_result(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<MemoryDistillResultParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let sid = uuid::Uuid::parse_str(params.0.session_id.trim()).map_err(|_| {
+            rmcp::ErrorData::invalid_params(
+                format!("session_id 不是合法 UUID: {}", params.0.session_id),
+                None,
+            )
+        })?;
+        let v = self.svc().distill_result(sid).await.map_err(from_memory)?;
+        ok_json(v)
+    }
+
+    /// 读取结构化值（kv_get）。
+    async fn memory_kv_get(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<MemoryKvGetParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let row = self
+            .svc()
+            .kv_get(&params.0.key)
+            .await
+            .map_err(from_memory)?;
+        match row {
+            Some(r) => ok_json(serde_json::to_value(&r).unwrap_or(serde_json::json!({}))),
+            None => Err(rmcp::ErrorData::invalid_params(
+                format!("kv 键不存在: {}", params.0.key),
+                None,
+            )),
+        }
+    }
+
+    /// 列出全部 KV（kv_list，按 updated_at 倒序）。
+    async fn memory_kv_list(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<MemoryKvListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let rows = self
+            .svc()
+            .kv_list(params.0.limit.unwrap_or(50))
+            .await
+            .map_err(from_memory)?;
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+    }
+
+    /// 字面量直查 KV（kv_search）——精确值不依赖分词，ILIKE 全字段。
+    async fn memory_kv_search(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<MemoryKvSearchParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let rows = self
+            .svc()
+            .kv_search(&params.0.query, params.0.limit.unwrap_or(20))
+            .await
+            .map_err(from_memory)?;
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
     }
 
     /// 列出 L0 原始会话（keyset 分页，可按 agent 过滤）。
@@ -3333,6 +3486,41 @@ impl EngramMcpServer {
                 self.memory_get_session(
                     ctx,
                     Parameters(dispatch::from_args("memory", "get_session", call.args)?),
+                )
+                .await
+            }
+            "distill_result" => {
+                self.memory_distill_result(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "distill_result", call.args)?),
+                )
+                .await
+            }
+            "kv_put" => {
+                self.memory_kv_put(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "kv_put", call.args)?),
+                )
+                .await
+            }
+            "kv_get" => {
+                self.memory_kv_get(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "kv_get", call.args)?),
+                )
+                .await
+            }
+            "kv_list" => {
+                self.memory_kv_list(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "kv_list", call.args)?),
+                )
+                .await
+            }
+            "kv_search" => {
+                self.memory_kv_search(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "kv_search", call.args)?),
                 )
                 .await
             }

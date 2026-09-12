@@ -226,6 +226,8 @@ async fn context_pack_excludes_expired_atoms() {
             None,
             Some(now - chrono::Duration::days(1)),
             false,
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -238,12 +240,23 @@ async fn context_pack_excludes_expired_atoms() {
             None,
             Some(now + chrono::Duration::days(1)),
             false,
+            None,
+            None,
         )
         .await
         .unwrap();
     // 永久原子（无 valid_until）
     let _perm = svc
-        .create_atom("fact", "永久事实：喜欢喝美式咖啡", 0.9, None, None, false)
+        .create_atom(
+            "fact",
+            "永久事实：喜欢喝美式咖啡",
+            0.9,
+            None,
+            None,
+            false,
+            None,
+            None,
+        )
         .await
         .unwrap();
 
@@ -429,7 +442,16 @@ async fn forget_entity_archives_linked_atoms() {
 async fn atom_time_and_supersede_chain() {
     let (_pool, svc, _container) = setup().await;
     let old = svc
-        .create_atom("fact", "张三的生日是 3 月 5 日", 0.9, None, None, false)
+        .create_atom(
+            "fact",
+            "张三的生日是 3 月 5 日",
+            0.9,
+            None,
+            None,
+            false,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(old.occurred_at.is_none());
@@ -445,6 +467,8 @@ async fn atom_time_and_supersede_chain() {
             Some(occ),
             None,
             false,
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -476,14 +500,18 @@ async fn atom_time_and_supersede_chain() {
 async fn create_atom_rejects_empty_and_oversize_content() {
     let (_pool, svc, _container) = setup().await;
 
-    let empty = svc.create_atom("fact", "   ", 0.9, None, None, false).await;
+    let empty = svc
+        .create_atom("fact", "   ", 0.9, None, None, false, None, None)
+        .await;
     assert!(
         matches!(empty, Err(MemoryError::BadRequest(_))),
         "空内容应被拒"
     );
 
     let long = "长".repeat(121);
-    let oversize = svc.create_atom("fact", &long, 0.9, None, None, false).await;
+    let oversize = svc
+        .create_atom("fact", &long, 0.9, None, None, false, None, None)
+        .await;
     assert!(
         matches!(oversize, Err(MemoryError::BadRequest(_))),
         "超 120 字应被拒"
@@ -492,7 +520,7 @@ async fn create_atom_rejects_empty_and_oversize_content() {
     // 边界：120 字应通过
     let ok_len = "字".repeat(120);
     let ok = svc
-        .create_atom("fact", &ok_len, 0.9, None, None, false)
+        .create_atom("fact", &ok_len, 0.9, None, None, false, None, None)
         .await;
     assert!(ok.is_ok(), "120 字应通过");
 }
@@ -512,6 +540,8 @@ async fn context_pack_pending_review_and_no_feedback() {
             None,
             None,
             false,
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -593,7 +623,16 @@ async fn sensitive_atoms_hidden_until_reveal() {
     let (pool, svc, _container) = setup().await;
     insert_atom(&pool, "用户喜欢骑行", 0).await;
     let s = svc
-        .create_atom("fact", "用户在服用降压药", 0.9, None, None, true)
+        .create_atom(
+            "fact",
+            "用户在服用降压药",
+            0.9,
+            None,
+            None,
+            true,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(s.sensitive);
@@ -864,12 +903,12 @@ async fn export_contains_all_domains() {
     )
     .await
     .unwrap();
-    svc.create_atom("fact", "导出验证原子", 0.9, None, None, false)
+    svc.create_atom("fact", "导出验证原子", 0.9, None, None, false, None, None)
         .await
         .unwrap();
     svc.create_entity("张三", "person", "").await.unwrap();
 
-    svc.create_atom("fact", "导出隐私项", 0.9, None, None, true)
+    svc.create_atom("fact", "导出隐私项", 0.9, None, None, true, None, None)
         .await
         .unwrap();
     let dump = svc.export(false).await.unwrap();
@@ -893,9 +932,18 @@ async fn archive_debounces_into_single_snapshot_refresh() {
     let mut atoms = vec![];
     for i in 0..3 {
         atoms.push(
-            svc.create_atom("fact", &format!("成员{i}"), 0.9, None, None, false)
-                .await
-                .unwrap(),
+            svc.create_atom(
+                "fact",
+                &format!("成员{i}"),
+                0.9,
+                None,
+                None,
+                false,
+                None,
+                None,
+            )
+            .await
+            .unwrap(),
         );
     }
     let sid = Uuid::now_v7();

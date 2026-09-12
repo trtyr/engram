@@ -30,6 +30,14 @@ struct SessionRow {
     metadata: serde_json::Value,
 }
 
+/// 断言强度归一：fact/inference/assumption 白名单；缺失/非法一律 inference（保守——不升格）。
+fn normalize_strength(v: Option<&str>) -> String {
+    match v {
+        Some(s @ ("fact" | "inference" | "assumption")) => s.to_string(),
+        _ => "inference".to_string(),
+    }
+}
+
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {
     let pool = ctx.pool();
 
@@ -174,6 +182,7 @@ async fn run_claimed(
         occurred_at: Option<chrono::DateTime<chrono::Utc>>,
         valid_until: Option<chrono::DateTime<chrono::Utc>>,
         sensitive: bool,
+        strength: String,
     }
     let mut texts: Vec<String> = Vec::new();
     let mut pending: Vec<PendingAtom> = Vec::new();
@@ -300,6 +309,8 @@ async fn run_claimed(
                     .map(|sid| *session_sensitive.get(&sid).unwrap_or(&false))
                     .unwrap_or(false)
             });
+            // 断言强度：LLM 判定 + 白名单；缺失/非法一律落 inference（保守——不升格）
+            let strength = normalize_strength(a.get("strength").and_then(|v| v.as_str()));
             texts.push(content.clone());
             pending.push(PendingAtom {
                 kind,
@@ -310,6 +321,7 @@ async fn run_claimed(
                 occurred_at,
                 valid_until,
                 sensitive,
+                strength,
             });
         }
         if seg_count == 0 {
@@ -351,12 +363,13 @@ async fn run_claimed(
                 occurred_at,
                 valid_until,
                 sensitive,
+                strength,
             } = p;
             let id = Uuid::now_v7();
             let needs_review = confidence < 0.55;
             sqlx::query(
-                "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, occurred_at, valid_until, sensitive, embedding, tsv)
-                 VALUES ($1, $2, $3, $4, 'candidate', $5, $6, $7, $8, $9, $10, to_tsvector('simple', $11))",
+                "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, occurred_at, valid_until, sensitive, embedding, tsv, strength, source_kind)
+                 VALUES ($1, $2, $3, $4, 'candidate', $5, $6, $7, $8, $9, $10, to_tsvector('simple', $11), $12, 'agent_inferred')",
             )
             .bind(id)
             .bind(&kind)
@@ -375,6 +388,7 @@ async fn run_claimed(
                     .map(|v| pgvector::Vector::from(v.clone())),
             )
             .bind(engram_search::tokenize::tsv_text(&content))
+            .bind(&strength)
             .execute(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -504,4 +518,25 @@ async fn run_claimed(
     }
 
     Ok(json!({"session_ids": session_ids, "candidate_ids": candidate_ids}))
+}
+
+#[cfg(test)]
+mod strength_tests {
+    use super::normalize_strength;
+    #[test]
+    fn strength_defaults_to_inference() {
+        assert_eq!(normalize_strength(None), "inference");
+        assert_eq!(normalize_strength(Some("fact")), "fact");
+        assert_eq!(normalize_strength(Some("assumption")), "assumption");
+        assert_eq!(
+            normalize_strength(Some("FACT")),
+            "inference",
+            "大小写敏感——防 LLM 随手大写逃逸白名单"
+        );
+        assert_eq!(
+            normalize_strength(Some("certain")),
+            "inference",
+            "词表外一律保守"
+        );
+    }
 }

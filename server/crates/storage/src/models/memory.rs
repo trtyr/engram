@@ -38,6 +38,23 @@ pub struct AtomDto {
     pub valid_until: Option<DateTime<Utc>>,
     #[schema(value_type = Object)]
     pub source_refs: serde_json::Value,
+    /// 断言强度：fact=用户明示/机器验证, inference=agent 推断, assumption=假设
+    pub strength: String,
+    /// 断言来源：user_stated/verified_probe/agent_inferred/doc
+    pub source_kind: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// KV 值保值条目：value 逐字保存（蒸馏零介入），key 唯一 UPSERT 就地更新。
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct KvEntryDto {
+    pub id: Uuid,
+    pub key: String,
+    pub value: String,
+    pub context: String,
+    pub tags: Vec<String>,
+    pub source: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

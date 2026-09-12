@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::PgPool;
 use crate::error::StoreResult;
 use crate::models::memory::{
-    AtomDto, AtomRevision, EntityDto, EntityRelationDto, EntityRevision, GraphEdge, PersonaVersion,
-    ScenarioDto, SessionDto, TimelineEvent,
+    AtomDto, AtomRevision, EntityDto, EntityRelationDto, EntityRevision, GraphEdge, KvEntryDto,
+    PersonaVersion, ScenarioDto, SessionDto, TimelineEvent,
 };
 
 // ---------- L0 会话 ----------
@@ -305,10 +305,12 @@ pub async fn insert_atom(
     valid_until: Option<DateTime<Utc>>,
     embedding: Option<Vec<f32>>,
     tsv: &str,
+    strength: &str,
+    source_kind: &str,
 ) -> StoreResult<AtomDto> {
     let row = sqlx::query_as::<_, AtomDto>(
-        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive, occurred_at, valid_until, source_refs, embedding, tsv) \
-         VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, '[]'::jsonb, $9, to_tsvector('simple', $10)) RETURNING *",
+        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive, occurred_at, valid_until, source_refs, embedding, tsv, strength, source_kind) \
+         VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, '[]'::jsonb, $9, to_tsvector('simple', $10), $11, $12) RETURNING *",
     )
     .bind(id)
     .bind(kind)
@@ -320,9 +322,129 @@ pub async fn insert_atom(
     .bind(valid_until)
     .bind(embedding.map(pgvector::Vector::from))
     .bind(tsv)
+    .bind(strength)
+    .bind(source_kind)
     .fetch_one(pool)
     .await?;
     Ok(row)
+}
+
+// ---------- KV 值保值通道（蒸馏零介入——value 逐字保存） ----------
+
+/// UPSERT：同 key 就地覆盖更新（可变状态不走取代链）。返回更新后的行。
+pub async fn kv_upsert(
+    pool: &PgPool,
+    key: &str,
+    value: &str,
+    context: &str,
+    tags: &[String],
+    source: &str,
+) -> StoreResult<KvEntryDto> {
+    let row = sqlx::query_as::<_, KvEntryDto>(
+        "INSERT INTO kv_entries (key, value, context, tags, source) \
+         VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, context = EXCLUDED.context, \
+           tags = EXCLUDED.tags, source = EXCLUDED.source, updated_at = now() \
+         RETURNING *",
+    )
+    .bind(key)
+    .bind(value)
+    .bind(context)
+    .bind(tags)
+    .bind(source)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn kv_get(pool: &PgPool, key: &str) -> StoreResult<Option<KvEntryDto>> {
+    sqlx::query_as::<_, KvEntryDto>("SELECT * FROM kv_entries WHERE key = $1")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
+}
+
+pub async fn kv_list(pool: &PgPool, limit: i64) -> StoreResult<Vec<KvEntryDto>> {
+    Ok(sqlx::query_as::<_, KvEntryDto>(
+        "SELECT * FROM kv_entries ORDER BY updated_at DESC LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// 字面量直查（ILIKE 兜底通道——精确值不依赖分词）。
+pub async fn kv_search_literal(
+    pool: &PgPool,
+    needle: &str,
+    limit: i64,
+) -> StoreResult<Vec<KvEntryDto>> {
+    let pat = format!("%{}%", needle.replace('%', "\\%").replace('_', "\\_"));
+    Ok(sqlx::query_as::<_, KvEntryDto>(
+        "SELECT * FROM kv_entries WHERE key ILIKE $2 OR value ILIKE $2 OR context ILIKE $2 \
+         ORDER BY updated_at DESC LIMIT $1",
+    )
+    .bind(limit)
+    .bind(pat)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// 会话蒸馏状态 + metadata（蒸馏回执用）。
+pub async fn session_distill_meta(
+    pool: &PgPool,
+    session_id: Uuid,
+) -> StoreResult<Option<(String, serde_json::Value)>> {
+    sqlx::query_as("SELECT distill_status, metadata FROM raw_sessions WHERE id = $1")
+        .bind(session_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
+}
+
+/// 按会话 id 反查蒸馏产物（source_refs 含该 session 的原子，新→旧）。
+pub async fn atoms_by_session(pool: &PgPool, session_id: Uuid) -> StoreResult<Vec<AtomDto>> {
+    let cond = serde_json::json!([{"session_id": session_id}]).to_string();
+    Ok(sqlx::query_as::<_, AtomDto>(
+        "SELECT * FROM atoms WHERE source_refs @> $1::jsonb ORDER BY created_at DESC LIMIT 200",
+    )
+    .bind(cond)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// 字面量 ILIKE 兜底（工单「库里有一搜没有」）：FTS/向量双腿零命中后直查 content。
+#[derive(sqlx::FromRow)]
+pub struct AtomLiteralHit {
+    pub id: Uuid,
+    pub kind: String,
+    pub content: String,
+    pub needs_review: bool,
+}
+
+pub async fn atoms_literal_fallback(
+    pool: &PgPool,
+    limit: i64,
+    needle: &str,
+    reveal_sensitive: bool,
+) -> StoreResult<Vec<AtomLiteralHit>> {
+    let pat = format!("%{}%", needle.replace('%', "\\%").replace('_', "\\_"));
+    let sens = if reveal_sensitive {
+        "true"
+    } else {
+        "NOT sensitive"
+    };
+    let sql = format!(
+        "SELECT id, kind, content, needs_review FROM atoms \
+         WHERE status = 'active' AND ({sens}) AND content ILIKE $2 \
+         ORDER BY created_at DESC LIMIT $1"
+    );
+    Ok(sqlx::query_as::<_, AtomLiteralHit>(&sql)
+        .bind(limit)
+        .bind(pat)
+        .fetch_all(pool)
+        .await?)
 }
 
 /// 原子改写历史（新→旧）。

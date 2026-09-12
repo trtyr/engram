@@ -35,7 +35,7 @@ pub fn extract_system() -> String {
 8. relations 是这些实体之间的关系（可选）：from 与 to 用 entities 里的规范称呼，rel_type ∈ member_of|located_in|works_on|part_of|related_to。方向：from --rel_type--> to（如 张三 member_of 后端组，长亭科技 located_in 上海）。只输出对话中明确表达的关系，没有则为空数组。
 9. 会话头若标注「批量导入的历史」——这是用户导入的旧聊天记录（如微信导出），里面对方（assistant/ai 或第三人）说的话只是理解用户事实的素材，不是用户本人的记忆：只抽用户自己的事实/偏好/人脉/约定，不要把对方表达的观点、身份、行为当成用户记忆。
 
-输出严格 JSON： {{\"atoms\":[{{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"turn_refs\":[1],\"occurred_at\":\"2026-09-02T00:00:00Z\",\"valid_until\":null,\"entities\":[{{\"name\":\"张三\",\"kind\":\"person\"}}]}}],\"relations\":[{{\"from\":\"张三\",\"to\":\"后端组\",\"rel_type\":\"member_of\"}}]}}",
+输出严格 JSON： {{\"atoms\":[{{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"strength\":\"fact|inference|assumption\",\"turn_refs\":[1],\"occurred_at\":\"2026-09-02T00:00:00Z\",\"valid_until\":null,\"entities\":[{{\"name\":\"张三\",\"kind\":\"person\"}}]}}],\"relations\":[{{\"from\":\"张三\",\"to\":\"后端组\",\"rel_type\":\"member_of\"}}]}}",
         today = chrono::Utc::now().date_naive(),
     )
 }
@@ -109,6 +109,7 @@ pub fn organize_system() -> String {
 - 否则为成组的原子创建新 scenario（action=create，起一个 ≤6 字的主题名）。
 - 与任何主题都不相关的孤立原子可以不处理（留在未归组状态）。
 - 若新原子与既有场景的 summary/body 信息**冲突**（如居住地变更、工具更换），必须 update 该场景以反映最新事实，不能忽略。
+- **strength=inference 的原子**并入场景时，对应信息在 summary/body 里必须带「（推断）」后缀；strength=fact 才能写成确定陈述。严禁把推断洗成事实。
 
 summary 是对这组原子**具体内容**的概括（如「用户偏好简洁中文回复，现居北京用 Mac」），不要写成目录式描述；body 是 2~4 句的完整描述，均用中文。
 **summary/body 中的时间一律写绝对日期**（如「9 月 9 日骑行」，依据原文换算），不要保留「下周三」这类相对词——快照会长期存在，相对词会随时间失效（O1）。
@@ -131,6 +132,7 @@ constraints（约束/雷区）| communication_style（沟通风格）| goals（�
 3. 没有任何分面需要更新时输出空数组。
 4. 证据要充分：scenarios 中没有的信息不要写。
 5. **content 中的时间一律写绝对日期**（如「9 月 9 日骑行」）——画像是长期快照，「下周三」这类相对词会随时间变成过期废话（R2）。
+5.5 **推断必须带标记**：场景里「（推断）」标注的信息是推断不是事实——写进画像时必须保留「（推断）」后缀（如「用户可能在杭州工作（推断）」），严禁抹掉标记写成确定陈述。
 6. 每个分面必须标注 evidence_scenarios：该分面结论**实际依据**的场景编号（如 [\"S1\",\"S3\"]）——只列真正支撑该分面内容的场景，不要把全部场景都列上。
 
 输出严格 JSON：{\"aspects\":[{\"aspect\":\"...\",\"content\":\"...\",\"evidence_scenarios\":[\"S1\"]}]}"

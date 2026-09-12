@@ -60,6 +60,11 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
         "memory" => action_docs![
             "context", false, "装载用户记忆上下文包（L3 画像 + L2 场景 + L1 原子 + 实体；会话开场调用一次）" => crate::ContextParams;
             "search", false, "定向检索用户记忆（全文+向量，跨 L1/L2/L3/实体）" => crate::SearchParams;
+            "distill_result", false, "蒸馏回执：查一次会话蒸馏产出了哪些原子（id/内容/强度/状态）——写入方可验收" => crate::MemoryDistillResultParams;
+            "kv_put", false, "写入/更新结构化精确值（序列号/UUID/IP:PORT 等）——同 key 就地覆盖，蒸馏零介入逐字保存" => crate::MemoryKvPutParams;
+            "kv_get", false, "读取结构化精确值（按 key）" => crate::MemoryKvGetParams;
+            "kv_list", false, "列出全部 KV 值（按 updated_at 倒序）" => crate::MemoryKvListParams;
+            "kv_search", false, "字面量直查 KV（key/value/context ILIKE——精确值不依赖分词）" => crate::MemoryKvSearchParams;
             "remember", false, "一句话记忆（记条小事实不必手搓 turns；等价单轮 write_session+auto 蒸馏）" => crate::RememberParams;
             "write_session", false, "写入一段对话到 L0 会话（收尾用；蒸馏自动抽取记忆）" => crate::WriteSessionParams;
             "append_session", false, "向未蒸馏的会话追加轮次（长对话分段落库）" => crate::AppendSessionParams;

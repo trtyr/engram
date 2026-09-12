@@ -306,6 +306,12 @@ pub struct CreateAtomRequest {
     /// P3 隐私标记：默认不进检索与 context_pack（reveal 才可见）
     #[serde(default)]
     pub sensitive: bool,
+    /// 断言强度：fact=用户明示/机器验证, inference=agent 推断, assumption=假设（缺省 fact）
+    #[serde(default)]
+    pub strength: Option<String>,
+    /// 断言来源：user_stated/verified_probe/agent_inferred/doc（缺省 user_stated）
+    #[serde(default)]
+    pub source: Option<String>,
 }
 fn default_conf() -> f32 {
     0.9
@@ -640,6 +646,8 @@ pub async fn create_atom(
             req.occurred_at,
             req.valid_until,
             req.sensitive,
+            req.strength.as_deref(),
+            req.source.as_deref(),
         )
         .await
         .map_err(me)?;

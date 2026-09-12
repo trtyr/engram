@@ -37,8 +37,8 @@ impl From<StoreError> for MemoryError {
 // ---------- DTO（api 直接复用，utoipa schema；行类型在 storage，此处 re-export） ----------
 
 pub use engram_storage::models::memory::{
-    AtomDto, AtomRevision, EntityDto, EntityRelationDto, EntityRevision, GraphEdge, PersonaVersion,
-    ScenarioDto, SessionDto, TimelineEvent,
+    AtomDto, AtomRevision, EntityDto, EntityRelationDto, EntityRevision, GraphEdge, KvEntryDto,
+    PersonaVersion, ScenarioDto, SessionDto, TimelineEvent,
 };
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -558,6 +558,7 @@ impl MemoryService {
     }
 
     /// 手工新增（人审补充；active 直接入库）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_atom(
         &self,
         kind: &str,
@@ -566,7 +567,25 @@ impl MemoryService {
         occurred_at: Option<DateTime<Utc>>,
         valid_until: Option<DateTime<Utc>>,
         sensitive: bool,
+        strength: Option<&str>,
+        source_kind: Option<&str>,
     ) -> Result<AtomDto, MemoryError> {
+        const STRENGTHS: [&str; 3] = ["fact", "inference", "assumption"];
+        const SOURCES: [&str; 4] = ["user_stated", "verified_probe", "agent_inferred", "doc"];
+        if let Some(v) = strength
+            && !STRENGTHS.contains(&v)
+        {
+            return Err(MemoryError::BadRequest(format!(
+                "strength 仅接受 fact/inference/assumption（收到 {v}）"
+            )));
+        }
+        if let Some(v) = source_kind
+            && !SOURCES.contains(&v)
+        {
+            return Err(MemoryError::BadRequest(format!(
+                "source 仅接受 user_stated/verified_probe/agent_inferred/doc（收到 {v}）"
+            )));
+        }
         let text = content.trim();
         // 输入校验：空内容 + 超长（对齐蒸馏链的 1~120 字契约）
         if text.is_empty() {
@@ -602,9 +621,105 @@ impl MemoryService {
             valid_until,
             emb.and_then(|v| v.into_iter().next()),
             &engram_search::tokenize::tsv_text(text),
+            strength.unwrap_or("fact"),
+            source_kind.unwrap_or("user_stated"),
         )
         .await?;
         Ok(row)
+    }
+
+    /// 蒸馏回执：一次会话蒸馏产出了什么（原子 id + 内容预览 + 状态）。
+    pub async fn distill_result(&self, session_id: Uuid) -> Result<serde_json::Value, MemoryError> {
+        let Some((distill_status, metadata)) =
+            repo::session_distill_meta(&self.pool, session_id).await?
+        else {
+            return Err(MemoryError::NotFound(format!("会话 {session_id} 不存在")));
+        };
+        let status = if metadata.get("distill").and_then(|v| v.as_str()) == Some("off") {
+            "off（该会话标记为不蒸馏）".to_string()
+        } else {
+            distill_status
+        };
+        let atoms = repo::atoms_by_session(&self.pool, session_id).await?;
+        let preview: Vec<serde_json::Value> = atoms
+            .iter()
+            .map(|a| {
+                serde_json::json!({
+                    "id": a.id,
+                    "kind": a.kind,
+                    "content": a.content,
+                    "strength": a.strength,
+                    "source_kind": a.source_kind,
+                    "status": a.status,
+                    "needs_review": a.needs_review,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({
+            "session_id": session_id,
+            "distill_status": status,
+            "atom_count": atoms.len(),
+            "atoms": preview,
+        }))
+    }
+
+    // ---------- KV 值保值通道（蒸馏零介入——value 逐字保存） ----------
+
+    /// 写入/更新一个结构化值。同 key 就地覆盖（可变状态不产生取代链）。
+    pub async fn kv_put(
+        &self,
+        key: &str,
+        value: &str,
+        context: Option<&str>,
+        tags: Option<Vec<String>>,
+        source: Option<&str>,
+    ) -> Result<KvEntryDto, MemoryError> {
+        let k = key.trim();
+        if k.is_empty() || k.chars().count() > 200 {
+            return Err(MemoryError::BadRequest("key 不能为空且 ≤200 字符".into()));
+        }
+        let v = value;
+        if v.is_empty() {
+            return Err(MemoryError::BadRequest(
+                "value 不能为空——KV 是精确值通道，不放空话".into(),
+            ));
+        }
+        const SOURCES: [&str; 4] = ["user_stated", "verified_probe", "agent_inferred", "doc"];
+        let src = source.unwrap_or("user_stated");
+        if !SOURCES.contains(&src) {
+            return Err(MemoryError::BadRequest(format!(
+                "source 仅接受 user_stated/verified_probe/agent_inferred/doc（收到 {src}）"
+            )));
+        }
+        let row = repo::kv_upsert(
+            &self.pool,
+            k,
+            v,
+            context.unwrap_or("").trim(),
+            &tags.unwrap_or_default(),
+            src,
+        )
+        .await?;
+        Ok(row)
+    }
+
+    pub async fn kv_get(&self, key: &str) -> Result<Option<KvEntryDto>, MemoryError> {
+        Ok(repo::kv_get(&self.pool, key.trim()).await?)
+    }
+
+    pub async fn kv_list(&self, limit: i64) -> Result<Vec<KvEntryDto>, MemoryError> {
+        Ok(repo::kv_list(&self.pool, limit.clamp(1, 500)).await?)
+    }
+
+    /// 字面量直查（key/value/context ILIKE）——精确值不依赖分词。
+    pub async fn kv_search(&self, query: &str, limit: i64) -> Result<Vec<KvEntryDto>, MemoryError> {
+        let q = query.trim();
+        if q.chars().count() < 3 {
+            return Err(MemoryError::BadRequest(
+                "检索词至少 3 字符（防全表扫短串）".into(),
+            ));
+        }
+        Ok(repo::kv_search_literal(&self.pool, q, limit.clamp(1, 100)).await?)
     }
 
     // 选项袋式更新：8 个可选字段一一对应列；struct 化留给下一轮接口收敛
@@ -1399,7 +1514,7 @@ impl MemoryService {
         } else {
             vec![]
         };
-        let l1 = if want_l1 {
+        let mut l1 = if want_l1 {
             search_atoms(
                 &self.pool,
                 query,
@@ -1414,6 +1529,34 @@ impl MemoryService {
         } else {
             vec![]
         };
+        // ILIKE 兜底（工单「库里有一搜没有」）：FTS+向量双腿零命中时字面量直查——
+        // 精确值（序列号/UUID/IP:PORT）不依赖分词；顺带合并 KV 通道（蒸馏零介入的精确值）
+        if want_l1 && l1.is_empty() && query.trim().chars().count() >= 3 {
+            for h in repo::atoms_literal_fallback(&self.pool, max_items, query, reveal).await? {
+                l1.push(engram_search::SearchHit {
+                    id: h.id,
+                    score: 0.01,
+                    title: None,
+                    snippet: h.content,
+                    kind: Some(h.kind),
+                    needs_review: Some(h.needs_review),
+                });
+            }
+            if let Ok(kvs) =
+                repo::kv_search_literal(&self.pool, query.trim(), max_items.max(1)).await
+            {
+                for kv in kvs {
+                    l1.push(engram_search::SearchHit {
+                        id: kv.id,
+                        score: 0.02,
+                        title: Some(kv.key.clone()),
+                        snippet: format!("[kv:{}] {}", kv.key, kv.value),
+                        kind: Some("kv".into()),
+                        needs_review: None,
+                    });
+                }
+            }
+        }
         let l2 = if want_l2 {
             search_scenarios(&self.pool, query, qv.as_deref(), max_items)
                 .await

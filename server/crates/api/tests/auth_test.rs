@@ -831,7 +831,7 @@ async fn edit_split_atom_rewrite_user_only() {
         ),
     );
     let atom = svc
-        .create_atom("fact", "用户不能吃辣", 0.9, None, None, false)
+        .create_atom("fact", "用户不能吃辣", 0.9, None, None, false, None, None)
         .await
         .unwrap();
 
@@ -920,7 +920,7 @@ async fn ai_direct_write_revoked() {
     );
     // 预置数据：一个原子 + 两个实体（走 svc 直造，绕过 handler 的收窄检查）
     let atom = svc
-        .create_atom("fact", "测试原子", 0.9, None, None, false)
+        .create_atom("fact", "测试原子", 0.9, None, None, false, None, None)
         .await
         .unwrap();
     let e1 = svc.create_entity("张三", "person", "").await.unwrap();
