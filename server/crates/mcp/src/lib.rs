@@ -675,6 +675,12 @@ pub struct RememberParams {
     /// agent 归因
     #[schemars(description = "可选：agent 归因名。缺省用连接本服务的 API key 名。")]
     pub agent: Option<String>,
+    /// 显式断言强度：仅支持 "fact"——用户亲口明示的事实用这个（直写落库不走蒸馏，保原话）；
+    /// 缺省走蒸馏（产物默认 inference，保守不升格）
+    #[schemars(
+        description = "可选：仅支持 fact——用户亲口明示的事实直写落库（不走蒸馏，原话保真）。缺省走蒸馏（默认 inference）。"
+    )]
+    pub strength: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -1581,6 +1587,33 @@ impl EngramMcpServer {
             Principal::ApiKey { name, .. } => name.clone(),
             Principal::Admin => "admin".into(),
         });
+        // 显式 fact：用户亲口明示的事实直写落库（不走蒸馏——原话保真，不走概括）。
+        // 这是用户授权的提格入口；蒸馏默认 inference 的保守原则只约束无声明路径。
+        if rp.strength.as_deref() == Some("fact") {
+            if rp.sensitive.unwrap_or(false) {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "sensitive 与 strength=fact 互斥——敏感内容走会话蒸馏通道",
+                ));
+            }
+            let a = self
+                .svc()
+                .create_atom(
+                    "fact",
+                    &text,
+                    0.9,
+                    None,
+                    None,
+                    false,
+                    Some("fact"),
+                    Some("user_stated"),
+                )
+                .await
+                .map_err(from_memory)?;
+            let mut v = serde_json::to_value(&a).unwrap_or(serde_json::json!({}));
+            v["hint"] = json!("已记住（显式 fact 直写——原话保真，不走蒸馏）");
+            return ok_json(v);
+        }
         let turns = serde_json::json!([{ "speaker": "user", "text": text }]);
         let s = self
             .svc()
