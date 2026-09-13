@@ -1571,11 +1571,15 @@ impl MemoryService {
                 repo::kv_search_literal(&self.pool, query.trim(), max_items.max(1)).await
             {
                 for kv in kvs {
+                    let kv = kv_stale_hint(kv);
                     l1.push(engram_search::SearchHit {
                         id: kv.id,
                         score: 0.02,
                         title: Some(kv.key.clone()),
-                        snippet: format!("[kv:{}] {}", kv.key, kv.value),
+                        snippet: match &kv.stale_hint {
+                            Some(h) => format!("[kv:{}] {}\n⚠ {}", kv.key, kv.value, h),
+                            None => format!("[kv:{}] {}", kv.key, kv.value),
+                        },
                         kind: Some("kv".into()),
                         needs_review: None,
                     });
@@ -1750,7 +1754,7 @@ impl MemoryService {
                     q,
                     qv.as_deref(),
                     remaining as i64,
-                    false,
+                    true, // sensitive 口径放开（2026-09-12）
                     None,
                     None,
                 )

@@ -649,14 +649,14 @@ async fn sensitive_atoms_visible_with_flag() {
     // 非敏感原子照常
     let r2 = svc.search("骑行", &[], 10, true, None, None).await.unwrap();
     assert!(r2.l1.iter().any(|h| h.snippet.contains("骑行")));
-    // context_pack：恒排除（注入路径不给 reveal）
+    // context_pack：口径放开后同样可见（2026-09-12）
     let pack = svc
         .context_pack(Some("降压药"), 10, 10_000, true)
         .await
         .unwrap();
     assert!(
-        !pack.atoms.iter().any(|a| a.id == s.id),
-        "pack 注入不携带 sensitive"
+        pack.atoms.iter().any(|a| a.id == s.id),
+        "sensitive 原子默认进 context_pack（标记保留）"
     );
     // patch 可切换
     let off = svc

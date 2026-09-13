@@ -622,9 +622,9 @@ pub struct WriteSessionParams {
         description = "蒸馏模式：\"auto\"（默认，写入后 ~30 秒窗口合并蒸馏）/ \"manual\"（立即触发蒸馏）/ \"off\"（**永久豁免**——该会话不会被任何自动或手动蒸馏扫到，适合只归档不提炼的内容）。一般用默认。"
     )]
     pub distill: Option<String>,
-    /// 会话级敏感标记（医疗/感情/财务等隐私）：蒸馏产物继承，默认不进检索
+    /// 会话级敏感标记（医疗/感情/财务等隐私）：蒸馏产物继承标记。2026-09-12 口径放开——敏感是标记不是隐身，检索/上下文默认可见。
     #[schemars(
-        description = "整段对话含用户隐私（医疗/感情/财务等）时置 true：蒸馏产物自动继承敏感标记，默认不进检索与上下文包。"
+        description = "整段对话含用户隐私（医疗/感情/财务等）时置 true：蒸馏产物自动继承敏感标记。2026-09-12 口径放开——sensitive 是标记不是隐身，检索与上下文默认可见（DTO 带 sensitive=true 供识别）。"
     )]
     pub sensitive: Option<bool>,
     /// agent 归因（缺省用连接本服务的 API key 名）
@@ -670,7 +670,9 @@ pub struct RememberParams {
     )]
     pub text: String,
     /// 会话级敏感标记
-    #[schemars(description = "可选：敏感内容（医疗/感情/财务）置 true，蒸馏产物默认不进检索。")]
+    #[schemars(
+        description = "可选：敏感内容（医疗/感情/财务）置 true——敏感是标记不是隐身，产物默认可见并带 sensitive 标记。"
+    )]
     pub sensitive: Option<bool>,
     /// agent 归因
     #[schemars(description = "可选：agent 归因名。缺省用连接本服务的 API key 名。")]
@@ -1284,7 +1286,7 @@ impl EngramMcpServer {
     /// 何时用：对话中需要回忆与当前话题相关的用户背景、既往决策、偏好、历史事件时。
     /// 何时不用：会话开场的全景装载用 memory_context；浏览全量列表用 memory_list_atoms。
     /// 命中会回写热度（hit_count），常被检索的内容会在整理中获得更高权重。
-    /// 敏感条目默认排除；返回 {entities, l1, l2, l3}，各元素含 score/title/snippet；
+    /// sensitive 条目默认可见（2026-09-12 口径放开——标记保留不隐身）；返回 {entities, l1, l2, l3}，各元素含 score/title/snippet；
     /// L3 画像默认不带 evidence_refs（与 context 同口径，include_evidence=true 开）。
     async fn memory_search(
         &self,
@@ -4190,7 +4192,7 @@ LLM 供应商/模型的配置与排障是管理员专属，走 Web 控制台「�
 - 用户记忆的写入通道只有「写会话」：事实抽取、画像更新、实体维护全部由蒸馏完成；
 - 直接改写用户记忆语义内容（原子内容、画像分面、实体档案）是用户专属权限，MCP 工具面不提供；
 - 纠错也走会话：把正确的表述写成对话（correction 语义），蒸馏会自动生成取代链；
-- 敏感对话（医疗/感情/财务等）写入时置 sensitive=true，默认不进检索与上下文；
+- 敏感对话（医疗/感情/财务等）写入时可置 sensitive=true——敏感是标记不是隐身，检索与上下文默认可见（2026-09-12 口径放开）；凭据类（密码/密钥/token）无论 sensitive 一律不写入；
 - 破坏性操作（各域 delete/forget 类，目录里有【破坏性】标注）不可逆，只对用户明确请求使用；
 - skills delete 仅限用户明确要求——内容过时用 update 修订，改坏用 restore 回滚，不要自行删除。\
 ";
