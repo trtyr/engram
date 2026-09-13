@@ -229,6 +229,72 @@ impl CgBridge {
         Ok(row)
     }
 
+    /// 索引新鲜度（工单「索引生命周期无口径」）：仓库 HEAD 提交时间 vs last_indexed。
+    /// 只读 .git（git log），不新增后台扫描。HEAD 不可读（非 git 仓库/权限）→ 仅返回 last_indexed。
+    pub async fn freshness_for(&self, proj: &CgProjectDto) -> serde_json::Value {
+        let last_indexed = proj
+            .stats
+            .as_ref()
+            .and_then(|s| s.get("last_indexed").cloned())
+            .unwrap_or(serde_json::Value::Null);
+
+        // HEAD：git log -1 --format=%H %cI（容器 runtime 已装 git）
+        let head = tokio::process::Command::new("git")
+            .args(["log", "-1", "--format=%H %cI"])
+            .current_dir(Path::new(&proj.path))
+            .output()
+            .await
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        let Some(head_line) = head else {
+            return serde_json::json!({
+                "last_indexed": last_indexed,
+                "stale": serde_json::Value::Null,
+                "hint": "HEAD 不可读（非 git 仓库或无 .git）——新鲜度未知，建议定期 sync",
+            });
+        };
+        let mut parts = head_line.split_whitespace();
+        let hash = parts.next().unwrap_or("").to_string();
+        let head_time = parts
+            .next()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| t.with_timezone(&chrono::Utc));
+        let Some(head_time) = head_time else {
+            return serde_json::json!({
+                "head": hash, "last_indexed": last_indexed, "stale": serde_json::Value::Null,
+                "hint": "HEAD 时间解析失败——新鲜度未知",
+            });
+        };
+
+        // last_indexed 解析（CLI 格式容错：RFC3339 字符串）
+        let indexed_at = last_indexed.as_str().and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|t| t.with_timezone(&chrono::Utc))
+        });
+        let Some(indexed_at) = indexed_at else {
+            return serde_json::json!({
+                "head": hash, "head_committed_at": head_time.to_rfc3339(),
+                "last_indexed": last_indexed, "stale": serde_json::Value::Null,
+                "hint": "last_indexed 无法解析——建议 sync 后再查询",
+            });
+        };
+        let stale = head_time > indexed_at;
+        let mut v = serde_json::json!({
+            "head": hash,
+            "head_committed_at": head_time.to_rfc3339(),
+            "last_indexed": indexed_at.to_rfc3339(),
+            "stale": stale,
+        });
+        if stale {
+            v["hint"] = serde_json::json!(
+                "索引早于最近一次提交——结果可能落后于代码，建议先 codegraph sync"
+            );
+        }
+        v
+    }
+
     pub async fn list(&self) -> Result<Vec<CgProjectDto>, CgError> {
         Ok(
             sqlx::query_as::<_, CgProjectDto>("SELECT * FROM cg_projects ORDER BY created_at DESC")

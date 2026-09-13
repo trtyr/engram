@@ -2270,7 +2270,14 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         require_codegraph(&p)?;
         let rows = cg_svc(&self.state).list().await.map_err(from_cg)?;
-        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+        // 新鲜度口径（工单「索引生命周期无口径」）：HEAD 对比 last_indexed，陈旧显式提示
+        let mut out = Vec::new();
+        for r in &rows {
+            let mut item = serde_json::to_value(r).unwrap_or(serde_json::json!({}));
+            item["freshness"] = cg_svc(&self.state).freshness_for(r).await;
+            out.push(item);
+        }
+        ok_json(serde_json::Value::Array(out))
     }
 
     /// 注册代码图谱项目（本地绝对路径或 git URL）。
@@ -2367,7 +2374,7 @@ impl EngramMcpServer {
             )
         })?;
         let id = cg_resolve(&self.state, &params.0.project).await?;
-        let v = cg_svc(&self.state)
+        let mut v = cg_svc(&self.state)
             .query(
                 id,
                 kind,
@@ -2377,6 +2384,12 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_cg)?;
+        // 新鲜度提示：索引落后于 HEAD 时显式提醒（避免静默使用旧图）
+        if let Ok(proj) = cg_svc(&self.state).get(id).await
+            && proj.status == "ready"
+        {
+            v["_freshness"] = cg_svc(&self.state).freshness_for(&proj).await;
+        }
         ok_json(v)
     }
 
