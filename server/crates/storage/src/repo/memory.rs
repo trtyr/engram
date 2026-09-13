@@ -634,7 +634,7 @@ pub async fn atoms_by_ids(pool: &PgPool, ids: &[Uuid]) -> StoreResult<Vec<AtomDt
 /// context_pack 无 query 路径：热度头部（过滤过期与敏感）。
 pub async fn recent_active_atoms(pool: &PgPool, limit: i64) -> StoreResult<Vec<AtomDto>> {
     let rows = sqlx::query_as(
-        "SELECT * FROM atoms WHERE status = 'active' AND NOT sensitive \
+        "SELECT * FROM atoms WHERE status = 'active' \
          AND (valid_until IS NULL OR valid_until > now()) \
          ORDER BY hit_count DESC, confidence DESC, created_at DESC LIMIT $1",
     )
@@ -647,7 +647,7 @@ pub async fn recent_active_atoms(pool: &PgPool, limit: i64) -> StoreResult<Vec<A
 /// 人审代问（议题三）：队列里的低置信项带给 AI。
 pub async fn pending_review_atoms(pool: &PgPool) -> StoreResult<Vec<AtomDto>> {
     let rows = sqlx::query_as(
-        "SELECT * FROM atoms WHERE needs_review AND status = 'active' AND NOT sensitive ORDER BY created_at DESC LIMIT 5",
+        "SELECT * FROM atoms WHERE needs_review AND status = 'active' ORDER BY created_at DESC LIMIT 5",
     )
     .fetch_all(pool)
     .await?;

@@ -92,7 +92,7 @@ async fn search_hits_bump_hit_count() {
     .unwrap();
 
     let _ = svc
-        .search("Rust", &[], 10, false, false, None, None)
+        .search("Rust", &[], 10, false, None, None)
         .await
         .expect("search");
 
@@ -617,9 +617,9 @@ async fn concurrent_append_keeps_all_turns() {
     );
 }
 
-/// P3 sensitive：默认不进检索与 pack，reveal 才可见；consolidate 素材不动它。
+/// sensitive 口径（2026-09-12 放开）：标记保留、检索默认可见；蒸馏素材链（organize）仍过滤防扩散。
 #[tokio::test]
-async fn sensitive_atoms_hidden_until_reveal() {
+async fn sensitive_atoms_visible_with_flag() {
     let (pool, svc, _container) = setup().await;
     insert_atom(&pool, "用户喜欢骑行", 0).await;
     let s = svc
@@ -635,20 +635,20 @@ async fn sensitive_atoms_hidden_until_reveal() {
         )
         .await
         .unwrap();
-    assert!(s.sensitive);
+    assert!(s.sensitive, "标记保留——DTO 上仍可见 sensitive=true");
 
-    // 默认检索：不可见
+    // 默认检索（无 reveal 参数概念了）：可见
     let r = svc
-        .search("降压药", &[], 10, true, false, None, None)
+        .search("降压药", &[], 10, true, None, None)
         .await
         .unwrap();
-    assert!(r.l1.is_empty(), "sensitive 默认不可见");
-    // reveal：可见
-    let r = svc
-        .search("降压药", &[], 10, true, true, None, None)
-        .await
-        .unwrap();
-    assert!(r.l1.iter().any(|h| h.id == s.id), "reveal 后可见");
+    assert!(
+        r.l1.iter().any(|h| h.id == s.id),
+        "sensitive 原子默认可见（口径放开）"
+    );
+    // 非敏感原子照常
+    let r2 = svc.search("骑行", &[], 10, true, None, None).await.unwrap();
+    assert!(r2.l1.iter().any(|h| h.snippet.contains("骑行")));
     // context_pack：恒排除（注入路径不给 reveal）
     let pack = svc
         .context_pack(Some("降压药"), 10, 10_000, true)

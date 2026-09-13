@@ -1304,7 +1304,6 @@ impl EngramMcpServer {
                 &layers,
                 sp.max_items.unwrap_or(20),
                 false,
-                false,
                 from,
                 to,
             )
@@ -3305,7 +3304,7 @@ impl EngramMcpServer {
             }
             let r = self
                 .svc()
-                .search(&q, &["l1", "l2", "entities"], max, false, false, None, None)
+                .search(&q, &["l1", "l2", "entities"], max, false, None, None)
                 .await;
             Some(match r {
                 Ok(r) => json!({

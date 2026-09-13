@@ -57,7 +57,14 @@ pub struct KvEntryDto {
     pub source: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// 陈旧提示（返回时按 updated_at 计算，非列）：超过 KV_STALE_DAYS 天时提示可能过期
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[sqlx(skip)]
+    pub stale_hint: Option<String>,
 }
+
+/// KV 陈旧阈值（天）：updated_at 超过该值提示「可能已过期」。
+pub const KV_STALE_DAYS: i64 = 14;
 
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct ScenarioDto {

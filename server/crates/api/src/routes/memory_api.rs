@@ -586,7 +586,7 @@ pub async fn export_memory(
     require_memory(&principal)?;
     Ok(Json(
         svc(&state)
-            .export(p.include_sensitive.unwrap_or(false))
+            .export(p.include_sensitive.unwrap_or(true)) // 敏感口径放开（2026-09-12）——默认全量
             .await
             .map_err(me)?,
     ))
@@ -1078,7 +1078,6 @@ pub async fn search(
                 &layers,
                 req.max_items.unwrap_or(20),
                 req.no_feedback,
-                req.reveal,
                 req.from,
                 req.to,
             )

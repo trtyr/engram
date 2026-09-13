@@ -130,6 +130,19 @@ pub struct EmbeddingStatus {
 // ---------- 服务 ----------
 
 /// 查询侧嵌入指令（Qwen3-Embedding 等非对称检索模型用）；None = 不包装。
+/// KV 陈旧提示：updated_at 超过 KV_STALE_DAYS 天时附带提示（不阻塞使用——只是提醒）。
+pub fn kv_stale_hint(mut e: KvEntryDto) -> KvEntryDto {
+    let age = chrono::Utc::now() - e.updated_at;
+    if age > chrono::Duration::days(engram_storage::models::memory::KV_STALE_DAYS) {
+        e.stale_hint = Some(format!(
+            "此值最后校验于 {}（超过 {} 天），可能已过期——引用前建议先实测",
+            e.updated_at.format("%Y-%m-%d"),
+            engram_storage::models::memory::KV_STALE_DAYS
+        ));
+    }
+    e
+}
+
 static QUERY_INSTRUCTION: std::sync::LazyLock<Option<String>> = std::sync::LazyLock::new(|| {
     std::env::var("AGENT_MEMORY_EMBED_QUERY_INSTRUCTION")
         .ok()
@@ -704,11 +717,17 @@ impl MemoryService {
     }
 
     pub async fn kv_get(&self, key: &str) -> Result<Option<KvEntryDto>, MemoryError> {
-        Ok(repo::kv_get(&self.pool, key.trim()).await?)
+        Ok(repo::kv_get(&self.pool, key.trim())
+            .await?
+            .map(kv_stale_hint))
     }
 
     pub async fn kv_list(&self, limit: i64) -> Result<Vec<KvEntryDto>, MemoryError> {
-        Ok(repo::kv_list(&self.pool, limit.clamp(1, 500)).await?)
+        Ok(repo::kv_list(&self.pool, limit.clamp(1, 500))
+            .await?
+            .into_iter()
+            .map(kv_stale_hint)
+            .collect())
     }
 
     /// 字面量直查（key/value/context ILIKE）——精确值不依赖分词。
@@ -719,7 +738,11 @@ impl MemoryService {
                 "检索词至少 3 字符（防全表扫短串）".into(),
             ));
         }
-        Ok(repo::kv_search_literal(&self.pool, q, limit.clamp(1, 100)).await?)
+        Ok(repo::kv_search_literal(&self.pool, q, limit.clamp(1, 100))
+            .await?
+            .into_iter()
+            .map(kv_stale_hint)
+            .collect())
     }
 
     // 选项袋式更新：8 个可选字段一一对应列；struct 化留给下一轮接口收敛
@@ -1481,13 +1504,15 @@ impl MemoryService {
 
     /// 分层检索。无 embedding 通道时自动退化为纯 FTS。
     #[allow(clippy::too_many_arguments)]
+    /// 2026-09-12 敏感口径放开：单用户系统全部记忆可见（用户拍板「全部放进来且能检索」）。
+    /// sensitive 保留为**标记**（AtomDto.sensitive 字段照常返回），不再是隐身开关；
+    /// reveal 参数移除——显式 hide 需求未来以 include_hidden 形态回归。
     pub async fn search(
         &self,
         query: &str,
         layers: &[&str],
         max_items: i64,
         no_feedback: bool,
-        reveal: bool,
         from: Option<chrono::DateTime<chrono::Utc>>,
         to: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<SearchResponse, MemoryError> {
@@ -1520,7 +1545,7 @@ impl MemoryService {
                 query,
                 qv.as_deref(),
                 max_items,
-                reveal,
+                true, // sensitive 口径放开（2026-09-12）——标记保留、不再隐身
                 from,
                 to,
             )
@@ -1532,7 +1557,7 @@ impl MemoryService {
         // ILIKE 兜底（工单「库里有一搜没有」）：FTS+向量双腿零命中时字面量直查——
         // 精确值（序列号/UUID/IP:PORT）不依赖分词；顺带合并 KV 通道（蒸馏零介入的精确值）
         if want_l1 && l1.is_empty() && query.trim().chars().count() >= 3 {
-            for h in repo::atoms_literal_fallback(&self.pool, max_items, query, reveal).await? {
+            for h in repo::atoms_literal_fallback(&self.pool, max_items, query, true).await? {
                 l1.push(engram_search::SearchHit {
                     id: h.id,
                     score: 0.01,

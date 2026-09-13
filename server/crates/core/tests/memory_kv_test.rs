@@ -216,10 +216,7 @@ async fn search_literal_fallback_hits_atom_and_kv() {
         .unwrap();
 
     // FTS 对该字面量的命中不稳定（分词链路），兜底必须接住——atom 与 kv 都要回来
-    let resp = svc
-        .search(lit, &[], 20, true, true, None, None)
-        .await
-        .unwrap();
+    let resp = svc.search(lit, &[], 20, true, None, None).await.unwrap();
     let ids: Vec<_> = resp.l1.iter().map(|h| h.id).collect();
     assert!(!resp.l1.is_empty(), "字面量兜底不应为空");
     assert!(
@@ -228,4 +225,38 @@ async fn search_literal_fallback_hits_atom_and_kv() {
         resp.l1.iter().map(|h| &h.snippet).collect::<Vec<_>>()
     );
     assert_eq!(ids.len(), resp.l1.len());
+}
+
+/// stale 提示（工单「状态变更无人发现」）：updated_at 超过 14 天 → 返回带 stale_hint；
+/// 新值不带。向后兼容——字段仅在有提示时出现。
+#[tokio::test]
+async fn kv_stale_hint_marks_old_values() {
+    let (pool, svc, _pg) = setup().await;
+    svc.kv_put("old-ip", "10.0.0.1", None, None, None)
+        .await
+        .unwrap();
+    svc.kv_put("new-ip", "10.0.0.2", None, None, None)
+        .await
+        .unwrap();
+    // 把 old-ip 的 updated_at 拨回 20 天前
+    sqlx::query(
+        "UPDATE kv_entries SET updated_at = now() - interval '20 days' WHERE key = 'old-ip'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let old = svc.kv_get("old-ip").await.unwrap().unwrap();
+    assert!(old.stale_hint.is_some(), "老值应带 stale 提示");
+    assert!(old.stale_hint.unwrap().contains("可能已过期"));
+    let fresh = svc.kv_get("new-ip").await.unwrap().unwrap();
+    assert!(fresh.stale_hint.is_none(), "新值不带提示");
+    // 序列化向后兼容：无提示时字段不出现
+    let json = serde_json::to_string(&fresh).unwrap();
+    assert!(!json.contains("stale_hint"));
+    // list/search 同口径
+    let all = svc.kv_list(50).await.unwrap();
+    assert_eq!(all.iter().filter(|e| e.stale_hint.is_some()).count(), 1);
+    let hits = svc.kv_search("10.0.0.1", 10).await.unwrap();
+    assert!(hits[0].stale_hint.is_some());
 }
