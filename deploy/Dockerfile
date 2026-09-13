@@ -60,10 +60,9 @@ FROM debian:trixie-slim AS runtime
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
-# apt 用清华镜像（稳定直连，不依赖任何代理环境）
-RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null; \
-    sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list 2>/dev/null; \
-    apt-get update \
+# 2026-09-13：TUN 虚拟网卡直连——apt 走 debian 官方源（清华镜像在当前网络下不可达）；
+# 代理 ARG 保留（历史兼容，默认空不生效）
+RUN apt-get update -o Acquire::ForceIPv4=true \
     && apt-get install -y --no-install-recommends ca-certificates curl git npm \
     && rm -rf /var/lib/apt/lists/*
 # codegraph CLI pin 版本（D0005；升级需重新验证 JSON 输出格式）
