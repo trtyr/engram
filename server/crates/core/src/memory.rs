@@ -1554,27 +1554,20 @@ impl MemoryService {
         } else {
             vec![]
         };
-        // ILIKE 兜底（工单「库里有一搜没有」）：FTS+向量双腿零命中时字面量直查——
-        // 精确值（序列号/UUID/IP:PORT）不依赖分词；顺带合并 KV 通道（蒸馏零介入的精确值）
-        if want_l1 && l1.is_empty() && query.trim().chars().count() >= 3 {
-            for h in repo::atoms_literal_fallback(&self.pool, max_items, query, true).await? {
-                l1.push(engram_search::SearchHit {
-                    id: h.id,
-                    score: 0.01,
-                    title: None,
-                    snippet: h.content,
-                    kind: Some(h.kind),
-                    needs_review: Some(h.needs_review),
-                });
-            }
+        // ILIKE 补漏与 KV 权威通道（工单「库里有一搜必有」）：
+        // - KV 是精确值唯一权威源——字面量命中**恒合并**进结果最前（FTS 噪音命中
+        //   不应把权威值挤出结果），带 stale_hint
+        // - atoms ILIKE 兜底仅在双腿零命中时触发（补漏，不打扰正常排序）
+        if want_l1 && query.trim().chars().count() >= 3 {
+            let mut kv_hits: Vec<engram_search::SearchHit> = Vec::new();
             if let Ok(kvs) =
                 repo::kv_search_literal(&self.pool, query.trim(), max_items.max(1)).await
             {
                 for kv in kvs {
                     let kv = kv_stale_hint(kv);
-                    l1.push(engram_search::SearchHit {
+                    kv_hits.push(engram_search::SearchHit {
                         id: kv.id,
-                        score: 0.02,
+                        score: 100.0, // 权威源置顶
                         title: Some(kv.key.clone()),
                         snippet: match &kv.stale_hint {
                             Some(h) => format!("[kv:{}] {}\n⚠ {}", kv.key, kv.value, h),
@@ -1582,6 +1575,21 @@ impl MemoryService {
                         },
                         kind: Some("kv".into()),
                         needs_review: None,
+                    });
+                }
+            }
+            if !kv_hits.is_empty() {
+                kv_hits.extend(l1);
+                l1 = kv_hits;
+            } else if l1.is_empty() {
+                for h in repo::atoms_literal_fallback(&self.pool, max_items, query, true).await? {
+                    l1.push(engram_search::SearchHit {
+                        id: h.id,
+                        score: 0.01,
+                        title: None,
+                        snippet: h.content,
+                        kind: Some(h.kind),
+                        needs_review: Some(h.needs_review),
                     });
                 }
             }

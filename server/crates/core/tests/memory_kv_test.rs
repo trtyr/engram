@@ -260,3 +260,28 @@ async fn kv_stale_hint_marks_old_values() {
     let hits = svc.kv_search("10.0.0.1", 10).await.unwrap();
     assert!(hits[0].stale_hint.is_some());
 }
+
+/// KV 权威通道恒并结果（即使 FTS 有噪音命中）：字面量命中 KV 时排最前且带 stale。
+#[tokio::test]
+async fn kv_authority_channel_merges_despite_fts_noise() {
+    let (pool, svc, _pg) = setup().await;
+    svc.kv_put("legacy-gw", "ZX-VGATE-7741", None, None, None)
+        .await
+        .unwrap();
+    // 噪音原子：FTS 会命中 zx/vgate 等碎片的其他行
+    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, tsv) VALUES ($1, 'fact', 'ZX 系列网关型号大全 7741 家族', 0.9, to_tsvector('simple', 'ZX 系列网关型号大全 7741 家族'))")
+        .bind(uuid::Uuid::now_v7())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let resp = svc
+        .search("ZX-VGATE-7741", &[], 20, true, None, None)
+        .await
+        .unwrap();
+    assert!(
+        resp.l1.first().map(|h| h.kind.as_deref()) == Some(Some("kv")),
+        "KV 权威命中应排最前: {:?}",
+        resp.l1.iter().map(|h| &h.snippet).collect::<Vec<_>>()
+    );
+    assert!(resp.l1.first().unwrap().snippet.contains("ZX-VGATE-7741"));
+}
