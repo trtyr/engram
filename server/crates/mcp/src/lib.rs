@@ -2384,8 +2384,10 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_cg)?;
-        // 新鲜度提示：索引落后于 HEAD 时显式提醒（避免静默使用旧图）
-        if let Ok(proj) = cg_svc(&self.state).get(id).await
+        // 新鲜度提示：索引落后于 HEAD 时显式提醒（避免静默使用旧图）。
+        // 仅 object 响应注入（kind=search 返回数组，不能带键——新鲜度看 codegraph list）
+        if v.is_object()
+            && let Ok(proj) = cg_svc(&self.state).get(id).await
             && proj.status == "ready"
         {
             v["_freshness"] = cg_svc(&self.state).freshness_for(&proj).await;
