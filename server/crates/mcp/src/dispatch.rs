@@ -119,6 +119,9 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "graph", false, "Wiki 链接图全貌（节点/边/社区划分；按库）" => crate::wiki::WikiLibParams;
             "lint", false, "Wiki 体检（死链/孤页/缺源；只报告不修改；按库）" => crate::wiki::WikiLibParams;
             "lint_deep", false, "语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步任务，产出入人审队列；slugs 可限定范围控成本）" => crate::wiki::WikiLintDeepParams;
+            "document_add", false, "入库文档（text 或 url）——分块+嵌入进原文 RAG 并触发织入；幂等去重" => crate::wiki::WikiDocumentAddParams;
+            "document_get", false, "文档状态（status/error 即处理进度）" => crate::wiki::WikiDocumentGetParams;
+            "documents_search", false, "原文检索（chunk 级 FTS+向量混合——与页面级 search 互补）" => crate::wiki::WikiDocumentsSearchParams;
             "reviews", false, "人审队列：列出审查项（lint 深检/织入期 LLM 旗标的发现——kind/payload/来源；status 可过滤 open/resolved/dismissed，缺省 open）" => crate::wiki::WikiReviewsParams;
             "review_resolve", false, "处置评审项：标记已处理（resolved）或驳回作废（dismiss），可附动作标签" => crate::wiki::WikiReviewResolveParams;
             "index", false, "内容目录（按页型分组的全库目录：slug/标题/入链数/首段摘要；只读动态聚合）" => crate::wiki::WikiLibParams;

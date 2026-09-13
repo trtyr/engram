@@ -172,6 +172,47 @@ pub struct WikiIngestParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiDocumentAddParams {
+    /// 二选一：要入库的文本（name 作标题）
+    #[schemars(
+        description = "二选一：要入库的文本全文（分块+嵌入进原文 RAG，并触发 LLM 织入）。与 url 二选一。"
+    )]
+    pub text: Option<String>,
+    /// 二选一：要抓取的 URL（SSRF 校验）
+    #[schemars(description = "二选一：要抓取的 URL（自动抓取→分块→嵌入→织入）。与 text 二选一。")]
+    pub url: Option<String>,
+    /// 可选：文档名（text 模式作标题；url 模式忽略）
+    #[schemars(description = "可选：文档名（text 模式的标题）。")]
+    pub name: Option<String>,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiDocumentGetParams {
+    /// 文档 id（document_add 返回的 id）
+    #[schemars(description = "文档 id（document_add 返回的 id）。status 字段即处理进度。")]
+    pub id: String,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiDocumentsSearchParams {
+    /// 原文检索词（chunk 级 FTS+向量混合——搜的是原文分块不是 LLM 生成的页面）
+    #[schemars(description = "检索词（chunk 级原文 RAG——与 wiki search 的页面级检索互补）。")]
+    pub query: String,
+    /// 返回上限（默认 8）
+    #[schemars(description = "可选：返回上限。默认 8。")]
+    pub limit: Option<i64>,
+    /// 可选：库 slug（缺省 main 主库）
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiReviewsParams {
     /// 可选：按状态过滤（open/resolved/dismissed；缺省 open）
     #[schemars(description = "可选：按状态过滤（open/resolved/dismissed；缺省 open）。")]

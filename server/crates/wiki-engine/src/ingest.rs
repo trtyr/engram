@@ -328,6 +328,43 @@ pub async fn analyze_job(
 }
 
 /// 第二步：生成/更新页面 + 索引 + 链接图 + 嵌入。
+/// 单片字符上限：超过则按段落边界切片分别调用（防超时+巨 JSON）。
+const GEN_SLICE_CHARS: usize = 24_000;
+
+/// 按段落边界（\n\n）贪心切片；单段超限时硬切。
+fn slice_source(text: &str, limit: usize) -> Vec<String> {
+    if text.chars().count() <= limit {
+        return vec![text.to_string()];
+    }
+    let mut slices = Vec::new();
+    let mut cur = String::new();
+    for para in text.split("\n\n") {
+        let para_len = para.chars().count();
+        if para_len > limit {
+            // 单段超限：硬切
+            if !cur.is_empty() {
+                slices.push(std::mem::take(&mut cur));
+            }
+            let chars: Vec<char> = para.chars().collect();
+            for chunk in chars.chunks(limit) {
+                slices.push(chunk.iter().collect());
+            }
+            continue;
+        }
+        if cur.chars().count() + para_len + 2 > limit {
+            slices.push(std::mem::take(&mut cur));
+        }
+        if !cur.is_empty() {
+            cur.push_str("\n\n");
+        }
+        cur.push_str(para);
+    }
+    if !cur.is_empty() {
+        slices.push(cur);
+    }
+    slices
+}
+
 pub async fn generate_job(
     ctx: JobContext,
     llm: crate::service::LlmRef,
@@ -368,27 +405,66 @@ pub async fn generate_job(
     let existing_pages = read_index(pool, lib).await?;
 
     let purpose = crate::purpose::purpose_context(pool, lib).await;
-    let user = format!(
-        "== 知识库 Purpose（方向意图，写作风格与侧重纳入考量）==\n{purpose}\n\n== 分析结果 ==\n{}\n\n== 源文档 ==\n{}\n\n== 既有页面集合（已存在，勿重建）==\n{}",
-        serde_json::to_string_pretty(&analysis).unwrap_or_default(),
-        text,
-        existing_pages
-    );
-    let out = engram_distill::llm_port::chat_json_retrying(
-        &ctx,
-        llm.as_ref(),
-        engram_llm::types::Purpose::WikiGeneration,
-        &prompts::generation_system(),
-        &user,
-        ctx.job.id,
-    )
-    .await?;
-
-    let mut pages = out
-        .get("pages")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
+    // 分片消费（工单「高反斜杠大文档织入必败」）：整篇塞给 LLM 会超时+产出巨 JSON 易坏
+    // ——超过 GEN_SLICE_CHARS 按段落边界切片，每片独立调用，聚合候选页后走既有去重/截断链
+    let slices = slice_source(&text, GEN_SLICE_CHARS);
+    if slices.len() > 1 {
+        ctx.emit(
+            "源文档过大，分片织入",
+            Some(json!({
+                "total_chars": text.chars().count(),
+                "slices": slices.len(),
+                "slice_chars": GEN_SLICE_CHARS,
+            })),
+        )
+        .await
+        .ok();
+    }
+    let mut pages: Vec<serde_json::Value> = Vec::new();
+    let mut seen_slugs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (i, slice) in slices.iter().enumerate() {
+        let part_note = if slices.len() > 1 {
+            format!(
+                "\n\n（本批为源文档第 {}/{} 片——只产出与本片内容对应的页面）",
+                i + 1,
+                slices.len()
+            )
+        } else {
+            String::new()
+        };
+        let user = format!(
+            "== 知识库 Purpose（方向意图，写作风格与侧重纳入考量）==\n{purpose}\n\n== 分析结果 ==\n{}\n\n== 源文档 ==\n{}{}\n\n== 既有页面集合（已存在，勿重建）==\n{}",
+            serde_json::to_string_pretty(&analysis).unwrap_or_default(),
+            slice,
+            part_note,
+            existing_pages
+        );
+        let out = engram_distill::llm_port::chat_json_retrying(
+            &ctx,
+            llm.as_ref(),
+            engram_llm::types::Purpose::WikiGeneration,
+            &prompts::generation_system(),
+            &user,
+            ctx.job.id,
+        )
+        .await?;
+        let batch = out
+            .get("pages")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for p in batch {
+            // 聚合去重：同 slug 只保留首次产出（分片边界重复内容不产重复页）
+            let slug = p
+                .get("slug")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if seen_slugs.insert(slug) {
+                pages.push(p);
+            }
+        }
+    }
     // 漂移校准（测试方 W-7③）：单次织入建页量软上限——超限截断 + 告警，不中断织入。
     // 防 LLM 幻觉/暴走批量建页导致 llm 页自我漂移；正常多主题文档（<20 页）不受影响。
     if pages.len() > MAX_PAGES_PER_GENERATE {
@@ -857,6 +933,32 @@ async fn mark_source_failed(pool: &sqlx::PgPool, ctx_job: &engram_jobs::types::J
         .bind(msg)
         .execute(pool)
         .await;
+    // 织入失败可见（工单「write_page 哑写」②）：失败落人审队列 flag（via=ingest_failed）——
+    // 人能在 reviews 里看到「这条原料织不进来」，而不是只有 source 表里一行 failed
+    let row: Option<(Uuid, Option<String>)> =
+        sqlx::query_as("SELECT library_id, title FROM wiki_sources WHERE id = $1")
+            .bind(sid)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    if let Some((lib, title)) = row {
+        let _ = sqlx::query(
+            "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries, source_id) \
+             VALUES ($1, $2, 'flag', $3, '[]'::jsonb, $4)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(lib)
+        .bind(serde_json::json!({
+            "via": "ingest_failed",
+            "source_id": sid,
+            "title": title,
+            "reason": format!("织入失败：{msg}——修复后可重新 ingest 同内容（sha 变更即重试）"),
+        }))
+        .bind(sid)
+        .execute(pool)
+        .await;
+    }
 }
 
 /// 注册 Wiki handler。
@@ -910,5 +1012,43 @@ fn source_failure_msg(
             Err(format!("重试耗尽（{msg}）"))
         }
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod slice_tests {
+    use super::{GEN_SLICE_CHARS, slice_source};
+
+    #[test]
+    fn small_text_single_slice() {
+        assert_eq!(slice_source("短文本", GEN_SLICE_CHARS).len(), 1);
+    }
+
+    #[test]
+    fn large_text_split_on_paragraphs() {
+        let paras: Vec<String> = (0..50)
+            .map(|i| format!("第{i}段。{}", "内容".repeat(300)))
+            .collect();
+        let text = paras.join("\n\n");
+        let slices = slice_source(&text, GEN_SLICE_CHARS);
+        assert!(slices.len() > 1, "应切多片");
+        assert!(
+            slices
+                .iter()
+                .all(|s| s.chars().count() <= GEN_SLICE_CHARS + 2),
+            "单片不超限（+2 容忍拼接）"
+        );
+        // 无内容丢失（去分隔符拼回等长）
+        let total: usize = slices.iter().map(|s| s.chars().count()).sum();
+        let origin = text.chars().count();
+        assert!(total >= origin - (slices.len() * 2), "切片不丢内容");
+    }
+
+    #[test]
+    fn single_oversized_paragraph_hard_split() {
+        let huge = "长".repeat(GEN_SLICE_CHARS * 2 + 100);
+        let slices = slice_source(&huge, GEN_SLICE_CHARS);
+        assert!(slices.len() >= 3, "单段超限硬切: {}", slices.len());
+        assert!(slices.iter().all(|s| s.chars().count() <= GEN_SLICE_CHARS));
     }
 }

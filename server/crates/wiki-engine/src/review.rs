@@ -20,6 +20,10 @@ pub struct ReviewItem {
     pub status: String,
     pub created_at: DateTime<Utc>,
     pub resolved_at: Option<DateTime<Utc>>,
+    /// 腐烂标注（返回时计算，非列）：提案指向的 slug 已不存在 → 列出已删 slug
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[sqlx(skip)]
+    pub stale: Option<Vec<String>>,
 }
 
 /// LLM 输出的 review flag（预定义动作约束——防幻觉任意动作）。
@@ -133,6 +137,83 @@ pub async fn list_by_status(
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))
+}
+
+/// 腐烂治理（工单「人审队列腐烂」）：提案指向的页面已删除 → stale 标注。
+/// payload 中的候选 slug 字段：pages（lint 数组）/ slug / suggested_slug / related。
+pub async fn annotate_stale(
+    pool: &PgPool,
+    lib: Uuid,
+    mut items: Vec<ReviewItem>,
+) -> Result<Vec<ReviewItem>, JobError> {
+    let alive: std::collections::HashSet<String> =
+        sqlx::query_scalar("SELECT slug FROM wiki_pages WHERE library_id = $1")
+            .bind(lib)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?
+            .into_iter()
+            .collect();
+    for it in &mut items {
+        let mut mentioned: Vec<String> = Vec::new();
+        if let Some(pages) = it.payload.get("pages").and_then(|v| v.as_array()) {
+            mentioned.extend(pages.iter().filter_map(|p| p.as_str().map(String::from)));
+        }
+        for key in ["slug", "suggested_slug"] {
+            if let Some(s) = it.payload.get(key).and_then(|v| v.as_str()) {
+                mentioned.push(s.to_string());
+            }
+        }
+        let dead: Vec<String> = mentioned
+            .into_iter()
+            .filter(|s| !s.is_empty() && !alive.contains(s))
+            .collect();
+        if !dead.is_empty() {
+            it.stale = Some(dead);
+        }
+    }
+    Ok(items)
+}
+
+/// 删除级联处置：页面/源删除后，其 open 提案自动 dismissed（不删数据——可审计）。
+/// 返回处置条数。slug 匹配 payload 的 pages/slug/suggested_slug 字段；source 匹配 source_id。
+pub async fn cascade_dismiss(
+    pool: &PgPool,
+    lib: Uuid,
+    slug: Option<&str>,
+    source_id: Option<Uuid>,
+) -> Result<u64, JobError> {
+    let n = if let Some(slug) = slug {
+        sqlx::query(
+            "UPDATE wiki_review_items SET status = 'dismissed', action = $3, resolved_at = now() \
+             WHERE status = 'open' AND library_id = $1 \
+               AND (payload->'pages' ? $2 OR payload->>'slug' = $2 OR payload->>'suggested_slug' = $2)",
+        )
+        .bind(lib)
+        .bind(slug)
+        .bind(format!("cascade:page-deleted:{slug}"))
+        .execute(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .rows_affected()
+    } else if let Some(sid) = source_id {
+        sqlx::query(
+            "UPDATE wiki_review_items SET status = 'dismissed', action = $3, resolved_at = now() \
+             WHERE status = 'open' AND library_id = $1 \
+               AND (source_id = $2 OR payload->>'source_id' = $4)",
+        )
+        .bind(lib)
+        .bind(sid)
+        .bind(format!("cascade:source-deleted:{sid}"))
+        .bind(sid.to_string())
+        .execute(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .rows_affected()
+    } else {
+        0
+    };
+    Ok(n)
 }
 
 /// 处理（resolve/dismiss + 动作标签）。返回是否命中（false = 不存在或已处理）。

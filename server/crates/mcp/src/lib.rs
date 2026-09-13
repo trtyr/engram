@@ -2728,6 +2728,17 @@ impl EngramMcpServer {
         // P0-1：刚发送的正文不回显；版本历史在覆盖时自动留快照
         let mut v = wiki::trim_page(serde_json::to_value(&page).unwrap_or(serde_json::json!({})));
         v["content_omitted"] = json!(true);
+        // 写入即处理（2026-09-13）：AI 写页自动入队轻量再摄取（页面当原料吸收概念/互链；
+        // 同 sha 去重；摄取失败不影响页面本身，失败会落 reviews via=ingest_failed 可见）
+        match wiki::svc(&self.state)
+            .auto_ingest_page(lib, &wp.title, &wp.content)
+            .await
+        {
+            Ok(ingest) => v["auto_ingest"] = ingest,
+            Err(e) => {
+                v["auto_ingest"] = json!({"state": "failed", "hint": format!("织入入队失败（页面本身已保存）: {e}")});
+            }
+        }
         ok_json(v)
     }
 
@@ -2873,6 +2884,108 @@ impl EngramMcpServer {
             "job_id": job_id,
             "hint": "语义 lint 异步执行（LLM 逐批检查）——产出写入人审队列，稍后用 wiki action=reviews 查看发现、action=review_resolve 处置",
         }))
+    }
+
+    // 文档域错误映射（WikiDocumentError → rmcp）
+    fn from_wiki_docs(e: engram_core::wiki_docs::WikiDocumentError) -> rmcp::ErrorData {
+        use engram_core::wiki_docs::WikiDocumentError;
+        match e {
+            WikiDocumentError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
+            WikiDocumentError::NotFound(m) => rmcp::ErrorData::resource_not_found(m, None),
+            WikiDocumentError::Storage(m) => rmcp::ErrorData::internal_error(m, None),
+        }
+    }
+
+    // ---------- 文档 RAG（wiki_documents）——MCP 对齐 HTTP 能力（工单「工具面不对齐」） ----------
+
+    /// 入库文档（document_add）：text 或 url → 分块+嵌入进原文 RAG，并触发 LLM 织入。
+    async fn wiki_document_add(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(dp): Parameters<wiki::WikiDocumentAddParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(dp.library.as_deref()).await?;
+        let svc = engram_core::wiki_docs::WikiDocumentService::new(
+            self.state.pool.clone(),
+            self.state.registry(),
+            self.state.data_dir.clone(),
+        );
+        let source = if let Some(url) = dp.url.as_deref().filter(|u| !u.trim().is_empty()) {
+            engram_core::wiki_docs::IngestSource::Url(url.trim().to_string())
+        } else if let Some(text) = dp.text.as_deref().filter(|t| !t.trim().is_empty()) {
+            engram_core::wiki_docs::IngestSource::Bytes {
+                name: dp.name.clone().unwrap_or_else(|| "mcp-text".into()),
+                content: text.as_bytes().to_vec(),
+                content_type: Some("text/markdown".into()),
+            }
+        } else {
+            return Err(rmcp::ErrorData::invalid_params(
+                "text 与 url 二选一".to_string(),
+                None,
+            ));
+        };
+        let (id, deduped) = svc
+            .submit(lib, source)
+            .await
+            .map_err(Self::from_wiki_docs)?;
+        let doc = svc
+            .get_document(lib, id)
+            .await
+            .map_err(Self::from_wiki_docs)?;
+        ok_json(serde_json::json!({
+            "id": doc.id,
+            "title": doc.title,
+            "status": doc.status,
+            "deduped": deduped,
+            "hint": "入库成功（异步分块/嵌入/织入）——用 document_get 看 status 进度；原文检索用 documents_search",
+        }))
+    }
+
+    /// 文档状态（document_get）：看处理进度（status/error）。
+    async fn wiki_document_get(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(dp): Parameters<wiki::WikiDocumentGetParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(dp.library.as_deref()).await?;
+        let id = uuid::Uuid::parse_str(dp.id.trim()).map_err(|_| {
+            rmcp::ErrorData::invalid_params(format!("id 不是合法 UUID: {}", dp.id), None)
+        })?;
+        let svc = engram_core::wiki_docs::WikiDocumentService::new(
+            self.state.pool.clone(),
+            self.state.registry(),
+            self.state.data_dir.clone(),
+        );
+        let doc = svc
+            .get_document(lib, id)
+            .await
+            .map_err(Self::from_wiki_docs)?;
+        ok_json(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 原文检索（documents_search）：chunk 级 FTS+向量混合——搜原文分块，与页面级 wiki search 互补。
+    async fn wiki_documents_search(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(dp): Parameters<wiki::WikiDocumentsSearchParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(dp.library.as_deref()).await?;
+        let svc = engram_core::wiki_docs::WikiDocumentService::new(
+            self.state.pool.clone(),
+            self.state.registry(),
+            self.state.data_dir.clone(),
+        );
+        let hits = svc
+            .search(lib, &dp.query, dp.limit.unwrap_or(8).clamp(1, 50))
+            .await
+            .map_err(Self::from_wiki_docs)?;
+        ok_json(serde_json::to_value(&hits).unwrap_or(serde_json::json!([])))
     }
 
     /// 人审队列（reviews）：列出待审提案（lint 深检/织入期 LLM 旗标）。
@@ -3958,6 +4071,27 @@ impl EngramMcpServer {
                 self.wiki_lint_deep(
                     ctx,
                     Parameters(dispatch::from_args("wiki", "lint_deep", call.args)?),
+                )
+                .await
+            }
+            "document_add" => {
+                self.wiki_document_add(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "document_add", call.args)?),
+                )
+                .await
+            }
+            "document_get" => {
+                self.wiki_document_get(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "document_get", call.args)?),
+                )
+                .await
+            }
+            "documents_search" => {
+                self.wiki_documents_search(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "documents_search", call.args)?),
                 )
                 .await
             }

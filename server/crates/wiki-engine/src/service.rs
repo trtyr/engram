@@ -734,7 +734,11 @@ impl WikiService {
         lib: Uuid,
         status: Option<&str>,
     ) -> Result<Vec<crate::review::ReviewItem>, WikiError> {
-        crate::review::list_by_status(&self.pool, lib, status)
+        let items = crate::review::list_by_status(&self.pool, lib, status)
+            .await
+            .map_err(WikiError::from)?;
+        // 腐烂标注：提案指向的页面已删除 → stale 字段列出已删 slug
+        crate::review::annotate_stale(&self.pool, lib, items)
             .await
             .map_err(WikiError::from)
     }
@@ -809,6 +813,33 @@ impl WikiService {
         Ok(outcome.skipped())
     }
 
+    /// write_page 织入钩子（2026-09-13）：AI 写页后自动把页面当原料入队再摄取
+    /// （吸收概念/实体/互链，不级联重建全库）——「写入即处理」。
+    /// 同内容（sha）去重内建：已 ready 跳过、在途 InFlight、failed 才重提。
+    pub async fn auto_ingest_page(
+        &self,
+        lib: Uuid,
+        title: &str,
+        content: &str,
+    ) -> Result<serde_json::Value, WikiError> {
+        let outcome = crate::ingest::enqueue_ingest(&self.queue, lib, title, content).await?;
+        let v = match outcome {
+            crate::ingest::IngestOutcome::Enqueued(id, job) => serde_json::json!({
+                "state": "enqueued", "source_id": id, "job_id": job,
+                "hint": "已入队织入（analyze→generate，任务页可见）——概念吸收与互链稍后出现",
+            }),
+            crate::ingest::IngestOutcome::AlreadyReady(id) => serde_json::json!({
+                "state": "already_ingested", "source_id": id,
+                "hint": "同内容已织入过（sha 命中）——跳过",
+            }),
+            crate::ingest::IngestOutcome::InFlight(id, job) => serde_json::json!({
+                "state": "in_flight", "source_id": id, "job_id": job,
+                "hint": "织入在途（同内容正在处理）",
+            }),
+        };
+        Ok(v)
+    }
+
     /// 存量回填（D4 遗留）：重析全部页面正文重建 wiki_links（库内）。
     /// 修复前写入的页面链接索引缺失——一次性全量重析（幂等，先清后建）。
     pub async fn rebuild_all_links(&self, lib: Uuid) -> Result<u64, WikiError> {
@@ -874,6 +905,8 @@ impl WikiService {
         .bind(lib)
         .execute(&self.pool)
         .await?;
+        // 腐烂治理（工单「人审队列腐烂」）：指向该页的 open 提案自动 dismissed（可审计不删数据）
+        let _ = crate::review::cascade_dismiss(&self.pool, lib, Some(&slug), None).await;
         Ok(true)
     }
 
@@ -1061,6 +1094,8 @@ impl WikiService {
         let report = crate::cascade::cascade_delete_source(&self.pool, source_id)
             .await
             .map_err(WikiError::from)?;
+        // 腐烂治理（工单「人审队列腐烂」）：指向该源的 open 提案自动 dismissed（可审计不删数据）
+        let _ = crate::review::cascade_dismiss(&self.pool, lib, None, Some(source_id)).await;
         // 破坏性操作落审计行（与 memory 域「job 行即审计链」同哲学）——best-effort，不阻断返回
         self.audit(
             "wiki_source_cascade_delete",

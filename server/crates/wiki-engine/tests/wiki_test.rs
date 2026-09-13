@@ -1335,3 +1335,122 @@ async fn archive_creates_synthesis_with_bidirectional_links() {
     .unwrap();
     assert_eq!(ver, 2, "覆盖归档应递增版本");
 }
+
+/// write_page 织入钩子：auto_ingest_page 把页面当原料入队（source 行产生）；
+/// 同内容二次调用 already_ingested；失败重试路径由 sha 状态机承担。
+#[tokio::test]
+async fn write_page_auto_ingest_enqueues_source() {
+    let (pool, wiki, _handle, _pg, lib) = setup(vec![]).await;
+    wiki.put_page(
+        lib,
+        "hook-page",
+        "钩子页",
+        "# 钩子页\n\n讲一个独特概念：反斜杠壁虎协议（HOOK-GEEKO-774）。",
+        None,
+        Some("ai"),
+    )
+    .await
+    .unwrap();
+    let v = wiki
+        .auto_ingest_page(
+            lib,
+            "钩子页",
+            "# 钩子页\n\n讲一个独特概念：反斜杠壁虎协议（HOOK-GEEKO-774）。",
+        )
+        .await
+        .unwrap();
+    assert_eq!(v["state"], "enqueued", "首次应入队: {v}");
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM wiki_sources WHERE library_id = $1")
+        .bind(lib)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 1, "应产生一条 source 原料");
+    // 同内容二次 → 在途（mock 队列未消费，source 仍 pending）——勿重复提交
+    let v2 = wiki
+        .auto_ingest_page(
+            lib,
+            "钩子页",
+            "# 钩子页\n\n讲一个独特概念：反斜杠壁虎协议（HOOK-GEEKO-774）。",
+        )
+        .await
+        .unwrap();
+    assert_eq!(v2["state"], "in_flight");
+}
+
+/// 人审腐烂治理（工单「人审队列腐烂」）：reviews stale 标注 + delete_page 级联 dismissed。
+#[tokio::test]
+async fn review_stale_annotation_and_cascade() {
+    let (pool, wiki, _handle, _pg, lib) = setup(vec![]).await;
+    // 造两页
+    wiki.put_page(lib, "alive-x", "活页", "# 活", None, None)
+        .await
+        .unwrap();
+    wiki.put_page(lib, "dead-y", "死页", "# 死", None, None)
+        .await
+        .unwrap();
+    // 造两条 flag 提案：一条指向活页，一条指向将删页
+    for (slug, title) in [("alive-x", "指向活页"), ("dead-y", "指向死页")] {
+        sqlx::query(
+            "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries) \
+             VALUES ($1, $2, 'flag', $3, '[]'::jsonb)",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(lib)
+        .bind(serde_json::json!({"via": "semantic_lint", "pages": [slug], "reason": title}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // 两页都在 → 都不标 stale
+    let stale_of = |items: &Vec<engram_wiki_engine::review::ReviewItem>, s: &str| {
+        items
+            .iter()
+            .find(|it| it.payload.get("reason").and_then(|v| v.as_str()) == Some(s))
+            .and_then(|it| it.stale.clone())
+    };
+    let items = wiki.reviews(lib, None).await.unwrap();
+    assert!(stale_of(&items, "指向活页").is_none() && stale_of(&items, "指向死页").is_none());
+
+    // 删 dead-y（走 delete_page）→ 级联 dismissed：死页提案从 open 消失且可审计
+    wiki.delete_page(lib, "dead-y").await.unwrap();
+    let items2 = wiki.reviews(lib, None).await.unwrap();
+    assert!(
+        !items2
+            .iter()
+            .any(|it| it.payload.get("reason").and_then(|v| v.as_str()) == Some("指向死页")),
+        "死页提案应已从 open 消失（级联 dismissed）"
+    );
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_review_items WHERE status='dismissed' AND action LIKE 'cascade:page-deleted:%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 1, "级联 dismissed 可审计");
+
+    // stale 标注场景：绕过级联的删除（如 SQL 清理/旧数据）→ reviews 查时标注
+    wiki.put_page(lib, "orphan-z", "孤页", "# 孤", None, None)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries) VALUES ($1, $2, 'flag', $3, '[]'::jsonb)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(lib)
+    .bind(serde_json::json!({"via": "semantic_lint", "pages": ["orphan-z"], "reason": "指向孤页"}))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM wiki_pages WHERE slug = 'orphan-z' AND library_id = $1")
+        .bind(lib)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let items3 = wiki.reviews(lib, None).await.unwrap();
+    assert_eq!(
+        stale_of(&items3, "指向孤页").as_deref(),
+        Some(&["orphan-z".to_string()][..]),
+        "绕过级联的删除 → stale 标注"
+    );
+}
