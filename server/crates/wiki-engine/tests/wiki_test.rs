@@ -1453,4 +1453,25 @@ async fn review_stale_annotation_and_cascade() {
         Some(&["orphan-z".to_string()][..]),
         "绕过级联的删除 → stale 标注"
     );
+
+    // suggested_slug（create_page 前瞻目标——建议新建的页本就不在库里）绝不误标 stale
+    sqlx::query(
+        "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries) VALUES ($1, $2, 'create_page', $3, '[]'::jsonb)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(lib)
+    .bind(serde_json::json!({"via": "ingest", "title": "拟新建议题页", "suggested_slug": "not-built-yet-x", "reason": "源里反复出现该概念，建议建页"}))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let items4 = wiki.reviews(lib, None).await.unwrap();
+    let cp = items4
+        .iter()
+        .find(|it| it.kind == "create_page")
+        .expect("create_page 提案应列出");
+    assert!(
+        cp.stale.is_none(),
+        "suggested_slug 是前瞻目标不是引用——不得误标 stale: {:?}",
+        cp.stale
+    );
 }

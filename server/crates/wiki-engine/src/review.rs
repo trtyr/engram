@@ -139,8 +139,12 @@ pub async fn list_by_status(
     .map_err(|e| JobError::Retryable(e.to_string()))
 }
 
-/// 腐烂治理（工单「人审队列腐烂」）：提案指向的页面已删除 → stale 标注。
-/// payload 中的候选 slug 字段：pages（lint 数组）/ slug / suggested_slug / related。
+/// 腐烂治理（工单「人审队列腐烂」）：提案**引用的既有页**已删除 → stale 标注。
+///
+/// 语义边界（auditor 2026-09-13）：只检测**引用性**字段——payload.pages（lint/flag
+/// 「发现涉及的页」，指既有页）。**payload.suggested_slug 是 create_page/deep_research
+/// 的前瞻目标（建议新建的页，本就不该在库里）——纳入检测会把正当待建提案误标为
+/// 已删内容，绝不检测。**
 pub async fn annotate_stale(
     pool: &PgPool,
     lib: Uuid,
@@ -158,11 +162,6 @@ pub async fn annotate_stale(
         let mut mentioned: Vec<String> = Vec::new();
         if let Some(pages) = it.payload.get("pages").and_then(|v| v.as_array()) {
             mentioned.extend(pages.iter().filter_map(|p| p.as_str().map(String::from)));
-        }
-        for key in ["slug", "suggested_slug"] {
-            if let Some(s) = it.payload.get(key).and_then(|v| v.as_str()) {
-                mentioned.push(s.to_string());
-            }
         }
         let dead: Vec<String> = mentioned
             .into_iter()
