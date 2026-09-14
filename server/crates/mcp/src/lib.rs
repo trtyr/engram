@@ -3277,11 +3277,17 @@ impl EngramMcpServer {
                 &tp.title,
                 tp.body.as_deref().unwrap_or(""),
                 tp.kind.as_deref().unwrap_or("todo"),
-                // 分级合并：ticket 的 priority 退役——不注入默认值（core 缺省落 normal）
-                if tp.kind.as_deref() == Some("ticket") {
-                    ""
-                } else {
-                    tp.priority.as_deref().unwrap_or("normal")
+                // 分级合并：显式 priority 原样透传（ticket 传非空 → core 400 用 severity）；
+                // 缺省按 kind 填（ticket→空串=缺省 normal；todo→normal）
+                match tp.priority.as_deref() {
+                    Some(p) => p,
+                    None => {
+                        if tp.kind.as_deref() == Some("ticket") {
+                            ""
+                        } else {
+                            "normal"
+                        }
+                    }
                 },
                 tp.severity.as_deref(),
                 tp.symptom.as_deref().unwrap_or(""),

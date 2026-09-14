@@ -87,7 +87,8 @@ export default function Todos() {
       await api.post('/todos', {
         title: title.trim(),
         kind: quickKind,
-        priority: quickPriority,
+        // ticket 分级用 severity——不发 priority（服务端按 kind 缺省；显式传会被 400）
+        priority: quickKind === 'ticket' ? undefined : quickPriority,
         severity: quickKind === 'ticket' ? quickSeverity : undefined,
         symptom: quickKind === 'ticket' ? quickSymptom.trim() || undefined : undefined,
         project_hint: projectHint.trim() || undefined,

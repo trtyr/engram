@@ -49,8 +49,9 @@ pub struct CreateTodoRequest {
     /// 可选：todo（行动项，默认）/ ticket（工单）
     #[serde(default)]
     pub kind: Option<String>,
-    #[serde(default = "default_priority")]
-    pub priority: String,
+    /// 缺省按 kind：todo=normal / ticket=空串（severity 才是工单分级）
+    #[serde(default)]
+    pub priority: Option<String>,
     /// 可选：工单严重度 P0-P3（仅 kind=ticket）
     #[serde(default)]
     pub severity: Option<String>,
@@ -65,10 +66,6 @@ pub struct CreateTodoRequest {
     pub due_at: Option<DateTime<Utc>>,
     /// 可选：相关项目名提示（纯文本，不做绑定）
     pub project_hint: Option<String>,
-}
-
-fn default_priority() -> String {
-    "normal".into()
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -130,7 +127,16 @@ pub async fn create_todo(
             &req.title,
             &req.body,
             req.kind.as_deref().unwrap_or("todo"),
-            &req.priority,
+            match req.priority.as_deref() {
+                Some(p) => p,
+                None => {
+                    if req.kind.as_deref() == Some("ticket") {
+                        ""
+                    } else {
+                        "normal"
+                    }
+                }
+            },
             req.severity.as_deref(),
             &req.symptom,
             &req.reproduce,

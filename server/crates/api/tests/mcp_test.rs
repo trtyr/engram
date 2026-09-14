@@ -1425,3 +1425,126 @@ async fn wiki_mcp_tool_toggle_hides_and_rejects() {
     let (status, _) = put_mcp_config(&app, &admin, json!({"disabled_tools": ["wiki_bogus"]})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+/// 工单模型细化（migration 0043）MCP 功能级四项：
+/// 短号往返 / link-unlink-links 双向 / list brief 摘要 / ticket priority 400。
+#[tokio::test]
+async fn todos_model_refinement_mcp_end_to_end() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["todos"]).await;
+    let mut seq: i64 = 0;
+    let mut call = |action: &str, mut args: serde_json::Value| {
+        seq += 1;
+        args["action"] = json!(action);
+        rpc(seq, "tools/call", json!({"name":"todos","arguments":args}))
+    };
+    let _ = &mut call;
+    // expect_result 解到 content 包装层；内层 text 是 JSON 字符串——二次解析
+    let parse_text = |v: &Value| -> Value {
+        let txt = v["result"]["content"][0]["text"].as_str().unwrap();
+        serde_json::from_str(txt).unwrap()
+    };
+
+    // ① add ticket（不传 priority）→ 返回 short_no；get by EN-n 等价
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(
+            "add",
+            json!({
+                "title":"短号往返 MCP", "kind":"ticket", "severity":"P2"
+            }),
+        ),
+    )
+    .await;
+    let added = parse_text(&v);
+    let short_no = added["short_no"].as_i64().expect("short_no");
+    assert!(short_no >= 1);
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call("get", json!({"id": format!("EN-{short_no}")})),
+    )
+    .await;
+    let got = parse_text(&v);
+    assert_eq!(got["id"], added["id"], "EN-n 直达应等价 UUID");
+
+    // ② link 双向 + 幂等 + links 反查
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(
+            "add",
+            json!({"title":"根因票 MCP","kind":"ticket","severity":"P1"}),
+        ),
+    )
+    .await;
+    let root = parse_text(&v);
+    let root_no = root["short_no"].as_i64().unwrap();
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(
+            "link",
+            json!({
+                "from": format!("EN-{short_no}"), "to": format!("EN-{root_no}"), "kind":"blocked_by"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(parse_text(&v)["created"], json!(true));
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(
+            "link",
+            json!({
+                "from": format!("EN-{short_no}"), "to": format!("EN-{root_no}"), "kind":"blocked_by"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(parse_text(&v)["created"], json!(false), "重复 link 幂等");
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call("links", json!({"id": format!("EN-{short_no}")})),
+    )
+    .await;
+    let links = parse_text(&v);
+    assert_eq!(links["count"], json!(1));
+    assert_eq!(
+        links["links"][0]["from_ref"],
+        json!(format!("EN-{short_no}"))
+    );
+
+    // ③ list 默认 brief：无 body/symptom，body_omitted=true
+    let (_, v) = mcp_rpc(&app, &key, call("list", json!({"kind":"ticket"}))).await;
+    let parsed = parse_text(&v);
+    assert_eq!(parsed["brief"], json!(true));
+    let first = parsed["items"][0].clone();
+    assert!(
+        first.get("body").is_none() && first.get("symptom").is_none(),
+        "brief 不含长字段"
+    );
+    assert_eq!(first["body_omitted"], json!(true));
+
+    // ④ ticket add 显式 priority → 400 用 severity
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(
+            "add",
+            json!({
+                "title":"分级合并验证", "kind":"ticket", "priority":"high", "severity":"P1"
+            }),
+        ),
+    )
+    .await;
+    // 400 错误走 JSON-RPC error 载荷（message 带提示）
+    let err_text = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        err_text.contains("工单分级用 severity"),
+        "应 400 提示用 severity: {err_text}"
+    );
+}
