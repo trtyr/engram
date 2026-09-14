@@ -3270,7 +3270,12 @@ impl EngramMcpServer {
                 &tp.title,
                 tp.body.as_deref().unwrap_or(""),
                 tp.kind.as_deref().unwrap_or("todo"),
-                tp.priority.as_deref().unwrap_or("normal"),
+                // 分级合并：ticket 的 priority 退役——不注入默认值（core 缺省落 normal）
+                if tp.kind.as_deref() == Some("ticket") {
+                    ""
+                } else {
+                    tp.priority.as_deref().unwrap_or("normal")
+                },
                 tp.severity.as_deref(),
                 tp.symptom.as_deref().unwrap_or(""),
                 tp.reproduce.as_deref().unwrap_or(""),
