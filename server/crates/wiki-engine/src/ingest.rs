@@ -637,7 +637,11 @@ pub async fn generate_job(
             Ok(emb) => {
                 // K4 守卫（移植）：响应数量/维度与批次不符 → 拒绝写入，
                 // 不再静默跳过部分页（短响应旁路）
-                if emb.len() != texts.len() || emb.iter().any(|v| v.len() != 1024) {
+                if emb.len() != texts.len()
+                    || emb.iter().any(|v| {
+                        v.len() != engram_distill::llm_port::embedding_dimensions() as usize
+                    })
+                {
                     tracing::warn!(
                         source = %source_id,
                         expected = texts.len(),

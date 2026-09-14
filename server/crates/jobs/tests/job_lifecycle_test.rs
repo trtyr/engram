@@ -215,3 +215,82 @@ impl TestExt for JobTemplate {
         self
     }
 }
+
+/// R12 行为级：per-kind 专属池真的限流——slow kind 配 cap=1 时并发峰值=1，
+/// 未配置的 fast kind 不受影响可并发（>1），证明分池只作用于配置的 kind。
+#[tokio::test]
+async fn per_kind_concurrency_actually_caps_running_jobs() {
+    let (_c, queue, pool, _url) = setup().await;
+
+    // 每类两个原子：cur（当前并发，可回落）+ peak（历史峰值，fetch_max 只增不减）
+    let mk_pair = || {
+        (
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        )
+    };
+    let (slow_cur, slow_peak) = mk_pair();
+    let (fast_cur, fast_peak) = mk_pair();
+
+    let mk_handler = |cur: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+                      peak: std::sync::Arc<std::sync::atomic::AtomicUsize>| {
+        move |_ctx: engram_jobs::JobContext| {
+            let cur = cur.clone();
+            let peak = peak.clone();
+            async move {
+                let now = cur.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                peak.fetch_max(now, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                cur.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(serde_json::json!({}))
+            }
+        }
+    };
+
+    let runner = Runner::new(
+        pool,
+        RunnerConfig {
+            worker_id: "w-perkind".into(),
+            concurrency: 4,
+            poll_interval: Duration::from_millis(30),
+            batch_size: 10,
+            reap_interval: Duration::from_secs(3600),
+            per_kind_concurrency: HashMap::from([("slow".to_string(), 1)]),
+        },
+    )
+    .register("slow", mk_handler(slow_cur.clone(), slow_peak.clone()))
+    .register("fast", mk_handler(fast_cur.clone(), fast_peak.clone()));
+
+    let handle = runner.start();
+    for _ in 0..3 {
+        queue.enqueue(JobTemplate::new("slow")).await.unwrap();
+        queue.enqueue(JobTemplate::new("fast")).await.unwrap();
+    }
+
+    // 等全部完成（6 个 job × 250ms + 轮询裕量）
+    let mut all_done = false;
+    for _ in 0..200 {
+        let pending = sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM jobs WHERE status NOT IN ('succeeded','failed','dead','cancelled')",
+        )
+        .fetch_one(queue.pool())
+        .await
+        .unwrap_or(1);
+        if pending == 0 {
+            all_done = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    handle.shutdown();
+    handle.join().await;
+    assert!(all_done, "全部任务应执行完");
+
+    let slow = slow_peak.load(std::sync::atomic::Ordering::SeqCst);
+    let fast = fast_peak.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        slow, 1,
+        "配置 cap=1 的 kind 并发峰值应恰为 1（实际 {slow}）"
+    );
+    assert!(fast >= 2, "未配置 kind 应走全局池可并发（实际峰值 {fast}）");
+}

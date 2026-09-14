@@ -605,7 +605,12 @@ impl WikiService {
         // W2：查询向量（无 provider / 嵌入失败 → None → 纯 FTS）；L6：经记账门面
         let qv: Option<Vec<f32>> = self
             .registry
-            .embed_for(Purpose::Embed, vec![query.to_string()], Some(1024), None)
+            .embed_for(
+                Purpose::Embed,
+                vec![query.to_string()],
+                Some(engram_distill::llm_port::embedding_dimensions()),
+                None,
+            )
             .await
             .ok()
             .and_then(|r| r.embeddings.first().cloned());

@@ -475,8 +475,9 @@ pub async fn embed_job(
                 Ok(resp) => {
                     // K4：响应数量或维度与批次不符 → 整批按失败处理，
                     // 杜绝「NULL 向量 + embed_failed=false」双重静默入库
+                    let dim = engram_distill::llm_port::embedding_dimensions() as usize;
                     let bad = resp.embeddings.len() != batch.len()
-                        || resp.embeddings.iter().any(|v| v.len() != 1024); // D0010
+                        || resp.embeddings.iter().any(|v| v.len() != dim); // D0010
                     if bad {
                         tracing::warn!(
                             doc = %doc_id,
