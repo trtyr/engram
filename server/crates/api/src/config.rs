@@ -17,8 +17,6 @@ pub struct Config {
     pub master_key: Option<String>,
     /// 运行时数据目录（uploads/wiki-sources/codegraph）。
     pub data_dir: std::path::PathBuf,
-    /// embedding 向量维度（默认 1024 = 既有表列 `vector(1024)`）。
-    pub embedding_dimensions: u32,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,28 +62,26 @@ impl Config {
             tracing::warn!("AGENT_MEMORY_MASTER_KEY 未设置：Phase 1 密钥加密上线后将拒绝启动");
         }
 
-        let embedding_dimensions = match std::env::var("AGENT_MEMORY_EMBEDDING_DIMENSIONS") {
-            Ok(v) => {
-                let d = v.trim().parse::<u32>().map_err(|e| ConfigError::Parse {
+        // R11 校验：配置维度 ≠ 既有表列维度时拒启（错误信息含迁移+重嵌入指引）。
+        // 值本身由 engram_distill::llm_port::embedding_dimensions() 运行时读取——此处只做守门。
+        if let Ok(v) = std::env::var("AGENT_MEMORY_EMBEDDING_DIMENSIONS") {
+            let d = v.trim().parse::<u32>().map_err(|e| ConfigError::Parse {
+                name: "AGENT_MEMORY_EMBEDDING_DIMENSIONS",
+                reason: e.to_string(),
+            })?;
+            if d == 0 {
+                return Err(ConfigError::Parse {
                     name: "AGENT_MEMORY_EMBEDDING_DIMENSIONS",
-                    reason: e.to_string(),
-                })?;
-                if d == 0 {
-                    return Err(ConfigError::Parse {
-                        name: "AGENT_MEMORY_EMBEDDING_DIMENSIONS",
-                        reason: "维度必须为正整数".into(),
-                    });
-                }
-                if d != EMBEDDING_COLUMN_DIM {
-                    return Err(ConfigError::EmbeddingDimensionMismatch {
-                        configured: d,
-                        column: EMBEDDING_COLUMN_DIM,
-                    });
-                }
-                d
+                    reason: "维度必须为正整数".into(),
+                });
             }
-            Err(_) => EMBEDDING_COLUMN_DIM,
-        };
+            if d != EMBEDDING_COLUMN_DIM {
+                return Err(ConfigError::EmbeddingDimensionMismatch {
+                    configured: d,
+                    column: EMBEDDING_COLUMN_DIM,
+                });
+            }
+        }
 
         Ok(Self {
             database_url,
@@ -95,7 +91,6 @@ impl Config {
             data_dir: std::env::var("AGENT_MEMORY_DATA_DIR")
                 .unwrap_or_else(|_| "./data".into())
                 .into(),
-            embedding_dimensions,
         })
     }
 }
@@ -129,7 +124,8 @@ mod tests {
         rm_env!("AGENT_MEMORY_EMBEDDING_DIMENSIONS");
         set_env!("AGENT_MEMORY_DATABASE_URL", "postgres://x");
         let cfg = Config::from_env().unwrap();
-        assert_eq!(cfg.embedding_dimensions, 1024);
+        // 默认（未配置）应通过守门（无字段——值由 helper 消费）
+        let _ = cfg;
     }
 
     #[test]

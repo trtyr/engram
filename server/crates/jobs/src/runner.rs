@@ -194,22 +194,22 @@ impl Runner {
                     }
                     Ok(jobs) => {
                         for job in jobs {
-                            // R12 双层限流：专属池（若配置）+ 全局池
-                            let kind_permit = match per_kind_sem.get(&job.kind) {
-                                Some(sem) => match sem.clone().acquire_owned().await {
-                                    Ok(p) => Some(p),
-                                    Err(_) => break,
-                                },
-                                None => None,
-                            };
-                            let Ok(permit) = semaphore.clone().acquire_owned().await else {
-                                break;
-                            };
+                            // R12 双层限流：专属池（若配置）在任务内先拿、全局池后拿。
+                            // 专属等待必须发生在 spawn 内——分派循环若顺序 await 专属信号量，
+                            // 满载的慢 kind 会阻塞同批后面未配置 kind 的派发（饥饿，auditor 抓出）。
+                            let kind_sem = per_kind_sem.get(&job.kind).cloned();
+                            let semaphore = semaphore.clone();
                             let queue = queue.clone();
                             let handlers = handlers.clone();
                             tokio::spawn(async move {
+                                let _kind_permit = match kind_sem {
+                                    Some(sem) => sem.acquire_owned().await.ok(),
+                                    None => None,
+                                };
+                                let Ok(permit) = semaphore.acquire_owned().await else {
+                                    return;
+                                };
                                 let _permit = permit;
-                                let _kind_permit = kind_permit;
                                 execute_job(&queue, handlers, job).await;
                             });
                         }
