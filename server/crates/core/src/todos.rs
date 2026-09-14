@@ -76,6 +76,8 @@ pub struct TodoDto {
     pub resolved_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// 全局单调短号（显示为 EN-<n>；人类可读引用）
+    pub short_no: i32,
 }
 
 fn to_dto(t: repo::TodoRow) -> TodoDto {
@@ -98,6 +100,7 @@ fn to_dto(t: repo::TodoRow) -> TodoDto {
         resolved_at: t.resolved_at,
         created_at: t.created_at,
         updated_at: t.updated_at,
+        short_no: t.short_no,
     }
 }
 
@@ -140,6 +143,60 @@ impl TodoService {
     }
 
     /// 新建待办/工单（kind 决定形态：todo=行动项 / ticket=工单）。
+    #[allow(clippy::too_many_arguments)]
+    /// 按引用取 todo：支持完整 UUID 或短号形式「EN-<n>」。
+    pub async fn find_by_ref(&self, r: &str) -> Result<Option<TodoDto>, TodoError> {
+        let r = r.trim();
+        if let Ok(id) = Uuid::parse_str(r) {
+            return Ok(repo::get(&self.pool, id).await?.map(to_dto));
+        }
+        let n = r
+            .strip_prefix("EN-")
+            .or_else(|| r.strip_prefix("en-"))
+            .and_then(|n| n.parse::<i32>().ok())
+            .ok_or_else(|| {
+                TodoError::BadRequest(format!("引用格式非法：{r}（应为 UUID 或 EN-<短号>）"))
+            })?;
+        Ok(repo::find_by_short_no(&self.pool, n).await.map(to_dto))
+    }
+
+    // ---------- 关联关系（blocked_by / relates_to / parent） ----------
+
+    /// 建关联（幂等）。from≠to、双方存在性由调用方/MCP 层校验，库层 FK 兜底。
+    pub async fn link(&self, from: Uuid, to: Uuid, kind: &str) -> Result<bool, TodoError> {
+        if from == to {
+            return Err(TodoError::BadRequest("不能关联自身".into()));
+        }
+        if !["blocked_by", "relates_to", "parent"].contains(&kind) {
+            return Err(TodoError::BadRequest(format!(
+                "kind 仅接受 blocked_by/relates_to/parent（收到 {kind}）"
+            )));
+        }
+        repo::link_add(&self.pool, from, to, kind)
+            .await
+            .map_err(|e| TodoError::Storage(format!("存储暂时不可用: {e}")))
+    }
+
+    pub async fn unlink(&self, from: Uuid, to: Uuid, kind: &str) -> Result<bool, TodoError> {
+        repo::link_remove(&self.pool, from, to, kind)
+            .await
+            .map_err(|e| TodoError::Storage(format!("存储暂时不可用: {e}")))
+    }
+
+    /// 双向关联列表：(from, to, kind, direction=out|in)。
+    pub async fn links(&self, id: Uuid) -> Result<Vec<(Uuid, Uuid, String, String)>, TodoError> {
+        repo::links_for(&self.pool, id)
+            .await
+            .map_err(|e| TodoError::Storage(format!("存储暂时不可用: {e}")))
+    }
+
+    /// 关联计数（id → 条数）。
+    pub async fn link_count_map(&self) -> Result<std::collections::HashMap<Uuid, i64>, TodoError> {
+        repo::link_count_map(&self.pool)
+            .await
+            .map_err(|e| TodoError::Storage(format!("存储暂时不可用: {e}")))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
@@ -187,6 +244,20 @@ impl TodoService {
         for t in &tags {
             Self::reject_nul("tags", t)?;
         }
+        // 分级合并（工单模型细化）：ticket 分级用 severity，priority 退役——
+        // 显式传非空 priority 才 400；缺省（空串）静默落 normal（列 NOT NULL 兼容）
+        // 分级合并：ticket 分级用 severity——显式传非空 priority 400；
+        // 缺省（空串）静默落 normal（列 NOT NULL+CHECK 兼容），语义退役
+        let priority: &str = if kind == "ticket" {
+            if !priority.trim().is_empty() {
+                return Err(TodoError::BadRequest(
+                    "工单分级用 severity（P0-P3）——priority 已对 ticket 退役".into(),
+                ));
+            }
+            "normal"
+        } else {
+            priority
+        };
         Self::validate_priority(priority)?;
         let id = Uuid::now_v7();
         repo::insert(
@@ -339,7 +410,13 @@ impl TodoService {
         }
         if let Some(p) = priority {
             Self::validate_priority(p)?;
+            if kind == "ticket" {
+                return Err(TodoError::BadRequest(
+                    "工单分级用 severity（P0-P3）——priority 已对 ticket 退役".into(),
+                ));
+            }
         }
+        // （update 的 kind 转换 todo→ticket 携带旧 priority 值属合法存量迁移，不拒）
         if let Some(s) = status
             && !valid_status(&kind, s)
         {

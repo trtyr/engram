@@ -31,9 +31,11 @@ pub struct TodoRow {
     pub resolved_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// 全局单调短号（显示为 EN-<n>；sequence 生成）
+    pub short_no: i32,
 }
 
-const COLS: &str = "id, title, body, kind, status, priority, severity, symptom, reproduce, acceptance, resolution, tags, due_at, project_hint, done_at, resolved_at, created_at, updated_at";
+const COLS: &str = "id, title, body, kind, status, priority, severity, symptom, reproduce, acceptance, resolution, tags, due_at, project_hint, done_at, resolved_at, created_at, updated_at, short_no";
 
 pub struct NewTodo<'a> {
     pub id: Uuid,
@@ -250,4 +252,95 @@ pub async fn search_open(
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+/// 按短号取 todo（EN-<n> 引用直达）。
+pub async fn find_by_short_no(pool: &sqlx::PgPool, short_no: i32) -> Option<TodoRow> {
+    sqlx::query_as::<_, TodoRow>("SELECT * FROM todos WHERE short_no = $1")
+        .bind(short_no)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+// ---------- 关联关系（工单模型细化：blocked_by / relates_to / parent） ----------
+
+pub struct TodoLink {
+    pub from_id: Uuid,
+    pub to_id: Uuid,
+    pub kind: String,
+}
+
+/// 建关联（幂等：重复 link 无变化）。返回是否新插入。
+pub async fn link_add(
+    pool: &sqlx::PgPool,
+    from_id: Uuid,
+    to_id: Uuid,
+    kind: &str,
+) -> Result<bool, sqlx::Error> {
+    let n = sqlx::query(
+        "INSERT INTO todo_links (from_id, to_id, kind) VALUES ($1, $2, $3) \
+         ON CONFLICT (from_id, to_id, kind) DO NOTHING",
+    )
+    .bind(from_id)
+    .bind(to_id)
+    .bind(kind)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(n > 0)
+}
+
+/// 解除关联。
+pub async fn link_remove(
+    pool: &sqlx::PgPool,
+    from_id: Uuid,
+    to_id: Uuid,
+    kind: &str,
+) -> Result<bool, sqlx::Error> {
+    let n = sqlx::query("DELETE FROM todo_links WHERE from_id = $1 AND to_id = $2 AND kind = $3")
+        .bind(from_id)
+        .bind(to_id)
+        .bind(kind)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    Ok(n > 0)
+}
+
+/// 某 todo 的全部关联（含反向：别人指向它的行，direction 标注）。
+pub async fn links_for(
+    pool: &sqlx::PgPool,
+    id: Uuid,
+) -> Result<Vec<(Uuid, Uuid, String, String)>, sqlx::Error> {
+    // out = 我指向别人；in = 别人指向我
+    sqlx::query_as(
+        "SELECT from_id, to_id, kind, 'out' AS direction FROM todo_links WHERE from_id = $1 \
+         UNION ALL \
+         SELECT from_id, to_id, kind, 'in' AS direction FROM todo_links WHERE to_id = $1",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
+}
+
+/// 关联计数（todo_id → 关联条数，双向并集）。
+pub async fn link_count_map(
+    pool: &sqlx::PgPool,
+) -> Result<std::collections::HashMap<Uuid, i64>, sqlx::Error> {
+    let rows: Vec<(Uuid, i64)> = sqlx::query_as(
+        "SELECT t.id, SUM(t.n)::bigint AS n FROM (\
+           SELECT from_id AS id, count(*)::bigint AS n FROM todo_links GROUP BY from_id \
+           UNION ALL \
+           SELECT to_id AS id, count(*)::bigint AS n FROM todo_links GROUP BY to_id\
+         ) t JOIN todos ON todos.id = t.id GROUP BY t.id, t.n",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut m = std::collections::HashMap::new();
+    for (id, n) in rows {
+        *m.entry(id).or_insert(0) += n;
+    }
+    Ok(m)
 }

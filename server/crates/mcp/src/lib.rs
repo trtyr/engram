@@ -373,7 +373,33 @@ pub struct TodoAddParams {
     pub acceptance: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct TodoLinkParams {
+    /// 源条目（UUID 或 EN-<短号>）
+    #[schemars(description = "源条目（UUID 或 EN-<短号>）。")]
+    pub from: String,
+    /// 目标条目（UUID 或 EN-<短号>）
+    #[schemars(description = "目标条目（UUID 或 EN-<短号>）。")]
+    pub to: String,
+    /// 关联类型：blocked_by（from 被 to 阻塞）/ relates_to（相关）/ parent（to 是 from 的父项）
+    #[schemars(description = "关联类型：blocked_by / relates_to / parent。")]
+    pub kind: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct TodoUnlinkParams {
+    /// 源条目
+    #[schemars(description = "源条目（UUID 或 EN-<短号>）。")]
+    pub from: String,
+    /// 目标条目
+    #[schemars(description = "目标条目（UUID 或 EN-<短号>）。")]
+    pub to: String,
+    /// 关联类型
+    #[schemars(description = "关联类型：blocked_by / relates_to / parent。")]
+    pub kind: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct TodoListParams {
     /// open | done | archived（缺省全部，open 优先展示）
     #[schemars(description = "可选状态过滤：open/done/archived。缺省全部（open 优先）。")]
@@ -390,6 +416,11 @@ pub struct TodoListParams {
     /// 标题/正文子串
     #[schemars(description = "可选子串过滤（标题或正文）。")]
     pub q: Option<String>,
+    /// 摘要模式（MCP 默认 true）：只返回 短号/标题/形态/状态/分级/标签/关联计数
+    #[schemars(
+        description = "可选：摘要模式，默认 true——只返回 short_no/标题/形态/状态/分级/标签/关联计数（不含 body/symptom 等长字段）。brief=false 返回全量。"
+    )]
+    pub brief: Option<bool>,
     /// keyset 分页游标（D29）：上一页最后一条的 {1|0}|{updated_at ISO8601}|{id}——
     /// 1 表示该条 status=open。首查不传；结果恰为 limit 条时继续传游标取下一页
     #[schemars(
@@ -3281,7 +3312,105 @@ impl EngramMcpServer {
             )
             .await
             .map_err(from_todo)?;
+        // 摘要模式（工单「列表返回全量正文」）：MCP 默认 brief——只回轻字段+关联计数
+        if lp.brief.unwrap_or(true) {
+            let counts = todo_svc(&self.state)
+                .link_count_map()
+                .await
+                .unwrap_or_default();
+            let brief: Vec<serde_json::Value> = rows
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "id": t.id,
+                        "short_no": t.short_no,
+                        "ref": format!("EN-{}", t.short_no),
+                        "title": t.title,
+                        "kind": t.kind,
+                        "status": t.status,
+                        "severity": t.severity,
+                        "priority": t.priority,
+                        "tags": t.tags,
+                        "links": counts.get(&t.id).copied().unwrap_or(0),
+                        "body_omitted": true,
+                    })
+                })
+                .collect();
+            return ok_json(serde_json::json!({
+                "brief": true,
+                "count": brief.len(),
+                "items": brief,
+                "hint": "摘要模式（body 已省略）——brief=false 取全量；引用条目用 EN-<短号>",
+            }));
+        }
         ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+    }
+
+    /// todo 引用解析（EN-<短号> 或 UUID → id）。
+    async fn todo_ref_id(&self, r: &str) -> Result<Uuid, rmcp::ErrorData> {
+        let r = r.trim();
+        if let Ok(id) = Uuid::parse_str(r) {
+            return Ok(id);
+        }
+        let n = r
+            .strip_prefix("EN-")
+            .or_else(|| r.strip_prefix("en-"))
+            .and_then(|n| n.parse::<i32>().ok())
+            .ok_or_else(|| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("引用格式非法：{r}（UUID 或 EN-<短号>）"),
+                )
+            })?;
+        todo_svc(&self.state)
+            .find_by_ref(r)
+            .await
+            .map_err(from_todo)?
+            .map(|d| d.id)
+            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("待办不存在: EN-{n}")))
+    }
+
+    /// 建立关联（link）：blocked_by / relates_to / parent 三类，幂等。
+    async fn todo_link(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TodoLinkParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let lp = params.0;
+        let from = self.todo_ref_id(&lp.from).await?;
+        let to = self.todo_ref_id(&lp.to).await?;
+        let created = todo_svc(&self.state)
+            .link(from, to, &lp.kind)
+            .await
+            .map_err(from_todo)?;
+        ok_json(serde_json::json!({
+            "from": from, "to": to, "kind": lp.kind,
+            "created": created,
+            "hint": if created { "已关联" } else { "关联已存在（幂等）" },
+        }))
+    }
+
+    /// 解除关联（unlink）。
+    async fn todo_unlink(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TodoUnlinkParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let lp = params.0;
+        let from = self.todo_ref_id(&lp.from).await?;
+        let to = self.todo_ref_id(&lp.to).await?;
+        let removed = todo_svc(&self.state)
+            .unlink(from, to, &lp.kind)
+            .await
+            .map_err(from_todo)?;
+        if !removed {
+            return Err(mcp_err(ErrorCode::INVALID_PARAMS, "关联不存在"));
+        }
+        ok_json(serde_json::json!({"from": from, "to": to, "kind": lp.kind, "removed": true}))
     }
 
     /// 待办详情。
@@ -3292,9 +3421,16 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_todos(&p)?;
-        let id = Uuid::parse_str(&params.0.id)
-            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "id 不是合法 UUID"))?;
-        let dto = todo_svc(&self.state).get(id).await.map_err(from_todo)?;
+        let dto = todo_svc(&self.state)
+            .find_by_ref(&params.0.id)
+            .await
+            .map_err(from_todo)?
+            .ok_or_else(|| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("待办不存在: {}", params.0.id),
+                )
+            })?;
         ok_json(serde_json::to_value(&dto).unwrap_or(serde_json::json!({})))
     }
 
@@ -4192,6 +4328,20 @@ impl EngramMcpServer {
                 self.todo_get(
                     ctx,
                     Parameters(dispatch::from_args("todos", "get", call.args)?),
+                )
+                .await
+            }
+            "link" => {
+                self.todo_link(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "link", call.args)?),
+                )
+                .await
+            }
+            "unlink" => {
+                self.todo_unlink(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "unlink", call.args)?),
                 )
                 .await
             }

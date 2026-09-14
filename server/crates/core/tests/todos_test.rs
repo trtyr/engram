@@ -378,7 +378,7 @@ async fn kind_rejects_foreign_status() {
             "工单拒done",
             "",
             "ticket",
-            "normal",
+            "",
             Some("P2"),
             "症状",
             "",
@@ -420,7 +420,7 @@ async fn ticket_fields_roundtrip() {
             "工单字段存取",
             "详情",
             "ticket",
-            "high",
+            "",
             Some("P1"),
             "搜索命中不稳",
             "doc_search 查宽泛词",
@@ -447,7 +447,7 @@ async fn ticket_state_machine_and_resolution_gate() {
             "状态机工单",
             "",
             "ticket",
-            "normal",
+            "",
             Some("P2"),
             "问题现象",
             "",
@@ -589,4 +589,143 @@ async fn kind_conversion_todo_to_ticket() {
     assert_eq!(u.kind, "ticket");
     assert_eq!(u.severity.as_deref(), Some("P3"));
     assert_eq!(u.symptom, "转换后补症状");
+}
+
+/// 工单模型细化四件：短号往返 / 三关联幂等+双向 / ticket priority 退役 / find_by_ref
+#[tokio::test]
+async fn short_no_and_links() {
+    let (_pool, svc, _pg) = setup().await;
+    // ① 短号往返：create 返回 short_no≥1；find_by_ref("EN-n") 等价 UUID
+    let t = svc
+        .create(
+            "短号测试",
+            "",
+            "todo",
+            "normal",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(t.short_no >= 1, "短号应为正整数");
+    let by_ref = svc
+        .find_by_ref(&format!("EN-{}", t.short_no))
+        .await
+        .unwrap()
+        .expect("EN 引用直达");
+    assert_eq!(by_ref.id, t.id);
+    assert!(svc.find_by_ref("EN-99999").await.unwrap().is_none());
+    assert!(svc.find_by_ref("garbage").await.is_err(), "非法引用 400");
+
+    // ② 三种关联 + 幂等 + 双向 + 解除
+    let a = svc
+        .create(
+            "A 被阻塞",
+            "",
+            "ticket",
+            "",
+            Some("P1"),
+            "同根因",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let b = svc
+        .create(
+            "B 根因",
+            "",
+            "ticket",
+            "",
+            Some("P0"),
+            "根因票",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let c = svc
+        .create(
+            "C 相关",
+            "",
+            "todo",
+            "normal",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        svc.link(a.id, b.id, "blocked_by").await.unwrap(),
+        "首次插入 true"
+    );
+    assert!(
+        !svc.link(a.id, b.id, "blocked_by").await.unwrap(),
+        "重复 link 幂等 false"
+    );
+    assert!(svc.link(a.id, c.id, "relates_to").await.unwrap());
+    assert!(svc.link(a.id, b.id, "parent").await.unwrap());
+    assert!(svc.link(a.id, a.id, "relates_to").await.is_err(), "自环拒");
+    let links = svc.links(a.id).await.unwrap();
+    assert_eq!(links.len(), 3);
+    let counts = svc.link_count_map().await.unwrap();
+    assert_eq!(counts.get(&a.id), Some(&3));
+    assert!(svc.unlink(a.id, b.id, "parent").await.unwrap());
+    assert_eq!(svc.links(a.id).await.unwrap().len(), 2);
+
+    // ④ ticket priority 退役：create 非空 400；todo 正常
+    assert!(
+        svc.create(
+            "ticket priority",
+            "",
+            "ticket",
+            "high",
+            Some("P2"),
+            "",
+            "",
+            "",
+            &[],
+            None,
+            None
+        )
+        .await
+        .is_err(),
+        "ticket 传 priority 应 400"
+    );
+    let u = svc
+        .update(
+            t.id,
+            None,
+            None,
+            None,
+            Some("high"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+    // t 是 todo——priority 正常更新不受影响
+    assert!(u.is_ok());
 }
