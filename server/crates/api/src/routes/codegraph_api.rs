@@ -81,9 +81,19 @@ pub async fn register_project(
 pub async fn list_projects(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-) -> Result<Json<Vec<CgProjectDto>>, ApiError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     require_cg(&principal)?;
-    Ok(Json(bridge(&state).list().await.map_err(ce)?))
+    // freshness 与 MCP 对齐（EN-26）：每项带 {head, snapshot_head, stale, hint}——
+    // 版本诚实不区分接入面。返回数组包一层 {"items": [...]}？否——保持数组形态，
+    // freshness 直接注入每项（serde_json Value 数组逐项改写）。
+    let rows = bridge(&state).list().await.map_err(ce)?;
+    let mut items = Vec::with_capacity(rows.len());
+    for r in rows {
+        let mut item = serde_json::to_value(&r).map_err(|e| ApiError::Internal(e.into()))?;
+        item["freshness"] = bridge(&state).freshness_for(&r).await;
+        items.push(item);
+    }
+    Ok(Json(serde_json::Value::Array(items)))
 }
 
 #[utoipa::path(get, path = "/codegraph/projects/{id}", responses((status = 200, body = CgProjectDto)))]

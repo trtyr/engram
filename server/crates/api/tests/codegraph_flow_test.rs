@@ -237,3 +237,125 @@ async fn cli_status_shape_is_stable() {
     assert!(v["available"].is_boolean(), "available 应为 bool: {v}");
     assert!(v["pin"].as_str().is_some(), "pin 应为字符串: {v}");
 }
+
+/// EN-26 版本诚实：codegraph list 每项带 freshness，两种形态——
+/// ① .git 可读 → stale 布尔 + snapshot_head；② 路径失效 → stale=null（不虚报）。
+#[tokio::test]
+async fn list_freshness_two_shapes() {
+    let (app, _pg) = support::app().await;
+    let k = key(&app).await;
+    let post = |app: &axum::Router, k: &str, name: &str, uri: String| {
+        let app = app.clone();
+        let k = k.to_string();
+        let name = name.to_string();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/codegraph/projects")
+                    .header("authorization", format!("Bearer {k}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"name": name, "source_uri": uri}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // ① 真实 temp git repo（可读 .git）
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("r");
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(&repo)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap()
+    };
+    git(&["init", "-q"]);
+    std::fs::write(repo.join("a.txt"), "x").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "init"]);
+    let resp = post(
+        &app,
+        &k,
+        "fresh-live",
+        repo.to_string_lossy().replace('\\', "/"),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    // 模拟「已索引」：写入 stats（head 快照戳 + last_indexed）——HTTP 测试环境无真 CLI
+    {
+        let url = support::connection_url(&_pg).await.unwrap();
+        let pool = support::connect_with_retry(&url).await.unwrap();
+        let head = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"]).stdout)
+            .trim()
+            .to_string();
+        sqlx::query("UPDATE cg_projects SET stats = $1 WHERE name = 'fresh-live'")
+            .bind(serde_json::json!({
+                "files": 1, "symbols": 1, "edges": 0, "by_kind": {},
+                "last_indexed": chrono::Utc::now().to_rfc3339(),
+                "head": head,
+            }))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // ② 注册后摘走目录（不可读）
+    let tmp2 = tempfile::tempdir().unwrap();
+    let ghost = tmp2.path().join("ghost");
+    std::fs::create_dir_all(&ghost).unwrap();
+    let resp = post(
+        &app,
+        &k,
+        "fresh-ghost",
+        ghost.to_string_lossy().replace('\\', "/"),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    std::fs::remove_dir_all(&ghost).unwrap();
+
+    // list：两项都带 freshness，形态正确
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/codegraph/projects")
+                .header("authorization", format!("Bearer {k}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let items = v.as_array().expect("list 应为数组");
+    let live = items
+        .iter()
+        .find(|i| i["name"] == "fresh-live")
+        .expect("live 项目在列");
+    let f = &live["freshness"];
+    assert!(f["stale"].is_boolean(), "可读 .git → stale 布尔: {f}");
+    assert!(f["head"].as_str().is_some(), "{f}");
+
+    let ghost_item = items
+        .iter()
+        .find(|i| i["name"] == "fresh-ghost")
+        .expect("ghost 项目在列");
+    let f = &ghost_item["freshness"];
+    assert!(f["stale"].is_null(), "路径失效 → stale=null 不虚报: {f}");
+    assert!(f["hint"].as_str().is_some(), "应有提示: {f}");
+}
