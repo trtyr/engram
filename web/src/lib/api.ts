@@ -326,6 +326,8 @@ export interface CgCliStatus {
 /** 待办（第七域，GET /todos） */
 export interface Todo {
   id: string
+  /** 全局单调短号（显示为 EN-<n>，人类可读引用） */
+  short_no: number
   title: string
   body: string
   /** todo=行动项 / ticket=工单（0041） */

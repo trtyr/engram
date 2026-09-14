@@ -453,6 +453,7 @@ function TodoRow({
         >
           {t.title}
         </p>
+        <p className="mt-0.5 font-mono text-[11px] text-muted-foreground/70">EN-{t.short_no}</p>
         {t.body && (
           <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground">
             {t.body}
