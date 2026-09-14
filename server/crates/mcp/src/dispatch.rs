@@ -131,7 +131,10 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
         ],
         "todos" => action_docs![
             "add", false, "记一条（默认 todo 行动项；kind=ticket 开工单——结构化问题跟踪，建议填 severity/symptom/acceptance）" => crate::TodoAddParams;
-            "list", false, "列表（open 优先；status/priority/tag/q 过滤；ticket 状态含 confirmed/in_progress/resolved/verified）" => crate::TodoListParams;
+            "list", false, "列表（open 优先；status/priority/tag/q 过滤；ticket 状态含 confirmed/in_progress/resolved/verified；默认摘要模式 brief 只回短号/标题/状态/分级/关联计数）" => crate::TodoListParams;
+            "link", false, "建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号" => crate::TodoLinkParams;
+            "unlink", false, "解除关联" => crate::TodoUnlinkParams;
+            "links", false, "双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口" => crate::TodoLinksParams;
             "get", false, "详情（含工单的 severity/symptom/acceptance/resolution）" => crate::TodoIdParams;
             "done", false, "标记完成（记 done_at；仅 kind=todo——工单用 update 转 resolved）" => crate::TodoIdParams;
             "update", false, "编辑（标题/详情/优先级/状态/截止/工单字段；状态机按 kind 校验）" => crate::TodoUpdateParams;

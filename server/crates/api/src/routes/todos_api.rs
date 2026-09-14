@@ -155,6 +155,28 @@ pub async fn get_todo(
     Ok(Json(svc(&state).get(id).await.map_err(te)?))
 }
 
+/// 双向关联列表（GET /todos/{id}/links）——「谁阻塞我」反查。
+#[utoipa::path(get, path = "/todos/{id}/links",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = Vec<serde_json::Value>)))]
+pub async fn todo_links(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
+    require_todos(&principal)?;
+    let raw = svc(&state).links(id).await.map_err(te)?;
+    let items: Vec<serde_json::Value> = raw
+        .iter()
+        .map(|(from, to, kind, dir)| {
+            serde_json::json!({
+                "from": from, "to": to, "kind": kind, "direction": dir,
+            })
+        })
+        .collect();
+    Ok(Json(items))
+}
+
 /// 更新待办（部分字段，None 不动；status=done 自动记 done_at）。
 #[utoipa::path(put, path = "/todos/{id}", request_body = UpdateTodoRequest,
     responses((status = 200, body = TodoDto), (status = 404, body = crate::error::ErrorEnvelope)))]

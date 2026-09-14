@@ -659,7 +659,11 @@ async fn mcp_progressive_discovery_help_and_unknown_action() {
     let manual: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(manual["domain"], "todos");
     let actions = manual["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 6, "todos 应有 6 个操作：{manual}");
+    assert_eq!(
+        actions.len(),
+        9,
+        "todos 应有 9 个操作（含 link/unlink/links）：{manual}"
+    );
     let add = actions.iter().find(|a| a["action"] == "add").unwrap();
     assert!(
         add["parameters"]["properties"]["title"].is_object(),

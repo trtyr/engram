@@ -400,6 +400,13 @@ pub struct TodoUnlinkParams {
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
+pub struct TodoLinksParams {
+    /// 目标条目（UUID 或 EN-<短号>）
+    #[schemars(description = "目标条目（UUID 或 EN-<短号>）。")]
+    pub id: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct TodoListParams {
     /// open | done | archived（缺省全部，open 优先展示）
     #[schemars(description = "可选状态过滤：open/done/archived。缺省全部（open 优先）。")]
@@ -3418,6 +3425,30 @@ impl EngramMcpServer {
         ok_json(serde_json::json!({"from": from, "to": to, "kind": lp.kind, "removed": true}))
     }
 
+    /// 关联列表（links）：双向列出某条目的全部关联（含 EN-短号与方向）——「谁阻塞我」反查入口。
+    async fn todo_links(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TodoLinksParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let id = self.todo_ref_id(&params.0.id).await?;
+        let raw = todo_svc(&self.state).links(id).await.map_err(from_todo)?;
+        let items: Vec<serde_json::Value> = raw
+            .iter()
+            .map(|(from, to, kind, dir)| {
+                serde_json::json!({
+                    "from": from, "from_ref": format!("EN-{}", from),
+                    "to": to, "to_ref": format!("EN-{}", to),
+                    "kind": kind,
+                    "direction": dir,
+                })
+            })
+            .collect();
+        ok_json(serde_json::json!({"id": id, "count": items.len(), "links": items}))
+    }
+
     /// 待办详情。
     async fn todo_get(
         &self,
@@ -3447,8 +3478,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_todos(&p)?;
-        let id = Uuid::parse_str(&params.0.id)
-            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "id 不是合法 UUID"))?;
+        let id = self.todo_ref_id(&params.0.id).await?;
         let dto = todo_svc(&self.state)
             .update(
                 id,
@@ -3481,8 +3511,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_todos(&p)?;
-        let id = Uuid::parse_str(&params.0.id)
-            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "id 不是合法 UUID"))?;
+        let id = self.todo_ref_id(&params.0.id).await?;
         let dto = todo_svc(&self.state)
             .update(
                 id,
@@ -3518,8 +3547,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_todos(&p)?;
-        let id = Uuid::parse_str(&params.0.id)
-            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "id 不是合法 UUID"))?;
+        let id = self.todo_ref_id(&params.0.id).await?;
         todo_svc(&self.state).delete(id).await.map_err(from_todo)?;
         ok_json(serde_json::json!({ "deleted": params.0.id }))
     }
@@ -4333,6 +4361,13 @@ impl EngramMcpServer {
                 self.todo_get(
                     ctx,
                     Parameters(dispatch::from_args("todos", "get", call.args)?),
+                )
+                .await
+            }
+            "links" => {
+                self.todo_links(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "links", call.args)?),
                 )
                 .await
             }

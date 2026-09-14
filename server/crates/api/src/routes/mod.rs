@@ -397,6 +397,7 @@ pub fn router(state: AppState) -> Router {
                 .put(todos_api::update_todo)
                 .delete(todos_api::delete_todo),
         )
+        .route("/todos/{id}/links", get(todos_api::todo_links))
         .route("/todos/export", get(todos_api::export_todos))
         .route("/migrate/export", get(migrate_api::export_bundle))
         .route("/migrate/import", post(migrate_api::import_bundle))
