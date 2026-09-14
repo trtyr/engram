@@ -248,10 +248,20 @@ impl CgBridge {
             .filter(|o| o.status.success())
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
         let Some(head_line) = head else {
+            // HEAD 不可读（非 git 仓库/bind-mount 摘走/跨机器）：退回 stats 里持久化的
+            // 构建时快照戳（EN-26「未标注的过期才是 bug」）——诚实标注「图是哪个 commit 的」，
+            // 不冒充最新。
+            let snapshot_head = proj
+                .stats
+                .as_ref()
+                .and_then(|s| s.get("head"))
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
             return serde_json::json!({
-                "last_indexed": last_indexed,
+                "snapshot_head": snapshot_head,
+                "built_at": last_indexed,
                 "stale": serde_json::Value::Null,
-                "hint": "HEAD 不可读（非 git 仓库或无 .git）——新鲜度未知，建议定期 sync",
+                "hint": "当前 repo .git 不可读，无法校验新鲜度——上方 snapshot_head 是索引构建时的 commit；结构对不上请先 codegraph sync（有 repo 侧）或重新 index",
             });
         };
         let mut parts = head_line.split_whitespace();
@@ -281,8 +291,17 @@ impl CgBridge {
             });
         };
         let stale = head_time > indexed_at;
+        // 构建时快照戳（index/sync 时刻的 HEAD）：与当前 HEAD 并列展示——
+        // 查询方可直接对照「图基于 X vs 代码在 Y」，不靠时间戳推断。
+        let snapshot_head = proj
+            .stats
+            .as_ref()
+            .and_then(|s| s.get("head"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let mut v = serde_json::json!({
             "head": hash,
+            "snapshot_head": snapshot_head,
             "head_committed_at": head_time.to_rfc3339(),
             "last_indexed": indexed_at.to_rfc3339(),
             "stale": stale,
@@ -375,17 +394,29 @@ impl CgBridge {
 
     /// 索引统计：CLI status --json 归一为前端契约 {files, symbols, edges, by_kind}。
     /// （CLI 字段是 fileCount/nodeCount/edgeCount——此前直透导致前端恒显示 ?。）
+    /// 另附 `head`：index/sync 完成时刻的 HEAD commit hash（版本快照戳，EN-26）——
+    /// 读得到 .git 才写；此后即使 repo 摘走，快照语义（「图是哪个 commit 的」）仍在 stats 里。
     async fn read_stats(&self, path: &Path) -> Option<serde_json::Value> {
         let out = run_cli(&["status", "--json"], Some(path), TIMEOUT_QUERY)
             .await
             .ok()?;
         let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+        // 快照戳：构建时刻的 HEAD（读不到 = 非 git 仓库，留 null 不阻塞统计）
+        let head = tokio::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(path)
+            .output()
+            .await
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
         Some(serde_json::json!({
             "files": v.get("fileCount")?,
             "symbols": v.get("nodeCount")?,
             "edges": v.get("edgeCount")?,
             "by_kind": v.get("nodesByKind").cloned().unwrap_or(serde_json::json!({})),
             "last_indexed": v.get("lastIndexed").cloned().unwrap_or(serde_json::Value::Null),
+            "head": head,
         }))
     }
 
@@ -986,6 +1017,89 @@ mod tests {
         assert_eq!(edges[0]["from"], "Wiki@src/Wiki.tsx:43");
         assert_eq!(edges[0]["to"], "load@demo");
         assert_eq!(edges[1]["from"], "load@demo");
+    }
+
+    /// EN-26 快照戳口径：freshness 三场景。
+    /// ① .git 可读 → stale 布尔 + snapshot_head 并列；
+    /// ② .git 不可读 → snapshot_head/built_at 诚实标注（stale=null），不冒充最新。
+    #[tokio::test]
+    async fn freshness_snapshot_head_semantics() {
+        let bridge = CgBridge::new(
+            sqlx::Pool::<sqlx::Postgres>::connect_lazy(
+                "postgres://invalid:invalid@127.0.0.1:1/none",
+            )
+            .unwrap(),
+            "/tmp/cg-nonexistent-root",
+        );
+        let base = std::env::temp_dir().join(format!("cg-fresh-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&base).unwrap();
+
+        // 建 temp git repo + 一次提交（快照戳来源）
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str], cwd: &std::path::Path| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"], &repo);
+        std::fs::write(repo.join("a.txt"), "x").unwrap();
+        git(&["add", "."], &repo);
+        git(&["commit", "-qm", "init"], &repo);
+        let head_hash = String::from_utf8_lossy(&git(&["rev-parse", "HEAD"], &repo).stdout)
+            .trim()
+            .to_string();
+
+        let mk = |path: String, stats: serde_json::Value| CgProjectDto {
+            id: Uuid::now_v7(),
+            name: "t".into(),
+            path,
+            source_uri: "t".into(),
+            status: "ready".into(),
+            stats: Some(stats),
+            error: None,
+            last_synced_at: None,
+            created_at: chrono::Utc::now(),
+        };
+
+        // ① 可读 .git：stale 布尔 + head/snapshot_head
+        let proj = mk(
+            repo.to_string_lossy().into_owned(),
+            serde_json::json!({"last_indexed": chrono::Utc::now().to_rfc3339(), "head": head_hash}),
+        );
+        let f = bridge.freshness_for(&proj).await;
+        assert_eq!(f["stale"], serde_json::json!(false), "{f}");
+        assert_eq!(f["snapshot_head"], serde_json::json!(head_hash), "{f}");
+        assert_eq!(f["head"], serde_json::json!(head_hash), "{f}");
+
+        // ② .git 不可读（目录已摘）：snapshot_head + built_at 诚实标注
+        let ghost = base.join("ghost");
+        let proj = mk(
+            ghost.to_string_lossy().into_owned(),
+            serde_json::json!({"last_indexed": chrono::Utc::now().to_rfc3339(), "head": head_hash}),
+        );
+        let f = bridge.freshness_for(&proj).await;
+        assert_eq!(f["stale"], serde_json::Value::Null, "{f}");
+        assert_eq!(f["snapshot_head"], serde_json::json!(head_hash), "{f}");
+        assert!(f["built_at"].is_string(), "{f}");
+        assert!(f["hint"].as_str().unwrap().contains("snapshot_head"), "{f}");
+
+        // ③ 连快照戳都没有（旧数据）：stale=null 但仍不虚报
+        let proj = mk(
+            ghost.to_string_lossy().into_owned(),
+            serde_json::json!({"last_indexed": chrono::Utc::now().to_rfc3339()}),
+        );
+        let f = bridge.freshness_for(&proj).await;
+        assert_eq!(f["stale"], serde_json::Value::Null, "{f}");
+        assert!(f["snapshot_head"].is_null(), "{f}");
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
