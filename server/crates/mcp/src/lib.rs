@@ -3435,12 +3435,20 @@ impl EngramMcpServer {
         require_todos(&p)?;
         let id = self.todo_ref_id(&params.0.id).await?;
         let raw = todo_svc(&self.state).links(id).await.map_err(from_todo)?;
+        let counts = todo_svc(&self.state)
+            .list(None, None, None, None, None, None, 500)
+            .await
+            .map_err(from_todo)?;
+        let short_of: std::collections::HashMap<Uuid, i32> =
+            counts.iter().map(|t| (t.id, t.short_no)).collect();
         let items: Vec<serde_json::Value> = raw
             .iter()
             .map(|(from, to, kind, dir)| {
                 serde_json::json!({
-                    "from": from, "from_ref": format!("EN-{}", from),
-                    "to": to, "to_ref": format!("EN-{}", to),
+                    "from": from,
+                    "from_ref": short_of.get(from).map(|n| format!("EN-{n}")).unwrap_or_default(),
+                    "to": to,
+                    "to_ref": short_of.get(to).map(|n| format!("EN-{n}")).unwrap_or_default(),
                     "kind": kind,
                     "direction": dir,
                 })
