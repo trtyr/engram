@@ -298,7 +298,11 @@ mod tests {
         assert!(cat.contains("- add："));
         let manual = render_manual("todos", &["todos.delete".to_string()]);
         let actions = manual["actions"].as_array().unwrap();
-        assert_eq!(actions.len(), 5, "停用操作应从手册隐身");
+        assert_eq!(
+            actions.len(),
+            8,
+            "停用操作应从手册隐身（todos 原有 5 + link/unlink/links）："
+        );
         let err = unknown_action("todos", "nope");
         assert!(
             err.message.contains("add"),
