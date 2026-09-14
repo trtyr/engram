@@ -1448,7 +1448,12 @@ impl MemoryService {
         for attempt in 1..=3 {
             match self
                 .registry
-                .embed_for(Purpose::Embed, texts.to_vec(), Some(1024), None)
+                .embed_for(
+                    Purpose::Embed,
+                    texts.to_vec(),
+                    Some(engram_distill::llm_port::embedding_dimensions()),
+                    None,
+                )
                 .await
             {
                 Ok(r) => return Some(r.embeddings),

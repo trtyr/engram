@@ -154,6 +154,7 @@ async fn run_jobs(pool: sqlx::PgPool) -> engram_jobs::RunnerHandle {
                 poll_interval: Duration::from_millis(20),
                 batch_size: 10,
                 reap_interval: Duration::from_secs(3600),
+                per_kind_concurrency: Default::default(),
             },
         ),
         registry,

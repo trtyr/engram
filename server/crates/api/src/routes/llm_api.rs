@@ -467,7 +467,7 @@ pub async fn test_provider(
                 .embed(engram_llm::types::EmbedRequest {
                     model: em,
                     inputs: vec!["连通探测".into()],
-                    dimensions: Some(1024),
+                    dimensions: Some(engram_distill::llm_port::embedding_dimensions()),
                 })
                 .await,
         );

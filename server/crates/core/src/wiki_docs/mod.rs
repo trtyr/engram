@@ -153,7 +153,12 @@ impl WikiDocumentService {
         // L6：经记账门面（查询嵌入也计入用量，不再绕过记账）
         let qv: Option<Vec<f32>> = self
             .registry
-            .embed_for(Purpose::Embed, vec![query.to_string()], Some(1024), None)
+            .embed_for(
+                Purpose::Embed,
+                vec![query.to_string()],
+                Some(engram_distill::llm_port::embedding_dimensions()),
+                None,
+            )
             .await
             .ok()
             .and_then(|r| r.embeddings.first().cloned());

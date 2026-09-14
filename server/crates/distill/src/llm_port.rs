@@ -198,6 +198,25 @@ pub async fn chat_json_retrying(
 }
 
 /// 真实实现：ProviderRegistry（路由 + 记账）。chat_json 单发；重试由 [`chat_json_retrying`] 统一处理。
+/// embedding 维度（R11 配置化）：读 `AGENT_MEMORY_EMBEDDING_DIMENSIONS`（默认 1024 = 既有
+/// 表列维度）。启动时 config 层已校验 ≠1024 会拒启——此处对非法值 warn 回落 1024（纵深防御，
+/// 兜住测试/工具进程绕过 config 直用 GatewayLlm 的路径）。
+pub fn embedding_dimensions() -> u32 {
+    static DIM: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *DIM.get_or_init(
+        || match std::env::var("AGENT_MEMORY_EMBEDDING_DIMENSIONS") {
+            Ok(v) => match v.trim().parse::<u32>() {
+                Ok(d) if d > 0 => d,
+                _ => {
+                    tracing::warn!("AGENT_MEMORY_EMBEDDING_DIMENSIONS 非法（{v}）——回落 1024");
+                    1024
+                }
+            },
+            Err(_) => 1024,
+        },
+    )
+}
+
 pub struct GatewayLlm {
     registry: ProviderRegistry,
     /// 单 job token 预算（熔断）
@@ -290,7 +309,7 @@ impl DistillLlm for GatewayLlm {
                 .embed(EmbedRequest {
                     model: model.clone(),
                     inputs: texts.to_vec(),
-                    dimensions: Some(1024),
+                    dimensions: Some(embedding_dimensions()),
                 })
                 .await
                 .map_err(to_job_err)?;

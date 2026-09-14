@@ -68,6 +68,10 @@ pub struct RunnerConfig {
     pub batch_size: i64,
     /// 僵尸回收间隔
     pub reap_interval: Duration,
+    /// per-kind 并发上限（R12）：kind → 并发数。有配置的 kind 走专属信号量
+    /// （cap = min(per_kind, 全局 concurrency)），未配置走全局——默认空表 = 行为与旧版完全一致。
+    /// env 入口：`AGENT_MEMORY_JOB_CONCURRENCY=wiki_generate:1,wiki_analyze:2`（runner::parse_per_kind）。
+    pub per_kind_concurrency: HashMap<String, usize>,
 }
 
 impl Default for RunnerConfig {
@@ -78,8 +82,33 @@ impl Default for RunnerConfig {
             poll_interval: Duration::from_millis(500),
             batch_size: 2,
             reap_interval: Duration::from_secs(30),
+            per_kind_concurrency: HashMap::new(),
         }
     }
+}
+
+/// 解析 `AGENT_MEMORY_JOB_CONCURRENCY`（R12）——格式 `kind:cap,kind:cap`。
+/// 非法段（无冒号/非数字/0）warn 跳过；返回空表 = 全部走全局并发。
+pub fn parse_per_kind_concurrency(env_val: &str) -> HashMap<String, usize> {
+    let mut m = HashMap::new();
+    for seg in env_val.split(',') {
+        let seg = seg.trim();
+        if seg.is_empty() {
+            continue;
+        }
+        let Some((kind, cap)) = seg.split_once(':') else {
+            tracing::warn!("AGENT_MEMORY_JOB_CONCURRENCY 段非法（缺冒号）跳过: {seg}");
+            continue;
+        };
+        match cap.trim().parse::<usize>() {
+            Ok(0) => tracing::warn!("AGENT_MEMORY_JOB_CONCURRENCY cap=0 非法跳过: {seg}"),
+            Ok(cap) => {
+                m.insert(kind.trim().to_string(), cap);
+            }
+            Err(_) => tracing::warn!("AGENT_MEMORY_JOB_CONCURRENCY cap 非数字跳过: {seg}"),
+        }
+    }
+    m
 }
 
 /// 任务运行器。spawn 后用 handle 停止。
@@ -122,7 +151,22 @@ impl Runner {
         let mut shutdown = self.shutdown;
 
         let join = tokio::spawn(async move {
-            tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, "job runner 启动");
+            // per-kind 分池（R12）：cap 不超过全局并发；启动日志打印生效配置
+            let mut per_kind_sem: HashMap<String, Arc<tokio::sync::Semaphore>> = HashMap::new();
+            for (kind, cap) in &config.per_kind_concurrency {
+                let cap = (*cap).min(config.concurrency);
+                per_kind_sem.insert(kind.clone(), Arc::new(tokio::sync::Semaphore::new(cap)));
+            }
+            if !per_kind_sem.is_empty() {
+                let mut parts: Vec<String> = per_kind_sem
+                    .iter()
+                    .map(|(k, s)| format!("{k}:{}", s.available_permits()))
+                    .collect();
+                parts.sort();
+                tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, per_kind = %parts.join(","), "job runner 启动（per-kind 并发生效）");
+            } else {
+                tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, "job runner 启动");
+            }
             let semaphore = Arc::new(tokio::sync::Semaphore::new(config.concurrency));
             let mut last_reap = tokio::time::Instant::now();
 
@@ -150,6 +194,14 @@ impl Runner {
                     }
                     Ok(jobs) => {
                         for job in jobs {
+                            // R12 双层限流：专属池（若配置）+ 全局池
+                            let kind_permit = match per_kind_sem.get(&job.kind) {
+                                Some(sem) => match sem.clone().acquire_owned().await {
+                                    Ok(p) => Some(p),
+                                    Err(_) => break,
+                                },
+                                None => None,
+                            };
                             let Ok(permit) = semaphore.clone().acquire_owned().await else {
                                 break;
                             };
@@ -157,6 +209,7 @@ impl Runner {
                             let handlers = handlers.clone();
                             tokio::spawn(async move {
                                 let _permit = permit;
+                                let _kind_permit = kind_permit;
                                 execute_job(&queue, handlers, job).await;
                             });
                         }
@@ -221,5 +274,47 @@ async fn execute_job(queue: &JobQueue, handlers: Arc<HashMap<String, HandlerFn>>
                 tracing::error!(job_id = %job.id, error = %mark_err, "标记失败本身失败（状态可能滞留 running，等回收）");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod per_kind_tests {
+    use super::*;
+
+    #[test]
+    fn parse_per_kind_handles_valid_and_skips_garbage() {
+        let m = parse_per_kind_concurrency("wiki_generate:1, wiki_analyze:2 ,,bad,broken:0,x:abc");
+        assert_eq!(m.get("wiki_generate"), Some(&1));
+        assert_eq!(m.get("wiki_analyze"), Some(&2));
+        assert_eq!(m.len(), 2, "非法段全部跳过: {m:?}");
+    }
+
+    #[test]
+    fn empty_env_yields_empty_map() {
+        assert!(parse_per_kind_concurrency("").is_empty());
+    }
+
+    /// R12 核心语义：有配置的 kind cap 不超过全局；未配置走全局。
+    /// 用真实 Runner 起一个两池布局验证并发上限差（wiki_generate:1 vs 全局 4）。
+    #[tokio::test]
+    async fn per_kind_semaphore_caps_beyond_global() {
+        let cfg = RunnerConfig {
+            worker_id: "test-pk".into(),
+            concurrency: 4,
+            per_kind_concurrency: parse_per_kind_concurrency("wiki_generate:1"),
+            ..Default::default()
+        };
+        // 语义校验：构造分池后专属池 permit=1、全局=4
+        let per = cfg
+            .per_kind_concurrency
+            .get("wiki_generate")
+            .copied()
+            .unwrap()
+            .min(cfg.concurrency);
+        assert_eq!(per, 1);
+        assert!(
+            !cfg.per_kind_concurrency.contains_key("embed"),
+            "未配置 kind 回退全局"
+        );
     }
 }

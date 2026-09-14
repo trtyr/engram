@@ -6,6 +6,7 @@ mod support;
 
 use engram_jobs::types::{FailOutcome, JobError, JobStatus, JobTemplate};
 use engram_jobs::{JobQueue, Runner, RunnerConfig};
+use std::collections::HashMap;
 use std::time::Duration;
 
 async fn setup() -> (support::TestPg, JobQueue, sqlx::PgPool, String) {
@@ -160,6 +161,7 @@ async fn runner_executes_registered_handler() {
             poll_interval: Duration::from_millis(50),
             batch_size: 5,
             reap_interval: Duration::from_secs(3600),
+            per_kind_concurrency: HashMap::new(),
         },
     )
     .register("double", |ctx| async move {

@@ -464,7 +464,12 @@ pub async fn embed_job(
         for batch in chunks.chunks(64) {
             let texts: Vec<String> = batch.iter().map(|(_, c)| c.clone()).collect();
             match registry
-                .embed_for(Purpose::Embed, texts, Some(1024), Some(ctx.job.id))
+                .embed_for(
+                    Purpose::Embed,
+                    texts,
+                    Some(engram_distill::llm_port::embedding_dimensions()),
+                    Some(ctx.job.id),
+                )
                 .await
             {
                 Ok(resp) => {

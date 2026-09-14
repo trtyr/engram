@@ -51,8 +51,13 @@ async fn main() -> anyhow::Result<()> {
     // 4. 任务 runner：注册蒸馏链 + 知识摄取 handler
     // P-C：deep purge 定时执行器——armed 的 job 到期（5 分钟冷却后）真清库。
     let pool_for_purge = pool.clone();
+    // R12 per-kind 并发：AGENT_MEMORY_JOB_CONCURRENCY=kind:cap,...（不配则全局并发，行为不变）
+    let mut runner_config = engram_jobs::RunnerConfig::default();
+    if let Ok(v) = std::env::var("AGENT_MEMORY_JOB_CONCURRENCY") {
+        runner_config.per_kind_concurrency = engram_jobs::runner::parse_per_kind_concurrency(&v);
+    }
     let runner = engram_distill::register_handlers(
-        engram_jobs::Runner::new(pool.clone(), engram_jobs::RunnerConfig::default()),
+        engram_jobs::Runner::new(pool.clone(), runner_config),
         engram_distill::gateway_llm(
             pool.clone(),
             engram_llm::KeyCipher::from_hex_master(
