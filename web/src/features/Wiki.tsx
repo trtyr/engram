@@ -53,6 +53,7 @@ export default function Wiki() {
   // —— 多库：当前库 slug（默认 main，不做 URL 同步）+ 可选库列表 ——
   const [lib, setLib] = useState('main')
   const [libraries, setLibraries] = useState<WikiLibrary[]>([])
+  const [newLibOpen, setNewLibOpen] = useState(false)
   // —— 状态提升（审计 #4）：切图谱 / 收件箱 / 运维再回来，选中与折叠不丢 ——
   const [pages, setPages] = useState<WikiPage[] | null>(null)
   const [loadErr, setLoadErr] = useState('')
@@ -217,13 +218,21 @@ export default function Wiki() {
                 aria-label="切换知识库"
                 className={selectCls}
                 value={lib}
-                onChange={(e) => switchLib(e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value === '__new__') {
+                    setNewLibOpen(true)
+                    e.target.value = lib
+                    return
+                  }
+                  switchLib(e.target.value)
+                }}
               >
                 {libOptions.map((l) => (
                   <option key={l.slug} value={l.slug}>
                     {l.name}（{l.slug}）· {l.pages} 页
                   </option>
                 ))}
+                <option value="__new__">＋ 新建库…</option>
               </select>
               <Tabs
                 items={[
@@ -239,6 +248,16 @@ export default function Wiki() {
               <Button size="sm" variant="outline" onClick={() => setPanel('ops')}>
                 运维
               </Button>
+              {newLibOpen && (
+                <NewLibDialog
+                  onClose={() => setNewLibOpen(false)}
+                  onCreated={(slug) => {
+                    setNewLibOpen(false)
+                    loadLibraries()
+                    switchLib(slug)
+                  }}
+                />
+              )}
             </>
           )}
         </PageHeader>
@@ -671,6 +690,66 @@ const OPS_SECTIONS: { value: OpsSection; label: string }[] = [
   { value: 'purpose', label: '目标' },
   { value: 'libraries', label: '库' },
 ]
+
+/** 页头快速建库（R：入口显性化——建库不再只藏在运维面板） */
+export function NewLibDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void
+  onCreated: (slug: string) => void
+}) {
+  const [slug, setSlug] = useState('')
+  const [name, setName] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const slugOk = SLUG_RE.test(slug)
+  const create = async () => {
+    if (!slugOk || busy) return
+    setBusy(true)
+    setErr('')
+    try {
+      const created = await api.post<WikiLibrary>('/wiki/libraries', { slug, name: name.trim() || slug })
+      onCreated(created.slug)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '建库失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
+      <input
+        autoFocus
+        aria-label="新库 slug"
+        placeholder="slug（小写字母/数字/连字符）"
+        className="w-44 rounded border border-line bg-transparent px-2 py-1 font-mono text-xs"
+        value={slug}
+        onChange={(e) => {
+          setSlug(e.target.value)
+          setErr('')
+        }}
+        onKeyDown={(e) => e.key === 'Enter' && create()}
+      />
+      <input
+        aria-label="新库名称"
+        placeholder="显示名（可选）"
+        className="w-40 rounded border border-line bg-transparent px-2 py-1 text-xs"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && create()}
+      />
+      <Button size="sm" onClick={create} disabled={!slugOk || busy}>
+        创建
+      </Button>
+      <Button size="sm" variant="ghost" onClick={onClose}>
+        取消
+      </Button>
+      {!slugOk && slug && <span className="text-xs text-danger">slug 需小写字母/数字/连字符（1-40 字符）</span>}
+      {err && <span className="text-xs text-danger">{err}</span>}
+    </div>
+  )
+}
 
 function OpsPanel({
   lib,
