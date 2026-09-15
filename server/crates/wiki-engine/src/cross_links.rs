@@ -19,15 +19,6 @@ pub async fn sync_page(
         .bind(from_slug)
         .execute(pool)
         .await?;
-    // from 库的 slug（INSERT 用 slug 定位两侧库——与 to 侧对称）
-    let Some((from_lib_slug,)) =
-        sqlx::query_as::<_, (String,)>("SELECT slug FROM wiki_libraries WHERE id = $1")
-            .bind(from_lib)
-            .fetch_optional(pool)
-            .await?
-    else {
-        return Ok(());
-    };
     for (to_lib_slug, to_slug) in cross_targets {
         // $1=from_library_id 值、$2=from_slug 值、$3=to_slug 值、$4=to 库 slug（WHERE 定位）
         sqlx::query(
