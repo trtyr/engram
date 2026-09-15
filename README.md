@@ -136,7 +136,22 @@ claude mcp add --transport http engram http://localhost:8080/mcp \
 
 ## 🚀 快速上手
 
-### Docker（推荐）
+### 宿主直跑（本机日常形态）
+
+```bash
+git clone https://github.com/trtyr/engram && cd engram
+python3 scripts/engramctl.py start          # PG 检查 → cargo build → 后台挂起 → /ready
+python3 scripts/engramctl.py stop|status|logs|restart   # --skip-build 跳编译
+# 控制台 → http://localhost:17654
+```
+
+- PG：brew `postgresql@16` + pgvector（127.0.0.1:5432）；配置源 `~/.engram/.env`
+- 进程 nohup 后台，PID `~/.engram/server.pid`，日志 `~/.engram/server.log`
+- codegraph 宿主路径单形态，无容器路径转换
+
+### Docker（远程部署选项）
+
+> 2026-09-15 起本机日常不再使用 Docker（构建慢、OrbStack 稳定性、网络栈摩擦）；deploy/ 保留给需要环境隔离的远程部署场景。
 
 ```bash
 git clone https://github.com/trtyr/engram && cd engram/deploy
