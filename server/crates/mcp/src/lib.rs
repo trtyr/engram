@@ -38,6 +38,7 @@ pub mod wiki;
 use axum::response::IntoResponse;
 use engram_core::auth::Principal;
 use engram_core::state::AppState;
+use engram_core::unified::UnifiedHit;
 
 /// 错误桥：把本模块的错误统一成 MCP ErrorData。
 pub(crate) fn mcp_err(code: ErrorCode, msg: impl Into<String>) -> rmcp::ErrorData {
@@ -741,6 +742,11 @@ pub struct SearchAllParams {
         description = "检索词。对 key 有 scope 的域并发检索（memory/wiki/skills/todos/projects）。"
     )]
     pub query: String,
+    /// R6：可选 LLM 精排（默认关）——开时五域命中合并 top-10 交 LLM 重排，响应附 reranked 视图
+    #[schemars(
+        description = "可选：LLM 精排（默认关）。开时五域命中合并 top-10 交 LLM 重排，响应附 reranked 视图（LLM 失败降级原分组）。"
+    )]
+    pub rerank: Option<bool>,
     /// 每域返回条数（默认 3）
     #[schemars(description = "每域返回条数上限，默认 3。结果只有摘要——精确检索请用单域工具。")]
     pub max_per_domain: Option<i64>,
@@ -3736,21 +3742,106 @@ impl EngramMcpServer {
             "query": q,
             "note": "各域 top-k 摘要——精确/过滤检索用单域工具；wiki 全文 get_page，memory 原文 get_session，技能全文 skills get",
         });
-        if let Some(v) = mem_r {
-            out["memory"] = v;
+        if let Some(v) = &mem_r {
+            out["memory"] = v.clone();
         }
-        if let Some(v) = wiki_r {
-            out["wiki"] = v;
+        if let Some(v) = &wiki_r {
+            out["wiki"] = v.clone();
         }
-        if let Some(v) = skills_r {
-            out["skills"] = v;
+        if let Some(v) = &skills_r {
+            out["skills"] = v.clone();
         }
-        if let Some(v) = todos_r {
-            out["todos"] = v;
+        if let Some(v) = &todos_r {
+            out["todos"] = v.clone();
         }
-        if let Some(v) = projects_val {
-            out["projects"] = v;
+        if let Some(v) = &projects_val {
+            out["projects"] = v.clone();
         }
+
+        // R6：rerank=true 时五域命中合并 top-10 交 LLM 精排，附 reranked 视图（失败降级为无此字段）
+        if params.0.rerank == Some(true) {
+            let mut candidates: Vec<UnifiedHit> = Vec::new();
+            let push_arr =
+                |domain: &str, arr: &serde_json::Value, candidates: &mut Vec<UnifiedHit>| {
+                    if let Some(items) = arr.as_array() {
+                        for it in items {
+                            let title = it
+                                .get("title")
+                                .or_else(|| it.get("name"))
+                                .or_else(|| it.get("slug"))
+                                .and_then(|x| x.as_str())
+                                .map(|s| s.to_string());
+                            let snippet = it
+                                .get("snippet")
+                                .or_else(|| it.get("description"))
+                                .or_else(|| it.get("text"))
+                                .and_then(|x| x.as_str())
+                                .map(|s| s.to_string())
+                                .unwrap_or_default();
+                            if title.is_none() && snippet.is_empty() {
+                                continue;
+                            }
+                            candidates.push(UnifiedHit {
+                                domain: domain.to_string(),
+                                id: uuid::Uuid::now_v7(),
+                                title,
+                                snippet,
+                                score: 0.0,
+                                extra: serde_json::json!({}),
+                            });
+                        }
+                    }
+                };
+            if let Some(v) = mem_r.as_ref() {
+                if let Some(l1) = v.get("l1") {
+                    push_arr("memory", l1, &mut candidates);
+                }
+                if let Some(l2) = v.get("l2") {
+                    push_arr("memory", l2, &mut candidates);
+                }
+            }
+            if let Some(v) = wiki_r.as_ref() {
+                push_arr("wiki", v, &mut candidates);
+            }
+            if let Some(v) = skills_r.as_ref() {
+                push_arr("skills", v, &mut candidates);
+            }
+            if let Some(v) = todos_r.as_ref() {
+                push_arr("todos", v, &mut candidates);
+            }
+            if let Some(v) = projects_val.as_ref() {
+                push_arr("projects", v, &mut candidates);
+            }
+
+            let top = candidates.len().min(10);
+            if top > 1 {
+                match engram_core::unified::rerank_hits(&self.state.llm(), &q, &candidates[..top])
+                    .await
+                {
+                    Ok(order) => {
+                        let reranked: Vec<serde_json::Value> = order
+                            .into_iter()
+                            .filter_map(|i| candidates.get(i))
+                            .map(|h| {
+                                json!({
+                                    "domain": h.domain,
+                                    "title": h.title,
+                                    "snippet": h.snippet,
+                                })
+                            })
+                            .collect();
+                        out["reranked"] = json!(reranked);
+                        out["note"] = json!(
+                            "各域 top-k 摘要 + reranked=LLM 精排序（跨域）；精确检索用单域工具"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "search_all rerank 失败——仅返回分组摘要");
+                    }
+                }
+            }
+        }
+
         ok_json(out)
     }
 

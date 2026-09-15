@@ -266,7 +266,7 @@ impl UnifiedSearch {
 /// memory 的 l1/l2 各自独立 rank；wiki 各一组。
 /// R6：LLM 精排——top 候选（title+snippet）交模型输出目标顺序（原索引数组）。
 /// 任何失败返回 Err（调用方降级原序）；只做一次 chat 调用，失败不重试（检索是热路径）。
-async fn rerank_hits(
+pub async fn rerank_hits(
     llm: &engram_distill::llm_port::LlmRef,
     query: &str,
     hits: &[UnifiedHit],
