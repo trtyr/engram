@@ -606,7 +606,7 @@ impl MemoryService {
         }
         if text.chars().count() > 120 {
             return Err(MemoryError::BadRequest(format!(
-                "原子内容超长：最多 120 字，当前 {} 字",
+                "原子内容超长：最多 120 字，当前 {} 字——原子只收一句话；成段内容走 write_session（蒸馏自动切分），remember 用默认蒸馏路径（不带 strength=fact）",
                 text.chars().count()
             )));
         }

@@ -1618,7 +1618,7 @@ impl EngramMcpServer {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
                 format!(
-                    "remember 需要正文字段 text（一句话，≤{} 字）——注意字段名是 text 不是 content；成段内容请走 write_session（蒸馏后可 search）",
+                    "remember 需要正文字段 text（上限 {} 字）——注意字段名是 text 不是 content；strength=fact 直写原话时内容需 ≤120 字；成段内容走默认蒸馏路径或 write_session",
                     engram_core::memory::TURN_TEXT_MAX_CHARS
                 ),
             ));
@@ -1628,7 +1628,7 @@ impl EngramMcpServer {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
                 format!(
-                    "text 不能为空——要记住的内容一句话写清楚（≤{} 字）；成段内容请走 write_session",
+                    "text 不能为空——要记住的内容一句话写清楚（上限 {} 字）；成段内容请走 write_session",
                     engram_core::memory::TURN_TEXT_MAX_CHARS
                 ),
             ));
@@ -1637,7 +1637,7 @@ impl EngramMcpServer {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
                 format!(
-                    "text 超长（当前 {} 字，上限 {} 字）——remember 只收一句话；成段内容请走 write_session（蒸馏后可 search 命中）",
+                    "text 超长（当前 {} 字，上限 {} 字）——remember text 自身可到上限；但 strength=fact 直写原话限 120 字，超长请去掉 strength=fact 走默认蒸馏或用 write_session",
                     text.chars().count(),
                     engram_core::memory::TURN_TEXT_MAX_CHARS
                 ),
@@ -3869,7 +3869,7 @@ impl EngramMcpServer {
     /// 用户记忆域（单一入口）。记忆四层：L0 会话 →（蒸馏）→ L1 原子 → L2 场景 → L3 画像，
     /// 实体坐标系横向串联。开场用 action="context" 装载，定向回忆用 "search"，
     /// 收尾用 "write_session" 写入；遗忘用 "forget"。
-    /// 速记：remember 正文字段名是 text（一句话 ≤120 字），长内容走 write_session。操作全景：action="help"。
+    /// 速记：remember 正文字段名是 text；strength=fact 直写原话限 120 字，默认蒸馏路径成段内容也可，更长走 write_session。操作全景：action="help"。
     #[tool(
         name = "memory",
         annotations(
