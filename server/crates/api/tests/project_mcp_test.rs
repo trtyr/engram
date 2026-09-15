@@ -694,8 +694,8 @@ async fn project_tools_admin_info_and_toggle() {
     assert_eq!(project_tools.len(), 1, "projects 域应为 1 个域工具");
     assert_eq!(
         project_tools[0]["actions"].as_array().unwrap().len(),
-        16,
-        "projects 域应展示 16 个操作（含 doc_patch）：{tools:?}"
+        20,
+        "projects 域应展示 20 个操作（含 doc_patch + file 四动作）：{tools:?}"
     );
 
     // 停用 projects.delete：目录隐身 + call 拒绝
@@ -1007,4 +1007,107 @@ async fn project_precise_addressing_read() {
 
     // 覆盖 other 引用，避免未使用告警
     assert_eq!(other["title"], "结论");
+}
+
+/// 项目文件五动作端到端：file_put（新建 v1）→ file_get → 覆盖（v2 + 快照）→
+/// file_get 读历史版本 → file_list → file_delete。
+#[tokio::test]
+async fn project_file_lifecycle_mcp_end_to_end() {
+    let (app, _pg) = app().await;
+    let key = create_key(&app, &login_token(&app).await, &["project"]).await;
+    mcp_initialize(&app, &key).await;
+
+    let created = act_json(
+        &app,
+        &key,
+        "create",
+        json!({"name": "项目文件 MCP 验证", "type": "dev"}),
+    )
+    .await;
+    let pid = created["id"].as_str().unwrap().to_string();
+
+    // ① file_put 新建 → v1，扩展名推断 mime
+    let up = act_json(
+        &app,
+        &key,
+        "file_put",
+        json!({"project_id": pid, "name": "architecture.html", "content": "<h1>v1</h1>"}),
+    )
+    .await;
+    assert_eq!(up["version"], 1, "新建应为 v1：{up}");
+    assert_eq!(up["mime"], "text/html", "扩展名应推断 mime：{up}");
+
+    // ② file_get 读当前
+    let got = act_json(
+        &app,
+        &key,
+        "file_get",
+        json!({"project_id": pid, "name": "architecture.html"}),
+    )
+    .await;
+    assert_eq!(got["content"], "<h1>v1</h1>");
+    assert_eq!(got["version"], 1);
+
+    // ③ 覆盖 → v2
+    let up2 = act_json(
+        &app,
+        &key,
+        "file_put",
+        json!({"project_id": pid, "name": "architecture.html", "content": "<h1>v2</h1>"}),
+    )
+    .await;
+    assert_eq!(up2["version"], 2, "覆盖应 version+1：{up2}");
+
+    // ④ file_get 读历史版本 v1
+    let old = act_json(
+        &app,
+        &key,
+        "file_get",
+        json!({"project_id": pid, "name": "architecture.html", "version": 1}),
+    )
+    .await;
+    assert_eq!(old["content"], "<h1>v1</h1>", "历史版本应可回读：{old}");
+    assert_eq!(old["version"], 1);
+
+    // ⑤ file_list
+    let list = act_json(&app, &key, "file_list", json!({"project_id": pid})).await;
+    assert_eq!(list.as_array().unwrap().len(), 1, "应只有 1 个文件：{list}");
+    assert_eq!(list[0]["name"], "architecture.html");
+
+    // ⑥ 非法文件名拒绝（路径分隔）
+    let v = act_raw(
+        &app,
+        &key,
+        30,
+        "file_put",
+        json!({"project_id": pid, "name": "a/b.html", "content": "x"}),
+    )
+    .await;
+    let msg = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(msg.contains("路径分隔符"), "应拒绝路径分隔符：{v}");
+
+    // ⑦ file_delete
+    let del = act_json(
+        &app,
+        &key,
+        "file_delete",
+        json!({"project_id": pid, "name": "architecture.html"}),
+    )
+    .await;
+    assert_eq!(del["deleted"], "architecture.html");
+    let v2 = act_raw(
+        &app,
+        &key,
+        31,
+        "file_get",
+        json!({"project_id": pid, "name": "architecture.html"}),
+    )
+    .await;
+    assert!(
+        v2["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("不存在"),
+        "删除后应 404：{v2}"
+    );
 }

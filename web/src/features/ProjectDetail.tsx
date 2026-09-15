@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, type ProjectDetailDto, type ProjectDocDto, type ProjectLocationDto } from '@/lib/api'
+import { api, type ProjectDetailDto, type ProjectDocDto, type ProjectFileDto, type ProjectLocationDto } from '@/lib/api'
 import { Card, ErrorBox, Spinner } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls } from '@/lib/ui'
 import { cn } from '@/lib/utils'
@@ -24,6 +24,7 @@ type Sel =
   | { kind: 'overview' }
   | { kind: 'location'; loc: ProjectLocationDto }
   | { kind: 'doc'; doc: ProjectDocDto }
+  | { kind: 'file'; name: string | null }
 
 /** folder 树节点（category 内的子目录递归结构）。 */
 interface FolderNode {
@@ -145,6 +146,7 @@ export default function ProjectDetail() {
   const [err, setErr] = useState('')
   const [sel, setSel] = useState<Sel>({ kind: 'overview' })
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [files, setFiles] = useState<ProjectFileDto[]>([])
 
   const load = useCallback(() => {
     if (!id) return
@@ -152,6 +154,10 @@ export default function ProjectDetail() {
       .get<ProjectDetailDto>(`/projects/${id}`)
       .then(setDetail)
       .catch((e) => setErr(e instanceof Error ? e.message : '加载失败'))
+    api
+      .get<ProjectFileDto[]>(`/projects/${id}/files`)
+      .then(setFiles)
+      .catch(() => setFiles([]))
   }, [id])
 
   useEffect(() => {
@@ -238,6 +244,32 @@ export default function ProjectDetail() {
                     </div>
                   )
                 })}
+
+              {/* 📎 项目文件（架构图 HTML 等制品；0045） */}
+              <div className="mt-1 border-t border-border pt-1">
+                <GroupHeader
+                  label="📎 文件"
+                  count={files.length}
+                  open={!collapsed.has('files')}
+                  onToggle={() => toggleGroup('files')}
+                  onAdd={() => setSel({ kind: 'file', name: null })}
+                />
+                {!collapsed.has('files') &&
+                  files.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setSel({ kind: 'file', name: f.name })}
+                      className={cn(
+                        'block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted',
+                        sel.kind === 'file' && sel.name === f.name ? 'bg-muted font-medium' : 'text-muted-foreground',
+                      )}
+                    >
+                      {f.mime === 'text/html' ? '🖼️' : '📄'} {f.name}
+                      <span className="ml-1 text-xs text-muted-foreground">v{f.version}</span>
+                    </button>
+                  ))}
+              </div>
             </nav>
           </Card>
         </div>
@@ -267,6 +299,9 @@ export default function ProjectDetail() {
                 load()
               }}
             />
+          )}
+          {sel.kind === 'file' && (
+            <FilePane projectId={detail.id} name={sel.name} onChanged={load} />
           )}
         </div>
       </div>
@@ -591,4 +626,160 @@ function DocPane({
       )}
     </Card>
   )
+}
+
+
+/** 项目文件区：新建/查看/编辑/删除；text/html 用 iframe sandbox 渲染（架构图等制品），markdown 走 WikiMarkdown，其余 <pre>。 */
+function FilePane({ projectId, name, onChanged }: { projectId: string; name: string | null; onChanged: () => void }) {
+  const isNew = name === null
+  const [file, setFile] = useState<ProjectFileDto | null>(null)
+  const [editing, setEditing] = useState(isNew)
+  const [fileName, setFileName] = useState('')
+  const [content, setContent] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    setEditing(isNew)
+    setFileName(isNew ? '' : (name ?? ''))
+    setContent('')
+    setFile(null)
+    setErr('')
+    if (!isNew && name) {
+      api
+        .get<ProjectFileDto>(`/projects/${projectId}/files/${encodeURIComponent(name)}`)
+        .then(setFile)
+        .catch((e) => setErr(e instanceof Error ? e.message : '加载失败'))
+    }
+  }, [projectId, name, isNew])
+
+  async function save() {
+    if (!fileName.trim()) return
+    setBusy(true)
+    try {
+      await api.put(`/projects/${projectId}/files`, { name: fileName.trim(), content })
+      onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove() {
+    if (isNew) return onChanged()
+    setBusy(true)
+    try {
+      await api.del(`/projects/${projectId}/files/${encodeURIComponent(name ?? '')}`)
+      onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '删除失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+      {editing || isNew ? (
+        <>
+          <div className="flex shrink-0 items-center gap-2">
+            <input
+              className={`${inputCls} w-64 font-mono`}
+              placeholder="文件名（如 architecture.html）"
+              aria-label="文件名"
+              value={fileName}
+              onChange={(e) => setFileName(e.target.value)}
+            />
+            <span className="text-xs text-muted-foreground">{mimeHintOf(fileName)}</span>
+          </div>
+          <textarea
+            className={`${inputCls} min-h-[200px] w-full flex-1 resize-none font-mono text-sm leading-5`}
+            placeholder="文件内容（HTML / SVG / JSON / 配置…）"
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+          />
+          {err && (
+            <div className="shrink-0">
+              <ErrorBox msg={err} />
+            </div>
+          )}
+          <div className="flex shrink-0 gap-2">
+            <Button size="sm" disabled={busy || !fileName.trim()} onClick={save}>
+              {isNew ? '创建' : '保存（version+1）'}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onChanged()}>
+              取消
+            </Button>
+            {!isNew && (
+              <Button size="sm" variant="destructive" disabled={busy} onClick={remove}>
+                删除
+              </Button>
+            )}
+          </div>
+        </>
+      ) : !file ? (
+        <>
+          {err && <ErrorBox msg={err} />}
+          <Spinner />
+        </>
+      ) : (
+        <>
+          <div className="flex shrink-0 items-center justify-between">
+            <div>
+              <h3 className="font-mono text-sm font-semibold">
+                {file.name} <span className="text-xs text-muted-foreground">v{file.version}</span>
+              </h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {file.mime} · {fmtTime(file.updated_at)}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setFileName(file.name)
+                  setContent(file.content)
+                  setEditing(true)
+                }}
+              >
+                编辑
+              </Button>
+              <Button size="sm" variant="destructive" disabled={busy} onClick={remove}>
+                删除
+              </Button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border">
+            {file.mime === 'text/html' ? (
+              <iframe
+                title={`项目文件 ${file.name}`}
+                sandbox="allow-scripts"
+                srcDoc={file.content}
+                className="h-full w-full bg-white"
+              />
+            ) : file.mime === 'text/markdown' ? (
+              <div className="h-full overflow-y-auto p-3 [scrollbar-gutter:stable]">
+                <WikiMarkdown content={file.content} />
+              </div>
+            ) : (
+              <pre className="h-full overflow-auto bg-muted/40 p-3 font-mono text-xs leading-5">{file.content}</pre>
+            )}
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
+
+function mimeHintOf(name: string): string {
+  const ext = name.toLowerCase().split('.').pop() ?? ''
+  const hints: Record<string, string> = {
+    html: 'HTML——保存后点开即渲染',
+    md: 'Markdown',
+    svg: 'SVG（HTML 文件内嵌或单独保存均可）',
+    json: 'JSON',
+  }
+  return hints[ext] ?? '纯文本'
 }

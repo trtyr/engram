@@ -488,6 +488,19 @@ export interface ProjectDetailDto extends ProjectDto {
   locations: ProjectLocationDto[]
   docs: ProjectDocDto[]
 }
+/** 项目文件（非 markdown 制品：架构图 HTML/配置等；0045）。 */
+export interface ProjectFileDto {
+  id: string
+  project_id: string
+  name: string
+  /** 渲染契约：text/html → iframe sandbox 查看器，text/markdown → WikiMarkdown，其余 <pre> */
+  mime: string
+  content: string
+  version: number
+  created_at: string
+  updated_at: string
+}
+
 export interface ProjectTypeDto {
   type: string
   label: string

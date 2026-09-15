@@ -90,7 +90,11 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "doc_search", false, "grep 式跨文档按行检索（需 project_id/project_name 定位项目，先 list；定位到哪篇哪行）" => crate::ProjectDocSearchParams;
             "doc_patch", false, "行级补丁（replace/insert/delete 一个行区间——改长文档不必取全文重发）" => crate::ProjectDocPatchParams;
             "doc_update", false, "编辑项目文档（补丁式）" => crate::ProjectDocUpdateParams;
-            "doc_delete", true, "删除项目文档（不可逆）" => crate::ProjectDocDeleteParams
+            "doc_delete", true, "删除项目文档（不可逆）" => crate::ProjectDocDeleteParams;
+            "file_put", false, "写项目文件（架构图 HTML/配置/报告等制品；同 name 覆盖 version+1，旧版进快照）" => crate::ProjectFileUpsertParams;
+            "file_get", false, "读项目文件（当前或指定版本；支持 project_id/project_name 定位）" => crate::ProjectFileRefParams;
+            "file_list", false, "列出项目文件（name/mime/version/大小；不含内容）" => crate::ProjectFileListParams;
+            "file_delete", true, "删除项目文件（历史快照级联删，不可逆）" => crate::ProjectFileDeleteParams
         ],
         "skills" => action_docs![
             "list", false, "列出技能（q/tag/enabled 过滤，不含正文；kind=script 的条目带 local_path 指针）" => crate::SkillsListParams;

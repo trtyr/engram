@@ -75,6 +75,8 @@ use utoipa::OpenApi;
         project_api::batch_delete_projects,
         project_api::add_location, project_api::get_location, project_api::update_location, project_api::delete_location,
         project_api::add_doc, project_api::get_doc, project_api::update_doc, project_api::delete_doc,
+        project_api::upsert_file, project_api::list_files, project_api::get_file, project_api::delete_file,
+        project_api::list_file_versions, project_api::get_file_version,
         skills_api::list_skills, skills_api::create_skill, skills_api::import_skills,
         skills_api::export_skills, skills_api::get_skill, skills_api::update_skill,
         skills_api::delete_skill, skills_api::list_revisions, skills_api::restore_revision,
@@ -373,6 +375,22 @@ pub fn router(state: AppState) -> Router {
             get(project_api::get_location)
                 .put(project_api::update_location)
                 .delete(project_api::delete_location),
+        )
+        .route(
+            "/projects/{id}/files",
+            put(project_api::upsert_file).get(project_api::list_files),
+        )
+        .route(
+            "/projects/{id}/files/{name}",
+            get(project_api::get_file).delete(project_api::delete_file),
+        )
+        .route(
+            "/projects/{id}/files/{name}/versions",
+            get(project_api::list_file_versions),
+        )
+        .route(
+            "/projects/{id}/files/{name}/versions/{version}",
+            get(project_api::get_file_version),
         )
         .route("/projects/{id}/docs", post(project_api::add_doc))
         .route(

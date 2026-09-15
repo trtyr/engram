@@ -19,6 +19,20 @@ pub struct ProjectDto {
     pub updated_at: DateTime<Utc>,
 }
 
+/// 项目文件（非 markdown 制品：架构图 HTML / 配置样例 / 导出报告；0045）
+#[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct ProjectFileDto {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub name: String,
+    /// MIME 类型；渲染契约：text/html → iframe sandbox 查看器，text/markdown → WikiMarkdown，其余 <pre>
+    pub mime: String,
+    pub content: String,
+    pub version: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct ProjectLocationDto {
     pub id: Uuid,

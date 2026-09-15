@@ -148,7 +148,9 @@ pub struct WikiWritePageParams {
     #[schemars(description = "页面标题。")]
     pub title: String,
     /// Markdown 正文（[[wikilink]] 库内双链；[[lib/slug]] 跨库引用）
-    #[schemars(description = "Markdown 正文。[[slug]] 双链本库页面；[[lib/slug]] 跨库引用其他库的页面（目标存在自动建跨库链，缺失 lint 会报）。互链都进链接图。")]
+    #[schemars(
+        description = "Markdown 正文。[[slug]] 双链本库页面；[[lib/slug]] 跨库引用其他库的页面（目标存在自动建跨库链，缺失 lint 会报）。互链都进链接图。"
+    )]
     pub content: String,
     /// 目录树文件夹（Obsidian 式 / 分隔多级路径；缺省用页型默认目录）
     #[schemars(description = "可选：目录树文件夹（/ 分隔多级路径）。缺省按页型默认目录。")]

@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::PgPool;
 use crate::error::StoreResult;
-use crate::models::project::{ProjectDocDto, ProjectDto, ProjectLocationDto};
+use crate::models::project::{ProjectDocDto, ProjectDto, ProjectFileDto, ProjectLocationDto};
+use chrono::{DateTime, Utc};
 
 const PROJECT_COLS: &str =
     "id, name, type, status, description, categories, frontmatter, created_at, updated_at";
@@ -310,4 +311,116 @@ pub async fn get_doc(pool: &PgPool, id: Uuid) -> StoreResult<Option<ProjectDocDt
     .fetch_optional(pool)
     .await
     .map_err(Into::into)
+}
+
+// ---------- project_files（0045 项目文件：架构图 HTML 等制品） ----------
+
+const FILE_COLS: &str = "id, project_id, name, mime, content, version, created_at, updated_at";
+
+pub async fn list_files(pool: &PgPool, project_id: Uuid) -> StoreResult<Vec<ProjectFileDto>> {
+    let rows = sqlx::query_as::<_, ProjectFileDto>(&format!(
+        "SELECT {FILE_COLS} FROM project_files WHERE project_id = $1 ORDER BY name"
+    ))
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn get_file_by_name(
+    pool: &PgPool,
+    project_id: Uuid,
+    name: &str,
+) -> StoreResult<Option<ProjectFileDto>> {
+    let row = sqlx::query_as::<_, ProjectFileDto>(&format!(
+        "SELECT {FILE_COLS} FROM project_files WHERE project_id = $1 AND name = $2"
+    ))
+    .bind(project_id)
+    .bind(name)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// 覆盖式写入：存在则 version+1 并把旧内容存版本快照，不存在则插入 v1
+pub async fn upsert_file(
+    pool: &PgPool,
+    project_id: Uuid,
+    name: &str,
+    mime: &str,
+    content: &str,
+) -> StoreResult<ProjectFileDto> {
+    let existing = get_file_by_name(pool, project_id, name).await?;
+    if let Some(prev) = existing {
+        let new_version = prev.version + 1;
+        sqlx::query(
+            "INSERT INTO project_file_versions (file_id, version, content) VALUES ($1, $2, $3)",
+        )
+        .bind(prev.id)
+        .bind(prev.version)
+        .bind(&prev.content)
+        .execute(pool)
+        .await?;
+        let row = sqlx::query_as::<_, ProjectFileDto>(&format!(
+            "UPDATE project_files SET mime = $3, content = $4, version = $5, updated_at = now() \
+                 WHERE id = $1 AND project_id = $2 RETURNING {FILE_COLS}"
+        ))
+        .bind(prev.id)
+        .bind(project_id)
+        .bind(mime)
+        .bind(content)
+        .bind(new_version)
+        .fetch_one(pool)
+        .await?;
+        Ok(row)
+    } else {
+        let row = sqlx::query_as::<_, ProjectFileDto>(&format!(
+            "INSERT INTO project_files (project_id, name, mime, content) \
+                 VALUES ($1, $2, $3, $4) RETURNING {FILE_COLS}"
+        ))
+        .bind(project_id)
+        .bind(name)
+        .bind(mime)
+        .bind(content)
+        .fetch_one(pool)
+        .await?;
+        Ok(row)
+    }
+}
+
+pub async fn delete_file(pool: &PgPool, project_id: Uuid, name: &str) -> StoreResult<u64> {
+    let r = sqlx::query("DELETE FROM project_files WHERE project_id = $1 AND name = $2")
+        .bind(project_id)
+        .bind(name)
+        .execute(pool)
+        .await?;
+    Ok(r.rows_affected())
+}
+
+pub async fn list_file_versions(
+    pool: &PgPool,
+    file_id: Uuid,
+) -> StoreResult<Vec<(i32, DateTime<Utc>)>> {
+    let rows = sqlx::query_as::<_, (i32, DateTime<Utc>)>(
+        "SELECT version, created_at FROM project_file_versions WHERE file_id = $1 ORDER BY version DESC",
+    )
+    .bind(file_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn get_file_version(
+    pool: &PgPool,
+    file_id: Uuid,
+    version: i32,
+) -> StoreResult<Option<String>> {
+    let row = sqlx::query_scalar::<_, String>(
+        "SELECT content FROM project_file_versions WHERE file_id = $1 AND version = $2",
+    )
+    .bind(file_id)
+    .bind(version)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
 }

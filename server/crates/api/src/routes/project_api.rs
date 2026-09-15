@@ -6,8 +6,8 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use engram_core::project::{
-    ProjectDetailDto, ProjectDocDto, ProjectDto, ProjectError, ProjectLocationDto, ProjectService,
-    ProjectTypeDto,
+    ProjectDetailDto, ProjectDocDto, ProjectDto, ProjectError, ProjectFileDto, ProjectLocationDto,
+    ProjectService, ProjectTypeDto,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -389,4 +389,118 @@ pub async fn delete_doc(
     owned_doc(&s, id, doc_id).await?;
     s.delete_doc(doc_id).await.map_err(pe)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------- 项目文件（0045：架构图 HTML 等制品；渲染契约 mime） ----------
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub struct FileRequest {
+    /// 文件名（禁路径分隔，≤200 字符；扩展名推断 mime，可显式覆盖）
+    pub name: String,
+    /// 可选：显式 MIME（缺省按扩展名推断）
+    #[serde(default)]
+    pub mime: Option<String>,
+    /// 文本内容（HTML/SVG/JSON/配置等；≤8MB）
+    pub content: String,
+}
+
+/// 覆盖式写入项目文件（存在则 version+1，旧版进快照）。
+#[utoipa::path(put, path = "/projects/{id}/files",
+    request_body = FileRequest,
+    responses((status = 200, body = ProjectFileDto)))]
+pub async fn upsert_file(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<FileRequest>,
+) -> Result<Json<ProjectFileDto>, ApiError> {
+    require_project(&principal)?;
+    let f = svc(&state)
+        .upsert_file(id, &req.name, req.mime.as_deref(), &req.content)
+        .await
+        .map_err(pe)?;
+    Ok(Json(f))
+}
+
+/// 列出项目文件（含内容；列表页用 mime 决定预览形态）。
+#[utoipa::path(get, path = "/projects/{id}/files",
+    responses((status = 200, body = [ProjectFileDto])))]
+pub async fn list_files(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<ProjectFileDto>>, ApiError> {
+    require_project(&principal)?;
+    Ok(Json(svc(&state).list_files(id).await.map_err(pe)?))
+}
+
+/// 读单个文件。
+#[utoipa::path(get, path = "/projects/{id}/files/{name}",
+    responses((status = 200, body = ProjectFileDto)))]
+pub async fn get_file(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((id, name)): Path<(Uuid, String)>,
+) -> Result<Json<ProjectFileDto>, ApiError> {
+    require_project(&principal)?;
+    Ok(Json(svc(&state).get_file(id, &name).await.map_err(pe)?))
+}
+
+/// 删除项目文件（版本快照级联删）。
+#[utoipa::path(delete, path = "/projects/{id}/files/{name}",
+    responses((status = 204, description = "已删除")))]
+pub async fn delete_file(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((id, name)): Path<(Uuid, String)>,
+) -> Result<StatusCode, ApiError> {
+    require_project(&principal)?;
+    svc(&state).delete_file(id, &name).await.map_err(pe)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 文件历史版本列表（不含内容）。
+#[utoipa::path(get, path = "/projects/{id}/files/{name}/versions",
+    responses((status = 200, description = "[{version, created_at}]")))]
+pub async fn list_file_versions(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((id, name)): Path<(Uuid, String)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_project(&principal)?;
+    let rows = svc(&state)
+        .list_file_versions(id, &name)
+        .await
+        .map_err(pe)?;
+    Ok(Json(serde_json::json!(
+        rows.into_iter()
+            .map(|(v, t)| serde_json::json!({"version": v, "created_at": t}))
+            .collect::<Vec<_>>()
+    )))
+}
+
+/// 读某历史版本内容。
+#[utoipa::path(get, path = "/projects/{id}/files/{name}/versions/{version}",
+    responses((status = 200, body = ProjectFileDto)))]
+pub async fn get_file_version(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((id, name, version)): Path<(Uuid, String, i32)>,
+) -> Result<Json<ProjectFileDto>, ApiError> {
+    require_project(&principal)?;
+    let content = svc(&state)
+        .get_file_version(id, &name, version)
+        .await
+        .map_err(pe)?;
+    let cur = svc(&state).get_file(id, &name).await.map_err(pe)?;
+    Ok(Json(ProjectFileDto {
+        id: cur.id,
+        project_id: cur.project_id,
+        name: cur.name,
+        mime: cur.mime,
+        content,
+        version,
+        created_at: cur.created_at,
+        updated_at: cur.updated_at,
+    }))
 }
