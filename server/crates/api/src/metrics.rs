@@ -39,7 +39,7 @@ pub async fn metrics_handler(
     axum::extract::Extension(pool): axum::extract::Extension<PgPool>,
 ) -> Response {
     // jobs 队列深度（R10）：kind × status 计数——抓取驱动，无后台扫描
-    if let Ok(rows) = sqlx::query_scalar::<_, (String, String, i64)>(
+    if let Ok(rows) = sqlx::query_as::<_, (String, String, i64)>(
         "SELECT kind, status, count(*) FROM jobs GROUP BY kind, status",
     )
     .fetch_all(&pool)
