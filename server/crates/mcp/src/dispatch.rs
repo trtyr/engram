@@ -65,7 +65,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "kv_get", false, "读取结构化精确值（按 key）" => crate::MemoryKvGetParams;
             "kv_list", false, "列出全部 KV 值（按 updated_at 倒序）" => crate::MemoryKvListParams;
             "kv_search", false, "字面量直查 KV（key/value/context ILIKE——精确值不依赖分词）" => crate::MemoryKvSearchParams;
-            "remember", false, "一句话记忆（缺省走 auto 蒸馏，产物默认 inference；strength=fact 显式声明用户明示事实则直写落库原话保真）" => crate::RememberParams;
+            "remember", false, "一句话记忆（正文字段 text ≤120 字；缺省走 auto 蒸馏，产物默认 inference；strength=fact 显式声明用户明示事实则直写落库原话保真）" => crate::RememberParams;
             "write_session", false, "写入一段对话到 L0 会话（收尾用；蒸馏自动抽取记忆）" => crate::WriteSessionParams;
             "append_session", false, "向未蒸馏的会话追加轮次（长对话分段落库）" => crate::AppendSessionParams;
             "list_sessions", false, "列出 L0 会话（keyset 分页，可按 agent 过滤）" => crate::ListSessionsParams;
@@ -87,7 +87,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "location_delete", true, "删除一条位置登记" => crate::ProjectLocationDeleteParams;
             "doc_add", false, "项目下新增分类文档（Markdown）" => crate::ProjectDocAddParams;
             "doc_get", false, "读项目文档（全文或按行区间精读）" => crate::ProjectDocGetParams;
-            "doc_search", false, "grep 式跨文档按行检索（定位到哪篇哪行）" => crate::ProjectDocSearchParams;
+            "doc_search", false, "grep 式跨文档按行检索（需 project_id/project_name 定位项目，先 list；定位到哪篇哪行）" => crate::ProjectDocSearchParams;
             "doc_patch", false, "行级补丁（replace/insert/delete 一个行区间——改长文档不必取全文重发）" => crate::ProjectDocPatchParams;
             "doc_update", false, "编辑项目文档（补丁式）" => crate::ProjectDocUpdateParams;
             "doc_delete", true, "删除项目文档（不可逆）" => crate::ProjectDocDeleteParams

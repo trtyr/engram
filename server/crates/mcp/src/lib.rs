@@ -703,11 +703,11 @@ pub struct ForgetParams {
 /// 一句话记忆（R 报告 P1-9）：记条小事实不必手搓 turns 数组。
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct RememberParams {
-    /// 要记住的一句话
+    /// 要记住的一句话（字段名 text，≤120 字）
     #[schemars(
-        description = "要记住的事实/偏好/事件，一句话（如「用户的猫叫墨鱼，喜欢趴键盘上睡觉」）。等价于单轮 write_session + auto 蒸馏。"
+        description = "要记住的事实/偏好/事件，一句话 ≤120 字（如「用户的猫叫墨鱼，喜欢趴键盘上睡觉」）。字段名是 text。等价于单轮 write_session + auto 蒸馏；成段内容请走 write_session。"
     )]
-    pub text: String,
+    pub text: Option<String>,
     /// 会话级敏感标记
     #[schemars(
         description = "可选：敏感内容（医疗/感情/财务）置 true——敏感是标记不是隐身，产物默认可见并带 sensitive 标记。"
@@ -1612,18 +1612,33 @@ impl EngramMcpServer {
         let principal = principal_of(&ctx)?;
         require_memory(&principal)?;
         let rp = params.0;
-        let text = rp.text.trim().to_string();
+        // R（参数摩擦收口）：缺字段/为空/超长统一给一条完整约束提示——
+        // 此前 serde missing field 报错不带字段名与上限，AI 每次冷启动要试错多轮
+        let Some(raw) = rp.text else {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "remember 需要正文字段 text（一句话，≤{} 字）——注意字段名是 text 不是 content；成段内容请走 write_session（蒸馏后可 search）",
+                    engram_core::memory::TURN_TEXT_MAX_CHARS
+                ),
+            ));
+        };
+        let text = raw.trim().to_string();
         if text.is_empty() {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
-                "text 不能为空——要记住的内容一句话写清楚",
+                format!(
+                    "text 不能为空——要记住的内容一句话写清楚（≤{} 字）；成段内容请走 write_session",
+                    engram_core::memory::TURN_TEXT_MAX_CHARS
+                ),
             ));
         }
         if text.chars().count() > engram_core::memory::TURN_TEXT_MAX_CHARS {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
                 format!(
-                    "text 超长（上限 {} 字）——成段内容请走 write_session",
+                    "text 超长（当前 {} 字，上限 {} 字）——remember 只收一句话；成段内容请走 write_session（蒸馏后可 search 命中）",
+                    text.chars().count(),
                     engram_core::memory::TURN_TEXT_MAX_CHARS
                 ),
             ));
@@ -3853,7 +3868,8 @@ impl EngramMcpServer {
 
     /// 用户记忆域（单一入口）。记忆四层：L0 会话 →（蒸馏）→ L1 原子 → L2 场景 → L3 画像，
     /// 实体坐标系横向串联。开场用 action="context" 装载，定向回忆用 "search"，
-    /// 收尾用 "write_session" 写入；遗忘用 "forget"。操作全景：action="help"。
+    /// 收尾用 "write_session" 写入；遗忘用 "forget"。
+    /// 速记：remember 正文字段名是 text（一句话 ≤120 字），长内容走 write_session。操作全景：action="help"。
     #[tool(
         name = "memory",
         annotations(
@@ -3987,7 +4003,8 @@ impl EngramMcpServer {
 
     /// 项目记忆域（单一入口）：项目 = 一件有明确目标、跨会话推进的工作，
     /// 下挂多主机位置（登记制）与「分类 > 文档」树。开工 "list"/"get" 接上下文，
-    /// 干活中 "doc_add"/"doc_update" 沉淀，收尾 "update" 改状态。操作全景：action="help"。
+    /// 干活中 "doc_add"/"doc_update" 沉淀，收尾 "update" 改状态。
+    /// 速记：所有 doc_* 操作需先定位项目（参数 project_id 或 project_name，先 "list"）。操作全景：action="help"。
     #[tool(
         name = "projects",
         annotations(
