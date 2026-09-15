@@ -15,7 +15,7 @@ pub mod wiki_api;
 pub mod wiki_docs_api;
 
 use crate::state::AppState;
-use axum::middleware::from_fn_with_state;
+use axum::middleware::{Next, from_fn_with_state};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use utoipa::OpenApi;
@@ -85,9 +85,14 @@ use utoipa::OpenApi;
 pub(crate) struct ApiDoc;
 
 pub fn router(state: AppState) -> Router {
+    let metrics_handle = crate::metrics::install();
+
     let public = Router::new()
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
+        .route("/metrics", get(crate::metrics::metrics_handler))
+        .layer(axum::Extension(metrics_handle))
+        .layer(axum::Extension(state.pool.clone()))
         .route("/openapi.json", get(openapi_json))
         .route("/auth/login", post(auth_api::login_handler))
         .route("/auth/status", get(auth_api::status))
@@ -421,9 +426,40 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(public)
         .merge(authed.layer(from_fn_with_state(state.clone(), crate::auth::bearer_auth)))
+        // R10：HTTP 指标（请求计数 + 延迟直方图，按路由模板聚合）——放最外层，覆盖全部 API 路由
+        .layer(axum::middleware::from_fn(http_metrics_mw))
         // SPA 静态资源兜底（API 路由未命中时 → web/dist）
         .fallback_service(axum::routing::any(crate::web_assets::static_handler))
         .with_state(state)
+}
+
+/// R10：HTTP 指标中间件——请求计数 + 延迟直方图，route 用匹配模板（非逐 URI，防高基数）。
+async fn http_metrics_mw(req: axum::extract::Request, next: Next) -> axum::response::Response {
+    let start = std::time::Instant::now();
+    let method = req.method().clone();
+    let route = req
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| "unmatched".to_string());
+
+    let resp = next.run(req).await;
+
+    let status = resp.status().as_u16().to_string();
+    metrics::counter!(
+        "http_requests_total",
+        "method" => method.to_string(),
+        "route" => route.clone(),
+        "status" => status
+    )
+    .increment(1);
+    metrics::histogram!(
+        "http_request_duration_seconds",
+        "method" => method.to_string(),
+        "route" => route
+    )
+    .record(start.elapsed().as_secs_f64());
+    resp
 }
 
 async fn openapi_json() -> Json<utoipa::openapi::OpenApi> {

@@ -283,7 +283,13 @@ impl DistillLlm for GatewayLlm {
         Box<dyn std::future::Future<Output = Result<serde_json::Value, JobError>> + Send + 'a>,
     > {
         Box::pin(async move {
+            let started = std::time::Instant::now();
             let (content, _used) = self.chat_once(purpose, system, user, job_id, false).await?;
+            // R10：LLM 调用指标（by purpose）
+            metrics::counter!("llm_calls_total", "purpose" => purpose.as_str().to_string())
+                .increment(1);
+            metrics::histogram!("llm_duration_seconds", "purpose" => purpose.as_str().to_string())
+                .record(started.elapsed().as_secs_f64());
             // LLM 输出非法 JSON 是暂时性错误（输出有随机性，任务级重试常能自愈）——
             // 分类为 Retryable 让队列的 max_attempts 生效；Permanent 会放弃剩余重试直接 failed。
             parse_json_lenient(&content).map_err(|e| {
@@ -316,7 +322,7 @@ impl DistillLlm for GatewayLlm {
             self.registry
                 .record_usage(&engram_llm::types::UsageMeta {
                     provider: provider.name().to_string(),
-                    model,
+                    model: model.clone(),
                     purpose: Purpose::Embed.as_str().to_string(),
                     input_tokens: resp.input_tokens,
                     output_tokens: 0,
@@ -324,6 +330,8 @@ impl DistillLlm for GatewayLlm {
                     job_id: Some(job_id),
                 })
                 .await;
+            metrics::counter!("llm_calls_total", "purpose" => "embed").increment(1);
+            let _ = model;
             Ok(resp.embeddings)
         })
     }

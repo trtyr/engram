@@ -33,6 +33,8 @@ engram-wiki-engine = { path = "crates/wiki-engine" }
 engram-cg-bridge = { path = "crates/cg-bridge" }
 engram-search = { path = "crates/search" }
 engram-parsing = { path = "crates/parsing" }
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.17", default-features = false }
 
 # 异步运行时与 HTTP
 tokio = { version = "1", features = ["full"] }

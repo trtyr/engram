@@ -23,6 +23,9 @@ engram-search.workspace = true
 engram-cg-bridge.workspace = true
 
 axum.workspace = true
+metrics.workspace = true
+sqlx.workspace = true
+metrics-exporter-prometheus.workspace = true
 tokio.workspace = true
 tower-http = { workspace = true, features = ["fs"] }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }

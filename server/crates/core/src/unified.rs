@@ -80,6 +80,11 @@ impl UnifiedSearch {
         if query.trim().is_empty() {
             return Err(UnifiedError::BadRequest("query 不能为空".into()));
         }
+        metrics::counter!(
+            "unified_search_total",
+            "rerank" => rerank.to_string()
+        )
+        .increment(1);
         let per_domain = limit.clamp(5, 50);
 
         let mem = MemoryService::new(self.pool.clone(), self.registry.clone());

@@ -24,3 +24,4 @@ utoipa.workspace = true
 anyhow.workspace = true
 engram-storage = { path = "../storage" }
 axum.workspace = true
+metrics.workspace = true
