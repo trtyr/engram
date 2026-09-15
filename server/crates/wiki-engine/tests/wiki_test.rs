@@ -1516,7 +1516,7 @@ async fn cross_library_wikilinks_lifecycle() {
     .await
     .unwrap();
     assert_eq!(cross.len(), 1, "只有存在的跨库目标建链: {cross:?}");
-    let b_id = engram_wiki_engine::libraries::resolve(&pool, Some("cross-lib-b".into()))
+    let b_id = engram_wiki_engine::libraries::resolve(&pool, Some("cross-lib-b"))
         .await
         .unwrap();
     assert_eq!(cross[0].0, b_id.to_string());
