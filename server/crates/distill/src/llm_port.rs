@@ -331,6 +331,8 @@ impl DistillLlm for GatewayLlm {
                 })
                 .await;
             metrics::counter!("llm_calls_total", "purpose" => "embed").increment(1);
+            metrics::histogram!("llm_duration_seconds", "purpose" => "embed")
+                .record(resp.latency_ms as f64 / 1000.0);
             let _ = model;
             Ok(resp.embeddings)
         })
