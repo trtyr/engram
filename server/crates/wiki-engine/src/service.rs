@@ -381,7 +381,13 @@ impl WikiService {
             .bind(lib)
             .execute(&self.pool)
             .await?;
+        let mut cross_targets: Vec<(String, String)> = Vec::new();
         for target in crate::markup::extract_wikilinks(content) {
+            // R 多库补全：跨库引用 [[lib/slug]] 走 wiki_cross_links（校验目标存在后建链）
+            if let Some((to_lib, to_slug)) = crate::markup::split_cross_lib(&target) {
+                cross_targets.push((to_lib, to_slug));
+                continue;
+            }
             sqlx::query(
                 "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
                  VALUES ($3, $1, $2, 3.0) \
@@ -394,6 +400,7 @@ impl WikiService {
             .await
             .ok();
         }
+        crate::cross_links::sync_page(&self.pool, lib, slug, &cross_targets).await?;
         Ok(row)
     }
 
@@ -861,6 +868,9 @@ impl WikiService {
         let mut n = 0;
         for (slug, content) in &pages {
             for target in crate::markup::extract_wikilinks(content) {
+                if crate::markup::split_cross_lib(&target).is_some() {
+                    continue; // 跨库引用不进库内 wiki_links（graph/孤页检测是库内概念）
+                }
                 sqlx::query(
                     "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
                      VALUES ($3, $1, $2, 3.0) \
@@ -910,6 +920,8 @@ impl WikiService {
         .bind(lib)
         .execute(&self.pool)
         .await?;
+        // R 多库补全：跨库引用级联清理（from 侧与 to 侧）
+        crate::cross_links::delete_page_cleanup(&self.pool, lib, &slug).await?;
         // 腐烂治理（工单「人审队列腐烂」）：指向该页的 open 提案自动 dismissed（可审计不删数据）
         let _ = crate::review::cascade_dismiss(&self.pool, lib, Some(&slug), None).await;
         Ok(true)
@@ -1047,6 +1059,9 @@ impl WikiService {
                 .fetch_one(&self.pool)
                 .await?;
                 for target in crate::markup::extract_wikilinks(&content) {
+                    if crate::markup::split_cross_lib(&target).is_some() {
+                        continue; // 跨库引用不进库内 wiki_links
+                    }
                     sqlx::query(
                         "INSERT INTO wiki_links (library_id, from_slug, to_slug, weight) \
                          VALUES ($3, $1, $2, 3.0) \

@@ -1476,3 +1476,97 @@ async fn review_stale_annotation_and_cascade() {
         cp.stale
     );
 }
+
+/// R 多库补全：[[lib/slug]] 跨库引用——建链 / lint 不误报（存在的跨库目标）/
+/// 跨库 dead_link / 删目标页级联清理。库内引用语义不变。
+#[tokio::test]
+async fn cross_library_wikilinks_lifecycle() {
+    let (pool, svc, _runner, _t, _main_lib) = setup(vec![]).await;
+
+    // 两个库：A（写引用）与 B（被引用）
+    let lib_a = engram_wiki_engine::libraries::create(&pool, "cross-lib-a", "甲库")
+        .await
+        .unwrap()
+        .id;
+    let lib_b = engram_wiki_engine::libraries::create(&pool, "cross-lib-b", "乙库")
+        .await
+        .unwrap()
+        .id;
+
+    // B 库一个存在页 + A 库引用页（引用：B 存在页 + B 缺失页 + 库内页）
+    svc.put_page(lib_b, "target-page", "目标页", "目标页正文", None, None)
+        .await
+        .unwrap();
+    svc.put_page(
+        lib_a,
+        "referrer",
+        "引用页",
+        "正文引 [[cross-lib-b/target-page]] 与 [[cross-lib-b/ghost]] 与 [[intra]]",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // ① 跨库建链（wiki_cross_links），库内不混入斜杠目标
+    let cross: Vec<(String, String)> = sqlx::query_as(
+        "SELECT to_library_id::text, to_slug FROM wiki_cross_links WHERE from_slug = 'referrer'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(cross.len(), 1, "只有存在的跨库目标建链: {cross:?}");
+    let b_id = engram_wiki_engine::libraries::resolve(&pool, Some("cross-lib-b".into()))
+        .await
+        .unwrap();
+    assert_eq!(cross[0].0, b_id.to_string());
+    assert_eq!(cross[0].1, "target-page");
+    let intra: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_links WHERE from_slug='referrer' AND to_slug='intra'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(intra, 1, "库内引用照常进 wiki_links");
+    let polluted: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wiki_links WHERE to_slug LIKE '%/%'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(polluted, 0, "库内 links 表不应被斜杠目标污染");
+
+    // ② lint：存在的跨库目标不误报 dead_link；缺失的跨库目标报 dead_link
+    let report = engram_wiki_engine::lint::lint(&pool, lib_a).await.unwrap();
+    let dead: Vec<&String> = report
+        .issues
+        .iter()
+        .filter(|i| i.rule == "dead_link")
+        .map(|i| &i.detail)
+        .collect();
+    assert!(
+        dead.iter().any(|d| d.contains("ghost")),
+        "缺失跨库目标应报: {dead:?}"
+    );
+    assert!(
+        !dead.iter().any(|d| d.contains("target-page")),
+        "存在的跨库目标不误报: {dead:?}"
+    );
+
+    // ③ 反向可见：B 目标页能查到来自 A 的跨库引用
+    let back = engram_wiki_engine::cross_links::backlinks(&pool, lib_b, "target-page")
+        .await
+        .unwrap();
+    assert_eq!(
+        back,
+        vec![("cross-lib-a".to_string(), "referrer".to_string())]
+    );
+
+    // ④ 删 B 目标页 → 跨库引用级联清理
+    svc.delete_page(lib_b, "target-page").await.unwrap();
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wiki_cross_links WHERE to_slug = 'target-page'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 0, "删目标页应级联清理跨库引用");
+}

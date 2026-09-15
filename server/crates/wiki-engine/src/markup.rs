@@ -11,9 +11,11 @@ pub fn extract_wikilinks(content: &str) -> Vec<String> {
             && let Some(end_rel) = content[i + 2..].find("]]")
         {
             let inner = &content[i + 2..i + 2 + end_rel];
-            // [[slug|显示名]] → 取 slug
+            // [[slug|显示名]] → 取 slug；[[lib/slug]] 跨库形式（R 多库补全）也提取（带斜杠原样返回，调用方 split_cross_lib 区分）
             let slug = inner.split('|').next().unwrap_or("").trim();
-            if is_valid_slug(slug) && !out.iter().any(|s| s == slug) {
+            if (is_valid_slug(slug) || split_cross_lib(slug).is_some())
+                && !out.iter().any(|s| s == slug)
+            {
                 out.push(slug.to_string());
             }
             i += 2 + end_rel + 2;
@@ -66,6 +68,13 @@ pub fn parse_frontmatter_sources(fm_text: &str) -> Vec<String> {
 
 /// W8：从正文中移除指向 `slug` 的全部 wikilink（**含 `[[slug|别名]]` 形式**）。
 /// cascade 清 dead link 用——精确串替换只吃 `[[slug]]`，alias 形式会留 `|别名]]` 裸碎片。
+/// 跨库引用目标：`lib/slug`（恰好一个斜杠，两段各自合法 slug）→ Some((lib, slug))。
+/// 库 slug 与页面 slug 均不含斜杠，故无歧义；库内引用（无斜杠）返回 None。
+pub fn split_cross_lib(wikilink: &str) -> Option<(String, String)> {
+    let (lib, slug) = wikilink.split_once('/')?;
+    (is_valid_slug(lib) && is_valid_slug(slug)).then(|| (lib.to_string(), slug.to_string()))
+}
+
 pub fn remove_wikilinks(content: &str, slug: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let mut i = 0;

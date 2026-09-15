@@ -50,9 +50,33 @@ pub async fn lint(pool: &PgPool, lib: Uuid) -> Result<LintReport, sqlx::Error> {
     .await?;
     let inlink_map: std::collections::HashMap<String, i64> = inlinks.into_iter().collect();
 
+    // R 多库补全：先批量收集跨库引用目标（lib/slug），一次查存在性——存在则跳过死链判定
+    let mut cross_keys: Vec<(String, String)> = Vec::new();
+    for (_, _, _, content, _) in &pages {
+        for target in extract_wikilinks(content) {
+            if let Some(pair) = crate::markup::split_cross_lib(&target) {
+                cross_keys.push(pair);
+            }
+        }
+    }
+    let cross_existing = crate::cross_links::filter_existing(pool, &cross_keys).await?;
+
     for (_, slug, _page_type, content, fm) in &pages {
         // 1. 死链（W-1：精确未中→小写重查，仅大小写差异报 case_mismatch 而非 dead_link）
         for target in extract_wikilinks(content) {
+            // 跨库引用：目标（库+页）存在则合法跳过；不存在报跨库 dead_link
+            if let Some((to_lib, to_slug)) = crate::markup::split_cross_lib(&target) {
+                if !cross_existing.contains_key(&(to_lib.clone(), to_slug.clone())) {
+                    issues.push(LintIssue {
+                        rule: "dead_link".into(),
+                        slug: slug.clone(),
+                        detail: format!(
+                            "[[{target}]] 指向不存在的跨库页面（库「{to_lib}」无页「{to_slug}」）"
+                        ),
+                    });
+                }
+                continue;
+            }
             if !slugs.contains(&target) {
                 if let Some(real) = lower_slugs.get(&target.to_lowercase()) {
                     issues.push(LintIssue {

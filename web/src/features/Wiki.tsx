@@ -155,6 +155,30 @@ export default function Wiki() {
   }, [params, lib])
 
   const onSelect = async (slug: string) => {
+    // R 多库补全：[[lib/slug]] 跨库引用——切库后打开目标页
+    if (slug.includes('/')) {
+      const [targetLib, targetSlug] = slug.split('/')
+      setLib(targetLib)
+      setOpen(null)
+      requestedRef.current = targetSlug
+      setOpening(true)
+      setOpenErr('')
+      try {
+        const page = await api.get<WikiPage>(
+          withLib(`/wiki/pages/${encodeURIComponent(targetSlug)}`, targetLib),
+        )
+        setOpen(page)
+        const next = new URLSearchParams(params)
+        next.set('lib', targetLib)
+        next.set('page', targetSlug)
+        setParams(next)
+      } catch {
+        setOpenErr(`跨库页面「${slug}」打开失败：目标库或页面可能不存在`)
+      } finally {
+        setOpening(false)
+      }
+      return
+    }
     setOpening(true)
     setOpenErr('')
     requestedRef.current = slug
