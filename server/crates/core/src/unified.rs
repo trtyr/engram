@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::memory::MemoryService;
 use crate::wiki::WikiService;
 use crate::wiki_docs::WikiDocumentService;
+use engram_llm::types::Purpose;
 
 /// 统一命中（跨域检索的最小公分母）。
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
@@ -48,6 +49,8 @@ pub struct UnifiedSearch {
     pool: PgPool,
     registry: ProviderRegistry,
     data_dir: std::path::PathBuf,
+    /// R6 rerank 用 LLM 门面（可选精排）
+    llm: engram_distill::llm_port::LlmRef,
 }
 
 impl UnifiedSearch {
@@ -55,16 +58,25 @@ impl UnifiedSearch {
         pool: PgPool,
         registry: ProviderRegistry,
         data_dir: impl Into<std::path::PathBuf>,
+        llm: engram_distill::llm_port::LlmRef,
     ) -> Self {
         Self {
             pool,
             registry,
             data_dir: data_dir.into(),
+            llm,
         }
     }
 
     /// 一次查询融合三域，返回按 RRF rank 分数降序的统一命中。
-    pub async fn search(&self, query: &str, limit: i64) -> Result<Vec<UnifiedHit>, UnifiedError> {
+    /// `rerank=true`（R6）：RRF 排序后对 top 候选做一次 LLM 精排——LLM 失败/解析败
+    /// 降级原序（warn 可见），检索永不因 rerank 失败而失败。默认 false = 零额外 LLM 调用。
+    pub async fn search(
+        &self,
+        query: &str,
+        limit: i64,
+        rerank: bool,
+    ) -> Result<Vec<UnifiedHit>, UnifiedError> {
         if query.trim().is_empty() {
             return Err(UnifiedError::BadRequest("query 不能为空".into()));
         }
@@ -221,12 +233,87 @@ impl UnifiedSearch {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         merged.truncate(limit.max(0) as usize);
+
+        if rerank && merged.len() > 1 {
+            let top = merged.len().min(10);
+            match rerank_hits(&self.llm, query, &merged[..top]).await {
+                Ok(order) if order.len() == top && order.iter().all(|i| *i < top) => {
+                    let rest: Vec<UnifiedHit> = merged.split_off(top);
+                    let mut top_vec: Vec<Option<UnifiedHit>> = merged.drain(..).map(Some).collect();
+                    let mut reordered: Vec<UnifiedHit> = Vec::with_capacity(top);
+                    for i in order {
+                        if let Some(h) = top_vec[i].take() {
+                            reordered.push(h);
+                        }
+                    }
+                    reordered.extend(top_vec.into_iter().flatten());
+                    reordered.extend(rest);
+                    merged = reordered;
+                }
+                Ok(order) if order.len() == top => {
+                    tracing::warn!("统一检索 rerank：order 含越界索引，降级原序");
+                }
+                Ok(_) => tracing::warn!("统一检索 rerank：order 长度不符，降级原序"),
+                Err(e) => tracing::warn!(error = %e, "统一检索 rerank 失败，降级原序"),
+            }
+        }
+
         Ok(merged)
     }
 }
 
 /// 域内 rank 归一化：按 `domain:layer` 分组，组内按命中顺序赋 RRF 分数 `1/(60+rank)`。
 /// memory 的 l1/l2 各自独立 rank；wiki 各一组。
+/// R6：LLM 精排——top 候选（title+snippet）交模型输出目标顺序（原索引数组）。
+/// 任何失败返回 Err（调用方降级原序）；只做一次 chat 调用，失败不重试（检索是热路径）。
+async fn rerank_hits(
+    llm: &engram_distill::llm_port::LlmRef,
+    query: &str,
+    hits: &[UnifiedHit],
+) -> Result<Vec<usize>, String> {
+    let listing: String = hits
+        .iter()
+        .enumerate()
+        .map(|(i, h)| {
+            format!(
+                "[{}] {}
+{}",
+                i,
+                h.title.as_deref().unwrap_or("(无标题)"),
+                h.snippet.chars().take(120).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(
+            "
+---
+",
+        );
+    let system = "你是检索重排序员。给定查询与候选列表（每项带 [索引]），按与查询的相关性从高到低输出索引。只输出 JSON：{\"order\": [索引数组]}，必须包含全部索引且不重复。";
+    let user = format!(
+        "查询：{query}
+
+候选：
+{listing}"
+    );
+
+    // rerank 是热路径旁路——不带 job 上下文（job_id 用 NOW_v7 占位，事件流可按 purpose 过滤）
+    let v = llm
+        .chat_json(Purpose::SearchRerank, system, user.as_str(), Uuid::now_v7())
+        .await
+        .map_err(|e| e.to_string())?;
+    let order: Vec<usize> = v
+        .get("order")
+        .and_then(|o| o.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_u64().map(|n| n as usize))
+                .collect()
+        })
+        .ok_or_else(|| "order 字段缺失".to_string())?;
+    Ok(order)
+}
+
 pub(crate) fn assign_rrf_scores(hits: &mut [UnifiedHit]) {
     use std::collections::HashMap;
     let mut rank: HashMap<String, usize> = HashMap::new();

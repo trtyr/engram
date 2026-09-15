@@ -25,6 +25,8 @@ pub enum Purpose {
     WikiGeneration,
     /// Wiki 语义 lint（中档——页面间矛盾/过时/缺页检查）
     WikiLint,
+    /// 检索重排序（中档——R6：top 候选精排）
+    SearchRerank,
 }
 
 impl Purpose {
@@ -39,6 +41,7 @@ impl Purpose {
             Purpose::Persona => "persona",
             Purpose::WikiGeneration => "wiki_generation",
             Purpose::WikiLint => "wiki_lint",
+            Purpose::SearchRerank => "search_rerank",
         }
     }
 }

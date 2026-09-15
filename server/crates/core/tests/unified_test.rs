@@ -6,7 +6,6 @@
 mod support;
 
 use engram_core::unified::UnifiedSearch;
-use engram_llm::{KeyCipher, ProviderRegistry};
 use engram_search::tokenize::tsv_text;
 use uuid::Uuid;
 
@@ -15,12 +14,12 @@ async fn setup() -> (sqlx::PgPool, UnifiedSearch, support::TestPg) {
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
-    let registry = ProviderRegistry::new(
-        pool.clone(),
-        KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
-    );
     let dir = tempfile::tempdir().unwrap();
-    let svc = UnifiedSearch::new(pool.clone(), registry, dir.keep());
+    let cipher = engram_llm::KeyCipher::from_hex_master(&"00".repeat(32)).unwrap();
+    let registry = engram_llm::ProviderRegistry::new(pool.clone(), cipher);
+    let llm: std::sync::Arc<dyn engram_distill::llm_port::DistillLlm> =
+        std::sync::Arc::new(engram_distill::llm_port::MockLlm::with_chats(vec![]));
+    let svc = UnifiedSearch::new(pool.clone(), registry, dir.keep(), llm);
     (pool, svc, container)
 }
 
@@ -79,7 +78,7 @@ async fn unified_search_fuses_three_domains() {
         .unwrap();
 
     // 统一检索
-    let hits = svc.search("Rust", 20).await.expect("统一检索");
+    let hits = svc.search("Rust", 20, false).await.expect("统一检索");
 
     assert!(!hits.is_empty(), "统一检索应返回命中");
 

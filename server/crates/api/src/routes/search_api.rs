@@ -29,7 +29,12 @@ fn ue(e: UnifiedError) -> ApiError {
 }
 
 fn svc(state: &AppState) -> UnifiedSearch {
-    UnifiedSearch::new(state.pool.clone(), state.registry(), state.data_dir.clone())
+    UnifiedSearch::new(
+        state.pool.clone(),
+        state.registry(),
+        state.data_dir.clone(),
+        state.llm(),
+    )
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -37,6 +42,9 @@ pub struct SearchRequest {
     pub query: String,
     #[serde(default = "default_limit")]
     pub limit: i64,
+    /// R6：可选 LLM 精排（默认关——开启时 top 候选多一次 LLM 调用，失败降级原序）
+    #[serde(default)]
+    pub rerank: bool,
 }
 
 fn default_limit() -> i64 {
@@ -60,7 +68,7 @@ pub async fn search(
 ) -> Result<Json<SearchResponse>, ApiError> {
     require_search(&principal)?;
     let hits = svc(&state)
-        .search(&req.query, req.limit)
+        .search(&req.query, req.limit, req.rerank)
         .await
         .map_err(ue)?;
     Ok(Json(SearchResponse {
