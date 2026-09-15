@@ -107,9 +107,9 @@ pub struct WikiSearchParams {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiListPagesParams {
-    /// 页型过滤：entity/concept/source/synthesis/comparison/queries/overview/index 等
+    /// 页型过滤：entity/concept/source/synthesis/comparison/queries/overview/index/analysis 等
     #[schemars(
-        description = "可选：按页型过滤。entity=实体, concept=概念, source=来源, synthesis=综合, comparison=对比, queries=查询存档, overview=总览, index=索引。"
+        description = "可选：按页型过滤。entity=实体, concept=概念, source=来源, synthesis=综合, comparison=对比, queries=查询存档, overview=总览, index=索引, analysis=分析归档。"
     )]
     pub page_type: Option<String>,
     /// keyset 分页游标（D28）：上一页最后一条的 {updated_at ISO8601}|{id}
@@ -147,8 +147,8 @@ pub struct WikiWritePageParams {
     /// 页面标题
     #[schemars(description = "页面标题。")]
     pub title: String,
-    /// Markdown 正文（可用 [[wikilink]] 双链其他页面）
-    #[schemars(description = "Markdown 正文。可用 [[slug]] 双链其他页面，互链会进链接图。")]
+    /// Markdown 正文（[[wikilink]] 库内双链；[[lib/slug]] 跨库引用）
+    #[schemars(description = "Markdown 正文。[[slug]] 双链本库页面；[[lib/slug]] 跨库引用其他库的页面（目标存在自动建跨库链，缺失 lint 会报）。互链都进链接图。")]
     pub content: String,
     /// 目录树文件夹（Obsidian 式 / 分隔多级路径；缺省用页型默认目录）
     #[schemars(description = "可选：目录树文件夹（/ 分隔多级路径）。缺省按页型默认目录。")]

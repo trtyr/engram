@@ -3270,7 +3270,7 @@ impl EngramMcpServer {
         )
     }
 
-    /// 列出全部 wiki 库（多库；页面/原料计数一并返回）。建库/删库走 Web。
+    /// 列出全部 wiki 库（多库；页面/原料计数一并返回）。建库/删库走 Web（Wiki 页头「＋ 新建库…」或运维面板）。
     async fn wiki_libraries(
         &self,
         ctx: RequestContext<RoleServer>,
