@@ -7,7 +7,6 @@ const mocked = vi.hoisted(() => ({ post: vi.fn() }))
 vi.mock('@/lib/api', () => ({
   api: { post: mocked.post, get: vi.fn(), put: vi.fn(), del: vi.fn() },
 }))
-import { api } from '@/lib/api'
 
 const renderDlg = (onCreated = vi.fn()) => {
   const onClose = vi.fn()
