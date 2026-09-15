@@ -28,6 +28,10 @@ pub struct ChunkHit {
     pub document_title: String,
     pub seq: i32,
     pub snippet: String,
+    /// R9：前一相邻块片段（≤200 字；文档首块为空串）
+    pub context_prev: String,
+    /// R9：后一相邻块片段（≤200 字；文档末块为空串）
+    pub context_next: String,
     pub score: f64,
     pub embed_failed: bool,
 }
@@ -169,16 +173,31 @@ impl WikiDocumentService {
         let rows = repo::search_chunks(&self.pool, lib, &tsv_query_smart(query, 3), qv, limit)
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
+        // R9：批量取相邻块片段（seq±1），一条 SQL；文档首尾块自然缺席 = 空串
+        let mut keys = Vec::with_capacity(rows.len() * 2);
+        for r in &rows {
+            keys.push((r.document_id, r.seq - 1));
+            keys.push((r.document_id, r.seq + 1));
+        }
+        let neighbors = repo::neighbor_snippets(&self.pool, &keys)
+            .await
+            .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
         Ok(rows
             .into_iter()
-            .map(|r| ChunkHit {
-                chunk_id: r.id,
-                document_id: r.document_id,
-                document_title: r.title,
-                seq: r.seq,
-                snippet: r.content.chars().take(200).collect(),
-                score: r.score,
-                embed_failed: r.embed_failed,
+            .map(|r| {
+                let prev = neighbors.get(&(r.document_id, r.seq - 1)).cloned();
+                let next = neighbors.get(&(r.document_id, r.seq + 1)).cloned();
+                ChunkHit {
+                    chunk_id: r.id,
+                    document_id: r.document_id,
+                    document_title: r.title,
+                    seq: r.seq,
+                    snippet: r.content.chars().take(200).collect(),
+                    context_prev: prev.unwrap_or_default(),
+                    context_next: next.unwrap_or_default(),
+                    score: r.score,
+                    embed_failed: r.embed_failed,
+                }
             })
             .collect())
     }

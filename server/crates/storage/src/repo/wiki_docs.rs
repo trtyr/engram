@@ -429,6 +429,34 @@ pub async fn search_chunks(
         .collect())
 }
 
+/// R9：命中间块的相邻块内容（同文档 seq±1，各截 200 字）。
+/// 返回 (document_id, seq) → 片段；查不到的键（文档首尾块）自然缺席。
+pub async fn neighbor_snippets(
+    pool: &PgPool,
+    keys: &[(Uuid, i32)],
+) -> StoreResult<std::collections::HashMap<(Uuid, i32), String>> {
+    if keys.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new(
+        "SELECT document_id, seq, content FROM wiki_chunks WHERE (document_id, seq) IN (",
+    );
+    qb.push_values(keys, |mut b, (doc, seq)| {
+        b.push_bind(doc).push_bind(seq);
+    });
+    qb.push(")");
+    let rows = qb.build().fetch_all(pool).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            (
+                (r.get::<Uuid, _>("document_id"), r.get::<i32, _>("seq")),
+                r.get::<String, _>("content").chars().take(200).collect(),
+            )
+        })
+        .collect())
+}
+
 /// 文档所属库（摄取 job 链回查 library 用；文档不存在返回 None）。
 pub async fn document_library(pool: &PgPool, doc_id: Uuid) -> StoreResult<Option<Uuid>> {
     sqlx::query_scalar("SELECT library_id FROM wiki_documents WHERE id = $1")

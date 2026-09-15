@@ -678,3 +678,86 @@ async fn embed_short_response_marks_batch_failed_not_silent_null() {
     handle.shutdown();
     handle.join().await;
 }
+
+/// R9：documents_search 命中带相邻块片段——中间块前后都有、首块无 prev、末块无 next。
+#[tokio::test]
+async fn search_hits_carry_neighbor_context() {
+    let (pool, svc, _c) = setup().await;
+    let lib = main_lib(&pool).await;
+
+    // 3 块文档：seq 0/1/2，各含独特关键词
+    let doc_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO wiki_documents (id, library_id, title, source_uri, sha256, status) \
+         VALUES ($1, $2, '邻居测试', 'neighbor.md', $3, 'ready')",
+    )
+    .bind(doc_id)
+    .bind(lib)
+    .bind(format!("sha-nb-{}", uuid::Uuid::now_v7().simple()))
+    .execute(&pool)
+    .await
+    .unwrap();
+    // 空格分词形式（表内 tsv 为 simple 解析器——jieba 预分词的写入路径等价于逐词可命中）
+    let contents = [
+        "首段 介绍 向量 检索 背景 概念",
+        "中段 详述 记忆 平台 架构 设计",
+        "末段 总结 图谱 未来 演进",
+    ];
+    for (seq, content) in contents.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO wiki_chunks (id, library_id, document_id, seq, content, embed_failed, embedding, tsv) \
+             VALUES ($1, $2, $3, $4, $5, false, NULL, to_tsvector('simple', $5))",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(lib)
+        .bind(doc_id)
+        .bind(seq as i32)
+        .bind(content)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // ① 中间块命中（seq=1）：前后都有
+    let hits = svc.search(lib, "记忆 平台", 5).await.unwrap();
+    let mid = hits.iter().find(|h| h.seq == 1).expect("中段应命中");
+    assert!(
+        mid.context_prev.contains("背景"),
+        "prev 应为首段: {}",
+        mid.context_prev
+    );
+    assert!(
+        mid.context_next.contains("演进"),
+        "next 应为末段: {}",
+        mid.context_next
+    );
+    assert!(mid.context_prev.chars().count() <= 200);
+
+    // ② 首块命中（seq=0）：无 prev（空串）、有 next
+    let hits = svc.search(lib, "背景概念", 5).await.unwrap();
+    let first = hits.iter().find(|h| h.seq == 0).expect("首段应命中");
+    assert!(
+        first.context_prev.is_empty(),
+        "首块无 prev: {}",
+        first.context_prev
+    );
+    assert!(
+        first.context_next.contains("记忆"),
+        "next 应为中段: {}",
+        first.context_next
+    );
+
+    // ③ 末块命中（seq=2）：有 prev、无 next
+    let hits = svc.search(lib, "未来演进", 5).await.unwrap();
+    let last = hits.iter().find(|h| h.seq == 2).expect("末段应命中");
+    assert!(
+        last.context_prev.contains("记忆"),
+        "prev 应为中段: {}",
+        last.context_prev
+    );
+    assert!(
+        last.context_next.is_empty(),
+        "末块无 next: {}",
+        last.context_next
+    );
+}
