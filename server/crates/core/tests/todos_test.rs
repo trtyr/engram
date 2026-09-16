@@ -785,3 +785,95 @@ async fn list_supports_ticket_status_and_severity_filters() {
         .expect_err("非法 severity 应报错");
     assert!(err.to_string().contains("severity"), "{err}");
 }
+
+// EN-58 口径固化（2026-09-16）：list 排序 = open 优先（status='open' DESC）+ updated_at DESC
+// + id 决稳。用乱序 created_at/updated_at 数据锁死该口径——防止将来有人「顺手」改掉
+// ORDER BY 而无测试报警。EN-58 的「乱序」感知实为 open 优先分组 + 前端不分段所致，
+// 后端口径无病；本测试即无病证明。
+#[tokio::test]
+async fn list_order_is_open_first_then_updated_at_desc() {
+    let (pool, svc, _pg) = setup().await;
+
+    // 造 5 条工单：A(open) B(confirmed) C(open) D(in_progress) E(resolved)
+    let mut ids = Vec::new();
+    for title in ["A-open", "B-confirmed", "C-open", "D-inprog", "E-resolved"] {
+        let t = svc
+            .create(title, "", "ticket", "", Some("P3"), "", "", "", &[], None, None)
+            .await
+            .unwrap();
+        ids.push((title, t.id));
+    }
+    // 状态流转（E 到 resolved 必须带 resolution——CHECK 要求）
+    svc.update(
+        ids[1].1, None, None, None, None, Some("confirmed"), None, None, None, None, None, None, None, None,
+    )
+    .await
+    .unwrap();
+    svc.update(
+        ids[3].1, None, None, None, None, Some("in_progress"), None, None, None, None, None, None, None, None,
+    )
+    .await
+    .unwrap();
+    svc.update(
+        ids[4].1, None, None, None, None, Some("resolved"), None, None, None, None, Some("修好了"), None, None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // 乱序时间戳：created_at 与 updated_at 均手工打散（SQL 直改）
+    let stamps: [(usize, i64, i64); 5] = [
+        (0, 6, 6),   // A: created -6d  updated -6d
+        (1, 9, 7),   // B: created -9d  updated -7d
+        (2, 14, 14), // C: created -14d updated -14d
+        (3, 11, 3),  // D: created -11d updated -3d
+        (4, 26, 2),  // E: created -26d updated -2d
+    ];
+    for (i, c_days, u_days) in stamps {
+        sqlx::query(
+            "UPDATE todos SET created_at = now() - ($1 || ' days')::interval, \
+             updated_at = now() - ($2 || ' days')::interval WHERE id = $3",
+        )
+        .bind(c_days.to_string())
+        .bind(u_days.to_string())
+        .bind(ids[i].1)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // 断言口径：open 段（A -6d → C -14d）在前，非 open 段（E -2d → D -3d → B -7d）在后
+    let rows = svc
+        .list(None, None, None, None, None, None, None, 200)
+        .await
+        .unwrap();
+    let got: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
+    assert_eq!(
+        got,
+        vec!["A-open", "C-open", "E-resolved", "D-inprog", "B-confirmed"],
+        "排序口径应为 open 优先 + 段内 updated_at DESC: {got:?}"
+    );
+
+    // D29 cursor 翻页：limit=2 翻完全部 5 条不丢不重（三元组行比较在乱序数据下不丢行）
+    let mut seen: Vec<uuid::Uuid> = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = svc
+            .list(None, None, None, None, None, None, cursor.as_deref(), 2)
+            .await
+            .unwrap();
+        if page.is_empty() {
+            break;
+        }
+        seen.extend(page.iter().map(|r| r.id));
+        let last = page.last().unwrap();
+        let flag = if last.status == "open" { 1 } else { 0 };
+        cursor = Some(format!("{}|{}|{}", flag, last.updated_at.to_rfc3339(), last.id));
+        if page.len() < 2 {
+            break;
+        }
+    }
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 5, "cursor 翻页应覆盖全部 5 条不丢不重: {seen:?}");
+}

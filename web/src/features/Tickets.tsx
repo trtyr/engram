@@ -198,16 +198,39 @@ export default function Tickets() {
         <Empty text="暂无工单——让 AI 通过 todo_add（kind=ticket）帮你记，填上症状更好用" />
       ) : (
         <div className={cn('grid grid-cols-1 gap-4', selected && 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]')}>
-          <div className="min-w-0 space-y-1.5">
-            {rows.map((t) => (
-              <TicketRow
-                key={t.id}
-                t={t}
-                busy={busy}
-                active={selected?.id === t.id}
-                onSelect={() => setSelected(t)}
-              />
-            ))}
+          <div className="min-w-0 space-y-4">
+            {/* EN-58：分段展示让排序可预期——后端口径是 open 优先 + updated_at DESC，
+                混排时用户看到「忽上忽下」。分两段各带计数，段内保持后端顺序不变。 */}
+            {(() => {
+              const openRows = rows.filter((t) => t.status === 'open')
+              const restRows = rows.filter((t) => t.status !== 'open')
+              const seg = (label: string, list: typeof rows) =>
+                list.length === 0 ? null : (
+                  <section aria-label={label}>
+                    <h3 className="mb-1.5 flex items-baseline gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {label}
+                      <span className="font-mono font-normal">{list.length}</span>
+                    </h3>
+                    <div className="space-y-1.5">
+                      {list.map((t) => (
+                        <TicketRow
+                          key={t.id}
+                          t={t}
+                          busy={busy}
+                          active={selected?.id === t.id}
+                          onSelect={() => setSelected(t)}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )
+              return (
+                <>
+                  {seg('开放中', openRows)}
+                  {seg('推进中 / 已收敛', restRows)}
+                </>
+              )
+            })()}
           </div>
           {selected && (
             <TicketDetail
