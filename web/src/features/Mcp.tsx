@@ -211,6 +211,18 @@ function ToolDetail({
           </ul>
         </div>
       )}
+      {t.actions.length === 0 && t.name === 'search_all' && (
+        /* search_all 不是域：单个跨域工具，无 action 目录——说明卡替代操作区，
+           避免点开一片空白被误读成「空的/坏了」（工具级开关在本行上方） */
+        <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
+          <p className="font-medium text-foreground">跨域工具——无域内操作目录</p>
+          <p className="mt-1">
+            它不是域，是单个全局检索工具：一次查询并发 memory / wiki / skills / todos / projects
+            五域，各回 top-k 摘要——AI 不确定信息在哪个域时的兜底入口。命中后 AI 再用对应域工具精确取用。
+          </p>
+          <p className="mt-1">整个工具只有一个开关（上方工具行右侧）；没有 action 级开关，所以这里没有计数与操作列表。</p>
+        </div>
+      )}
       <div>
         <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">调用信封参数</h4>
         <div className="mt-1">
@@ -229,6 +241,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   projects: '项目',
   skills: '技能',
   todos: '待办',
+  search: '跨域检索', // 后端把 search_all 的 domain 字段写作 "search"（settings/mcp tools[].domain）
 }
 
 export default function Mcp() {
@@ -333,7 +346,11 @@ export default function Mcp() {
                   items={domains.map(([d, tools]) => ({
                     value: d,
                     label: DOMAIN_LABELS[d] ?? d,
-                    count: tools.reduce((n, t) => n + t.actions.length, 0),
+                    // search 不是域，是单个跨域工具（search_all）——无 action 目录，不显示计数（显示 0 会被误读成「空的/坏了」）
+                    count:
+                      d === 'search'
+                        ? undefined
+                        : tools.reduce((n, t) => n + t.actions.length, 0),
                   }))}
                   value={currentDomain}
                   onChange={setDomain}
