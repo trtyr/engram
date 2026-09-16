@@ -90,8 +90,9 @@ async fn index_and_query_real_repo() {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
         .unwrap()
-        .join(""); // 仓库根（server/ 的上上级）
+        .to_path_buf(); // 仓库根（crates/cg-bridge → crates → server → 根）
     let repo = repo.canonicalize().unwrap();
     let proj = bridge
         .register("self", repo.to_str().unwrap())
@@ -166,4 +167,85 @@ fn eprintln_no_cli() {
         "/tmp/cg-skip.txt",
         "CI 无 codegraph CLI，真索引测试跳过（本地已验证）",
     );
+}
+
+/// EN-48 验收链路：索引产物消失（目录被重新 clone / 清理）之后，
+/// list 不能再报「可用」，查询必须给「索引产物已丢失」这个具体病因，gc 能把幽灵落账。
+/// 不依赖真 codegraph CLI——直接造出「已 ready」的项目状态，专测产物丢失这一层。
+#[tokio::test]
+async fn lost_artifact_detected_by_list_query_and_gc() {
+    let (pool, bridge, _pg) = setup().await;
+
+    // 造一个「已索引好」的项目：目录在、产物在（判存在性用一个空文件就够）
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap(); // 界标：仓库根（产物查找不越界上溯）
+    let proj = bridge
+        .register("victim", dir.path().to_str().unwrap())
+        .await
+        .unwrap();
+    std::fs::create_dir_all(dir.path().join(".codegraph")).unwrap();
+    std::fs::write(dir.path().join(".codegraph").join("codegraph.db"), b"").unwrap();
+    sqlx::query("UPDATE cg_projects SET status = 'ready' WHERE id = $1")
+        .bind(proj.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // ① 产物在盘 → usable
+    assert!(bridge.get(proj.id).await.unwrap().usable, "产物在盘时应可用");
+
+    // ② 删掉 .codegraph（= 目录被重新 clone / 被清理）→ status 仍是 ready，usable 翻假
+    std::fs::remove_dir_all(dir.path().join(".codegraph")).unwrap();
+    let me = bridge.get(proj.id).await.unwrap();
+    assert_eq!(me.status, "ready", "status 是历史记录，本就不会自己变");
+    assert!(
+        !me.usable,
+        "产物已丢失——正是 EN-48 要抓的那一类（旧口径会照报可用）"
+    );
+    let listed = bridge.list().await.unwrap();
+    assert!(
+        !listed.iter().find(|p| p.id == proj.id).unwrap().usable,
+        "list 也必须反映当下可用性"
+    );
+
+    // ③ 查询给具体病因，不再是含糊的「索引库不存在」/「未就绪」/「CLI 不可用」
+    let e = bridge
+        .query(proj.id, QueryKind::Search, "x", None, false)
+        .await
+        .unwrap_err();
+    assert!(matches!(e, CgError::NotFound(_)), "{e:?}");
+    assert!(e.to_string().contains("索引产物已丢失"), "{e}");
+    let e = bridge.full_graph(proj.id).await.unwrap_err();
+    assert!(e.to_string().contains("索引产物已丢失"), "{e}");
+
+    // ④ gc 对账：幽灵落为 error（可逆——重新 index 即恢复）
+    let report = bridge.gc().await.unwrap();
+    assert_eq!(report["marked_invalid"].as_u64(), Some(1), "{report}");
+    let after = bridge.get(proj.id).await.unwrap();
+    assert_eq!(after.status, "error");
+    assert!(!after.usable);
+    assert!(
+        after.error.unwrap_or_default().contains("索引产物已丢失"),
+        "error 字段要写明病因"
+    );
+
+    // ⑤ 另一类幽灵：路径整个不存在（容器形态注册、宿主上不可见的条目）
+    let ghost_dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(ghost_dir.path().join(".git")).unwrap();
+    let ghost = bridge
+        .register("ghost", ghost_dir.path().to_str().unwrap())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE cg_projects SET status = 'ready' WHERE id = $1")
+        .bind(ghost.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    drop(ghost_dir); // 目录消失
+    let e = bridge
+        .query(ghost.id, QueryKind::Search, "x", None, false)
+        .await
+        .unwrap_err();
+    assert!(matches!(e, CgError::NotFound(_)), "{e:?}");
+    assert!(e.to_string().contains("项目路径不存在"), "{e}");
 }

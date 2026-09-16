@@ -163,6 +163,17 @@ pub async fn status(
     Ok(Json(bridge(&state).cli_status().await))
 }
 
+/// 失效条目对账（EN-48）：路径已不存在 / 索引产物已丢失的 ready 条目标为 error，
+/// 使列表不再把幽灵条目冒充可用资产。只改状态不动登记——重新 index 即可恢复。
+#[utoipa::path(post, path = "/codegraph/gc", responses((status = 200, body = Object)))]
+pub async fn gc(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_cg(&principal)?;
+    Ok(Json(bridge(&state).gc().await.map_err(ce)?))
+}
+
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct CgQueryRequest {
     /// explore | search | node | callers | callees | impact

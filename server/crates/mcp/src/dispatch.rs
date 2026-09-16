@@ -145,7 +145,8 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "delete", true, "删除待办（不可逆）" => crate::TodoIdParams
         ],
         "codegraph" => action_docs![
-            "list", false, "列出已注册代码库（注册状态/索引规模）" => crate::CgNoParams;
+            "list", false, "列出已注册代码库（注册状态/索引规模/当下可用性 usable）" => crate::CgNoParams;
+            "gc", false, "失效条目对账（路径已不存在/索引产物已丢失的条目标为 error；可重新 index 恢复）" => crate::CgNoParams;
             "register", false, "注册代码库（本地绝对路径按服务端文件系统校验，或 git URL）" => crate::CgRegisterParams;
             "query", false, "代码图谱查询（search/explore大纲/node/callers/callees/impact）" => crate::CgQueryParams;
             "index", false, "建索引/重建索引（异步 job）" => crate::CgNameParams;

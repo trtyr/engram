@@ -67,6 +67,7 @@ use utoipa::OpenApi;
         codegraph_api::get_project, codegraph_api::delete_project,
         codegraph_api::index_project, codegraph_api::sync_project,
         codegraph_api::query, codegraph_api::status, codegraph_api::graph,
+        codegraph_api::gc,
         migrate_api::export_bundle, migrate_api::import_bundle, migrate_api::pull,
         todos_api::list_todos, todos_api::create_todo, todos_api::get_todo,
         todos_api::update_todo, todos_api::delete_todo, todos_api::export_todos,
@@ -339,6 +340,7 @@ pub fn router(state: AppState) -> Router {
             post(codegraph_api::register_project).get(codegraph_api::list_projects),
         )
         .route("/codegraph/status", get(codegraph_api::status))
+        .route("/codegraph/gc", post(codegraph_api::gc))
         .route(
             "/codegraph/projects/{id}",
             get(codegraph_api::get_project).delete(codegraph_api::delete_project),

@@ -73,6 +73,11 @@ pub struct CgProjectDto {
     pub path: String,
     pub source_uri: String,
     pub status: String,
+    /// 当下可用性（**派生字段，不落库**，EN-48）：`status`/`stats` 只说明「最后一次索引成功过」，
+    /// 是历史陈述；本字段才是「现在能不能用」的当下断言——status=ready **且**索引产物确在盘。
+    /// 目录被重新 clone / 清理后 `.codegraph/` 不会自己回来，那时 status 仍是 ready，靠本字段区分。
+    #[sqlx(default)]
+    pub usable: bool,
     #[schema(value_type = Option<Object>)]
     pub stats: Option<serde_json::Value>,
     pub error: Option<String>,
@@ -110,6 +115,40 @@ pub(crate) struct CallersShape {
 pub(crate) struct CalleesShape {
     #[serde(default)]
     callees: Vec<CgSymbolRef>,
+}
+
+/// 索引产物路径（`<仓库根>/.codegraph/codegraph.db`）——**唯一出处**（EN-48）。
+///
+/// 注意 CLI 的「家」是**仓库根**而非 cwd：在仓库子目录里跑 `init`/`index`，它把
+/// `.gitignore` 留在 cwd、数据库写到 git 根去（2026-09-15 实测：在 `server/` 下索引，
+/// db 落在 `engram/.codegraph/codegraph.db`）。所以注册路径若是仓库内子目录，产物在父级。
+/// 查找顺序：注册路径自己 → 沿父目录向上，走到含 `.git` 的那一级为止（不越界到仓库外）。
+fn index_db_path(proj_path: &Path) -> PathBuf {
+    let direct = proj_path.join(".codegraph").join("codegraph.db");
+    if direct.is_file() {
+        return direct;
+    }
+    let mut cur = proj_path.to_path_buf();
+    loop {
+        if cur.join(".git").exists() {
+            break; // 已到仓库根：再往上不属于本项目
+        }
+        let Some(parent) = cur.parent() else {
+            break;
+        };
+        let candidate = parent.join(".codegraph").join("codegraph.db");
+        if candidate.is_file() {
+            return candidate;
+        }
+        cur = parent.to_path_buf();
+    }
+    direct // 都没找到 → 回「按注册路径推导」的位置，错误文案里好定位
+}
+
+/// 当下可用性（EN-48）：`status == "ready"` **且**索引产物确在盘。
+/// 纯只读判定（一次 stat），可在 list 里逐项现算——不落库、不做缓存。
+pub fn index_usable(proj: &CgProjectDto) -> bool {
+    proj.status == "ready" && index_db_path(Path::new(&proj.path)).is_file()
 }
 
 /// 桥接器。
@@ -315,19 +354,111 @@ impl CgBridge {
     }
 
     pub async fn list(&self) -> Result<Vec<CgProjectDto>, CgError> {
-        Ok(
-            sqlx::query_as::<_, CgProjectDto>("SELECT * FROM cg_projects ORDER BY created_at DESC")
-                .fetch_all(&self.pool)
-                .await?,
+        let mut rows = sqlx::query_as::<_, CgProjectDto>(
+            "SELECT * FROM cg_projects ORDER BY created_at DESC",
         )
+        .fetch_all(&self.pool)
+        .await?;
+        // usable 是派生字段（EN-48）：库里没有它的列，每次读取按磁盘事实现算。
+        for r in &mut rows {
+            r.usable = index_usable(r);
+        }
+        Ok(rows)
     }
 
     pub async fn get(&self, id: Uuid) -> Result<CgProjectDto, CgError> {
-        sqlx::query_as::<_, CgProjectDto>("SELECT * FROM cg_projects WHERE id = $1")
+        let mut row = sqlx::query_as::<_, CgProjectDto>("SELECT * FROM cg_projects WHERE id = $1")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?
-            .ok_or_else(|| CgError::NotFound(format!("项目 {id} 不存在")))
+            .ok_or_else(|| CgError::NotFound(format!("项目 {id} 不存在")))?;
+        row.usable = index_usable(&row);
+        Ok(row)
+    }
+
+    /// 读索引入口的**唯一门禁**（EN-48）：query / full_graph / graph 都过这里，
+    /// 按病因给不同且可行动的错误——不再是「同一故障三个入口三种表现」。
+    ///
+    /// 判定顺序即病因优先级：版本 → 状态 → 路径 → 产物。返回索引库路径（已确认在盘）。
+    fn ensure_ready(&self, proj: &CgProjectDto) -> Result<PathBuf, CgError> {
+        if proj.status == "version_mismatch" {
+            return Err(CgError::VersionMismatch {
+                need: CG_VERSION_PIN.into(),
+                got: "unknown".into(),
+            });
+        }
+        if proj.status != "ready" {
+            let hint = match proj.status.as_str() {
+                "registered" => "从未建过索引——先执行 codegraph index",
+                "indexing" => "索引仍在进行中——稍后 codegraph list 确认 ready",
+                "error" => "上次索引失败——看 codegraph list 的 error 字段，修好后重新 index",
+                _ => "先执行 codegraph index",
+            };
+            return Err(CgError::BadRequest(format!(
+                "项目未就绪（{}）——{hint}",
+                proj.status
+            )));
+        }
+        // ① 路径：目录被删/搬走，或条目来自容器形态（宿主看不到该路径）
+        let path = Path::new(&proj.path);
+        if !path.exists() {
+            return Err(CgError::NotFound(format!(
+                "项目路径不存在（{}）——目录可能已被删除或移动（容器形态下注册的路径在宿主上不可见）；\
+                 请重新注册，或删除该条目",
+                proj.path
+            )));
+        }
+        // ② 产物：status=ready 只是「历史上成功过」，`.codegraph/` 一旦随目录消失不会自己回来
+        let db_path = index_db_path(path);
+        if !db_path.is_file() {
+            return Err(CgError::NotFound(format!(
+                "索引产物已丢失（{}）——`.codegraph/` 是 codegraph CLI 的未跟踪产物，\
+                 目录被重新 clone / 清理后不会自己回来（注册状态仍是 ready，因为那只是历史记录）；\
+                 请重新执行 codegraph index",
+                db_path.display()
+            )));
+        }
+        Ok(db_path)
+    }
+
+    /// 失效条目对账（EN-48）：扫描全部项目，把「自称 ready 但产物已丢失 / 路径已不存在」的
+    /// 条目落到 error（附具体病因），使 list 不再把幽灵条目冒充可用资产。
+    ///
+    /// 只改状态、不动登记与源码——重新 index 即可恢复 ready，可逆。
+    pub async fn gc(&self) -> Result<serde_json::Value, CgError> {
+        let rows = self.list().await?;
+        let mut marked = Vec::new();
+        for proj in rows.iter().filter(|p| p.status == "ready" && !p.usable) {
+            let reason = if !Path::new(&proj.path).exists() {
+                format!(
+                    "项目路径不存在（{}）——目录已删除或移动（容器形态注册的路径在宿主上不可见）；\
+                     请重新注册或删除该条目",
+                    proj.path
+                )
+            } else {
+                format!(
+                    "索引产物已丢失（{}）——请重新执行 codegraph index",
+                    index_db_path(Path::new(&proj.path)).display()
+                )
+            };
+            sqlx::query(
+                "UPDATE cg_projects SET status = 'error', error = $2, updated_at = now() \
+                 WHERE id = $1",
+            )
+            .bind(proj.id)
+            .bind(&reason)
+            .execute(&self.pool)
+            .await?;
+            marked.push(serde_json::json!({
+                "name": proj.name, "path": proj.path, "reason": reason,
+            }));
+        }
+        Ok(serde_json::json!({
+            "scanned": rows.len(),
+            "marked_invalid": marked.len(),
+            "items": marked,
+            "note": "置为 error 的条目：重新 codegraph index 即可恢复 ready（登记与源码均未动）",
+        }))
     }
 
     /// 建索引（registered → indexing → ready/error）。超时 10min。
@@ -429,9 +560,14 @@ impl CgBridge {
         path: &Path,
         target: &str,
     ) -> Result<Option<serde_json::Value>, CgError> {
-        let db_path = path.join(".codegraph").join("codegraph.db");
-        if !db_path.exists() {
-            return Ok(None);
+        // 正常路径下调用方已过 ensure_ready（产物必在盘，EN-48）；这里的检查只兜
+        // 「校验后到读之间产物被删」的 TOCTOU——仍报同一类错，不静默降级成「假装没数据」。
+        let db_path = index_db_path(path);
+        if !db_path.is_file() {
+            return Err(CgError::NotFound(format!(
+                "索引产物已丢失（{}）——请重新执行 codegraph index",
+                db_path.display()
+            )));
         }
         let db_str = db_path.to_string_lossy().into_owned();
         let target = target.trim().to_string();
@@ -544,18 +680,7 @@ impl CgBridge {
         include_source: bool,
     ) -> Result<serde_json::Value, CgError> {
         let proj = self.get(id).await?;
-        if proj.status == "version_mismatch" {
-            return Err(CgError::VersionMismatch {
-                need: CG_VERSION_PIN.into(),
-                got: "unknown".into(),
-            });
-        }
-        if proj.status != "ready" {
-            return Err(CgError::BadRequest(format!(
-                "项目未就绪（{}）",
-                proj.status
-            )));
-        }
+        self.ensure_ready(&proj)?;
         let path = Path::new(&proj.path);
         self.ensure_version().await?;
 
@@ -670,21 +795,7 @@ impl CgBridge {
     /// 文件级通常几十个节点正好。数据源：.codegraph/codegraph.db（只读打开，schema 随 pin 稳定）。
     pub async fn full_graph(&self, id: Uuid) -> Result<serde_json::Value, CgError> {
         let proj = self.get(id).await?;
-        if proj.status != "ready" {
-            return Err(CgError::BadRequest(format!(
-                "项目未就绪（{}）——先建索引",
-                proj.status
-            )));
-        }
-        let db_path = Path::new(&proj.path)
-            .join(".codegraph")
-            .join("codegraph.db");
-        if !db_path.exists() {
-            return Err(CgError::NotFound(format!(
-                "索引库不存在（{}）——重新建索引",
-                db_path.display()
-            )));
-        }
+        let db_path = self.ensure_ready(&proj)?;
         // 阻塞读小库（<10MB）：spawn_blocking 防占 worker
         let db_str = db_path.to_string_lossy().into_owned();
         let v = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, CgError> {
@@ -738,12 +849,7 @@ impl CgBridge {
     /// 某一侧（如无 caller）失败不拖垮整图，按空处理。
     pub async fn graph(&self, id: Uuid, symbol: &str) -> Result<serde_json::Value, CgError> {
         let proj = self.get(id).await?;
-        if proj.status != "ready" {
-            return Err(CgError::BadRequest(format!(
-                "项目未就绪（{}）——先建索引",
-                proj.status
-            )));
-        }
+        self.ensure_ready(&proj)?;
         let path = Path::new(&proj.path);
         self.ensure_version().await?;
 
@@ -921,8 +1027,11 @@ async fn run_cli(
     if let Some(dir) = cwd {
         // 先探 cwd：NotFound 无法区分「二进制缺失」还是「工作目录缺失」——显式检查给出可行动文案
         if !dir.exists() {
-            return Err(CgError::CliUnavailable(format!(
-                "项目路径不存在: {}（容器部署下宿主路径不可见——需挂载该目录，或仅宿主 dev 形态使用 codegraph）",
+            // 路径类错误 ≠ CLI 不可用（EN-48）：从前归 CliUnavailable，等于把「目录没了」
+            // 报成「CLI 未安装」——EN-24 那次误指的根源。路径不存在重试无用，语义上属 Permanent。
+            return Err(CgError::NotFound(format!(
+                "项目路径不存在: {}——目录可能已删除或移动（容器形态下注册的路径在宿主上看不到）；\
+                 请重新注册该条目",
                 dir.display()
             )));
         }
@@ -1062,6 +1171,7 @@ mod tests {
             path,
             source_uri: "t".into(),
             status: "ready".into(),
+            usable: false,
             stats: Some(stats),
             error: None,
             last_synced_at: None,
@@ -1125,5 +1235,150 @@ mod tests {
             classify(CgError::BadRequest("y".into())),
             JobError::Permanent(_)
         ));
+    }
+
+    /// EN-48：usable 是「产物在盘」的当下断言，不是 status 的复读。
+    #[test]
+    fn usable_requires_artifact_on_disk() {
+        let dir = std::env::temp_dir().join(format!("cg-usable-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(dir.join(".codegraph")).unwrap();
+        let mk = |status: &str| CgProjectDto {
+            id: Uuid::now_v7(),
+            name: "t".into(),
+            path: dir.to_string_lossy().into_owned(),
+            source_uri: "t".into(),
+            status: status.into(),
+            usable: false,
+            stats: None,
+            error: None,
+            last_synced_at: None,
+            created_at: chrono::Utc::now(),
+        };
+
+        // status=ready 但产物不在盘 → 不可用（旧口径把它当可用资产，正是 EN-48 的病）
+        let mut p = mk("ready");
+        assert!(!index_usable(&p), "ready + 无产物 必须判为不可用");
+
+        // 产物落盘 → 可用
+        std::fs::write(index_db_path(&dir), b"").unwrap();
+        assert!(index_usable(&p));
+
+        // 产物在盘但 status 非 ready → 仍不可用
+        p.status = "indexing".into();
+        assert!(!index_usable(&p));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// EN-48：CLI 以 **git 根**为家——注册仓库子目录时产物在父级，不能只认注册路径。
+    /// （2026-09-15 实测：`server/` 下索引，db 落在仓库根。）
+    #[test]
+    fn index_db_path_finds_repo_root_artifact() {
+        let root = std::env::temp_dir().join(format!("cg-root-{}", Uuid::now_v7()));
+        let sub = root.join("server").join("crates");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap(); // 仓库根标识
+        std::fs::create_dir_all(root.join(".codegraph")).unwrap();
+        std::fs::write(index_db_path(&root), b"").unwrap();
+
+        // 注册子目录 → 沿父目录找到仓库根的产物，且据此判定可用
+        assert_eq!(index_db_path(&sub), index_db_path(&root));
+        let p = CgProjectDto {
+            id: Uuid::now_v7(),
+            name: "t".into(),
+            path: sub.to_string_lossy().into_owned(),
+            source_uri: "t".into(),
+            status: "ready".into(),
+            usable: false,
+            stats: None,
+            error: None,
+            last_synced_at: None,
+            created_at: chrono::Utc::now(),
+        };
+        assert!(index_usable(&p), "子目录注册也应认仓库根的索引产物");
+
+        // 不越界：自己已是仓库根（有 .git）时，不去捡仓库外的 .codegraph
+        let outside = root
+            .parent()
+            .unwrap()
+            .join(format!("cg-outside-{}", Uuid::now_v7()));
+        let orphan = outside.join("proj");
+        std::fs::create_dir_all(orphan.join(".git")).unwrap();
+        std::fs::create_dir_all(outside.join(".codegraph")).unwrap();
+        std::fs::write(index_db_path(&outside), b"").unwrap();
+        assert_ne!(
+            index_db_path(&orphan),
+            index_db_path(&outside),
+            "越过 .git 边界捡到外面的产物——不该发生"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// EN-48：门禁按病因分类——从未索引 / 版本不符 / 路径没了 / 产物丢了，各给各的错，
+    /// 不再一律「CLI 不可用」或一句含糊的「索引库不存在」。
+    #[tokio::test]
+    async fn ensure_ready_classifies_causes() {
+        let bridge = CgBridge::new(
+            sqlx::Pool::<sqlx::Postgres>::connect_lazy(
+                "postgres://invalid:invalid@127.0.0.1:1/none",
+            )
+            .unwrap(),
+            "/tmp/cg-nonexistent-root",
+        );
+        let mk = |status: &str, path: &std::path::Path| CgProjectDto {
+            id: Uuid::now_v7(),
+            name: "t".into(),
+            path: path.to_string_lossy().into_owned(),
+            source_uri: "t".into(),
+            status: status.into(),
+            usable: false,
+            stats: None,
+            error: None,
+            last_synced_at: None,
+            created_at: chrono::Utc::now(),
+        };
+        let tmp = std::env::temp_dir();
+
+        // ① 从未索引 → BadRequest，文案指向 index
+        let e = bridge.ensure_ready(&mk("registered", &tmp)).unwrap_err();
+        assert!(
+            matches!(e, CgError::BadRequest(_)) && e.to_string().contains("从未建过索引"),
+            "{e}"
+        );
+
+        // ② 版本不符优先于其他病因
+        let e = bridge
+            .ensure_ready(&mk("version_mismatch", &tmp))
+            .unwrap_err();
+        assert!(matches!(e, CgError::VersionMismatch { .. }), "{e}");
+
+        // ③ ready 但路径不存在 → NotFound（不是 CliUnavailable）
+        let gone = tmp.join(format!("cg-gone-{}", Uuid::now_v7()));
+        let e = bridge.ensure_ready(&mk("ready", &gone)).unwrap_err();
+        assert!(
+            matches!(e, CgError::NotFound(_)) && e.to_string().contains("项目路径不存在"),
+            "{e}"
+        );
+
+        // ④ ready、路径在、产物不在 → NotFound，且点名「索引产物已丢失」
+        let live = tmp.join(format!("cg-live-{}", Uuid::now_v7()));
+        std::fs::create_dir_all(&live).unwrap();
+        let e = bridge.ensure_ready(&mk("ready", &live)).unwrap_err();
+        assert!(
+            matches!(e, CgError::NotFound(_)) && e.to_string().contains("索引产物已丢失"),
+            "{e}"
+        );
+
+        // ⑤ 产物在盘 → 放行，并返回索引库路径
+        std::fs::create_dir_all(live.join(".codegraph")).unwrap();
+        std::fs::write(index_db_path(&live), b"").unwrap();
+        assert_eq!(
+            bridge.ensure_ready(&mk("ready", &live)).unwrap(),
+            index_db_path(&live)
+        );
+
+        let _ = std::fs::remove_dir_all(&live);
     }
 }

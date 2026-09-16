@@ -2632,6 +2632,21 @@ impl EngramMcpServer {
         }))
     }
 
+    /// 失效条目对账（EN-48）：把「注册状态 ready 但索引产物已丢失 / 路径已不存在」的条目
+    /// 落到 error，让 list 不再把幽灵条目冒充可用资产（此前它们会一直显示 ready）。
+    ///
+    /// 何时用：查询报「索引产物已丢失 / 项目路径不存在」而 codegraph list 仍显示 ready 时；
+    /// 或迁移、重装、换机器后做一次体检。可逆——重新 codegraph index 即恢复 ready。
+    async fn codegraph_gc(
+        &self,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_codegraph(&p)?;
+        let report = cg_svc(&self.state).gc().await.map_err(from_cg)?;
+        ok_json(report)
+    }
+
     /// 沉淀新技能：把本次对话中验证有效的做法固化成可复用指令包。
     ///
     /// 何时用：用户说「把这个做法存成技能/记成 SOP」，或一套流程已被验证有效且可复用时。
@@ -4780,6 +4795,7 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "gc" => self.codegraph_gc(ctx).await,
             other => Err(dispatch::unknown_action("codegraph", other)),
         }
     }
