@@ -60,10 +60,20 @@ async fn main() -> anyhow::Result<()> {
         engram_jobs::Runner::new(pool.clone(), runner_config),
         engram_distill::gateway_llm(
             pool.clone(),
-            engram_llm::KeyCipher::from_hex_master(
-                &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
-            )
-            .expect("主密钥格式恒合法"),
+            {
+                // 未配置 = 全零占位（纯 chat 场景不碰密钥加密也不出错）；配了坏值则响亮拒绝，
+                // 并告诉 AI/人「怎么生成正确的」——此前 expect("主密钥格式恒合法") 在坏值下
+                // 打出自相矛盾的日志（恒合法 + NotConfigured + 必须是 64 hex 三信息打架）。
+                let master_key_hex =
+                    cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32));
+                engram_llm::KeyCipher::from_hex_master(&master_key_hex).map_err(|e| {
+                    anyhow::anyhow!(
+                        "AGENT_MEMORY_MASTER_KEY 非法（{e}）——必须是 64 个 hex 字符（生成：openssl rand -hex 32）；\
+                         请修正 ~/.engram/.env 后重启。当前值前 8 字符：{}",
+                        &master_key_hex[..master_key_hex.len().min(8)]
+                    )
+                })?
+            },
         ),
     )
     .register("deep_purge", move |_ctx| {

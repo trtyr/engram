@@ -29,12 +29,26 @@ echo "   本脚本只体检与初始化；构建并启动服务用收尾提示�
 
 # ---------- [1/6] 基础工具 ----------
 step "[1/6] 基础工具（git / openssl / python3）"
-for t in git openssl python3; do
+for t in git openssl; do
   if cmd_exists "$t"; then ok "$t"; else
     fail "$t 缺失——macOS 先装命令行工具：xcode-select --install"
     MISSING=1
   fi
 done
+if cmd_exists python3; then
+  PYV=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "?.?")
+  ok "python3 ${PYV}"
+  case "$PYV" in
+    2.*|3.[0-9])
+      # 3.9 及以下：engramctl 用了 3.10+ 语法（有版本守卫，会给出友好提示而非 traceback）
+      warn "python3 ${PYV} 过旧（engramctl 需要 3.10+）——brew install python@3.12"
+      MISSING=1
+      ;;
+  esac
+else
+  fail "python3 缺失——macOS 先装命令行工具：xcode-select --install"
+  MISSING=1
+fi
 
 # ---------- [2/6] Rust（cargo） ----------
 step "[2/6] Rust 工具链（cargo）"

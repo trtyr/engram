@@ -19,6 +19,8 @@
 可选：AGENT_MEMORY_METRICS、RUST_LOG（默认 info）
 """
 
+from __future__ import annotations  # 兼容 3.9 解析 `int | None` 注解（注解惰性化）
+
 import os
 import shutil
 import signal
@@ -27,6 +29,15 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+
+# 版本守卫：空白 macOS 只带系统 python3（3.9），低于 3.10 时给可行动指引而不是一屏 traceback
+if sys.version_info < (3, 10):
+    print(
+        f"❌ Python 版本过旧（{sys.version_info.major}.{sys.version_info.minor}）——本脚本需要 3.10+"
+    )
+    print("   安装新版：brew install python@3.12")
+    print(f"   或显式用新版跑：/opt/homebrew/bin/python3 {' '.join(sys.argv)}")
+    sys.exit(1)
 
 HOME = Path.home()
 RUNTIME_DIR = HOME / ".engram"
