@@ -802,19 +802,32 @@ export default function Skills() {
                       </>
                     ) : (
                       <>
-                        <WikiMarkdown content={detail.content} />
-
                         {isScript(detail) ? (
-                          /* script 型：真身在本地，系统只存指针——不显示附属文件管理 */
-                          <div className="mt-8 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs leading-5 text-muted-foreground">
+                          /* script 型：正文不入库（后端 content 是从 local_path 现读的——
+                             那是给 agent 的通道）——Web 阅读视图不渲染正文，展示本地指针卡 */
+                          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-4 text-sm leading-6">
                             <p className="font-medium text-foreground">脚本型技能（本地指针）</p>
-                            <p className="mt-1">
-                              真身存放在本地文件夹 <code className="break-all font-mono">{detail.local_path ?? '（未设置）'}</code>
-                              （SKILL.md + scripts/），系统只存指针与来源，正文不入库、版本由本地 git 管理。
-                              修改脚本请直接编辑本地文件；路径失效时详情会报「指针失效」。
+                            <p className="mt-2 text-muted-foreground">
+                              正文不入库——SKILL.md 真身在本地文件夹，由 agent 直接读取执行；
+                              系统只登记指针与来源，版本由本地 git 管理。
+                            </p>
+                            <dl className="mt-3 space-y-1.5 font-mono text-xs">
+                              <div>
+                                <dt className="mr-1 inline text-muted-foreground">local_path:</dt>
+                                <dd className="inline break-all text-foreground">
+                                  {detail.local_path ?? '（未设置）'}
+                                </dd>
+                              </div>
+                            </dl>
+                            <p className="mt-3 text-xs text-muted-foreground">
+                              修改脚本请直接编辑本地文件；路径失效时此处会报「指针失效」。
                             </p>
                           </div>
                         ) : (
+                          <WikiMarkdown content={detail.content} />
+                        )}
+
+                        {!isScript(detail) && (
                           /* text 型：附属文件随库走 */
                           <div className="mt-8 border-t border-border pt-4">
                           <div className="flex items-center justify-between">

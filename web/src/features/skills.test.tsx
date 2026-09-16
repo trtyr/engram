@@ -273,8 +273,8 @@ describe('Skills 技能页（双栏）', () => {
     // script 型：无「版本」按钮、无附属文件管理
     expect(screen.queryByRole('button', { name: '版本' })).toBeNull()
     expect(screen.queryByRole('button', { name: '添加文件' })).toBeNull()
-    // 现读正文渲染
-    await waitFor(() => expect(screen.getByText('由指针现读。')).toBeTruthy())
+    // 正文不渲染（后端 content 是给 agent 的 local_path 现读通道，Web 不展示）
+    expect(screen.queryByText('由指针现读。')).toBeNull()
 
     // 切回 text 型：版本按钮回来、附属文件区正常
     fireEvent.click(screen.getByRole('button', { name: /PR 审查/ }))
