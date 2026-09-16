@@ -197,8 +197,8 @@ export default function Tickets() {
       {rows.length === 0 ? (
         <Empty text="暂无工单——让 AI 通过 todo_add（kind=ticket）帮你记，填上症状更好用" />
       ) : (
-        <div className={cn('grid gap-4', selected ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]' : '')}>
-          <div className="space-y-1.5">
+        <div className={cn('grid grid-cols-1 gap-4', selected && 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]')}>
+          <div className="min-w-0 space-y-1.5">
             {rows.map((t) => (
               <TicketRow
                 key={t.id}
@@ -272,12 +272,16 @@ function TicketRow({
             {TICKET_STATUS_LABEL[t.status] ?? t.status}
           </span>
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          {t.symptom && <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{t.symptom}</p>}
+        <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+          {t.symptom && (
+            <p className="min-w-0 max-w-full flex-1 basis-40 truncate text-xs text-muted-foreground">
+              {t.symptom}
+            </p>
+          )}
           {t.tags.map((tag: string) => (
             <span
               key={tag}
-              className="shrink-0 rounded border border-border px-1 py-0 text-[10px] text-muted-foreground"
+              className="rounded border border-border px-1 py-0 text-[10px] text-muted-foreground"
             >
               #{tag}
             </span>
@@ -317,7 +321,7 @@ function TicketDetail({
   const doneish = TICKET_DONEISH.includes(t.status)
   const step = TICKET_NEXT[t.status]
   return (
-    <Card className="h-fit p-4 lg:sticky lg:top-0">
+    <Card className="h-fit min-w-0 p-4 lg:sticky lg:top-0">
       {/* 头：短号 + 关闭 */}
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono text-xs text-muted-foreground">EN-{t.short_no}</span>
@@ -334,7 +338,7 @@ function TicketDetail({
       </div>
 
       {/* 标题 + 徽章 */}
-      <h3 className={cn('mt-1 text-base leading-6 font-semibold', doneish && 'text-muted-foreground')}>
+      <h3 className={cn('mt-1 text-base leading-6 font-semibold break-words', doneish && 'text-muted-foreground')}>
         {t.title}
       </h3>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -515,7 +519,7 @@ function EditableSection({
       ) : value ? (
         <p
           className={cn(
-            'mt-0.5 whitespace-pre-wrap leading-5',
+            'mt-0.5 break-words whitespace-pre-wrap leading-5',
             tone === 'success' && 'text-xs text-success',
           )}
         >

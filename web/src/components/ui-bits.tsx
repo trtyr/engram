@@ -95,7 +95,7 @@ export function PageHeader({
         <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
         {desc && <p className="mt-0.5 text-sm text-muted-foreground">{desc}</p>}
       </div>
-      {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
+      {children && <div className="flex min-w-0 flex-wrap items-center gap-2">{children}</div>}
     </div>
   )
 }
