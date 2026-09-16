@@ -164,14 +164,40 @@ pub async fn status(
 }
 
 /// 失效条目对账（EN-48）：路径已不存在 / 索引产物已丢失的 ready 条目标为 error，
-/// 使列表不再把幽灵条目冒充可用资产。只改状态不动登记——重新 index 即可恢复。
+/// 使列表不再把幽灵条目冒充可用资产。
+///
+/// 自愈（EN-48 残留）：对「路径仍在、仅产物丢失」的条目自动入队重建 job——
+/// 报告 `queued_rebuild` 带各条目的 job_id；入队失败不中断对账（报告里如实标注）。
 #[utoipa::path(post, path = "/codegraph/gc", responses((status = 200, body = Object)))]
 pub async fn gc(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_cg(&principal)?;
-    Ok(Json(bridge(&state).gc().await.map_err(ce)?))
+    let mut report = bridge(&state).gc().await.map_err(ce)?;
+    // 自愈：产物丢失（路径仍在）的条目自动重建——异步 job，状态走 indexing → ready/error
+    let mut queued = Vec::new();
+    if let Some(items) = report["needs_rebuild"].as_array() {
+        for item in items {
+            let Some(id) = item["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) else {
+                continue;
+            };
+            match enqueue(&state, "cg_index", id).await {
+                Ok(job) => queued.push(serde_json::json!({
+                    "id": id,
+                    "name": item["name"],
+                    "job_id": job.id,
+                })),
+                Err(e) => queued.push(serde_json::json!({
+                    "id": id,
+                    "name": item["name"],
+                    "enqueue_error": e.to_string(),
+                })),
+            }
+        }
+    }
+    report["queued_rebuild"] = serde_json::json!(queued);
+    Ok(Json(report))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

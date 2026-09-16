@@ -434,20 +434,31 @@ impl CgBridge {
     /// 条目落到 error（附具体病因），使 list 不再把幽灵条目冒充可用资产。
     ///
     /// 只改状态、不动登记与源码——重新 index 即可恢复 ready，可逆。
+    ///
+    /// 自愈（EN-48 残留）：返回体 `needs_rebuild` 列出「路径仍在、仅产物丢失」的条目——
+    /// 调用方（HTTP/MCP 层）对它们自动入队重建 job；「路径不存在」的幽灵无法自愈，
+    /// 只标 error 等人重新注册或删除。
     pub async fn gc(&self) -> Result<serde_json::Value, CgError> {
         let rows = self.list().await?;
         let mut marked = Vec::new();
+        let mut needs_rebuild = Vec::new();
         for proj in rows.iter().filter(|p| p.status == "ready" && !p.usable) {
-            let reason = if !Path::new(&proj.path).exists() {
-                format!(
-                    "项目路径不存在（{}）——目录已删除或移动（容器形态注册的路径在宿主上不可见）；\
-                     请重新注册或删除该条目",
-                    proj.path
+            let (reason, healable) = if !Path::new(&proj.path).exists() {
+                (
+                    format!(
+                        "项目路径不存在（{}）——目录已删除或移动（容器形态注册的路径在宿主上不可见）；\
+                         请重新注册或删除该条目",
+                        proj.path
+                    ),
+                    false,
                 )
             } else {
-                format!(
-                    "索引产物已丢失（{}）——请重新执行 codegraph index",
-                    index_db_path(Path::new(&proj.path)).display()
+                (
+                    format!(
+                        "索引产物已丢失（{}）——请重新执行 codegraph index",
+                        index_db_path(Path::new(&proj.path)).display()
+                    ),
+                    true,
                 )
             };
             sqlx::query(
@@ -461,12 +472,19 @@ impl CgBridge {
             marked.push(serde_json::json!({
                 "name": proj.name, "path": proj.path, "reason": reason,
             }));
+            if healable {
+                needs_rebuild.push(serde_json::json!({
+                    "id": proj.id, "name": proj.name, "path": proj.path,
+                }));
+            }
         }
         Ok(serde_json::json!({
             "scanned": rows.len(),
             "marked_invalid": marked.len(),
             "items": marked,
-            "note": "置为 error 的条目：重新 codegraph index 即可恢复 ready（登记与源码均未动）",
+            "needs_rebuild": needs_rebuild,
+            "note": "置为 error 的条目：needs_rebuild 里的（路径仍在、仅产物丢失）已由服务端自动入队重建；\
+                     路径不存在的幽灵条目需人工重新注册或删除",
         }))
     }
 
@@ -476,9 +494,15 @@ impl CgBridge {
         self.ensure_version().await?;
 
         self.set_status(id, "indexing", None, None).await?;
-        // 首次 init；已有 .codegraph 目录则全量重建（CLI 的 index 命令）
-        let marker = Path::new(&proj.path).join(".codegraph");
-        let cmd: &str = if marker.exists() { "index" } else { "init" };
+        // 命令选择按「索引产物 db 是否存在」（EN-48 残留修复）：db 在 → index（增量）；
+        // db 不在 → init（重建）。此前用 `.codegraph/` 目录存在性判断，但「目录在、db 丢」
+        // （手动清理/备份不完整）时 CLI 的 index 会报 CodeGraph not initialized 而失败——
+        // 自愈路径（gc 自动重建）恰恰专治产物丢失，必须用产物本体做判据。
+        let cmd: &str = if index_db_path(Path::new(&proj.path)).exists() {
+            "index"
+        } else {
+            "init"
+        };
         match run_cli(&[cmd], Some(Path::new(&proj.path)), TIMEOUT_INIT).await {
             Ok(_) => {
                 let stats = self.read_stats(Path::new(&proj.path)).await;

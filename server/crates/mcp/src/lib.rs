@@ -2638,15 +2638,41 @@ impl EngramMcpServer {
     /// 失效条目对账（EN-48）：把「注册状态 ready 但索引产物已丢失 / 路径已不存在」的条目
     /// 落到 error，让 list 不再把幽灵条目冒充可用资产（此前它们会一直显示 ready）。
     ///
+    /// 自愈（EN-48 残留）：「路径仍在、仅产物丢失」的条目自动入队重建 job（报告
+    /// queued_rebuild 带 job_id，异步执行——稍后 codegraph_list 确认回到 ready）；
+    /// 路径不存在的幽灵无法自愈，需人工重新注册或删除。
+    ///
     /// 何时用：查询报「索引产物已丢失 / 项目路径不存在」而 codegraph list 仍显示 ready 时；
-    /// 或迁移、重装、换机器后做一次体检。可逆——重新 codegraph index 即恢复 ready。
+    /// 或迁移、重装、换机器后做一次体检。
     async fn codegraph_gc(
         &self,
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_codegraph(&p)?;
-        let report = cg_svc(&self.state).gc().await.map_err(from_cg)?;
+        let mut report = cg_svc(&self.state).gc().await.map_err(from_cg)?;
+        // 自愈：产物丢失（路径仍在）的条目自动重建——入队失败不中断对账，报告里如实标注
+        let mut queued = Vec::new();
+        if let Some(items) = report["needs_rebuild"].as_array() {
+            for item in items {
+                let Some(id) = item["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) else {
+                    continue;
+                };
+                let name = item["name"].clone();
+                match engram_jobs::JobQueue::new(self.state.pool.clone()).enqueue(
+                    engram_jobs::JobTemplate::new("cg_index")
+                        .with_payload(serde_json::json!({"project_id": id})),
+                ).await {
+                    Ok(job) => queued.push(serde_json::json!({
+                        "id": id, "name": name, "job_id": job.id,
+                    })),
+                    Err(e) => queued.push(serde_json::json!({
+                        "id": id, "name": name, "enqueue_error": e.to_string(),
+                    })),
+                }
+            }
+        }
+        report["queued_rebuild"] = serde_json::json!(queued);
         ok_json(report)
     }
 

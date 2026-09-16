@@ -228,6 +228,10 @@ async fn lost_artifact_detected_by_list_query_and_gc() {
         after.error.unwrap_or_default().contains("索引产物已丢失"),
         "error 字段要写明病因"
     );
+    // 自愈清单（EN-48 残留）：victim 路径仍在、仅产物丢失 → 必须进 needs_rebuild
+    let needs = report["needs_rebuild"].as_array().unwrap();
+    assert_eq!(needs.len(), 1, "{report}");
+    assert_eq!(needs[0]["id"].as_str(), Some(proj.id.to_string()).as_deref());
 
     // ⑤ 另一类幽灵：路径整个不存在（容器形态注册、宿主上不可见的条目）
     let ghost_dir = tempfile::tempdir().unwrap();
@@ -248,4 +252,18 @@ async fn lost_artifact_detected_by_list_query_and_gc() {
         .unwrap_err();
     assert!(matches!(e, CgError::NotFound(_)), "{e:?}");
     assert!(e.to_string().contains("项目路径不存在"), "{e}");
+
+    // ⑥ 自愈边界：路径不存在的幽灵不可自愈——gc 落 error 但绝不进 needs_rebuild
+    let report2 = bridge.gc().await.unwrap();
+    assert_eq!(report2["marked_invalid"].as_u64(), Some(1), "{report2}");
+    assert!(
+        report2["needs_rebuild"].as_array().unwrap().is_empty(),
+        "幽灵条目不能自动重建（路径都没了，重建必失败）: {report2}"
+    );
+    let ghost_after = bridge.get(ghost.id).await.unwrap();
+    assert_eq!(ghost_after.status, "error");
+    assert!(
+        ghost_after.error.unwrap_or_default().contains("项目路径不存在"),
+        "幽灵病因要写「路径不存在」而非「产物丢失」"
+    );
 }
