@@ -6,7 +6,7 @@
   python3 scripts/engramctl.py stop                     # 停进程（SIGTERM，10s 后 SIGKILL）
   python3 scripts/engramctl.py status                   # 进程 + /ready + migration 版本
   python3 scripts/engramctl.py logs   [N]               # 看最后 N 行日志（默认 50）
-  python3 scripts/engramctl.py restart [--skip-build]
+  python3 scripts/engramctl.py restart [--skip-build]     # 先 build 成功，才 stop + start（build 失败则服务不动）
 
 配置源：~/.engram/.env（KEY=VALUE）——需含：
   AGENT_MEMORY_ADMIN_PASSWORD / AGENT_MEMORY_MASTER_KEY
@@ -30,6 +30,9 @@ SERVER_DIR = Path(__file__).resolve().parent.parent / "server"
 BINARY = SERVER_DIR / "target" / "release" / "engram-server"
 PORT = 17654
 READY_URL = f"http://127.0.0.1:{PORT}/ready"
+# 前端产物：rust-embed 在**编译期**嵌入 web/dist（crates/api/src/web_assets.rs），
+# 目录不存在时 `cargo build` 直接编译失败——所以 build 前先探它，给出可行动的提示。
+WEB_DIST = SERVER_DIR.parent / "web" / "dist"
 
 
 def load_env() -> dict:
@@ -69,6 +72,29 @@ def ready_probe() -> dict | None:
         return None
 
 
+def build_release() -> int:
+    """编译 release 二进制（0=成功）。**不碰正在运行的服务**——失败只返回非零。
+
+    历史教训（2026-09-15）：restart 原先是「先 stop 再 build」，build 一失败服务就留在
+    停摆状态（当时 web/dist 缺失导致 build 失败）。所以 build 必须先行、且与停服务解耦。
+    """
+    if not WEB_DIST.is_dir():
+        print("❌ 前端产物缺失：web/dist 不存在")
+        print("   web_assets.rs 用 RustEmbed 把前端**编译期**嵌进二进制，cargo build 需要它先存在。修复：")
+        print(f"     cd {WEB_DIST.parent} && pnpm install && pnpm build")
+        return 1
+    print("[2/4] cargo build --release（--skip-build 可跳过）...", flush=True)
+    r = subprocess.run(
+        ["cargo", "build", "--release", "-p", "engram-api"],
+        cwd=SERVER_DIR,
+        env={**os.environ, "CARGO_TERM_COLOR": "never"},
+    )
+    if r.returncode != 0:
+        print("❌ build 失败——正在运行的服务未受影响")
+        return 1
+    return 0
+
+
 def cmd_start(skip_build: bool) -> int:
     env = load_env()
     dsn = env.get("ENGRAM_DATABASE_URL", "postgres://trtyr@127.0.0.1:5432/engram")
@@ -84,15 +110,8 @@ def cmd_start(skip_build: bool) -> int:
     print("✅")
 
     if not skip_build:
-        print("[2/4] cargo build --release（--skip-build 可跳过）...", flush=True)
-        r = subprocess.run(
-            ["cargo", "build", "--release", "-p", "engram-api"],
-            cwd=SERVER_DIR,
-            env={**os.environ, "CARGO_TERM_COLOR": "never"},
-        )
-        if r.returncode != 0:
-            print("❌ build 失败")
-            return 1
+        if rc := build_release():
+            return rc
     elif BINARY.exists():
         print("[2/4] 跳过 build（--skip-build）✅")
     else:
@@ -153,6 +172,25 @@ def cmd_stop() -> int:
     return 0
 
 
+def cmd_restart(skip_build: bool) -> int:
+    """重启 = **build 成功 → 才停 + 起**。
+
+    顺序就是这个函数存在的全部理由：先 build，失败就直接返回（正在运行的服务原封不动），
+    只有 build 成功才停服务。旧实现反着来（先 stop 再 build），build 一失败服务就下线了。
+    """
+    if not skip_build:
+        print("[restart] build 先行——build 失败则不动正在运行的服务")
+        if rc := build_release():
+            return rc
+    elif not BINARY.exists():
+        print("❌ --skip-build 但二进制不存在，先跑一次不带 --skip-build 的 restart")
+        return 1
+    cmd_stop()
+    time.sleep(1)
+    # build 已在上方完成（或按 --skip-build 显式跳过），start 不必重复编译
+    return cmd_start(skip_build=True)
+
+
 def cmd_status() -> int:
     pid = server_pid()
     state = ready_probe()
@@ -185,9 +223,7 @@ def main() -> int:
     if cmd == "stop":
         return cmd_stop()
     if cmd == "restart":
-        cmd_stop()
-        time.sleep(1)
-        return cmd_start(skip_build)
+        return cmd_restart(skip_build)
     if cmd == "status":
         return cmd_status()
     if cmd == "logs":
