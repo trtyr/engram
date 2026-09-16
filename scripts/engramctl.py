@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """engramctl — engram 宿主进程管理脚本（2026-09-15 起，日常运行形态）。
 
+运行形态（2026-09-16 起）：**运行时家自包含于 ~/.engram/**——数据、配置、二进制
+（bin/engram-server）、管理脚本（bin/engramctl）全在本机；代码仓库（外置开发盘）
+只是开发工作区，仅 build/install 需要。拔掉外置盘：服务照跑、照重启，只是不能重新构建。
+
 用法：
-  python3 scripts/engramctl.py start   [--skip-build]   # 起 PG 检查 → build → 后台挂起 → 健康检查
+  python3 scripts/engramctl.py start   [--skip-build]   # PG 检查 → build → 安装 → 后台挂起 → /ready
   python3 scripts/engramctl.py stop                     # 停进程（SIGTERM，10s 后 SIGKILL）
   python3 scripts/engramctl.py status                   # 进程 + /ready + migration 版本
   python3 scripts/engramctl.py logs   [N]               # 看最后 N 行日志（默认 50）
-  python3 scripts/engramctl.py restart [--skip-build]     # 先 build 成功，才 stop + start（build 失败则服务不动）
+  python3 scripts/engramctl.py restart [--skip-build]   # 先 build 成功 → 安装 → 再 stop + start
+  python3 scripts/engramctl.py install                  # 把 target 构建产物装进 ~/.engram/bin（不重启）
 
 配置源：~/.engram/.env（KEY=VALUE）——需含：
   AGENT_MEMORY_ADMIN_PASSWORD / AGENT_MEMORY_MASTER_KEY
@@ -15,6 +20,7 @@
 """
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -23,11 +29,16 @@ import urllib.request
 from pathlib import Path
 
 HOME = Path.home()
-ENV_FILE = HOME / ".engram" / ".env"
-PID_FILE = HOME / ".engram" / "server.pid"
-LOG_FILE = HOME / ".engram" / "server.log"
+RUNTIME_DIR = HOME / ".engram"
+ENV_FILE = RUNTIME_DIR / ".env"
+PID_FILE = RUNTIME_DIR / "server.pid"
+LOG_FILE = RUNTIME_DIR / "server.log"
+# 运行二进制与管理脚本装在本机（~/.engram/bin）——engram 的运行时家自包含，
+# 不依赖代码仓库所在卷：拔掉外置开发盘，服务照跑、照重启。
+# 代码仓库（SERVER_DIR）只是开发工作区，仅 build/install 时需要。
+BIN_DIR = RUNTIME_DIR / "bin"
+BINARY = BIN_DIR / "engram-server"
 SERVER_DIR = Path(__file__).resolve().parent.parent / "server"
-BINARY = SERVER_DIR / "target" / "release" / "engram-server"
 PORT = 17654
 READY_URL = f"http://127.0.0.1:{PORT}/ready"
 # 前端产物：rust-embed 在**编译期**嵌入 web/dist（crates/api/src/web_assets.rs），
@@ -78,6 +89,11 @@ def build_release() -> int:
     历史教训（2026-09-15）：restart 原先是「先 stop 再 build」，build 一失败服务就留在
     停摆状态（当时 web/dist 缺失导致 build 失败）。所以 build 必须先行、且与停服务解耦。
     """
+    if not (SERVER_DIR / "Cargo.toml").is_file():
+        print(f"❌ 代码仓库不在：{SERVER_DIR} 下没有 Cargo.toml")
+        print("   本脚本是安装版（只带运行时，不带源码）——构建请回到代码仓库用仓库版 engramctl。")
+        print("   运行管理（start/stop/status/logs/restart）不受影响。")
+        return 1
     if not WEB_DIST.is_dir():
         print("❌ 前端产物缺失：web/dist 不存在")
         print("   web_assets.rs 用 RustEmbed 把前端**编译期**嵌进二进制，cargo build 需要它先存在。修复：")
@@ -92,6 +108,35 @@ def build_release() -> int:
     if r.returncode != 0:
         print("❌ build 失败——正在运行的服务未受影响")
         return 1
+    return 0
+
+
+def cmd_install() -> int:
+    """把构建产物装进本机运行时家（~/.engram/bin）：二进制 + 管理脚本自身。
+
+    装完后 engram 的**运行**不再依赖代码仓库所在卷——拔掉外置开发盘，服务照跑、
+    stop/start/status 照用；仓库只在「重新构建」时才需要。旧二进制留 .prev 一份可回滚。
+    """
+    src = SERVER_DIR / "target" / "release" / "engram-server"
+    if not (SERVER_DIR / "Cargo.toml").is_file():
+        print(f"❌ 本脚本是安装版（{Path(__file__).resolve()}），不带安装时对应的代码仓库")
+        print("   install 要从仓库的 target/ 拷构建产物——请回到代码仓库用仓库版 engramctl 操作。")
+        print("   运行管理（start/stop/status/logs/restart）不受影响。")
+        return 1
+    if not src.is_file():
+        print(f"❌ 还没有构建产物：{src} 不存在——先 restart（不带 --skip-build）构建一次")
+        return 1
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    if BINARY.exists():
+        prev = BIN_DIR / "engram-server.prev"
+        prev.unlink(missing_ok=True)
+        BINARY.rename(prev)  # 现役退为 .prev——新版有问题可一键回滚
+    shutil.copy2(src, BINARY)
+    # 管理脚本自身也装一份：本机自包含（拔盘后 stop/start/status 仍可用）
+    shutil.copy2(Path(__file__).resolve(), BIN_DIR / "engramctl")
+    os.chmod(BIN_DIR / "engramctl", 0o755)
+    print(f"[install] ✅ 二进制 → {BINARY}")
+    print(f"[install]    脚本 → {BIN_DIR / 'engramctl'}")
     return 0
 
 
@@ -112,10 +157,14 @@ def cmd_start(skip_build: bool) -> int:
     if not skip_build:
         if rc := build_release():
             return rc
+        # 构建产物装进本机运行时家——engram 从 ~/.engram/bin 跑，与代码仓库所在卷解耦
+        if rc := cmd_install():
+            return rc
     elif BINARY.exists():
         print("[2/4] 跳过 build（--skip-build）✅")
     else:
-        print("❌ --skip-build 但二进制不存在，先跑一次不带 --skip-build 的 start")
+        print("❌ --skip-build 但本机没有已安装的二进制（~/.engram/bin/engram-server）")
+        print("   先跑一次不带 --skip-build 的 start（构建并安装），或回到代码仓库构建后 install")
         return 1
 
     print("[3/4] 后台挂起 engram-server...", end=" ", flush=True)
@@ -132,7 +181,7 @@ def cmd_start(skip_build: bool) -> int:
         child_env["AGENT_MEMORY_METRICS"] = env["AGENT_MEMORY_METRICS"]
     with open(LOG_FILE, "ab") as log:
         proc = subprocess.Popen(
-            [str(BINARY)], cwd=SERVER_DIR, env=child_env,
+            [str(BINARY)], cwd=RUNTIME_DIR, env=child_env,
             stdout=log, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -182,8 +231,11 @@ def cmd_restart(skip_build: bool) -> int:
         print("[restart] build 先行——build 失败则不动正在运行的服务")
         if rc := build_release():
             return rc
+        if rc := cmd_install():
+            return rc
     elif not BINARY.exists():
-        print("❌ --skip-build 但二进制不存在，先跑一次不带 --skip-build 的 restart")
+        print("❌ --skip-build 但本机没有已安装的二进制（~/.engram/bin/engram-server）")
+        print("   先跑一次不带 --skip-build 的 restart（构建并安装）")
         return 1
     cmd_stop()
     time.sleep(1)
@@ -226,6 +278,8 @@ def main() -> int:
         return cmd_restart(skip_build)
     if cmd == "status":
         return cmd_status()
+    if cmd == "install":
+        return cmd_install()
     if cmd == "logs":
         n = int(args[1]) if len(args) > 1 else 50
         return cmd_logs(n)
