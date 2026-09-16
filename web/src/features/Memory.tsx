@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { appConfirm, type ConfirmOptions } from '@/components/confirm'
 
-type Tab = 'sessions' | 'atoms' | 'review' | 'scenarios' | 'persona' | 'search'
+type Tab = 'sessions' | 'atoms' | 'review' | 'scenarios' | 'persona' | 'search' | 'kv'
 
 /** 原子 kind 中英对照（蒸馏产出的 8 类记忆形态）。 */
 const KIND_LABEL: Record<string, string> = {
@@ -59,24 +59,26 @@ function MemoryPage() {
   const [tab, setTab] = useState<Tab>(() => {
     // 支持 ?tab= 深链（Dashboard 管线主视觉点击穿透 / palette 实体直达）：仅首次挂载读一次
     const t = new URLSearchParams(window.location.search).get('tab')
-    const valid: readonly string[] = ['sessions', 'atoms', 'review', 'scenarios', 'persona', 'search']
+    const valid: readonly string[] = ['sessions', 'atoms', 'review', 'scenarios', 'persona', 'search', 'kv']
     return valid.includes(t ?? '') ? (t as Tab) : 'sessions'
   })
   // tab 计数（原管线条带的职责）：挂载时取一次；蒸馏脉冲只表「正在炼」（processing）
-  const [counts, setCounts] = useState<{ l0: number; l1: number; l2: number; l3: number; review: number } | null>(null)
+  const [counts, setCounts] = useState<{ l0: number; l1: number; l2: number; l3: number; review: number; kv: number } | null>(null)
   useEffect(() => {
     Promise.all([
       api.get<Session[]>('/memory/sessions?limit=500').catch(() => []),
       api.get<Atom[]>('/memory/atoms?limit=500').catch(() => []),
       api.get<Scenario[]>('/memory/scenarios?limit=500').catch(() => []),
       api.get<Persona[]>('/memory/persona').catch(() => []),
-    ]).then(([s, a, sc, p]) => {
+      api.get<KvEntry[]>('/memory/kv?limit=500').catch(() => []),
+    ]).then(([s, a, sc, p, kv]) => {
       setCounts({
         l0: s.length,
         l1: a.filter((x) => x.status === 'active' || x.status === 'candidate').length,
         l2: sc.length,
         l3: p.length,
         review: a.filter((x) => x.needs_review).length,
+        kv: kv.length,
       })
     })
   }, [])
@@ -88,6 +90,7 @@ function MemoryPage() {
     { value: 'review' as Tab, label: '人审', count: counts?.review },
     { value: 'scenarios' as Tab, label: '场景', count: counts?.l2 },
     { value: 'persona' as Tab, label: '画像', count: counts?.l3 },
+    { value: 'kv' as Tab, label: 'KV', count: counts?.kv },
   ]
 
   return (
@@ -100,6 +103,7 @@ function MemoryPage() {
       {tab === 'review' && <ReviewQueue onGoAtoms={() => setTab('atoms')} />}
       {tab === 'scenarios' && <Scenarios />}
       {tab === 'persona' && <PersonaView onGoScenario={() => setTab('scenarios')} />}
+      {tab === 'kv' && <KvPane />}
       {tab === 'search' && (
         <SearchPane
           onGoAtoms={() => setTab('atoms')}
@@ -1151,6 +1155,126 @@ function AtomHistoryDrawer({ atom, onClose }: { atom: Atom; onClose: () => void 
           )}
         </div>
       </aside>
+    </div>
+  )
+}
+
+
+/** KV 精确值条目（EN-60 治理面只读；写入唯一通道是 MCP memory.kv_put）。 */
+interface KvEntry {
+  key: string
+  value: string
+  context: string
+  tags: string[]
+  source: string
+  updated_at: string
+}
+
+/** KV 治理区：AI 管道存的权威精确值（序列号/UUID/路径…），人只读。 */
+function KvPane() {
+  const [rows, setRows] = useState<KvEntry[] | null>(null)
+  const [err, setErr] = useState('')
+  const [q, setQ] = useState('')
+  const [openKey, setOpenKey] = useState<string | null>(null)
+  const load = (query: string) =>
+    api
+      .get<KvEntry[]>(`/memory/kv?limit=500${query ? `&q=${encodeURIComponent(query)}` : ''}`)
+      .then(setRows)
+      .catch((e) => setErr(e.message))
+  useEffect(() => {
+    load('')
+  }, [])
+  if (err) return <ErrorBox msg={err} />
+  if (!rows) return <Spinner />
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        AI 管道的权威精确值存储（序列号/UUID/路径…逐字保存、回读比对）。只读——写入唯一通道是 MCP
+        memory.kv_put。
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          className={inputCls}
+          aria-label="KV 检索"
+          placeholder="按 key / value / context 子串检索…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') load(q)
+          }}
+        />
+        <Button size="sm" variant="secondary" onClick={() => load(q)}>
+          检索
+        </Button>
+      </div>
+      {rows.length === 0 ? (
+        <Empty text="没有命中的 KV 条目" />
+      ) : (
+        <div className="overflow-hidden rounded-md border border-border">
+          <table className={tableCls.root}>
+            <thead>
+              <tr>
+                <th>key</th>
+                <th>value</th>
+                <th>context</th>
+                <th>source</th>
+                <th>更新</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr
+                  key={r.key}
+                  className="cursor-pointer hover:bg-muted/40"
+                  onClick={() => setOpenKey(openKey === r.key ? null : r.key)}
+                >
+                  <td className="max-w-52 truncate font-mono text-xs font-medium">{r.key}</td>
+                  <td className="max-w-64 truncate font-mono text-xs">{r.value}</td>
+                  <td className="max-w-72 truncate text-xs text-muted-foreground">{r.context}</td>
+                  <td className="whitespace-nowrap font-mono text-xs text-muted-foreground">{r.source}</td>
+                  <td className="whitespace-nowrap text-xs text-muted-foreground">{relTime(r.updated_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {openKey &&
+        (() => {
+          const r = rows.find((x) => x.key === openKey)
+          if (!r) return null
+          return (
+            <div className="rounded-md border border-border bg-muted/20 p-4 text-sm leading-6">
+              <div className="flex items-center justify-between">
+                <h3 className="font-mono text-sm font-semibold break-all">{r.key}</h3>
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setOpenKey(null)}
+                >
+                  收起
+                </button>
+              </div>
+              <dl className="mt-3 space-y-2">
+                <div>
+                  <dt className="text-xs text-muted-foreground">value（逐字）</dt>
+                  <dd className="mt-0.5 break-all rounded bg-background p-2 font-mono text-xs">{r.value}</dd>
+                </div>
+                {r.context && (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">context</dt>
+                    <dd className="mt-0.5 text-xs break-words">{r.context}</dd>
+                  </div>
+                )}
+                <div className="flex gap-4 text-xs text-muted-foreground">
+                  <span>source：{r.source}</span>
+                  <span>tags：{r.tags.length ? r.tags.join(' / ') : '—'}</span>
+                  <span>更新：{fmtTime(r.updated_at)}</span>
+                </div>
+              </dl>
+            </div>
+          )
+        })()}
     </div>
   )
 }

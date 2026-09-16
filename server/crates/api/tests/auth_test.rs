@@ -1458,6 +1458,8 @@ async fn openapi_snapshot() {
             "/memory/entities/{id}/relations/{rid}",
             "/memory/entities/{id}/revisions",
             "/memory/export",
+            "/memory/kv",
+            "/memory/kv/{key}",
             "/memory/persona",
             "/memory/persona/history",
             "/memory/persona/rollback",
