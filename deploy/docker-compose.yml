@@ -50,9 +50,6 @@ services:
     volumes:
       # 数据存宿主本地：uploads / wiki-sources / codegraph
       - ${ENGRAM_DATA_HOME:-~/.engram}/app:/app/data
-      # codegraph 容器形态：注册仓库按 bind mount 挂进容器（路径=容器内路径注册）。
-      # 新仓库接入：volumes 加一行挂载 → 容器内 codegraph register source_uri=/workspace/<repo> → index。
-      - /Users/trtyr/Documents/sec-agent:/workspace/sec-agent
     restart: unless-stopped
 
 # 数据卷已 bind mount 到宿主 ~/.engram/（见各服务 volumes），不再使用 named volume

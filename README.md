@@ -140,14 +140,17 @@ claude mcp add --transport http engram http://localhost:8080/mcp \
 
 ```bash
 git clone https://github.com/trtyr/engram && cd engram
-python3 scripts/engramctl.py start          # PG 检查 → cargo build → 后台挂起 → /ready
+python3 scripts/setup.sh                    # 冷启动引导：体检依赖（cargo/pnpm/PG/pgvector，缺失给安装命令）→ 建库 → 生成 ~/.engram/.env → 构建前端
+python3 scripts/engramctl.py start          # cargo build → 安装二进制到 ~/.engram/bin → 后台挂起 → /ready
 python3 scripts/engramctl.py stop|status|logs|restart   # --skip-build 跳编译
-# 控制台 → http://localhost:17654
+# 控制台 → http://localhost:17654（登录密码在 setup.sh 生成时打印一次，也在 ~/.engram/.env）
 ```
 
-- PG：brew `postgresql@16` + pgvector（127.0.0.1:5432）；配置源 `~/.engram/.env`
+- 运行时家自包含于 `~/.engram/`：数据、配置、二进制（bin/engram-server）、管理脚本（bin/engramctl）全在本机；
+  代码仓库只是开发工作区——拔掉仓库所在的外置盘，服务照跑、照重启，只是不能重新构建
+- PG：brew `postgresql@16/17` + pgvector（127.0.0.1:5432，setup.sh 会建库与扩展；brew 的 pgvector 只支持 PG17+）
 - 进程 nohup 后台，PID `~/.engram/server.pid`，日志 `~/.engram/server.log`
-- codegraph 宿主路径单形态，无容器路径转换
+- codegraph 宿主路径单形态，无容器路径转换（CLI 可选：`npm i -g` 对应版本后 `engramctl` 自动可用）
 
 ### Docker（远程部署选项）
 
