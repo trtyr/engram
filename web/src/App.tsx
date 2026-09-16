@@ -19,6 +19,7 @@ import {
   Puzzle,
   Search,
   Settings as SettingsIcon,
+  Ticket,
   Users,
   Waypoints,
 } from 'lucide-react'
@@ -40,6 +41,7 @@ const Projects = lazy(() => import('@/features/Projects'))
 const ProjectDetail = lazy(() => import('@/features/ProjectDetail'))
 const Skills = lazy(() => import('@/features/Skills'))
 const Todos = lazy(() => import('@/features/Todos'))
+const Tickets = lazy(() => import('@/features/Tickets'))
 const Jobs = lazy(() => import('@/features/Jobs'))
 const Settings = lazy(() => import('@/features/Settings'))
 const Mcp = lazy(() => import('@/features/Mcp'))
@@ -68,6 +70,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
       { to: '/projects', label: '项目', icon: FolderKanban },
       { to: '/skills', label: '技能', icon: Puzzle },
       { to: '/todos', label: '待办', icon: ListTodo },
+      { to: '/tickets', label: '工单', icon: Ticket },
     ],
   },
   {
@@ -323,6 +326,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/skills" element={<Skills />} />
               <Route path="/todos" element={<Todos />} />
+              <Route path="/tickets" element={<Tickets />} />
               <Route path="/jobs" element={<Jobs />} />
               <Route path="/mcp" element={<Mcp />} />
               <Route path="/settings" element={<Settings />} />
