@@ -409,8 +409,10 @@ pub struct TodoLinksParams {
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct TodoListParams {
-    /// open | done | archived（缺省全部，open 优先展示）
-    #[schemars(description = "可选状态过滤：open/done/archived。缺省全部（open 优先）。")]
+    /// 状态过滤，按 kind 校验：todo 态 open/done/archived；ticket 态 open/confirmed/in_progress/resolved/verified/archived（缺省全部，open 优先展示）
+    #[schemars(
+        description = "可选状态过滤（按 kind 校验）：todo 态 open/done/archived；ticket 态 open/confirmed/in_progress/resolved/verified/archived。缺省全部（open 优先）。"
+    )]
     pub status: Option<String>,
     /// 可选：todo / ticket
     #[schemars(description = "可选形态过滤：todo / ticket。")]
