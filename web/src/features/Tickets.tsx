@@ -84,6 +84,25 @@ export default function Tickets() {
     }
   }
 
+  /** 编辑工单四件套之一（详情面板内联编辑；PUT 部分更新，其余字段不动） */
+  async function saveField(
+    t: Todo,
+    field: 'symptom' | 'reproduce' | 'acceptance' | 'resolution',
+    value: string,
+  ) {
+    setBusy(true)
+    try {
+      await api.put(`/todos/${t.id}`, { [field]: value })
+      setErr('')
+      load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '保存失败')
+      throw e
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function doArchive(t: Todo) {
     setBusy(true)
     try {
@@ -198,6 +217,7 @@ export default function Tickets() {
               onAdvance={advance}
               onArchive={doArchive}
               onDelete={doDelete}
+              onEditSave={saveField}
             />
           )}
         </div>
@@ -252,7 +272,17 @@ function TicketRow({
             {TICKET_STATUS_LABEL[t.status] ?? t.status}
           </span>
         </div>
-        {t.symptom && <p className="mt-0.5 truncate text-xs text-muted-foreground">{t.symptom}</p>}
+        <div className="mt-0.5 flex items-center gap-1.5">
+          {t.symptom && <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{t.symptom}</p>}
+          {t.tags.map((tag: string) => (
+            <span
+              key={tag}
+              className="shrink-0 rounded border border-border px-1 py-0 text-[10px] text-muted-foreground"
+            >
+              #{tag}
+            </span>
+          ))}
+        </div>
       </div>
       <div className="shrink-0 text-right font-mono text-[10px] text-muted-foreground/70">
         <p>EN-{t.short_no}</p>
@@ -262,7 +292,7 @@ function TicketRow({
   )
 }
 
-/** 详情面板：symptom/reproduce/acceptance/resolution 完整展示 + 状态流转 + 归档/删除。 */
+/** 详情面板：symptom/reproduce/acceptance/resolution 完整展示 + **内联编辑** + 状态流转 + 归档/删除。 */
 function TicketDetail({
   t,
   busy,
@@ -270,6 +300,7 @@ function TicketDetail({
   onAdvance,
   onArchive,
   onDelete,
+  onEditSave,
 }: {
   t: Todo
   busy: boolean
@@ -277,6 +308,11 @@ function TicketDetail({
   onAdvance: (t: Todo) => void
   onArchive: (t: Todo) => void
   onDelete: (t: Todo) => void
+  onEditSave: (
+    t: Todo,
+    field: 'symptom' | 'reproduce' | 'acceptance' | 'resolution',
+    value: string,
+  ) => Promise<void>
 }) {
   const doneish = TICKET_DONEISH.includes(t.status)
   const step = TICKET_NEXT[t.status]
@@ -324,17 +360,34 @@ function TicketDetail({
         ))}
       </div>
 
-      {/* 工单四件套 */}
+      {/* 工单四件套（内联编辑：点「编辑」改文本，保存走 PUT 部分更新，其余字段不动） */}
       <div className="mt-3 space-y-2.5 text-sm">
-        <Section label="症状（symptom）" text={t.symptom} />
-        <Section label="复现（reproduce）" text={t.reproduce} />
-        <Section label="验收（acceptance）" text={t.acceptance} />
-        {t.resolution && (
-          <div className="rounded bg-success/10 px-2.5 py-2 text-xs leading-5 text-success">
-            <p className="font-medium">解决记录（resolution）</p>
-            <p className="mt-0.5 whitespace-pre-wrap">{t.resolution}</p>
-          </div>
-        )}
+        <EditableSection label="症状（symptom）" field="symptom" value={t.symptom} busy={busy} t={t} onSave={onEditSave} />
+        <EditableSection
+          label="复现（reproduce）"
+          field="reproduce"
+          value={t.reproduce}
+          busy={busy}
+          t={t}
+          onSave={onEditSave}
+        />
+        <EditableSection
+          label="验收（acceptance）"
+          field="acceptance"
+          value={t.acceptance}
+          busy={busy}
+          t={t}
+          onSave={onEditSave}
+        />
+        <EditableSection
+          label="解决记录（resolution）"
+          field="resolution"
+          value={t.resolution}
+          busy={busy}
+          t={t}
+          onSave={onEditSave}
+          tone="success"
+        />
       </div>
 
       {/* 元信息 */}
@@ -378,16 +431,100 @@ function TicketDetail({
   )
 }
 
-/** 四件套小节：有内容展示，无内容显示占位（诚实标注——工单字段空着比藏着有用）。 */
-function Section({ label, text }: { label: string; text: string }) {
+/** 四件套小节（内联编辑）：点「编辑」→ textarea → 保存走 PUT 部分更新；
+ *  空字段诚实标「未填」（工单字段空着比藏着有用），resolution 用成功色调。 */
+function EditableSection({
+  label,
+  field,
+  value,
+  busy,
+  t,
+  onSave,
+  tone,
+}: {
+  label: string
+  field: 'symptom' | 'reproduce' | 'acceptance' | 'resolution'
+  value: string
+  busy: boolean
+  t: Todo
+  onSave: (
+    t: Todo,
+    field: 'symptom' | 'reproduce' | 'acceptance' | 'resolution',
+    value: string,
+  ) => Promise<void>
+  tone?: 'success'
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [err, setErr] = useState('')
+
+  async function save() {
+    try {
+      await onSave(t, field, draft)
+      setEditing(false)
+      setErr('')
+    } catch {
+      // 保存失败：留在编辑态，错误已由父级 ErrorBox 展示
+    }
+  }
+
   return (
-    <div>
-      <p className="text-[11px] font-medium tracking-wide text-muted-foreground/70">{label}</p>
-      {text ? (
-        <p className="mt-0.5 whitespace-pre-wrap leading-5">{text}</p>
+    <div className={cn(tone === 'success' && 'rounded bg-success/10 px-2.5 py-2')}>
+      <div className="flex items-center justify-between gap-2">
+        <p
+          className={cn(
+            'text-[11px] font-medium tracking-wide',
+            tone === 'success' ? 'text-success' : 'text-muted-foreground/70',
+          )}
+        >
+          {label}
+        </p>
+        {!editing && (
+          <button
+            type="button"
+            className="text-[11px] text-muted-foreground hover:text-foreground"
+            disabled={busy}
+            aria-label={`编辑${label}`}
+            onClick={() => {
+              setDraft(value)
+              setEditing(true)
+            }}
+          >
+            编辑
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="mt-1">
+          <textarea
+            className={cn(inputCls, 'min-h-20 w-full text-sm')}
+            aria-label={`编辑${label}`}
+            value={draft}
+            disabled={busy}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <div className="mt-1.5 flex gap-1.5">
+            <Button size="sm" disabled={busy} onClick={save}>
+              保存
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(false)}>
+              取消
+            </Button>
+          </div>
+        </div>
+      ) : value ? (
+        <p
+          className={cn(
+            'mt-0.5 whitespace-pre-wrap leading-5',
+            tone === 'success' && 'text-xs text-success',
+          )}
+        >
+          {value}
+        </p>
       ) : (
         <p className="mt-0.5 text-xs text-muted-foreground/50">（未填）</p>
       )}
+      {err && <p className="mt-1 text-xs text-destructive">{err}</p>}
     </div>
   )
 }
