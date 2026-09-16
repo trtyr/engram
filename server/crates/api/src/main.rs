@@ -11,10 +11,8 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 1. 配置
-    let cfg = Config::from_env()?;
-
-    // 2. 结构化 JSON 日志
+    // 1. 结构化 JSON 日志（必须最先初始化——Config::from_env 的 data_root WARN 依赖它，
+    //    放在配置解析之后会让最早的告警静默丢失）
     tracing_subscriber::fmt()
         .json()
         .flatten_event(true)
@@ -23,6 +21,9 @@ async fn main() -> anyhow::Result<()> {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
+
+    // 2. 配置
+    let cfg = Config::from_env()?;
 
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "engram 启动");
 

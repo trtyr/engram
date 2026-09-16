@@ -88,9 +88,7 @@ impl Config {
             port,
             admin_password,
             master_key,
-            data_dir: std::env::var("AGENT_MEMORY_DATA_DIR")
-                .unwrap_or_else(|_| "./data".into())
-                .into(),
+            data_dir: engram_wiki_engine::data_root(),
         })
     }
 }

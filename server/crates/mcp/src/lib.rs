@@ -5121,10 +5121,8 @@ async fn codegraph_catalog(pool: &engram_storage::PgPool) -> Option<String> {
 
 /// MCP 工具面的 codegraph 工作目录：与 api 同约定（AGENT_MEMORY_DATA_DIR/codegraph）。
 fn cg_root_from_env() -> std::path::PathBuf {
-    std::path::Path::new(
-        &std::env::var("AGENT_MEMORY_DATA_DIR").unwrap_or_else(|_| "./data".into()),
-    )
-    .join("codegraph")
+    // EN-47：数据根解析唯一收口（wiki-engine::data_root——env 优先，fallback ~/.engram/app 且不再静默）
+    engram_wiki_engine::data_root().join("codegraph")
 }
 
 /// 按本次工具面实际包含的工具惰性取动态清单（工具不在面内就不查库）。

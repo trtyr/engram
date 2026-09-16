@@ -12,6 +12,7 @@ engram-jobs.workspace = true
 engram-llm.workspace = true
 engram-search.workspace = true
 engram-storage.workspace = true
+engram-wiki-engine = { path = "../wiki-engine" }
 
 rmcp.workspace = true
 schemars.workspace = true

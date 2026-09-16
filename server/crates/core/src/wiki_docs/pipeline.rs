@@ -351,9 +351,8 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
 }
 
 fn data_uploads() -> PathBuf {
-    std::env::var("AGENT_MEMORY_DATA_DIR")
-        .unwrap_or_else(|_| "./data".into())
-        .into()
+    // EN-47：数据根解析唯一收口（wiki-engine::data_root——env 优先，fallback ~/.engram/app 且不再静默）
+    engram_wiki_engine::data_root()
 }
 
 fn extract_title_from_html(bytes: &[u8]) -> Option<String> {

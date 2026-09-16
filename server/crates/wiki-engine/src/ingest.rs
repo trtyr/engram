@@ -13,14 +13,43 @@ use crate::service::folder_for_type;
 /// 单次织入建页量软上限（测试方 W-7③漂移校准）：超限截断+告警，防 llm 页自我漂移。
 const MAX_PAGES_PER_GENERATE: usize = 20;
 
-fn data_dir() -> std::path::PathBuf {
-    std::env::var("AGENT_MEMORY_DATA_DIR")
-        .unwrap_or_else(|_| "./data".into())
-        .into()
+/// 数据根解析——全 workspace 唯一收口（EN-47）。
+///
+/// `AGENT_MEMORY_DATA_DIR` 优先；未设（或空串）时 fallback 到 `~/.engram/app`
+/// （宿主运行时家，与 engramctl 注入的值一致），无 HOME 才退 `./data`。
+/// 任何 fallback 都会打 WARN（进程级一次）——**不再静默**：此前 5 处各自
+/// `unwrap_or_else(|_| "./data")`，数据根随进程 cwd 漂移且无告警。
+pub fn data_root() -> std::path::PathBuf {
+    let (path, fallback) = resolve_data_root(
+        std::env::var("AGENT_MEMORY_DATA_DIR").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    );
+    if fallback {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            tracing::warn!(
+                dir = %path.display(),
+                "AGENT_MEMORY_DATA_DIR 未设——数据根 fallback（不再静默使用随 cwd 漂移的 ./data；\
+                 宿主长期运行请显式设置环境变量）"
+            );
+        });
+    }
+    path
+}
+
+/// 纯逻辑：给定 env 值与 HOME，解析出数据根 + 是否发生 fallback（便于测试）。
+fn resolve_data_root(env_val: Option<&str>, home: Option<&str>) -> (std::path::PathBuf, bool) {
+    if let Some(d) = env_val.map(str::trim).filter(|d| !d.is_empty()) {
+        return (std::path::PathBuf::from(d), false);
+    }
+    match home {
+        Some(h) => (std::path::PathBuf::from(h).join(".engram").join("app"), true),
+        None => (std::path::PathBuf::from("./data"), true),
+    }
 }
 
 fn wiki_sources_dir() -> std::path::PathBuf {
-    data_dir().join("wiki-sources")
+    data_root().join("wiki-sources")
 }
 
 fn sha256_hex(b: &[u8]) -> String {
@@ -1054,5 +1083,38 @@ mod slice_tests {
         let slices = slice_source(&huge, GEN_SLICE_CHARS);
         assert!(slices.len() >= 3, "单段超限硬切: {}", slices.len());
         assert!(slices.iter().all(|s| s.chars().count() <= GEN_SLICE_CHARS));
+    }
+}
+
+#[cfg(test)]
+mod data_root_tests {
+    use super::resolve_data_root;
+
+    #[test]
+    fn env_设定时直接使用且不告警() {
+        let (p, fallback) = resolve_data_root(Some("/var/data/engram"), Some("/home/x"));
+        assert_eq!(p, std::path::PathBuf::from("/var/data/engram"));
+        assert!(!fallback);
+    }
+
+    #[test]
+    fn env_为空串视同未设() {
+        let (p, fallback) = resolve_data_root(Some("   "), Some("/home/x"));
+        assert_eq!(p, std::path::PathBuf::from("/home/x/.engram/app"));
+        assert!(fallback);
+    }
+
+    #[test]
+    fn env_未设有_home_fallback_到运行时家() {
+        let (p, fallback) = resolve_data_root(None, Some("/home/x"));
+        assert_eq!(p, std::path::PathBuf::from("/home/x/.engram/app"));
+        assert!(fallback);
+    }
+
+    #[test]
+    fn env_与_home_都未设_退回_cwd_相对路径() {
+        let (p, fallback) = resolve_data_root(None, None);
+        assert_eq!(p, std::path::PathBuf::from("./data"));
+        assert!(fallback);
     }
 }

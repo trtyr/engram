@@ -21,6 +21,7 @@ engram-core.workspace = true
 engram-distill.workspace = true
 engram-search.workspace = true
 engram-cg-bridge.workspace = true
+engram-wiki-engine = { path = "../wiki-engine" }
 
 axum.workspace = true
 metrics.workspace = true

@@ -24,6 +24,10 @@ impl AppState {
             pool,
             admin_password: None,
             master_key: None,
+            // EN-47：此默认仅供测试（cwd 相对 ./data）——生产主链路必须显式 `.with_data_dir()` 注入
+            // （见 api/main.rs 从 Config::from_env 注入）。不要把这里的默认改成 env 解析：
+            // 测试进程通常不设 env，解析会让裸测试静默落到真数据根 ~/.engram/app 造成污染。
+            // 静默漂移的病根已由 wiki-engine::data_root 的 WARN 收口解决。
             data_dir: "./data".into(),
         }
     }

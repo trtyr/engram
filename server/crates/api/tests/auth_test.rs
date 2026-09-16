@@ -1426,6 +1426,7 @@ async fn openapi_snapshot() {
             "/auth/sessions/{id}",
             "/auth/status",
             "/auth/username",
+            "/codegraph/gc",
             "/codegraph/projects",
             "/codegraph/projects/{id}",
             "/codegraph/projects/{id}/graph",
