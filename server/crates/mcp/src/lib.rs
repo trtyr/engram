@@ -1202,7 +1202,9 @@ pub struct SkillsCreateParams {
     #[schemars(description = "技能名（简短、可辨认，如「PR 审查」）。")]
     pub name: String,
     /// markdown 正文（技能指令本体）
-    #[schemars(description = "技能正文，markdown。写清这个技能做什么、怎么做、何时用。")]
+    #[schemars(
+        description = "技能正文，markdown。写清这个技能做什么、怎么做、何时用。kind=script 时传空字符串（正文不入库——SKILL.md 真身在 local_path，系统只存指针）。"
+    )]
     pub content: String,
     /// 可选 slug（缺省从 name 推导；中文/非 ASCII 名必须显式给）
     #[schemars(
@@ -2414,17 +2416,24 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_skills(&p)?;
+        // EN-54：script 型从 local_path 现读 SKILL.md 正文（与 HTTP 层 GET /skills/{slug} 对齐）。
+        // 此前调 get_skill（不带正文）且无条件 list_files 被 script 守卫拒掉，
+        // 报出张冠李戴的「文件列表 对 script 型技能不可用」——与 help 承诺的「现读」直接矛盾。
         let s = self
             .skills_svc()
-            .get_skill(&params.0.slug)
+            .get_skill_with_content(&params.0.slug)
             .await
             .map_err(from_skills)?;
-        // folder 形态：附属文件索引随详情下发（AI 据此用 skills_file_get 取脚本/参考资料）
-        let files = self
-            .skills_svc()
-            .list_files(&params.0.slug)
-            .await
-            .map_err(from_skills)?;
+        // folder 形态：附属文件索引随详情下发（AI 据此用 skills_file_get 取脚本/参考资料）；
+        // script 型附件在本地（指针语义），无服务端文件列表——跳过而非报错
+        let files = if s.kind == "script" {
+            Vec::new()
+        } else {
+            self.skills_svc()
+                .list_files(&params.0.slug)
+                .await
+                .map_err(from_skills)?
+        };
         let mut v = serde_json::to_value(&s).unwrap_or(serde_json::json!({}));
         v["files"] = serde_json::to_value(&files).unwrap_or(serde_json::json!([]));
         ok_json(v)
