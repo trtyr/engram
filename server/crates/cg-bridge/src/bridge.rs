@@ -268,8 +268,10 @@ impl CgBridge {
         Ok(row)
     }
 
-    /// 索引新鲜度（工单「索引生命周期无口径」）：仓库 HEAD 提交时间 vs last_indexed。
-    /// 只读 .git（git log），不新增后台扫描。HEAD 不可读（非 git 仓库/权限）→ 仅返回 last_indexed。
+    /// 索引新鲜度：**优先比快照戳**（`snapshot_head` vs HEAD——「图基于哪个 commit」对
+    /// 「代码在哪个 commit」，直接判据），无快照戳时才退回「HEAD 提交时间 vs last_indexed」。
+    /// 只读 .git（git log），不新增后台扫描。HEAD 不可读（非 git 仓库/权限）→ 只报快照戳 +
+    /// stale=null，不冒充最新。
     pub async fn freshness_for(&self, proj: &CgProjectDto) -> serde_json::Value {
         let last_indexed = proj
             .stats
@@ -316,38 +318,45 @@ impl CgBridge {
             });
         };
 
-        // last_indexed 解析（CLI 格式容错：RFC3339 字符串）
+        // last_indexed 解析（CLI 格式容错）——**降级为非致命**：它只是「无快照戳时的兜底判据」，
+        // 解析不出来不再早退（有快照戳时本来就轮不到它说话）。
         let indexed_at = last_indexed.as_str().and_then(|s| {
             chrono::DateTime::parse_from_rfc3339(s)
                 .ok()
                 .map(|t| t.with_timezone(&chrono::Utc))
         });
-        let Some(indexed_at) = indexed_at else {
-            return serde_json::json!({
-                "head": hash, "head_committed_at": head_time.to_rfc3339(),
-                "last_indexed": last_indexed, "stale": serde_json::Value::Null,
-                "hint": "last_indexed 无法解析——建议 sync 后再查询",
-            });
-        };
-        let stale = head_time > indexed_at;
-        // 构建时快照戳（index/sync 时刻的 HEAD）：与当前 HEAD 并列展示——
-        // 查询方可直接对照「图基于 X vs 代码在 Y」，不靠时间戳推断。
+        // 快照戳：索引构建时刻的 HEAD（stats.head，index/sync 时写入）。
         let snapshot_head = proj
             .stats
             .as_ref()
             .and_then(|s| s.get("head"))
             .cloned()
             .unwrap_or(serde_json::Value::Null);
+        // 陈旧判据（与《文档工作流》既有口径对齐）：**优先比快照戳**——「图基于哪个 commit」
+        // vs「代码在哪个 commit」是直接判据。时间戳只是间接代理：CLI 的 lastIndexed 指「上次
+        // 全量 index」，**sync 不更新它**（sync 只改索引内容 + last_synced_at + 快照戳），
+        // 拿它判必然假阳性——sync 完仍报 stale，hint 又叫用户再 sync（死循环）。故仅兜底。
+        let stale = match snapshot_head.as_str() {
+            Some(s) if !s.is_empty() => serde_json::json!(s != hash),
+            _ => match indexed_at {
+                Some(t) => serde_json::json!(head_time > t),
+                None => serde_json::Value::Null, // 两样判据都缺 → 未知，不虚报
+            },
+        };
         let mut v = serde_json::json!({
             "head": hash,
             "snapshot_head": snapshot_head,
             "head_committed_at": head_time.to_rfc3339(),
-            "last_indexed": indexed_at.to_rfc3339(),
+            "last_indexed": indexed_at.map(|t| t.to_rfc3339()),
             "stale": stale,
         });
-        if stale {
+        if stale == serde_json::json!(true) {
             v["hint"] = serde_json::json!(
-                "索引早于最近一次提交——结果可能落后于代码，建议先 codegraph sync"
+                "索引落后于代码——图基于 snapshot_head、代码在 head，建议先 codegraph sync"
+            );
+        } else if stale.is_null() {
+            v["hint"] = serde_json::json!(
+                "快照戳与 last_indexed 都缺——无法校验新鲜度（重新 index 可补上快照戳）"
             );
         }
         v
@@ -1208,6 +1217,108 @@ mod tests {
         let f = bridge.freshness_for(&proj).await;
         assert_eq!(f["stale"], serde_json::Value::Null, "{f}");
         assert!(f["snapshot_head"].is_null(), "{f}");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// EN-22 活体样本回归：陈旧判据优先比**快照戳**，而不是「HEAD 提交时间 vs last_indexed」。
+    /// 今日实测的假阳性：sync 之后 snapshot_head == head（图确实是新的），但 CLI 的 lastIndexed
+    /// 没被 sync 更新（它指「上次全量 index」），旧判据据此报 stale=true，hint 还叫用户再 sync
+    /// ——照做之后还是 stale，死循环。
+    #[tokio::test]
+    async fn freshness_prefers_snapshot_head_over_timestamps() {
+        let bridge = CgBridge::new(
+            sqlx::Pool::<sqlx::Postgres>::connect_lazy(
+                "postgres://invalid:invalid@127.0.0.1:1/none",
+            )
+            .unwrap(),
+            "/tmp/cg-nonexistent-root",
+        );
+        let base = std::env::temp_dir().join(format!("cg-fresh2-{}", Uuid::now_v7()));
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+        let rev_parse = |args: &[&str], cwd: &std::path::Path| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"]);
+        std::fs::write(repo.join("a.txt"), "x").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "A"]);
+        let hash_a = String::from_utf8_lossy(&rev_parse(&["rev-parse", "HEAD"], &repo).stdout)
+            .trim()
+            .to_string();
+        std::fs::write(repo.join("b.txt"), "y").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "B"]);
+        let hash_b = String::from_utf8_lossy(&rev_parse(&["rev-parse", "HEAD"], &repo).stdout)
+            .trim()
+            .to_string();
+        assert_ne!(hash_a, hash_b);
+
+        let mk = |stats: serde_json::Value| CgProjectDto {
+            id: Uuid::now_v7(),
+            name: "t".into(),
+            path: repo.to_string_lossy().into_owned(),
+            source_uri: "t".into(),
+            status: "ready".into(),
+            usable: false,
+            stats: Some(stats),
+            error: None,
+            last_synced_at: None,
+            created_at: chrono::Utc::now(),
+        };
+
+        // ① 快照戳 == HEAD → 新鲜。**哪怕 last_indexed 远早于这次提交**（今日假阳性场景）
+        let f = bridge
+            .freshness_for(&mk(serde_json::json!({
+                "head": hash_b, "last_indexed": "2020-01-01T00:00:00+00:00"
+            })))
+            .await;
+        assert_eq!(f["stale"], serde_json::json!(false), "{f}");
+        assert!(f.get("hint").is_none(), "判新鲜时不该给 sync 提示：{f}");
+
+        // ② 快照戳 ≠ HEAD（图停在旧 commit）→ 陈旧，且提示 sync
+        let f = bridge
+            .freshness_for(&mk(serde_json::json!({
+                "head": hash_a, "last_indexed": chrono::Utc::now().to_rfc3339()
+            })))
+            .await;
+        assert_eq!(f["stale"], serde_json::json!(true), "{f}");
+        assert!(
+            f["hint"].as_str().unwrap_or_default().contains("sync"),
+            "{f}"
+        );
+
+        // ③ 无快照戳 → 退回时间戳比较：last_indexed 早于 HEAD 提交时间 → 陈旧
+        let f = bridge
+            .freshness_for(&mk(serde_json::json!({
+                "last_indexed": "2020-01-01T00:00:00+00:00"
+            })))
+            .await;
+        assert_eq!(f["stale"], serde_json::json!(true), "{f}");
+
+        // ④ 无快照戳 + last_indexed 晚于 HEAD 提交时间 → 判新鲜（兜底判据的另一半）
+        let f = bridge
+            .freshness_for(&mk(serde_json::json!({
+                "last_indexed": "2099-01-01T00:00:00+00:00"
+            })))
+            .await;
+        assert_eq!(f["stale"], serde_json::json!(false), "{f}");
 
         let _ = std::fs::remove_dir_all(&base);
     }
