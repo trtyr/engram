@@ -21,6 +21,8 @@ export default function Todos() {
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [doneRows, setDoneRows] = useState<Todo[] | null>(null)
+  const [showDone, setShowDone] = useState(false) // 「已完成」折叠组，默认收起（微软 To Do 心智）
 
   // 快速输入条：一行输入回车即建，优先级轻量可调
   const [title, setTitle] = useState('')
@@ -49,6 +51,15 @@ export default function Todos() {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
+
+  // 「已完成」折叠组：active 视图内展开时才拉取（默认收起不白拉）；列表变化后同步刷新
+  useEffect(() => {
+    if (view !== 'active' || !showDone) return
+    api
+      .get<Todo[]>('/todos?kind=todo&status=done')
+      .then(setDoneRows)
+      .catch(() => undefined)
+  }, [view, showDone, rows])
 
   async function quickAdd() {
     if (!title.trim()) return
@@ -240,27 +251,75 @@ export default function Todos() {
       )}
 
       {/* 「已完成」折叠组：仅进行中视图，默认收起（微软 To Do 心智） */}
-      {view === 'active' && <DoneHint />}
+      {view === 'active' && (
+        <DoneGroup
+          count={doneRows?.length ?? 0}
+          open={showDone}
+          rows={doneRows}
+          busy={busy}
+          onToggleOpen={() => setShowDone((v) => !v)}
+          onToggle={toggleDone}
+          onArchive={doArchive}
+          onDelete={doDelete}
+        />
+      )}
     </div>
   )
 }
 
-/** 「已完成」折叠组：active 视图底部提示——已完成项在「已完成」视图里（数据按 status=open 拉取，不重复拉取）。 */
-function DoneHint() {
+/** 「已完成 N」折叠组（微软 To Do：完成后收进这里，默认收起，展开可看/可重开）。 */
+function DoneGroup({
+  count,
+  open,
+  rows,
+  busy,
+  onToggleOpen,
+  onToggle,
+  onArchive,
+  onDelete,
+}: {
+  count: number
+  open: boolean
+  rows: Todo[] | null
+  busy: boolean
+  onToggleOpen: () => void
+  onToggle: (t: Todo) => void
+  onArchive: (t: Todo) => void
+  onDelete: (t: Todo) => void
+}) {
   return (
-    <button
-      type="button"
-      onClick={() => {
-        const el = document.querySelector('[role="tablist"][aria-label="待办视图"] button:nth-child(2)') as
-          | HTMLElement
-          | null
-        el?.click()
-      }}
-      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-    >
-      <ChevronDown className="size-4 -rotate-90" aria-hidden="true" />
-      已完成的待办收在「已完成」视图里
-    </button>
+    <div className="pt-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggleOpen}
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <ChevronDown className={cn('size-4 transition-transform', !open && '-rotate-90')} aria-hidden="true" />
+        已完成
+        <span className="font-mono text-xs">{count}</span>
+      </button>
+      {open && (
+        <div className="mt-1 space-y-1 border-l border-border pl-3">
+          {rows === null ? (
+            <Spinner />
+          ) : rows.length === 0 ? (
+            <p className="px-2 py-1 text-xs text-muted-foreground/70">还没有完成的待办</p>
+          ) : (
+            rows.map((t) => (
+              <TodoRow
+                key={t.id}
+                t={t}
+                busy={busy}
+                onToggle={() => onToggle(t)}
+                onArchive={onArchive}
+                onDelete={onDelete}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

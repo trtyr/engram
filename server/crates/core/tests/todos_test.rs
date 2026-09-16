@@ -129,7 +129,7 @@ async fn done_is_idempotent_keeps_first_done_at() {
 async fn negative_limit_is_rejected() {
     let (_pool, svc, _pg) = setup().await;
     let err = svc
-        .list(None, None, None, None, None, None, -1)
+        .list(None, None, None, None, None, None, None, -1)
         .await
         .expect_err("负 limit 应报错");
     assert!(
@@ -137,7 +137,7 @@ async fn negative_limit_is_rejected() {
         "应报参数错误而非存储故障：{err}"
     );
     // 上限 clamp 语义保持：超大 limit 合法
-    svc.list(None, None, None, None, None, None, 100000)
+    svc.list(None, None, None, None, None, None, None, 100000)
         .await
         .unwrap();
 }
@@ -261,7 +261,7 @@ async fn cursor_pagination_walks_all_without_loss() {
     let mut cursor: Option<String> = None;
     loop {
         let c = cursor.as_deref();
-        let page = svc.list(None, None, None, None, None, c, 5).await.unwrap();
+        let page = svc.list(None, None, None, None, None, None, c, 5).await.unwrap();
         assert!(page.len() <= 5);
         if page.is_empty() {
             break;
@@ -298,7 +298,7 @@ async fn cursor_pagination_walks_all_without_loss() {
     assert_eq!(ids, expect, "翻页集合应与全量一致");
     // 垃圾游标响亮拒
     let err = svc
-        .list(None, None, None, None, None, Some("garbage"), 5)
+        .list(None, None, None, None, None, None, Some("garbage"), 5)
         .await
         .expect_err("垃圾游标应被拒");
     assert!(err.to_string().contains("cursor"), "{err}");
@@ -728,4 +728,60 @@ async fn short_no_and_links() {
         .await;
     // t 是 todo——priority 正常更新不受影响
     assert!(u.is_ok());
+}
+
+/// 工单页筛选的后端支撑（EN-48 拆页后续）：list 的 status 合法集按 kind 取 +
+/// severity 过滤真实生效。此前 status 只认 todo 三态（工单态直接 400「仅接受
+/// open/done/archived」）、severity 压根不是 list 参数（HTTP 层静默丢弃 → 筛选空操作）。
+#[tokio::test]
+async fn list_supports_ticket_status_and_severity_filters() {
+    let (_pool, svc, _pg) = setup().await;
+    // 两条工单：P0 + P2；一条普通 todo
+    let t_p0 = svc
+        .create("工单P0", "", "ticket", "", Some("P0"), "症状A", "", "", &[], None, None)
+        .await
+        .unwrap();
+    let t_p2 = svc
+        .create("工单P2", "", "ticket", "", Some("P2"), "症状B", "", "", &[], None, None)
+        .await
+        .unwrap();
+    let _todo = svc
+        .create("普通待办", "", "todo", "normal", None, "", "", "", &[], None, None)
+        .await
+        .unwrap();
+
+    // ① 工单态 status=confirmed 直接可用（旧实现 400）
+    svc.update(
+        t_p0.id, None, None, None, None, Some("confirmed"), None, None, None, None, None, None, None, None,
+    )
+    .await
+    .unwrap();
+    let confirmed = svc
+        .list(Some("confirmed"), Some("ticket"), None, None, None, None, None, 200)
+        .await
+        .unwrap();
+    assert_eq!(confirmed.len(), 1, "confirmed 工单应恰好 1 条");
+    assert_eq!(confirmed[0].id, t_p0.id);
+
+    // ② severity=P2 过滤真实生效（旧实现该参数不存在，返回全部）
+    let p2 = svc
+        .list(None, Some("ticket"), None, None, None, Some("P2"), None, 200)
+        .await
+        .unwrap();
+    assert_eq!(p2.len(), 1, "P2 工单应恰好 1 条");
+    assert_eq!(p2[0].id, t_p2.id);
+
+    // ③ 组合过滤：P0 + status=open（P0 那条已 confirmed，应空）
+    let p0_open = svc
+        .list(Some("open"), Some("ticket"), None, None, None, Some("P0"), None, 200)
+        .await
+        .unwrap();
+    assert!(p0_open.is_empty(), "P0 已 confirmed，open 组合应为空");
+
+    // ④ 非法 severity 响亮拒（不静默吞）
+    let err = svc
+        .list(None, Some("ticket"), None, None, None, Some("P9"), None, 200)
+        .await
+        .expect_err("非法 severity 应报错");
+    assert!(err.to_string().contains("severity"), "{err}");
 }

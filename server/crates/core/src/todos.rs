@@ -281,7 +281,9 @@ impl TodoService {
         self.get(id).await
     }
 
-    /// 列表：open 优先；status/priority/tag/q 过滤。
+    /// 列表：open 优先；status/priority/tag/q/severity 过滤。
+    /// status 合法集按 kind 取：给了 kind=ticket → 工单六态；给了 kind=todo 或未给 kind →
+    /// todo 三态 ∪ 工单态（未给 kind 时两形态都可能命中，取并集不误拒）。
     /// cursor（D29 keyset 分页，单页上限 500）：上一页最后一条的
     /// `{1|0}|{updated_at ISO8601}|{id}`——1 表示该条 status=open。首查不传。
     #[allow(clippy::too_many_arguments)]
@@ -292,6 +294,7 @@ impl TodoService {
         priority: Option<&str>,
         tag: Option<&str>,
         q: Option<&str>,
+        severity: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
     ) -> Result<Vec<TodoDto>, TodoError> {
@@ -325,11 +328,24 @@ impl TodoService {
             }
         };
         if let Some(s) = status
-            && !STATUSES.contains(&s)
+            && !valid_status(kind.unwrap_or("todo"), s)
+            && !(kind.is_none() && TICKET_STATUSES.contains(&s))
         {
+            let allowed = match kind {
+                Some("ticket") => TICKET_STATUSES.join("/"),
+                _ => format!("{}/{}", STATUSES.join("/"), "confirmed/in_progress/resolved/verified"),
+            };
             return Err(TodoError::BadRequest(format!(
                 "status 仅接受 {}（收到 {s}）",
-                STATUSES.join("/")
+                allowed
+            )));
+        }
+        if let Some(sv) = severity
+            && !SEVERITIES.contains(&sv)
+        {
+            return Err(TodoError::BadRequest(format!(
+                "severity 仅接受 {}（收到 {sv}）",
+                SEVERITIES.join("/")
             )));
         }
         if let Some(p) = priority
@@ -347,6 +363,7 @@ impl TodoService {
             priority,
             tag,
             q,
+            severity,
             cursor,
             limit.min(500),
         )

@@ -418,6 +418,9 @@ pub struct TodoListParams {
     /// low | normal | high
     #[schemars(description = "可选优先级过滤。")]
     pub priority: Option<String>,
+    /// 工单严重度 P0-P3（仅命中 kind=ticket 的行）
+    #[schemars(description = "可选：工单严重度 P0-P3（仅命中 kind=ticket 的行）。")]
+    pub severity: Option<String>,
     /// 标签过滤
     #[schemars(description = "可选标签过滤。")]
     pub tag: Option<String>,
@@ -3520,6 +3523,7 @@ impl EngramMcpServer {
                 lp.priority.as_deref(),
                 lp.tag.as_deref(),
                 lp.q.as_deref(),
+                lp.severity.as_deref(),
                 lp.cursor.as_deref(),
                 lp.limit.unwrap_or(50),
             )
@@ -3637,7 +3641,7 @@ impl EngramMcpServer {
         let id = self.todo_ref_id(&params.0.id).await?;
         let raw = todo_svc(&self.state).links(id).await.map_err(from_todo)?;
         let counts = todo_svc(&self.state)
-            .list(None, None, None, None, None, None, 500)
+            .list(None, None, None, None, None, None, None, 500)
             .await
             .map_err(from_todo)?;
         let short_of: std::collections::HashMap<Uuid, i32> =
@@ -3876,7 +3880,7 @@ impl EngramMcpServer {
                 return None;
             }
             match todo_svc(&self.state)
-                .list(None, None, None, None, Some(&q), None, max)
+                .list(None, None, None, None, Some(&q), None, None, max)
                 .await
             {
                 Ok(rows) => Some(json!(

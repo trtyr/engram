@@ -85,6 +85,7 @@ pub async fn list(
     priority: Option<&str>,
     tag: Option<&str>,
     q: Option<&str>,
+    severity: Option<&str>,
     cursor: Option<(i32, DateTime<Utc>, Uuid)>,
     limit: i64,
 ) -> StoreResult<Vec<TodoRow>> {
@@ -97,6 +98,7 @@ pub async fn list(
                  AND ($3::text IS NULL OR tags @> ARRAY[$3::text]) \
                  AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%') \
                  AND ($5::text IS NULL OR kind = $5) \
+                 AND ($10::text IS NULL OR severity = $10) \
                  AND (CASE WHEN status = 'open' THEN 1 ELSE 0 END, updated_at, id) < ($7::int, $8::timestamptz, $9::uuid) \
                  ORDER BY (status = 'open') DESC, updated_at DESC, id DESC \
                  LIMIT $6"
@@ -112,6 +114,7 @@ pub async fn list(
         .bind(flag)
         .bind(ts)
         .bind(id)
+        .bind(severity)
         .fetch_all(pool)
         .await?)
     } else {
@@ -123,6 +126,7 @@ pub async fn list(
                  AND ($3::text IS NULL OR tags @> ARRAY[$3::text]) \
                  AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%') \
                  AND ($5::text IS NULL OR kind = $5) \
+                 AND ($7::text IS NULL OR severity = $7) \
                  ORDER BY (status = 'open') DESC, updated_at DESC, id DESC \
                  LIMIT $6"
             )
@@ -134,6 +138,7 @@ pub async fn list(
         .bind(q)
         .bind(kind)
         .bind(limit)
+        .bind(severity)
         .fetch_all(pool)
         .await?)
     }
