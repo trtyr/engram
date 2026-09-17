@@ -131,6 +131,8 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "index", false, "内容目录（按页型分组的全库目录：slug/标题/入链数/首段摘要；只读动态聚合）" => crate::wiki::WikiLibParams;
             "archive", false, "问答/分析产物归档为 analysis 页（related 自动建双向 wikilinks——好答案不该消失在聊天记录里）" => crate::wiki::WikiArchiveParams;
             "libraries", false, "列出全部 wiki 库（多库；页面/原料计数一并返回；建库/删库走 Web）" => crate::wiki::WikiLibrariesParams;
+            "promote", false, "知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 synthesis 页（frontmatter 带源回链）+ 源文档自动追加 ⛳ 标记——提炼由调用方完成" => crate::wiki::WikiPromoteParams;
+            "promotions", false, "晋升登记列表（谁家的哪些知识晋升成了 wiki 页；按项目过滤）" => crate::wiki::WikiPromotionsParams;
             "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
         ],
         "todos" => action_docs![

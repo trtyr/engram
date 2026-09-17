@@ -371,3 +371,40 @@ pub struct WikiLibParams {
     #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
     pub library: Option<String>,
 }
+
+/// 知识晋升参数（EN-59）：把项目文档里的一条跨项目知识提炼成 wiki synthesis 页，
+/// 服务端自动双向回链（页 frontmatter 带源回链 + 源文档追加 ⛳ 晋升标记 + 登记表）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiPromoteParams {
+    /// 来源项目（名或 id）
+    #[schemars(description = "来源项目（名或 id）。")]
+    pub project: String,
+    /// 来源文档 id
+    #[schemars(description = "来源文档 id（project-get 看文档列表取）。")]
+    pub doc_id: String,
+    /// 源定位（小节标题/行区间说明——回链精度用）
+    #[schemars(description = "源定位（小节标题/行区间说明，如「§机器产出原样透传」）。")]
+    pub anchor: String,
+    /// 目标页 slug
+    #[schemars(description = "目标页 slug（仅字母/数字/-/_/·，≤80 字符）。")]
+    pub slug: String,
+    /// 页标题（提炼后的通用标题，非原文标题）
+    #[schemars(description = "页标题（提炼后的通用标题，非原文标题）。")]
+    pub title: String,
+    /// 提炼后的通用知识正文（markdown，可带 [[wikilink]]）——提炼由调用方完成，服务端不做 LLM 提炼
+    #[schemars(
+        description = "提炼后的通用知识正文（markdown，可带 [[wikilink]]）——提炼由调用方完成，服务端不做 LLM 提炼。"
+    )]
+    pub content: String,
+    /// 可选：目标库 slug（缺省 main 主库）
+    #[schemars(description = "可选：目标库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+/// 晋升登记列表参数。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiPromotionsParams {
+    /// 可选：按来源项目（名或 id）过滤
+    #[schemars(description = "可选：按来源项目（名或 id）过滤。")]
+    pub project: Option<String>,
+}

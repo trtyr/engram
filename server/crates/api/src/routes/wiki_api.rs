@@ -10,6 +10,7 @@ use engram_core::wiki::{LintReport, WikiError, WikiPageDto, WikiService};
 use engram_jobs::types::JobEvent;
 use serde::Deserialize;
 use utoipa::IntoParams;
+use uuid::Uuid;
 
 use crate::auth::{Principal, require_scope};
 use crate::error::ApiError;
@@ -24,6 +25,17 @@ fn we(e: WikiError) -> ApiError {
         WikiError::NotFound(m) => ApiError::NotFound(m),
         WikiError::BadRequest(m) => ApiError::BadRequest(m),
         WikiError::Storage(m) => ApiError::Unavailable(m),
+    }
+}
+
+fn pe(e: engram_core::promote::PromoteError) -> ApiError {
+    use engram_core::promote::PromoteError;
+    match e {
+        PromoteError::NotFound(m) => ApiError::NotFound(m),
+        PromoteError::Conflict(m) => ApiError::Conflict(m),
+        PromoteError::BadRequest(m) => ApiError::BadRequest(m),
+        PromoteError::Storage(m) => ApiError::Unavailable(m.to_string()),
+        PromoteError::Wiki(m) => we(m),
     }
 }
 
@@ -611,4 +623,80 @@ pub async fn rebuild_links(
     let lib = resolve_lib(&state, p.lib.as_deref()).await?;
     let n = svc(&state).rebuild_all_links(lib).await.map_err(we)?;
     Ok(Json(serde_json::json!({ "rebuilt_links": n })))
+}
+
+// ---------- 知识晋升（EN-59）：项目文档 → wiki 的结构化动作；只读列表对齐 MCP ----------
+
+/// 晋升请求体。
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct PromoteRequest {
+    /// 来源项目（名或 id）
+    pub project: String,
+    /// 来源文档 id
+    pub doc_id: Uuid,
+    /// 源定位（小节标题/行区间说明）
+    #[serde(default)]
+    pub anchor: String,
+    /// 目标页 slug
+    pub slug: String,
+    /// 页标题（提炼后的通用标题）
+    pub title: String,
+    /// 提炼后的通用知识正文（markdown）——提炼由调用方完成
+    pub content: String,
+    /// 可选：目标库 slug（缺省 main）
+    #[serde(default)]
+    pub library: Option<String>,
+}
+
+/// 知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 wiki synthesis 页。
+/// 服务端自动双向回链：页 frontmatter 带 promoted_from + 源文档追加 ⛳ 标记 + 登记表。
+#[utoipa::path(post, path = "/wiki/promote", request_body = PromoteRequest,
+    responses((status = 200, body = Object), (status = 404), (status = 409)))]
+pub async fn promote(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<PromoteRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_wiki(&principal)?;
+    let out = engram_core::promote::PromoteService::new(state.pool.clone())
+        .promote(engram_core::promote::PromoteRequest {
+            project: req.project,
+            doc_id: req.doc_id,
+            anchor: req.anchor,
+            slug: req.slug,
+            title: req.title,
+            content: req.content,
+            library: req.library,
+        })
+        .await
+        .map_err(pe)?;
+    Ok(Json(serde_json::json!({
+        "promoted": true,
+        "library": out.library,
+        "page_slug": out.page_slug,
+        "page_title": out.page_title,
+        "project": out.project_name,
+    })))
+}
+
+/// 晋升登记列表（可选按来源项目名/id 过滤）。
+#[utoipa::path(get, path = "/wiki/promotions", params(PromotionsParams),
+    responses((status = 200, body = [engram_storage::models::wiki_promotions::WikiPromotionDto])))]
+pub async fn promotions(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<PromotionsParams>,
+) -> Result<Json<Vec<engram_storage::models::wiki_promotions::WikiPromotionDto>>, ApiError> {
+    require_wiki(&principal)?;
+    let rows = engram_core::promote::PromoteService::new(state.pool.clone())
+        .list_promotions(p.project.as_deref())
+        .await
+        .map_err(pe)?;
+    Ok(Json(rows))
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct PromotionsParams {
+    /// 可选：按来源项目（名或 id）过滤
+    pub project: Option<String>,
 }

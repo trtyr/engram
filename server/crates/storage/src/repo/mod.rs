@@ -15,3 +15,4 @@ pub mod skills;
 pub mod todos;
 pub mod transfer;
 pub mod wiki_docs;
+pub mod wiki_promotions;

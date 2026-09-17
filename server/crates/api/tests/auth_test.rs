@@ -1536,6 +1536,8 @@ async fn openapi_snapshot() {
             "/wiki/lint",
             "/wiki/pages",
             "/wiki/pages/{slug}",
+            "/wiki/promote",
+            "/wiki/promotions",
             "/wiki/proposals",
             "/wiki/proposals/apply",
             "/wiki/purpose",

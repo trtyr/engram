@@ -1073,8 +1073,8 @@ async fn wiki_mcp_tools_listed() {
     assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
     assert_eq!(
         wiki_tools[0]["actions"].as_array().unwrap().len(),
-        23,
-        "wiki 域应展示 23 个操作（含文档 RAG 三动作 document_add/document_get/documents_search）"
+        25,
+        "wiki 域应展示 25 个操作（含文档 RAG 三动作 + EN-59 知识晋升 promote/promotions）"
     );
 
     // instructions 应覆盖 wiki 域

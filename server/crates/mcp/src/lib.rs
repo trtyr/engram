@@ -3357,6 +3357,75 @@ impl EngramMcpServer {
         ok_json(serde_json::to_value(&page).unwrap_or(serde_json::json!({})))
     }
 
+    /// 知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 wiki synthesis 页。
+    ///
+    /// 服务端自动双向回链：页 frontmatter 带 promoted_from（源回链）+ 源文档自动追加
+    /// ⛳ 晋升标记（frontmatter.promoted 数组 + 正文末尾可见标记行）+ 登记表可查。
+    /// 同一来源文档对同一页只登记一次——重复晋升报友好「已晋升过」。
+    ///
+    /// 何时用：写项目文档时提炼出「离开本项目还成立、别的项目用得上」的知识
+    /// （判据三问见《文档工作流》晋升节）。提炼正文由调用方完成——服务端不做 LLM 提炼。
+    async fn wiki_promote(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(ap): Parameters<wiki::WikiPromoteParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let doc_id = uuid::Uuid::parse_str(&ap.doc_id).map_err(|_| {
+            rmcp::ErrorData::invalid_params(
+                format!("doc_id 非法 UUID：{}——用 project-get 看文档列表取 id", ap.doc_id),
+                None,
+            )
+        })?;
+        let out = engram_core::promote::PromoteService::new(self.state.pool.clone())
+            .promote(engram_core::promote::PromoteRequest {
+                project: ap.project,
+                doc_id,
+                anchor: ap.anchor,
+                slug: ap.slug,
+                title: ap.title,
+                content: ap.content,
+                library: ap.library,
+            })
+            .await
+            .map_err(|e| match e {
+                engram_core::promote::PromoteError::NotFound(m) => {
+                    rmcp::ErrorData::resource_not_found(m, None)
+                }
+                engram_core::promote::PromoteError::Conflict(m) => {
+                    rmcp::ErrorData::invalid_params(m, None)
+                }
+                engram_core::promote::PromoteError::BadRequest(m) => {
+                    rmcp::ErrorData::invalid_params(m, None)
+                }
+                other => rmcp::ErrorData::internal_error(other.to_string(), None),
+            })?;
+        ok_json(serde_json::json!({
+            "promoted": true,
+            "library": out.library,
+            "page_slug": out.page_slug,
+            "page_title": out.page_title,
+            "project": out.project_name,
+            "hint": "源文档已追加 ⛳ 晋升标记（双向可查）——wiki search 可命中新页",
+        }))
+    }
+
+    /// 晋升登记列表（谁家的哪些知识晋升成了 wiki 页；按项目过滤）。
+    async fn wiki_promotions(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiPromotionsParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let rows = engram_core::promote::PromoteService::new(self.state.pool.clone())
+            .list_promotions(params.0.project.as_deref())
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+    }
+
     /// 删除 Wiki 页面（不可逆——连带清理双向 wikilinks；最后状态留版本快照可重建）。
     ///
     /// 何时用：页面作废/测试数据清理。只对明确表达的删除请求使用。
@@ -4669,6 +4738,20 @@ impl EngramMcpServer {
                 self.wiki_archive(
                     ctx,
                     Parameters(dispatch::from_args("wiki", "archive", call.args)?),
+                )
+                .await
+            }
+            "promote" => {
+                self.wiki_promote(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "promote", call.args)?),
+                )
+                .await
+            }
+            "promotions" => {
+                self.wiki_promotions(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "promotions", call.args)?),
                 )
                 .await
             }

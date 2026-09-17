@@ -15,6 +15,7 @@ pub mod lint;
 pub mod lint_deep;
 pub mod markup;
 pub mod prompts;
+pub mod promote;
 pub mod purpose;
 pub mod relevance;
 pub mod review;

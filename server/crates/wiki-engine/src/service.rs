@@ -130,6 +130,9 @@ pub struct WikiService {
     registry: ProviderRegistry,
 }
 
+/// 每 slug 保留的版本快照上限（与 skill_revisions 同口径）。
+pub(crate) const VERSION_KEEP: i64 = 50;
+
 impl WikiService {
     pub fn new(pool: sqlx::PgPool, registry: ProviderRegistry) -> Self {
         Self {
@@ -350,7 +353,7 @@ impl WikiService {
         .bind(lib)
         .execute(&self.pool)
         .await?;
-        self.prune_page_versions(lib, slug).await;
+        self.prune(lib, slug).await;
         let row = sqlx::query_as::<_, WikiPageDto>(
             "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, folder, content, frontmatter, origin, version, tsv) \
              VALUES ($1, $2, $3, $4, 'concept', COALESCE($5, ''), $6, $7::jsonb, 'human', 1, to_tsvector('simple', $8)) \
@@ -903,7 +906,7 @@ impl WikiService {
         .bind(lib)
         .execute(&self.pool)
         .await?;
-        self.prune_page_versions(lib, &slug).await;
+        self.prune(lib, &slug).await;
         let n = sqlx::query("DELETE FROM wiki_pages WHERE slug = $1 AND library_id = $2")
             .bind(&slug)
             .bind(lib)
@@ -929,23 +932,10 @@ impl WikiService {
 
     // ---------- 版本历史（R 报告建议 #5：列表 + 回滚；快照按 (library_id, slug) 隔离） ----------
 
-    /// 每 slug 保留的版本快照上限（与 skill_revisions 同口径）。
-    const VERSION_KEEP: i64 = 50;
 
     /// 裁剪旧快照（每 slug 只留最近 VERSION_KEEP 条；best-effort，不影响主流程）。
-    async fn prune_page_versions(&self, lib: Uuid, slug: &str) {
-        sqlx::query(
-            "DELETE FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 \
-             AND id NOT IN ( \
-             SELECT id FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 \
-             ORDER BY created_at DESC, version DESC LIMIT $3)",
-        )
-        .bind(slug)
-        .bind(lib)
-        .bind(Self::VERSION_KEEP)
-        .execute(&self.pool)
-        .await
-        .ok();
+    async fn prune(&self, lib: Uuid, slug: &str) {
+        prune_page_versions(&self.pool, lib, slug, VERSION_KEEP).await;
     }
 
     /// 页面版本列表（新→旧；不带正文，content_chars 供决策）。
@@ -1174,4 +1164,25 @@ impl WikiService {
         .await
         .ok();
     }
+}
+
+/// 版本快照裁剪（模块级：put_page 与 promote_page 共用；EN-59 提升可见性到 pub(crate)）。
+pub(crate) async fn prune_page_versions(
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    slug: &str,
+    keep: i64,
+) {
+    sqlx::query(
+        "DELETE FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 \
+         AND id NOT IN ( \
+         SELECT id FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 \
+         ORDER BY created_at DESC, version DESC LIMIT $3)",
+    )
+    .bind(slug)
+    .bind(lib)
+    .bind(keep)
+    .execute(pool)
+    .await
+    .ok();
 }

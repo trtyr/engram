@@ -424,3 +424,31 @@ pub async fn get_file_version(
     .await?;
     Ok(row)
 }
+
+/// 晋升标记双写（EN-59）：frontmatter.promoted 数组追加（结构化）+ 正文末尾追加
+/// 可见标记行（人读）。单语句原子——两处要么都写要么都不写。
+/// 幂等由外层 wiki_promotions 登记的 UNIQUE 保证（标记只在登记成功后调用一次）。
+pub async fn mark_doc_promoted(
+    pool: &PgPool,
+    doc_id: Uuid,
+    wiki_ref: &str,
+    anchor: &str,
+) -> StoreResult<()> {
+    let marker = format!("\n\n⛳ 本文「{anchor}」已晋升为 wiki:{wiki_ref}");
+    sqlx::query(
+        "UPDATE project_docs SET \
+           frontmatter = frontmatter || jsonb_build_object('promoted', \
+             (COALESCE(frontmatter->'promoted', '[]'::jsonb) || jsonb_build_object(\
+               'wiki', $2, 'anchor', $3, 'at', now()))), \
+           content = content || $4, \
+           updated_at = now() \
+         WHERE id = $1",
+    )
+    .bind(doc_id)
+    .bind(wiki_ref)
+    .bind(anchor)
+    .bind(marker)
+    .execute(pool)
+    .await?;
+    Ok(())
+}

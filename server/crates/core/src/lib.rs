@@ -8,6 +8,7 @@ pub mod auth;
 pub mod codegraph;
 pub mod memory;
 pub mod project;
+pub mod promote;
 pub mod skills;
 pub mod state;
 pub mod todos;
