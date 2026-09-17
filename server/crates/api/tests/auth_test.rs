@@ -472,6 +472,241 @@ async fn api_key_edit_name_and_scopes() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
+/// EN-62 ③：expires_at 过期机制——过期 key 立即 401 带到期说明；未过期通行；
+/// 不带 expires_at 的 key（存量语义）永不过期。
+#[tokio::test]
+async fn api_key_expires_at_enforced() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // 已过期的 key → 立即 401，报错带「过期」与具体时间
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::from(
+                    r#"{"name":"expired","scopes":["memory"],"expires_at":"2020-01-01T00:00:00Z"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["expires_at"],
+        serde_json::json!("2020-01-01T00:00:00Z"),
+        "创建响应回显 expires_at"
+    );
+    let expired_key = v["key"].as_str().unwrap().to_string();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/memory/atoms")
+                .header("authorization", format!("Bearer {expired_key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "过期 key 立即 401");
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("过期"), "401 说明带「过期」：{text}");
+    assert!(text.contains("2020-01-01"), "401 带具体到期时间：{text}");
+
+    // 未过期的 key（2030）正常通行
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::from(
+                    r#"{"name":"future","scopes":["memory"],"expires_at":"2030-01-01T00:00:00Z"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let future_key = v["key"].as_str().unwrap().to_string();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/memory/atoms")
+                .header("authorization", format!("Bearer {future_key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "未过期 key 正常通行");
+
+    // 不带 expires_at（存量语义 NULL=永不过期）也通行
+    let key = create_key(&app, &admin, &["memory"]).await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/memory/atoms")
+                .header("authorization", format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "无 expires_at（存量语义）正常通行");
+}
+
+/// EN-62：scope 别名规范化 + 可行动报错——签发带 projects 落库为 project；
+/// 未知 scope 报错含全部 9 个合法值与别名提示；update 同语义。
+#[tokio::test]
+async fn api_key_scope_alias_and_actionable_error() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // ① projects → 归一为 project 落库（签发成功）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::from(
+                    r#"{"name":"alias","scopes":["memory","projects","skill"]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "别名 projects/skill 应签发成功");
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let key = v["key"].as_str().unwrap().to_string();
+
+    // 落库为 project/skills（列表回显归一后值）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/settings/api-keys")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let list: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let row = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["name"] == "alias")
+        .expect("alias key 在列");
+    assert_eq!(
+        row["scopes"],
+        serde_json::json!(["memory", "project", "skills"]),
+        "别名应归一为单数 scope 落库"
+    );
+
+    // 归一后的 key 实际可用（projects 域工具调用走 project scope）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/projects")
+                .header("authorization", format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "归一后的 project scope 应真实可用");
+
+    // ② 未知 scope → 400 报错含全部 9 个合法值与别名提示
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::from(r#"{"name":"bad","scopes":["memory","nope"]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let msg = v["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("未知 scope: nope"), "报错点名坏值：{msg}");
+    for legal in ["memory", "wiki", "codegraph", "project", "skills", "todos", "llm", "erase", "cron"] {
+        assert!(msg.contains(legal), "报错应含合法值 {legal}：{msg}");
+    }
+    assert!(msg.contains("projects"), "报错应带 projects→project 别名提示：{msg}");
+
+    // ②b scopes 缺失 → 400（EN-62 ④：显式必填，无任何隐式默认）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::from(r#"{"name":"no-scopes"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY, "缺 scopes 应 422（serde missing field——字段名显式可自愈）");
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("scopes"), "422 提示 scopes 字段：{text}");
+
+    // ③ update 路径同语义：别名归一
+    let id = row["id"].as_str().unwrap();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/settings/api-keys/{id}"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin}"))
+                .body(Body::from(r#"{"scopes":["projects","wiki"]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["scopes"],
+        serde_json::json!(["project", "wiki"]),
+        "update 亦归一 projects→project"
+    );
+}
+
 /// 浏览器硬刷新 /todos（Accept: text/html）→ SPA 页；JSON 客户端同路径照常认证（D-001 补遗）。
 #[tokio::test]
 async fn todos_spa_navigation_bypasses_auth() {

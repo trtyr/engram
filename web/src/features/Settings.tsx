@@ -791,6 +791,7 @@ function Keys() {
   const [newKey, setNewKey] = useState('')
   const [name, setName] = useState('')
   const [scopes, setScopes] = useState<Set<string>>(new Set(['memory']))
+  const [expiresAt, setExpiresAt] = useState('') // datetime-local；空 = 永不过期（EN-62）
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [editing, setEditing] = useState<ApiKey | null>(null)
   const [editName, setEditName] = useState('')
@@ -854,9 +855,14 @@ function Keys() {
           className="mt-3 flex flex-wrap items-center gap-2"
           onSubmit={async (e) => {
             e.preventDefault()
-            const r = await api.post<{ key: string }>('/settings/api-keys', { name, scopes: [...scopes] })
+            const r = await api.post<{ key: string }>('/settings/api-keys', {
+              name,
+              scopes: [...scopes],
+              ...(expiresAt ? { expires_at: new Date(expiresAt).toISOString() } : {}),
+            })
             setNewKey(r.key)
             setName('')
+            setExpiresAt('')
             load()
           }}
         >
@@ -867,6 +873,16 @@ function Keys() {
             placeholder="pi-agent"
             value={name}
             onChange={(e) => setName(e.target.value)}
+          />
+          <label htmlFor="key-expires" className="text-sm font-medium">
+            过期 <span className="text-xs font-normal text-muted-foreground">（可选，留空永不过期）</span>
+          </label>
+          <input
+            id="key-expires"
+            type="datetime-local"
+            className={`${inputCls} w-56`}
+            value={expiresAt}
+            onChange={(e) => setExpiresAt(e.target.value)}
           />
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2" role="group" aria-label="scope 选择">
             {Object.entries(SCOPE_LABELS).map(([s, label]) => (
@@ -976,6 +992,7 @@ function Keys() {
                   <th className={tableCls.th}>scopes</th>
                   <th className={tableCls.th}>创建</th>
                   <th className={tableCls.th}>最近使用</th>
+                  <th className={tableCls.th}>过期</th>
                   <th className={tableCls.th} />
                 </tr>
               </thead>
@@ -993,6 +1010,9 @@ function Keys() {
                     <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(k.created_at)}</td>
                     <td className={`${tableCls.td} text-muted-foreground`}>
                       {k.last_used_at ? fmtTime(k.last_used_at) : '—'}
+                    </td>
+                    <td className={`${tableCls.td} ${k.expires_at && new Date(k.expires_at) < new Date() ? 'text-destructive' : 'text-muted-foreground'}`}>
+                      {k.expires_at ? fmtTime(k.expires_at) : '—'}
                     </td>
                     <td className={`${tableCls.td} text-right`}>
                       <div className="flex justify-end gap-1.5">

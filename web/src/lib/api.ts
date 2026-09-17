@@ -395,6 +395,7 @@ export interface ApiKey {
   created_at: string
   last_used_at: string | null
   revoked_at: string | null
+  expires_at: string | null
 }
 export interface McpActionInfo {
   action: string

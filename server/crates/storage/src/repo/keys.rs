@@ -56,32 +56,43 @@ pub async fn insert_api_key(
     key_hash: &str,
     key_prefix: &str,
     scopes: &[String],
+    expires_at: Option<DateTime<Utc>>,
 ) -> StoreResult<()> {
     sqlx::query(
-        "INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes, expires_at) VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(id)
     .bind(name)
     .bind(key_hash)
     .bind(key_prefix)
     .bind(sqlx::types::Json(scopes))
+    .bind(expires_at)
     .execute(pool)
     .await?;
     Ok(())
 }
 
-/// 按 hash 查有效 key（已吊销的不算）：返回 (key_id, name, scopes)。
+/// 按 hash 查有效 key 的返回：key_id / name / scopes / expires_at。
+type ActiveApiKey = (
+    Uuid,
+    String,
+    sqlx::types::Json<Vec<String>>,
+    Option<DateTime<Utc>>,
+);
+
+/// 按 hash 查有效 key（已吊销的不算）。
+/// 过期判断在调用方（401 要带具体到期时间，EN-62）。
 pub async fn find_api_key_by_hash(
     pool: &PgPool,
     key_hash: &str,
-) -> StoreResult<Option<(Uuid, String, Vec<String>)>> {
-    let row: Option<(Uuid, String, sqlx::types::Json<Vec<String>>)> = sqlx::query_as(
-        "SELECT id, name, scopes FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL",
+) -> StoreResult<Option<(Uuid, String, Vec<String>, Option<DateTime<Utc>>)>> {
+    let row: Option<ActiveApiKey> = sqlx::query_as(
+        "SELECT id, name, scopes, expires_at FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL",
     )
     .bind(key_hash)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|(id, name, scopes)| (id, name, scopes.0)))
+    Ok(row.map(|(id, name, scopes, expires_at)| (id, name, scopes.0, expires_at)))
 }
 
 /// 更新 key last_used（失败不阻塞认证，调用方 best-effort）。
@@ -96,7 +107,7 @@ pub async fn touch_api_key(pool: &PgPool, key_id: Uuid) -> StoreResult<()> {
 /// key 列表（永不含完整 key / hash）。
 pub async fn list_api_keys(pool: &PgPool) -> StoreResult<Vec<ApiKeyRow>> {
     let rows = sqlx::query_as::<_, ApiKeyRow>(
-        "SELECT id, name, key_prefix, scopes, created_at, last_used_at, revoked_at FROM api_keys ORDER BY created_at DESC",
+        "SELECT id, name, key_prefix, scopes, created_at, last_used_at, revoked_at, expires_at FROM api_keys ORDER BY created_at DESC",
     )
     .fetch_all(pool)
     .await?;
@@ -190,16 +201,21 @@ pub async fn update_api_key(
     id: Uuid,
     name: Option<&str>,
     scopes: Option<&[String]>,
+    expires_at: Option<Option<DateTime<Utc>>>,
 ) -> StoreResult<u64> {
+    // expires_at 外层 None=不改；Some(None)=改回永不过期；Some(Some(t))=设到期时间
     let res = sqlx::query(
         "UPDATE api_keys SET \
            name = COALESCE($2, name), \
-           scopes = COALESCE($3, scopes) \
+           scopes = COALESCE($3, scopes), \
+           expires_at = CASE WHEN $4::bool THEN $5 ELSE expires_at END \
          WHERE id = $1",
     )
     .bind(id)
     .bind(name)
     .bind(scopes.map(sqlx::types::Json))
+    .bind(expires_at.is_some())
+    .bind(expires_at.flatten())
     .execute(pool)
     .await?;
     Ok(res.rows_affected())
@@ -208,7 +224,7 @@ pub async fn update_api_key(
 /// 按 id 查 key（编辑后回显用；永不含完整 key / hash）。
 pub async fn get_api_key(pool: &PgPool, id: Uuid) -> StoreResult<Option<ApiKeyRow>> {
     let row: Option<ApiKeyRow> = sqlx::query_as(
-        "SELECT id, name, key_prefix, scopes, created_at, last_used_at, revoked_at \
+        "SELECT id, name, key_prefix, scopes, created_at, last_used_at, revoked_at, expires_at \
          FROM api_keys WHERE id = $1",
     )
     .bind(id)

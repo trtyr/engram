@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 
-pub use engram_core::auth::{Principal, SCOPES};
+pub use engram_core::auth::{normalize_scope, unknown_scope_message, Principal, SCOPES};
 
 fn sha256_hex(input: &str) -> String {
     let mut h = Sha256::new();
@@ -71,17 +71,21 @@ pub async fn create_api_key(
     pool: &PgPool,
     name: &str,
     scopes: Vec<String>,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<(Uuid, String), ApiError> {
-    for s in &scopes {
-        if !SCOPES.contains(&s.as_str()) {
-            return Err(ApiError::BadRequest(format!("未知 scope: {s}")));
-        }
-    }
+    let scopes: Vec<String> = scopes
+        .iter()
+        .map(|s| {
+            normalize_scope(s)
+                .map(str::to_string)
+                .ok_or_else(|| ApiError::BadRequest(unknown_scope_message(s)))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let mut raw = [0u8; 24];
     rand::rng().fill_bytes(&mut raw);
     let key = format!("amk_{}", hex(&raw));
     let id = Uuid::now_v7();
-    repo::insert_api_key(pool, id, name, &sha256_hex(&key), &key[..12], &scopes)
+    repo::insert_api_key(pool, id, name, &sha256_hex(&key), &key[..12], &scopes, expires_at)
         .await
         .map_err(ApiError::from)?;
     Ok((id, key))
@@ -144,10 +148,19 @@ async fn authenticate(pool: &PgPool, token: &str) -> Result<Option<Principal>, A
     // 2) API key（amk_ 前缀）
     if token.starts_with("amk_") {
         let hash = sha256_hex(token);
-        if let Some((key_id, name, scopes)) = repo::find_api_key_by_hash(pool, &hash)
+        if let Some((key_id, name, scopes, expires_at)) = repo::find_api_key_by_hash(pool, &hash)
             .await
             .map_err(ApiError::from)?
         {
+            // EN-62：过期 key → 401 带具体到期时间（让 AI/人能自愈：重新签发或调宽）
+            if let Some(exp) = expires_at
+                && exp <= Utc::now()
+            {
+                return Err(ApiError::Unauthorized(format!(
+                    "API key 已于 {} 过期——请在设置页重新签发（或用管理员调宽 expires_at）",
+                    exp.to_rfc3339()
+                )));
+            }
             // 更新 last_used（失败不阻塞）
             let _ = repo::touch_api_key(pool, key_id).await;
             return Ok(Some(Principal::ApiKey {

@@ -765,11 +765,11 @@ pub async fn usage(
 #[derive(Deserialize, ToSchema)]
 pub struct CreateApiKeyRequest {
     pub name: String,
-    #[serde(default = "default_scopes")]
+    /// scope 全量集合（EN-62：显式必填——不传请求直接 400，不再有任何隐式默认；
+    /// 常见误写「projects」自动归一为「project」）
     pub scopes: Vec<String>,
-}
-fn default_scopes() -> Vec<String> {
-    crate::auth::SCOPES.iter().map(|s| s.to_string()).collect()
+    /// 可选：过期时间（RFC3339，如 2027-01-01T00:00:00Z）——缺省永不过期；到期后该 key 返回 401（带到期说明）（EN-62）
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -778,6 +778,8 @@ pub struct ApiKeyCreated {
     pub name: String,
     /// 明文 key（amk_ 前缀；只在创建响应出现一次）
     pub key: String,
+    /// 过期时间（null = 永不过期）
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// 签发 API key。
@@ -790,13 +792,15 @@ pub async fn create_api_key_handler(
     Json(req): Json<CreateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<ApiKeyCreated>), ApiError> {
     require_admin(&principal)?;
-    let (id, key) = create_api_key(&state.pool, &req.name, req.scopes).await?;
+    let (id, key) =
+        create_api_key(&state.pool, &req.name, req.scopes, req.expires_at).await?;
     Ok((
         StatusCode::CREATED,
         Json(ApiKeyCreated {
             id,
             name: req.name,
             key,
+            expires_at: req.expires_at,
         }),
     ))
 }
@@ -810,6 +814,8 @@ pub struct ApiKeyDto {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub last_used_at: Option<chrono::DateTime<chrono::Utc>>,
     pub revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// 过期时间（null = 永不过期）
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// API key 列表（永不含完整 key）。
@@ -854,6 +860,8 @@ pub struct UpdateApiKeyRequest {
     pub name: Option<String>,
     /// 新 scope 全量集合（不传保持不变；传 [] 即清空全部权限）
     pub scopes: Option<Vec<String>>,
+    /// 过期时间（EN-62）：不传保持不变；null = 改回永不过期
+    pub expires_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
 fn key_dto(r: engram_storage::models::keys::ApiKeyRow) -> ApiKeyDto {
@@ -865,6 +873,7 @@ fn key_dto(r: engram_storage::models::keys::ApiKeyRow) -> ApiKeyDto {
         created_at: r.created_at,
         last_used_at: r.last_used_at,
         revoked_at: r.revoked_at,
+        expires_at: r.expires_at,
     }
 }
 
@@ -888,18 +897,27 @@ pub async fn update_api_key(
             return Err(ApiError::BadRequest("名称需 1~64 字符".into()));
         }
     }
-    if let Some(scopes) = &req.scopes {
-        for s in scopes {
-            if !crate::auth::SCOPES.contains(&s.as_str()) {
-                return Err(ApiError::BadRequest(format!("未知 scope: {s}")));
-            }
-        }
-    }
+    let scopes = req
+        .scopes
+        .as_ref()
+        .map(|list| {
+            list.iter()
+                .map(|s| {
+                    crate::auth::normalize_scope(s)
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            ApiError::BadRequest(crate::auth::unknown_scope_message(s))
+                        })
+                })
+                .collect::<Result<Vec<String>, _>>()
+        })
+        .transpose()?;
     let n = keys_repo::update_api_key(
         &state.pool,
         id,
         req.name.as_deref().map(str::trim),
-        req.scopes.as_deref(),
+        scopes.as_deref(),
+        req.expires_at,
     )
     .await?;
     if n == 0 {

@@ -18,6 +18,28 @@ pub const SCOPES: [&str; 9] = [
     "cron",
 ];
 
+/// 常见误写 → 合法 scope（签发/更新入口规范化；存量 key 值不受影响）。
+///
+/// 「projects」是最高频误写——域工具叫 projects（复数），scope 用单数 project
+///（EN-62）：签发入口就地归一，写的人不用知道这个历史例外。
+pub fn normalize_scope(s: &str) -> Option<&'static str> {
+    match s.trim() {
+        "projects" => Some("project"),
+        "todo" => Some("todos"),
+        "skill" => Some("skills"),
+        other => SCOPES.iter().copied().find(|x| *x == other),
+    }
+}
+
+/// 未知 scope 的可行动报错：带全部合法值 + 别名提示（报错即文档，EN-62）。
+pub fn unknown_scope_message(bad: &str) -> String {
+    format!(
+        "未知 scope: {bad}——合法值 {} 个：{}；「projects」会自动归一为 project（域工具叫 projects，scope 用单数）",
+        SCOPES.len(),
+        SCOPES.join(", ")
+    )
+}
+
 /// 已认证主体。
 #[derive(Debug, Clone)]
 pub enum Principal {
