@@ -34,6 +34,7 @@ use uuid::Uuid;
 
 pub mod dispatch;
 pub mod wiki;
+pub mod jobs;
 
 use axum::response::IntoResponse;
 use engram_core::auth::Principal;
@@ -1121,14 +1122,14 @@ pub struct CgQueryParams {
     pub project: String,
     /// explore | search | node | callers | callees | impact
     #[schemars(
-        description = "查询类型：search=搜符号, explore=区域符号大纲(默认不带源码), node=符号详情含源码, callers=谁调用它, callees=它调用谁, impact=改动影响面。"
+        description = "查询类型：search=搜符号, explore=区域符号大纲(默认不带源码), node=符号详情含源码, callers=谁调用它, callees=它调用谁, impact=改动影响面, full_graph=整张图原始 JSON（不需要 target）。"
     )]
     pub kind: String,
-    /// 查询文本或符号名
+    /// 查询文本或符号名（full_graph 不需要）
     #[schemars(
-        description = "查询文本（search/explore）或符号名（node/callers/callees/impact）。注意 explore 按目录名或符号定位，不支持按单文件文件名查询。"
+        description = "查询文本（search/explore）或符号名（node/callers/callees/impact）；kind=full_graph 时不需要。注意 explore 按目录名或符号定位，不支持按单文件文件名查询。"
     )]
-    pub target: String,
+    pub target: Option<String>,
     /// explore→max-files；impact→depth
     #[schemars(
         description = "可选：explore 的 max-files（仅 include_source=true 生效）或 impact 的 depth。"
@@ -2579,10 +2580,10 @@ impl EngramMcpServer {
     }
 
     /// 代码图谱查询：search 符号 / explore 区域 / node 符号详情 /
-    /// callers / callees / impact 影响面。
+    /// callers / callees / impact 影响面 / full_graph 全图（EN-61）。
     ///
     /// 何时用：读陌生代码前先 search/explore；改代码前用 callers/impact 评估影响面；
-    /// 深入一个函数用 node。
+    /// 深入一个函数用 node；要整张图的原始 JSON（导入到别处/全局统计）用 full_graph。
     async fn codegraph_query(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -2590,17 +2591,33 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_codegraph(&p)?;
-        if params.0.target.trim().is_empty() {
+        // full_graph（EN-61）：整张图导出——不需要 target；bridge.full_graph 已存在，这里只是接入口
+        if params.0.kind == "full_graph" {
+            let id = cg_resolve(&self.state, &params.0.project).await?;
+            let mut v = cg_svc(&self.state).full_graph(id).await.map_err(from_cg)?;
+            if let Ok(proj) = cg_svc(&self.state).get(id).await
+                && proj.status == "ready"
+            {
+                v["_freshness"] = cg_svc(&self.state).freshness_for(&proj).await;
+            }
+            return ok_json(v);
+        }
+        if params
+            .0
+            .target
+            .as_deref()
+            .is_none_or(|t| t.trim().is_empty())
+        {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
-                "target 不能为空——先用 kind=search 搜符号，再对具体符号做 callers/impact",
+                "target 不能为空——先用 kind=search 搜符号，再对具体符号做 callers/impact（kind=full_graph 除外，不需要 target）",
             ));
         }
         let kind = engram_cg_bridge::QueryKind::from_str_opt(&params.0.kind).ok_or_else(|| {
             mcp_err(
                 ErrorCode::INVALID_PARAMS,
                 format!(
-                    "未知查询类型 {}——explore/search/node/callers/callees/impact",
+                    "未知查询类型 {}——explore/search/node/callers/callees/impact/full_graph",
                     params.0.kind
                 ),
             )
@@ -2610,7 +2627,7 @@ impl EngramMcpServer {
             .query(
                 id,
                 kind,
-                &params.0.target,
+                params.0.target.as_deref().unwrap_or_default(),
                 params.0.depth,
                 params.0.include_source.unwrap_or(false),
             )
@@ -2685,6 +2702,162 @@ impl EngramMcpServer {
         }
         report["queued_rebuild"] = serde_json::json!(queued);
         ok_json(report)
+    }
+
+    // ---------- 异步任务域（EN-61）：job 状态/错误/事件/救活——闭环 AI 侧异步链路 ----------
+
+    /// 解析 jobs.list 的状态过滤字面量（与 HTTP parse_statuses 同口径）。
+    fn parse_job_statuses(s: &Option<String>) -> Vec<engram_jobs::types::JobStatus> {
+        use engram_jobs::types::JobStatus;
+        s.as_deref()
+            .map(|v| {
+                v.split(',')
+                    .filter_map(|p| match p.trim() {
+                        "pending" => Some(JobStatus::Pending),
+                        "running" => Some(JobStatus::Running),
+                        "succeeded" => Some(JobStatus::Succeeded),
+                        "failed" => Some(JobStatus::Failed),
+                        "dead" => Some(JobStatus::Dead),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// JobError → MCP 错误（Permanent=参数/状态问题可自愈，Retryable=临时故障）。
+    fn from_job(e: engram_jobs::types::JobError) -> rmcp::ErrorData {
+        use engram_jobs::types::JobError;
+        match e {
+            JobError::Permanent(m) => mcp_err(ErrorCode::INVALID_PARAMS, m),
+            JobError::Retryable(m) => mcp_err(ErrorCode::INTERNAL_ERROR, format!("临时故障（可重试）：{m}")),
+        }
+    }
+
+    /// 任务列表（EN-61）：codegraph index/sync 与 gc 自愈的 job 都在这。
+    async fn jobs_list(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<jobs::JobsListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let _ = principal_of(&ctx)?;
+        let cursor = match params.0.cursor.as_deref() {
+            Some(v) => Some(parse_flex_datetime(v).map_err(|e| {
+                mcp_err(ErrorCode::INVALID_PARAMS, format!("cursor 格式不合法：{e}——用 RFC3339（如 2026-09-17T00:00:00Z）"))
+            })?),
+            None => None,
+        };
+        let rows = engram_jobs::JobQueue::new(self.state.pool.clone())
+            .list(
+                &params
+                    .0
+                    .kind
+                    .as_deref()
+                    .map(|v| v.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+                &Self::parse_job_statuses(&params.0.status),
+                cursor,
+                params.0.limit.unwrap_or(50).min(200),
+            )
+            .await
+            .map_err(Self::from_job)?;
+        Ok(CallToolResult::structured(serde_json::json!({
+            "count": rows.len(),
+            "jobs": rows,
+            "hint": "状态字面量 pending/running/succeeded/failed/dead——轮询终止判断用 succeeded 或 failed/dead",
+        })))
+    }
+
+    /// 任务详情（EN-61）：状态/错误/attempts——job_id 从 codegraph index/sync 返回拿。
+    async fn jobs_get(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<jobs::JobsGetParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let _ = principal_of(&ctx)?;
+        let id = Uuid::parse_str(&params.0.id).map_err(|_| {
+            mcp_err(ErrorCode::INVALID_PARAMS, format!("任务 id 不是合法 UUID：{}", params.0.id))
+        })?;
+        let job = engram_jobs::JobQueue::new(self.state.pool.clone())
+            .get(id)
+            .await
+            .map_err(Self::from_job)?
+            .ok_or_else(|| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("任务 {id} 不存在——codegraph index/sync 的返回里有 job_id"),
+                )
+            })?;
+        Ok(CallToolResult::structured(serde_json::json!({
+            "job": job,
+            "hint": "failed/dead 时看 error 字段定因；dead 可让管理员 revive（Web 控制台或 admin token）",
+        })))
+    }
+
+    /// 任务事件时间线（EN-61）：增量轮询（after=上一批最后事件 id）。
+    async fn jobs_events(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<jobs::JobsEventsParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let _ = principal_of(&ctx)?;
+        let id = Uuid::parse_str(&params.0.id).map_err(|_| {
+            mcp_err(ErrorCode::INVALID_PARAMS, format!("任务 id 不是合法 UUID：{}", params.0.id))
+        })?;
+        let rows = engram_jobs::JobQueue::new(self.state.pool.clone())
+            .events(id, params.0.after, params.0.limit.unwrap_or(100).min(1000))
+            .await
+            .map_err(Self::from_job)?;
+        Ok(CallToolResult::structured(serde_json::json!({
+            "count": rows.len(),
+            "events": rows,
+            "after": rows.last().map(|e| e.id),
+        })))
+    }
+
+    /// 复活 dead/failed 任务（EN-61）：仅管理员（与 HTTP POST /jobs/{id}/revive 同语义）。
+    async fn jobs_revive(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<jobs::JobsReviveParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match principal_of(&ctx)? {
+            Principal::Admin => {}
+            Principal::ApiKey { .. } => {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_REQUEST,
+                    "任务复活仅管理员——用 Web 控制台操作，或让管理员处理（HTTP POST /jobs/{id}/revive 同语义）",
+                ))
+            }
+        }
+        let id = Uuid::parse_str(&params.0.id).map_err(|_| {
+            mcp_err(ErrorCode::INVALID_PARAMS, format!("任务 id 不是合法 UUID：{}", params.0.id))
+        })?;
+        let queue = engram_jobs::JobQueue::new(self.state.pool.clone());
+        queue.revive(id).await.map_err(Self::from_job)?;
+        // 复活后回读确认——非 dead/failed 的任务 UPDATE 影响 0 行，如实告知而非假成功
+        let job = queue
+            .get(id)
+            .await
+            .map_err(Self::from_job)?
+            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("任务 {id} 不存在")))?;
+        if matches!(
+            job.status,
+            engram_jobs::types::JobStatus::Failed | engram_jobs::types::JobStatus::Dead
+        ) {
+            return Ok(CallToolResult::structured(serde_json::json!({
+                "revived": false,
+                "id": id,
+                "status": job.status.to_string(),
+                "hint": "只有 dead/failed 任务能复活——当前状态不符合",
+            })));
+        }
+        Ok(CallToolResult::structured(serde_json::json!({
+            "revived": true,
+            "id": id,
+            "status": job.status.to_string(),
+            "hint": "任务已回 pending 重新调度——用 jobs get 跟进进展",
+        })))
     }
 
     /// 沉淀新技能：把本次对话中验证有效的做法固化成可复用指令包。
@@ -3355,6 +3528,40 @@ impl EngramMcpServer {
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::to_value(&page).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 读取库的方向意图（EN-61）：purpose 是每库一份的「这个库收什么/不收什么」约定。
+    ///
+    /// 何时用：wiki write_page 之前——先读 purpose 对齐方向，避免写跑题。
+    async fn wiki_purpose(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiLibParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let purpose = wiki::svc(&self.state)
+            .get_purpose(lib)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::to_value(&purpose).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 库的洞察列表（EN-61）：AI 评审产出的观察项（与 reviews 对照看）。
+    async fn wiki_insights(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiLibParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let report = wiki::svc(&self.state)
+            .insights(lib)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
     }
 
     /// 知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 wiki synthesis 页。
@@ -4741,6 +4948,20 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "purpose" => {
+                self.wiki_purpose(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "purpose", call.args)?),
+                )
+                .await
+            }
+            "insights" => {
+                self.wiki_insights(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "insights", call.args)?),
+                )
+                .await
+            }
             "promote" => {
                 self.wiki_promote(
                     ctx,
@@ -4763,6 +4984,39 @@ impl EngramMcpServer {
                 .await
             }
             other => Err(dispatch::unknown_action("wiki", other)),
+        }
+    }
+
+    /// 异步任务域（EN-61）：轮询 job 状态/错误/事件，闭环 codegraph index/sync
+    /// 的异步链路（拿到 job_id 不再干看着）。list/get/events 任何合法凭证可读；
+    /// revive 复活 dead/failed 任务仅管理员（与 HTTP 同语义）。操作全景：action="help"。
+    #[tool(
+        name = "jobs",
+        annotations(
+            title = "异步任务域",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn jobs_tool(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(call): Parameters<dispatch::DomainCall>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        // jobs 无域 scope（对齐 HTTP：list/get 任何合法凭证可读）；revive 的 Admin 检查在 handler 内
+        let _ = principal_of(&ctx)?;
+        if call.action == "help" {
+            let cfg = load_config(&self.state.pool).await;
+            return ok_json(dispatch::render_manual("jobs", &cfg.disabled_tools));
+        }
+        match call.action.as_str() {
+            "list" => self.jobs_list(ctx, Parameters(dispatch::from_args("jobs", "list", call.args)?)).await,
+            "get" => self.jobs_get(ctx, Parameters(dispatch::from_args("jobs", "get", call.args)?)).await,
+            "events" => self.jobs_events(ctx, Parameters(dispatch::from_args("jobs", "events", call.args)?)).await,
+            "revive" => self.jobs_revive(ctx, Parameters(dispatch::from_args("jobs", "revive", call.args)?)).await,
+            other => Err(dispatch::unknown_action("jobs", other)),
         }
     }
 
@@ -5015,6 +5269,8 @@ impl ServerHandler for EngramMcpServer {
                     "search_all" => ["memory", "wiki", "skills", "todos", "project"]
                         .iter()
                         .any(|s| p.has_scope(s)),
+                    // jobs 无域 scope（对齐 HTTP：任何合法凭证可读任务——AI 轮询自己触发的任务）
+                    "jobs" => true,
                     name => p.has_scope(tool_scope(name)),
                 })
             })

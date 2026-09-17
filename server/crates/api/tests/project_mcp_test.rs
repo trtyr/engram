@@ -79,13 +79,18 @@ async fn project_tools_listed_with_annotations() {
     names.sort();
     assert_eq!(
         names,
-        vec!["projects", "search_all"],
-        "project scope 应见 projects 域工具与 search_all"
+        vec!["jobs", "projects", "search_all"],
+        "project scope 应见 projects 域工具与 search_all（jobs 无域 scope 恒可见）"
     );
 
     // 描述目录：15 个操作齐备，破坏性操作带标注
     let (_, v) = mcp_rpc(&app, &key, rpc(10, "tools/list", json!({}))).await;
-    let description = expect_result(&v, "tools/list")["tools"][0]["description"]
+    let description = expect_result(&v, "tools/list")["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "projects")
+        .expect("projects 工具应在列")["description"]
         .as_str()
         .unwrap()
         .to_string();
@@ -719,12 +724,19 @@ async fn project_tools_admin_info_and_toggle() {
     sorted_names.sort();
     assert_eq!(
         sorted_names,
-        vec!["projects", "search_all"],
-        "域工具应保留（+跨域 search_all）"
+        vec!["jobs", "projects", "search_all"],
+        "域工具应保留（+跨域 search_all；jobs 无域 scope 恒可见）"
     );
     let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
     let result = expect_result(&v, "tools/list");
-    let description = result["tools"][0]["description"].as_str().unwrap();
+    let description = result["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "projects")
+        .expect("projects 工具应在列")["description"]
+        .as_str()
+        .unwrap();
     assert!(
         !description.contains("- delete："),
         "停用操作应从目录隐身：{description}"
@@ -783,7 +795,12 @@ async fn project_tools_admin_info_and_toggle() {
     assert_eq!(resp.status(), StatusCode::OK);
     let description = {
         let (_, v) = mcp_rpc(&app, &key, rpc(3, "tools/list", json!({}))).await;
-        expect_result(&v, "tools/list")["tools"][0]["description"]
+        expect_result(&v, "tools/list")["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "projects")
+            .expect("projects 工具应在列")["description"]
             .as_str()
             .unwrap()
             .to_string()

@@ -131,6 +131,8 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "index", false, "内容目录（按页型分组的全库目录：slug/标题/入链数/首段摘要；只读动态聚合）" => crate::wiki::WikiLibParams;
             "archive", false, "问答/分析产物归档为 analysis 页（related 自动建双向 wikilinks——好答案不该消失在聊天记录里）" => crate::wiki::WikiArchiveParams;
             "libraries", false, "列出全部 wiki 库（多库；页面/原料计数一并返回；建库/删库走 Web）" => crate::wiki::WikiLibrariesParams;
+            "purpose", false, "读取库的方向意图（每库一份——写页前先读，避免写跑题）" => crate::wiki::WikiLibParams;
+            "insights", false, "列出库的洞察（AI 评审产出的观察项，可与 reviews 对照看）" => crate::wiki::WikiLibParams;
             "promote", false, "知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 synthesis 页（frontmatter 带源回链）+ 源文档自动追加 ⛳ 标记——提炼由调用方完成" => crate::wiki::WikiPromoteParams;
             "promotions", false, "晋升登记列表（谁家的哪些知识晋升成了 wiki 页；按项目过滤）" => crate::wiki::WikiPromotionsParams;
             "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
@@ -150,17 +152,23 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "list", false, "列出已注册代码库（注册状态/索引规模/当下可用性 usable）" => crate::CgNoParams;
             "gc", false, "失效条目对账（路径已不存在/索引产物已丢失的条目标为 error；可重新 index 恢复）" => crate::CgNoParams;
             "register", false, "注册代码库（本地绝对路径按服务端文件系统校验，或 git URL）" => crate::CgRegisterParams;
-            "query", false, "代码图谱查询（search/explore大纲/node/callers/callees/impact）" => crate::CgQueryParams;
+            "query", false, "代码图谱查询（search/explore大纲/node/callers/callees/impact/full_graph全图）" => crate::CgQueryParams;
             "index", false, "建索引/重建索引（异步 job）" => crate::CgNameParams;
             "sync", false, "增量同步索引（小改动后刷新）" => crate::CgNameParams;
             "delete", true, "注销代码图谱项目（删注册与索引；源码不动）" => crate::CgNameParams
+        ],
+        "jobs" => action_docs![
+            "list", false, "列出异步任务（可按 kind/status 过滤——codegraph index/sync 与 gc 自愈的 job 都在这）" => crate::jobs::JobsListParams;
+            "get", false, "查任务详情（状态/错误/进度/attempts——job_id 从 codegraph index/sync 返回拿）" => crate::jobs::JobsGetParams;
+            "events", false, "任务事件时间线（增量轮询）" => crate::jobs::JobsEventsParams;
+            "revive", true, "复活 dead/failed 任务重跑（仅管理员——amk_ key 会收到明确拒绝）" => crate::jobs::JobsReviveParams
         ],
         _ => return None,
     })
 }
 
 /// 域工具名（= scope 名，projects 例外——scope 叫 project）。
-pub const DOMAIN_TOOLS: &[&str] = &["memory", "projects", "skills", "wiki", "todos", "codegraph"];
+pub const DOMAIN_TOOLS: &[&str] = &["memory", "projects", "skills", "wiki", "todos", "codegraph", "jobs"];
 
 pub fn is_domain_tool(name: &str) -> bool {
     DOMAIN_TOOLS.contains(&name)
