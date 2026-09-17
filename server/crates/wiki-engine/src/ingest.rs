@@ -645,11 +645,11 @@ pub async fn generate_job(
 
     let mut tsv_written = 0usize;
     for (slug, title, content) in &pages {
-        let text = format!("{title}\n{content}");
+        let text = engram_search::tokenize::tsv_text_wiki(&format!("{slug} {title} {content}"));
         sqlx::query("UPDATE wiki_pages SET tsv = to_tsvector('simple', $3) WHERE slug = $1 AND library_id = $2")
             .bind(slug)
             .bind(lib)
-            .bind(engram_search::tokenize::tsv_text(&text))
+            .bind(&text)
             .execute(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;

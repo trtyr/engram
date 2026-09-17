@@ -62,7 +62,7 @@ use utoipa::OpenApi;
         wiki_api::get_purpose, wiki_api::set_purpose,
         wiki_api::list_reviews, wiki_api::resolve_review,
         wiki_api::archive_query, wiki_api::list_sources, wiki_api::delete_source,
-        wiki_api::promote, wiki_api::promotions,
+        wiki_api::promote, wiki_api::promotions, wiki_api::rebuild_tsv,
         wiki_api::insights, wiki_api::dismiss_insight, wiki_api::reset_insights,
         codegraph_api::register_project, codegraph_api::list_projects,
         codegraph_api::get_project, codegraph_api::delete_project,
@@ -323,6 +323,7 @@ pub fn router(state: AppState) -> Router {
         .route("/wiki/graph", get(wiki_api::graph))
         .route("/wiki/lint", post(wiki_api::lint))
         .route("/wiki/links/rebuild", post(wiki_api::rebuild_links))
+        .route("/wiki/tsv/rebuild", post(wiki_api::rebuild_tsv))
         .route("/wiki/promote", post(wiki_api::promote))
         .route("/wiki/promotions", get(wiki_api::promotions))
         .route("/wiki/proposals", get(wiki_api::list_proposals))

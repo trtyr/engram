@@ -625,6 +625,21 @@ pub async fn rebuild_links(
     Ok(Json(serde_json::json!({ "rebuilt_links": n })))
 }
 
+/// 存量页 tsv 重刷（EN-63 唯一权威口径）：全页、slug+title+content、wiki 分词变体
+/// （对齐 rebuild_links 先例；幂等，值不变不写）。
+#[utoipa::path(post, path = "/wiki/tsv/rebuild", params(LibOnlyParams),
+    responses((status = 200, body = Object)))]
+pub async fn rebuild_tsv(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<LibOnlyParams>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_wiki(&principal)?;
+    let lib = resolve_lib(&state, p.lib.as_deref()).await?;
+    let n = svc(&state).backfill_tsv(lib).await.map_err(we)?;
+    Ok(Json(serde_json::json!({ "rebuilt_tsv": n })))
+}
+
 // ---------- 知识晋升（EN-59）：项目文档 → wiki 的结构化动作；只读列表对齐 MCP ----------
 
 /// 晋升请求体。

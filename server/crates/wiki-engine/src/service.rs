@@ -5,7 +5,13 @@ use chrono::{DateTime, Utc};
 use engram_jobs::{JobQueue, JobTemplate};
 use engram_llm::ProviderRegistry;
 use engram_llm::types::Purpose;
-use engram_search::tokenize::tsv_text;
+use engram_search::tokenize::{tsv_query_smart_wiki, tsv_text_wiki};
+
+/// wiki_pages tsv 覆盖口径（EN-63）：slug + title + content 三合一——slug 复合词
+/// 归一后（ai passthrough principle）与标题词都在索引里，搜索任何一段均可命中。
+fn page_tsv_text(slug: &str, title: &str, content: &str) -> String {
+    tsv_text_wiki(&format!("{slug} {title} {content}"))
+}
 use uuid::Uuid;
 
 use crate::ingest;
@@ -372,7 +378,7 @@ impl WikiService {
         .bind(folder)
         .bind(content)
         .bind(fm_insert.to_string())
-        .bind(tsv_text(content))
+        .bind(page_tsv_text(slug, title, content))
         .bind(fm_merge)
         .fetch_one(&self.pool)
         .await?;
@@ -609,7 +615,7 @@ impl WikiService {
         if !engram_search::tokenize::has_query_tokens(query) {
             return Ok(vec![]);
         }
-        let tsq = engram_search::tokenize::tsv_query_smart(query, 3);
+        let tsq = tsv_query_smart_wiki(query, 3);
         let limit = limit.min(50);
 
         // W2：查询向量（无 provider / 嵌入失败 → None → 纯 FTS）；L6：经记账门面
@@ -661,19 +667,20 @@ impl WikiService {
         }
     }
 
-    /// W2 存量补数：LLM 页 tsv 曾只嵌 slug——重写为 title+content 口径（库内）。
-    /// 幂等（值不变不写）；jieba 分词必须经 Rust，故逐页计算。
+    /// 存量页 tsv 重刷（EN-63 唯一权威口径）：全页、slug+title+content、wiki 分词变体
+    ///（此前 W2 版本只刷 llm 页且不含 slug——EN-63 起 PUT/promote/ingest 所有写点同口径，
+    /// 本函数负责把存量页拉齐）。幂等（值不变不写）；jieba 分词必须经 Rust，故逐页计算。
     pub async fn backfill_tsv(&self, lib: Uuid) -> Result<u64, WikiError> {
         let pages: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT slug, COALESCE(frontmatter->>'title', slug), content FROM wiki_pages \
-             WHERE origin = 'llm' AND page_type NOT IN ('index','log','overview') AND library_id = $1",
+             WHERE library_id = $1",
         )
         .bind(lib)
         .fetch_all(&self.pool)
         .await?;
         let mut n = 0u64;
         for (slug, title, content) in &pages {
-            let text = format!("{title}\n{content}");
+            let text = page_tsv_text(slug, title, content);
             let r = sqlx::query(
                 "UPDATE wiki_pages SET tsv = to_tsvector('simple', $3) \
                  WHERE slug = $1 AND library_id = $2 \
@@ -681,7 +688,7 @@ impl WikiService {
             )
             .bind(slug)
             .bind(lib)
-            .bind(engram_search::tokenize::tsv_text(&text))
+            .bind(&text)
             .execute(&self.pool)
             .await?;
             n += r.rows_affected();
@@ -819,7 +826,7 @@ impl WikiService {
         .bind(title)
         .bind(&content)
         .bind(sqlx::types::Json(&fm))
-        .bind(engram_search::tokenize::tsv_text(&content))
+        .bind(page_tsv_text(&slug, title, &content))
         .execute(&self.pool)
         .await?;
 
@@ -1045,7 +1052,7 @@ impl WikiService {
                 .bind(&content)
                 .bind(fm.to_string())
                 .bind(next)
-                .bind(tsv_text(&content))
+                .bind(page_tsv_text(slug, &title, &content))
                 .fetch_one(&self.pool)
                 .await?;
                 for target in crate::markup::extract_wikilinks(&content) {

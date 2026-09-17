@@ -97,6 +97,86 @@ pub fn has_query_tokens(text: &str) -> bool {
     !tokenize(text).is_empty()
 }
 
+
+// ---------- wiki 专用变体（EN-63）----------
+//
+// 全平台共用 `tokenize`/`tsv_text` 服务 memory 域 atoms 索引——其语义不能动。
+// wiki 页检索的痛点：① slug 型 ASCII 复合词（ai-passthrough-principle）含 -/_
+// 被 keep() 整词丢弃（写入不进 tsv、查询空 token）；② 长复合 CJK 词整段成 token
+// 时子串不可达。本变体把 -/_ 归一为分隔符 + 用 jieba 搜索引擎模式（切粒度更细），
+// **wiki 写入与查询必须同用本变体**（wiki_pages tsv 语义）；memory 域继续走旧函数。
+
+/// wiki 分词：-/_ 归一为空格 + cut_for_search 细粒度，其余口径同 tokenize。
+pub fn tokenize_wiki(text: &str) -> Vec<String> {
+    let normalized: String = text
+        .chars()
+        .map(|c| if matches!(c, '-' | '_') { ' ' } else { c })
+        .collect();
+    JIEBA
+        .cut_for_search(&normalized, true)
+        .into_iter()
+        .filter(|t| keep(t))
+        .map(|t| t.to_lowercase())
+        .collect()
+}
+
+/// wiki 写入用：空格拼接 token 串（配合 to_tsvector('simple', ...)）。
+pub fn tsv_text_wiki(text: &str) -> String {
+    tokenize_wiki(text).join(" ")
+}
+
+/// wiki 查询用：与 tsv_query_smart 同构（≤max AND 精确，超限 OR 兜底），走 wiki 分词。
+pub fn tsv_query_smart_wiki(text: &str, max_and_tokens: usize) -> String {
+    let tokens: Vec<String> = tokenize_wiki(text)
+        .into_iter()
+        .filter(|t| !QUERY_STOPWORDS.contains(&t.as_str()))
+        .collect();
+    if tokens.len() > max_and_tokens {
+        tokens.join(" | ")
+    } else {
+        tokens.join(" & ")
+    }
+}
+
+#[cfg(test)]
+mod wiki_variant_tests {
+    use super::*;
+
+    #[test]
+    fn slug_compound_splits_into_hittable_tokens() {
+        // EN-63 核心：slug 复合词不再整词丢弃——三个可命中 token
+        let toks = tokenize_wiki("ai-passthrough-principle");
+        assert_eq!(toks, vec!["ai", "passthrough", "principle"]);
+        // snake_case 同样归一
+        assert!(tokenize_wiki("host_direct_run").contains(&"host".to_string()));
+        // 查询侧生成可命中的 tsquery 片段
+        let q = tsv_query_smart_wiki("ai-passthrough-principle", 3);
+        assert_eq!(q, "ai & passthrough & principle");
+    }
+
+    #[test]
+    fn cjk_subword_reachable_via_search_mode() {
+        // cut_for_search：长复合词与子词都保留——「透传」可从「透传原则」达
+        let toks = tokenize_wiki("机器产出原样透传原则");
+        assert!(toks.contains(&"透传".to_string()), "透传 应为独立 token：{toks:?}");
+        let q = tsv_query_smart_wiki("透传", 3);
+        assert_eq!(q, "透传");
+    }
+
+    #[test]
+    fn legacy_tokenize_unchanged_for_memory_domain() {
+        // memory 域零变化基线（jieba 实证）：旧 tokenize 对 slug 切出三 token
+        //（单独的 "-" 被丢弃）——行为不因本单改动而变，wiki 变体才是归一入口
+        assert_eq!(
+            tokenize("ai-passthrough-principle"),
+            vec!["ai", "passthrough", "principle"]
+        );
+                // 单独「透传原则」jieba 切两词（词典无此复合词）——EN-59 当时的「透传」未命中
+        // 即源于此：tsv 只有词粒度 token，子串匹配靠 cut_for_search 变体补齐
+        assert_eq!(tokenize("透传原则"), vec!["透传", "原则"]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

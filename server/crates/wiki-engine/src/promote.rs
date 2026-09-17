@@ -56,7 +56,7 @@ pub async fn promote_page(
     .bind(title)
     .bind(content)
     .bind(fm.to_string())
-    .bind(engram_search::tokenize::tsv_text(content))
+    .bind(engram_search::tokenize::tsv_text_wiki(&format!("{slug} {title} {content}")))
     .fetch_one(pool)
     .await?;
 
