@@ -7,6 +7,7 @@ import { api, type Todo } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
+import WikiMarkdown from '@/components/WikiMarkdown'
 import { cn } from '@/lib/utils'
 import {
   PRIO_LABEL,
@@ -555,14 +556,11 @@ function EditableSection({
           </div>
         </div>
       ) : value ? (
-        <p
-          className={cn(
-            'mt-0.5 break-words whitespace-pre-wrap leading-5',
-            tone === 'success' && 'text-xs text-success',
-          )}
-        >
-          {value}
-        </p>
+        <div className={cn('mt-0.5 break-words', tone === 'success' && 'text-xs text-success')}>
+          {/* 四件套是 AI 常写 markdown 的字段——按全站渲染器出（**、列表、空行段落），
+              纯文本 pre-wrap 会裸显 markdown 源码且空行撑出大块空白 */}
+          <WikiMarkdown content={value} />
+        </div>
       ) : (
         <p className="mt-0.5 text-xs text-muted-foreground/50">（未填）</p>
       )}
