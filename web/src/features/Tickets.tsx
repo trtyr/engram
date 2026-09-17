@@ -203,7 +203,7 @@ export default function Tickets() {
           className={cn(
             'grid grid-cols-1 gap-4',
             selected
-              ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:h-[calc(100dvh-13.5rem)]'
+              ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:h-[calc(100dvh-7.5rem)]'
               : 'grid-cols-1',
           )}
         >
@@ -247,7 +247,7 @@ export default function Tickets() {
             })()}
           </div>
           {selected && (
-            <div className="min-w-0 lg:h-full lg:overflow-y-auto lg:pl-1">
+            <div className="min-w-0 lg:self-start lg:max-h-full lg:overflow-y-auto lg:pl-1">
               <TicketDetail
                 t={rows.find((r) => r.id === selected.id) ?? selected}
                 busy={busy}
