@@ -193,12 +193,25 @@ export default function Tickets() {
 
       {err && <ErrorBox msg={err} />}
 
-      {/* 列表 + 详情面板（lg 起双栏；选中行高亮，右侧面板展开详情） */}
+      {/* 列表 + 详情面板：lg 选中态 = 定高双栏、左右各自独立滚动（EN：滚动模型重构）；
+          未选中 / 移动端 = 单列自然流（现状不变） */}
       {rows.length === 0 ? (
         <Empty text="暂无工单——让 AI 通过 todo_add（kind=ticket）帮你记，填上症状更好用" />
       ) : (
-        <div className={cn('grid grid-cols-1 gap-4', selected && 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]')}>
-          <div className="min-w-0 space-y-4">
+        <div
+          className={cn(
+            'grid grid-cols-1 gap-4',
+            selected
+              ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:h-[calc(100dvh-13.5rem)]'
+              : 'grid-cols-1',
+          )}
+        >
+          <div
+            className={cn(
+              'min-w-0 space-y-4',
+              selected && 'lg:h-full lg:overflow-y-auto lg:pr-1',
+            )}
+          >
             {/* EN-58：分段展示让排序可预期——后端口径是 open 优先 + updated_at DESC，
                 混排时用户看到「忽上忽下」。分两段各带计数，段内保持后端顺序不变。 */}
             {(() => {
@@ -233,15 +246,17 @@ export default function Tickets() {
             })()}
           </div>
           {selected && (
-            <TicketDetail
-              t={rows.find((r) => r.id === selected.id) ?? selected}
-              busy={busy}
-              onClose={() => setSelected(null)}
-              onAdvance={advance}
-              onArchive={doArchive}
-              onDelete={doDelete}
-              onEditSave={saveField}
-            />
+            <div className="min-w-0 lg:h-full lg:overflow-y-auto lg:pl-1">
+              <TicketDetail
+                t={rows.find((r) => r.id === selected.id) ?? selected}
+                busy={busy}
+                onClose={() => setSelected(null)}
+                onAdvance={advance}
+                onArchive={doArchive}
+                onDelete={doDelete}
+                onEditSave={saveField}
+              />
+            </div>
           )}
         </div>
       )}
