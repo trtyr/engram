@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 45 份迁移：0045 = 项目文件 + 版本快照）
+    // 版本可查（当前 46 份迁移：0046 = wiki 默认库 main 幂等对账，EN-57）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(45), "0001-0045 迁移应已应用");
+    assert_eq!(version, Some(46), "0001-0046 迁移应已应用");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")
@@ -200,5 +200,60 @@ async fn migration_0022_splits_multi_model_provider() {
         rows.iter()
             .any(|(n, m, c)| n == "newapi-embedding" && m == "bge-m3" && c == "embedding"),
         "embedding 模型应拆成 name-capability 后缀: {rows:?}"
+    );
+}
+
+// EN-57：wiki 默认库 main 由迁移保证存在——空库跑迁移后必有 main；
+// 已有 main（slug 冲突）的库重复应用零影响（id/name 不动）。
+#[tokio::test]
+async fn default_main_library_guaranteed_and_idempotent() {
+    let container = support::start_pgvector().await.expect("启动 pgvector 容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接容器");
+
+    engram_storage::run_migrations(&pool).await.expect("迁移执行");
+
+    // 空库跑完全部迁移 → main 存在（0037 建名「主库」；0046 对已有行 DO NOTHING
+    // 不覆盖——name 是用户可改字段，迁移不钉死）
+    let (slug, name): (String, String) = sqlx::query_as(
+        "SELECT slug, name FROM wiki_libraries WHERE slug = 'main'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("迁移后应存在 main 库");
+    assert_eq!(slug, "main");
+    assert!(!name.is_empty(), "main 应有名字");
+    let id_before: uuid::Uuid =
+        sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // 幂等：再次执行全部迁移（或单独重放 0046 的 INSERT）不破坏已有行
+    engram_storage::run_migrations(&pool).await.expect("幂等重放");
+    sqlx::query(
+        "INSERT INTO wiki_libraries (id, slug, name) \
+         VALUES ('00000000-0000-4000-8000-000000000001', 'main', '个人知识库') \
+         ON CONFLICT (slug) DO NOTHING",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (id_after, name_after): (uuid::Uuid, String) = sqlx::query_as(
+        "SELECT id, name FROM wiki_libraries WHERE slug = 'main'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(id_after, id_before, "幂等重放不应改变已有 main 的 id");
+    assert_eq!(name_after, name, "幂等重放不应改变已有 main 的 name");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM wiki_libraries WHERE slug = 'main'")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1,
+        "main 恰好一行"
     );
 }

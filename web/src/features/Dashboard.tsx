@@ -164,8 +164,10 @@ export default function Dashboard() {
       api.get<Atom[]>('/memory/atoms?limit=500'),
       api.get<Session[]>('/memory/sessions?limit=500'),
       api.get<Scenario[]>('/memory/scenarios?limit=500'),
-      api.get<Document[]>('/wiki/documents?limit=200'),
-      api.get<WikiPage[]>('/wiki/pages?limit=300'),
+      // EN-57：wiki 两路单独降级——缺库/报错时置空，其余统计照常渲染。
+      // 概览页不因单一数据源故障整页白屏（memory 域失败仍整页报错——那是系统性故障）。
+      api.get<Document[]>('/wiki/documents?limit=200').catch(() => [] as Document[]),
+      api.get<WikiPage[]>('/wiki/pages?limit=300').catch(() => [] as WikiPage[]),
     ])
       .then(([atoms, sessions, scenarios, docs, pages]) => setCore({ atoms, sessions, scenarios, docs, pages }))
       .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
