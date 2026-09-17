@@ -636,9 +636,11 @@ impl WikiService {
             // CTE 与外层都按 library_id 过滤——slug 跨库可重名，外层不过滤会串库
             let rows: Vec<WikiPageDto> = sqlx::query_as(
                 "WITH fts AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
-                 FROM wiki_pages, to_tsquery('simple', $2) q WHERE tsv @@ q AND library_id = $1 LIMIT 100), \
+                 FROM wiki_pages, to_tsquery('simple', $2) q WHERE tsv @@ q AND library_id = $1 \
+                   AND page_type NOT IN ('index','log','overview') LIMIT 100), \
                  vec AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY embedding <=> $3) AS rank \
-                 FROM wiki_pages WHERE embedding IS NOT NULL AND library_id = $1 LIMIT 100) \
+                 FROM wiki_pages WHERE embedding IS NOT NULL AND library_id = $1 \
+                   AND page_type NOT IN ('index','log','overview') LIMIT 100) \
                  SELECT p.* FROM wiki_pages p \
                  LEFT JOIN fts ON fts.slug = p.slug \
                  LEFT JOIN vec ON vec.slug = p.slug \
@@ -657,6 +659,7 @@ impl WikiService {
             Ok(sqlx::query_as::<_, WikiPageDto>(
                 "SELECT * FROM wiki_pages, to_tsquery('simple', $2) q \
                  WHERE tsv @@ q AND library_id = $1 \
+                   AND page_type NOT IN ('index','log','overview') \
                  ORDER BY ts_rank(tsv, q) DESC LIMIT $3",
             )
             .bind(lib)
@@ -667,13 +670,25 @@ impl WikiService {
         }
     }
 
-    /// 存量页 tsv 重刷（EN-63 唯一权威口径）：全页、slug+title+content、wiki 分词变体
-    ///（此前 W2 版本只刷 llm 页且不含 slug——EN-63 起 PUT/promote/ingest 所有写点同口径，
-    /// 本函数负责把存量页拉齐）。幂等（值不变不写）；jieba 分词必须经 Rust，故逐页计算。
+    /// 存量页 tsv 重刷（EN-63）：内容页、slug+title+content、wiki 分词变体。
+    ///
+    /// 排除 index/log/overview 系统页——它们是目录/日志结构页不是内容（insights/lint/
+    /// cascade 等全部读者都排除它们），且 overview 页聚合了几乎全库正文、是关键词汤；
+    /// 历史上它们 tsv 为 NULL 不参与 FTS，重刷若包含会让系统页霸榜（audit 实证回归）。
+    /// 幂等（值不变不写）；jieba 分词必须经 Rust，故逐页计算。
     pub async fn backfill_tsv(&self, lib: Uuid) -> Result<u64, WikiError> {
+        // 历史残留清理：audit 前的重刷（无排除版）或任何途径给系统页写过的 tsv 必须清 NULL，
+        // 否则它们继续参与 FTS 霸榜——仅「不更新」不够
+        sqlx::query(
+            "UPDATE wiki_pages SET tsv = NULL \
+             WHERE library_id = $1 AND page_type IN ('index','log','overview') AND tsv IS NOT NULL",
+        )
+        .bind(lib)
+        .execute(&self.pool)
+        .await?;
         let pages: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT slug, COALESCE(frontmatter->>'title', slug), content FROM wiki_pages \
-             WHERE library_id = $1",
+             WHERE library_id = $1 AND page_type NOT IN ('index','log','overview')",
         )
         .bind(lib)
         .fetch_all(&self.pool)

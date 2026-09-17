@@ -153,7 +153,14 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
 
     let mut c_wiki = DomainCount::default();
     for it in each(data.get("wiki"), "pages") {
-        c_wiki.merge(DomainCount::bump(repo::import_wiki_page(pool, &it).await?));
+        // EN-63：导入页 tsv 按 wiki 口径现算（slug+title+content、wiki 分词变体）
+        let tsv_text = engram_search::tokenize::tsv_text_wiki(&format!(
+            "{} {} {}",
+            it.get("slug").and_then(|x| x.as_str()).unwrap_or(""),
+            it.get("title").and_then(|x| x.as_str()).unwrap_or(""),
+            it.get("content").and_then(|x| x.as_str()).unwrap_or(""),
+        ));
+        c_wiki.merge(DomainCount::bump(repo::import_wiki_page(pool, &it, &tsv_text).await?));
     }
 
     let mut c_project = DomainCount::default();

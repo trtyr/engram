@@ -1570,3 +1570,96 @@ async fn cross_library_wikilinks_lifecycle() {
             .unwrap();
     assert_eq!(left, 0, "删目标页应级联清理跨库引用");
 }
+
+/// EN-63：tsv 口径三断言——① backfill 重刷不碰系统页（index/log/overview 不参与 FTS，
+/// 否则 overview 关键词汤霸榜——audit 实证回归）；② slug 复合词归一后可命中
+/// （搜 ai-passthrough-principle / 「透传」）；③ import_wiki_page 导入页 tsv 同口径。
+#[tokio::test]
+async fn en63_tsv_coverage_and_system_page_exclusion() {
+    let (pool, svc, _handle, _pg, lib) = setup(vec![]).await;
+
+    // 内容页（含 slug 复合词 + 中文子串样本）与系统页各一
+    for (slug, ptype, title, content) in [
+        (
+            "en63-compound-page",
+            "concept",
+            "EN63 复合词样本",
+            "正文提到 pi-extension 与透传原则。",
+        ),
+        ("en63-index", "index", "EN63 索引页", "en63 全部页面总览"),
+        ("en63-overview", "overview", "EN63 总览", "透传 复合词 关键词汤"),
+    ] {
+        svc.put_page(lib, slug, title, content, None, None).await.unwrap();
+        // put_page 会生成 page_type=concept——系统页类型手动改 + tsv 置 NULL
+        //（模拟历史状态：系统页从不参与 FTS）
+        if ptype != "concept" {
+            sqlx::query(
+                "UPDATE wiki_pages SET page_type = $2, tsv = to_tsvector('simple', '脏残留') \
+                 WHERE slug = $1 AND library_id = $3",
+            )
+            .bind(slug)
+            .bind(ptype)
+            .bind(lib)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    // 重刷：内容页已是新口径（put_page 同函数）→ 幂等 n=0；系统页脏 tsv 被清回 NULL
+    //（audit 回归教训：仅「不更新」不清残留——上一轮脏 tsv 会继续霸榜）
+    let n = svc.backfill_tsv(lib).await.unwrap();
+    assert_eq!(n, 0, "写点已同口径，backfill 应幂等无活可干（n={n}）");
+
+    let (compound_ok, sys_null): (bool, bool) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM unnest(tsvector_to_array(w.tsv)) arr WHERE arr IN ('en63', 'compound', 'page')), \
+                (SELECT o.tsv IS NULL FROM wiki_pages o WHERE o.slug='en63-overview' AND o.library_id=$1) \
+         FROM wiki_pages w WHERE w.slug='en63-compound-page' AND w.library_id=$1",
+    )
+    .bind(lib)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(compound_ok, "内容页 tsv 应含 slug 归一 token（en63/compound/page）");
+    assert!(sys_null, "系统页（overview）重刷后 tsv 应仍为 NULL——结构页不参与 FTS");
+
+    // 搜索验证：slug 复合词与中文子串命中目标页，且 overview 不出现在结果
+    let hits = svc.search(lib, "ai-en63-compound-page", 20).await.unwrap();
+    assert!(
+        hits.iter().any(|p| p.slug == "en63-compound-page"),
+        "slug 复合词应命中：{:?}",
+        hits.iter().map(|p| &p.slug).collect::<Vec<_>>()
+    );
+    let hits = svc.search(lib, "透传", 20).await.unwrap();
+    assert!(
+        hits.iter().any(|p| p.slug == "en63-compound-page"),
+        "中文子串「透传」应命中（cut_for_search 子词）"
+    );
+    assert!(
+        hits.iter().all(|p| !matches!(p.page_type.as_str(), "index" | "log" | "overview")),
+        "系统页（index/log/overview）不应出现在搜索结果（向量腿也在排除内）：{:?}",
+        hits.iter().map(|p| (&p.slug, &p.page_type)).collect::<Vec<_>>()
+    );
+
+    // import_wiki_page：导入页 tsv 同口径（slug token 在）；系统页导入 tsv=NULL
+    let doc = serde_json::json!({
+        "id": uuid::Uuid::now_v7(),
+        "slug": "en63-imported-page",
+        "title": "EN63 导入页",
+        "content": "导入正文提到 pi-extension。",
+        "page_type": "concept",
+        "origin": "llm",
+        "version": 1,
+    });
+    let imported = engram_storage::repo::transfer::import_wiki_page(&pool, &doc, &engram_search::tokenize::tsv_text_wiki("en63-imported-page EN63 导入页 导入正文提到 pi-extension。")).await.unwrap();
+    assert!(imported, "导入应成功");
+    let (imp_ok,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM unnest(tsvector_to_array(tsv)) t WHERE t = 'imported') \
+         FROM wiki_pages WHERE slug = 'en63-imported-page' AND library_id = $1",
+    )
+    .bind(lib)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(imp_ok, "导入页 tsv 应按 wiki 口径写入（含 slug token）");
+}

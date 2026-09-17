@@ -400,15 +400,19 @@ pub async fn import_skill(pool: &PgPool, v: &Value, files: &[Value]) -> StoreRes
     Ok((true, imported_files))
 }
 
-pub async fn import_wiki_page(pool: &PgPool, v: &Value) -> StoreResult<bool> {
+pub async fn import_wiki_page(pool: &PgPool, v: &Value, tsv_text: &str) -> StoreResult<bool> {
     let content = str_of(v, "content", "");
     // 多库（2026-09-08）：迁移导入统一落主库（slug 冲突按库内判定）
     let lib: Uuid = sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
         .fetch_one(pool)
         .await?;
+    // tsv 由调用方按 wiki 口径（slug+title+content、wiki 分词变体）算好传入——storage 不依赖分词器；
+    // 系统页（index/log/overview）写 NULL（结构页不参与 FTS，EN-63 audit 回归教训）
     let res = sqlx::query(
         "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, folder, tsv, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, to_tsvector('simple', $6), $11, $12) ON CONFLICT (library_id, slug) DO NOTHING",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, \
+                 CASE WHEN $5 IN ('index','log','overview') THEN NULL ELSE to_tsvector('simple', $13) END, $11, $12) \
+         ON CONFLICT (library_id, slug) DO NOTHING",
     )
     .bind(id_of(v, "id"))
     .bind(lib)
@@ -422,6 +426,7 @@ pub async fn import_wiki_page(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     .bind(str_of(v, "folder", ""))
     .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
     .bind(ts(v, "updated_at").unwrap_or_else(Utc::now))
+    .bind(tsv_text)
     .execute(pool)
     .await?;
     Ok(res.rows_affected() > 0)

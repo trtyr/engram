@@ -625,8 +625,8 @@ pub async fn rebuild_links(
     Ok(Json(serde_json::json!({ "rebuilt_links": n })))
 }
 
-/// 存量页 tsv 重刷（EN-63 唯一权威口径）：全页、slug+title+content、wiki 分词变体
-/// （对齐 rebuild_links 先例；幂等，值不变不写）。
+/// 存量内容页 tsv 重刷（EN-63）：slug+title+content、wiki 分词变体；排除 index/log/overview
+/// 系统页（结构页不参与 FTS——重刷包含会让系统页霸榜）。对齐 rebuild_links 先例；幂等。
 #[utoipa::path(post, path = "/wiki/tsv/rebuild", params(LibOnlyParams),
     responses((status = 200, body = Object)))]
 pub async fn rebuild_tsv(
