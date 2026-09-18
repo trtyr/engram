@@ -78,4 +78,43 @@ impl AppState {
             Some(m) => m.0 == "00".repeat(32),
         }
     }
+
+    /// 公网加固（P001-t8）：弱熵主密钥检测——已设置但字符种类过少（如同一对字符
+    /// 重复 32 次），公网部署下离线爆破代价接近于零。与占位检测互补（占位另判）。
+    pub fn is_weak_master_key(&self) -> bool {
+        match &self.master_key {
+            None => false,
+            Some(m) => m.0.chars().collect::<std::collections::HashSet<_>>().len() < 8,
+        }
+    }
+}
+
+#[cfg(test)]
+mod weak_key_tests {
+    use super::*;
+
+    fn state_with(key: Option<&str>) -> AppState {
+        AppState::new(engram_storage::PgPool::connect_lazy("postgres://x@127.0.0.1:1/x").unwrap())
+            .with_master_key(key.map(str::to_string))
+    }
+
+    #[tokio::test]
+    async fn weak_entropy_detected() {
+        assert!(state_with(Some(&"ab".repeat(32))).is_weak_master_key());
+        assert!(!state_with(Some(&"0123456789abcdef".repeat(4))).is_weak_master_key());
+    }
+
+    #[tokio::test]
+    async fn placeholder_is_not_reported_as_weak() {
+        // 占位（None / 00×32）由 is_placeholder_master_key 负责，弱检测不重复报
+        assert!(!state_with(None).is_weak_master_key());
+    }
+
+    #[tokio::test]
+    async fn random_hex_is_strong() {
+        // 64 位 hex 理论上至少 10+ 种字符——构造 16 种字符各出现 4 次的强 key
+        let strong: String = "0123456789abcdef".chars().flat_map(|c| [c; 4]).collect();
+        assert_eq!(strong.len(), 64);
+        assert!(!state_with(Some(&strong)).is_weak_master_key());
+    }
 }

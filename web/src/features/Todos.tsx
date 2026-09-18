@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { appConfirm } from '@/components/confirm'
 import { Check, ChevronDown, Trash2 } from 'lucide-react'
+import Pager from '@/components/Pager'
 import { api, type Todo } from '@/lib/api'
 import { Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls, selectCls } from '@/lib/ui'
@@ -24,6 +25,10 @@ export default function Todos() {
   const [doneRows, setDoneRows] = useState<Todo[] | null>(null)
   const [showDone, setShowDone] = useState(false) // 「已完成」折叠组，默认收起（微软 To Do 心智）
 
+  // 翻页（前端切页：单用户数据量小，一次拉全 + slice，支持页码直跳）
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+
   // 快速输入条：一行输入回车即建，优先级轻量可调
   const [title, setTitle] = useState('')
   const [quickPriority, setQuickPriority] = useState('normal')
@@ -31,7 +36,8 @@ export default function Todos() {
   const query = useMemo(() => {
     // 视图 → 服务端 status 过滤（todo 形态只有 open/done/archived 三态）
     const status = view === 'active' ? 'open' : view
-    const parts = [`kind=todo`, `status=${status}`]
+    // limit 拉满（服务端默认 200 会静默截断）——翻页在前端切
+    const parts = [`kind=todo`, `status=${status}`, `limit=1000`]
     if (priority) parts.push(`priority=${priority}`)
     if (tag.trim()) parts.push(`tag=${encodeURIComponent(tag.trim())}`)
     if (q.trim()) parts.push(`q=${encodeURIComponent(q.trim())}`)
@@ -49,6 +55,7 @@ export default function Todos() {
 
   useEffect(() => {
     load()
+    setPage(1) // 筛选/视图变化回到第一页
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
@@ -127,6 +134,10 @@ export default function Todos() {
 
   if (err && !rows) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
+
+  // 翻页钳制：自动刷新后总数变少时当前页可能越界
+  const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
+  const cur = Math.min(page, maxPage)
 
   const views: { key: View; label: string }[] = [
     { key: 'active', label: '进行中' },
@@ -236,18 +247,30 @@ export default function Todos() {
           }
         />
       ) : (
-        <div className="space-y-1">
-          {rows.map((t) => (
-            <TodoRow
-              key={t.id}
-              t={t}
-              busy={busy}
-              onToggle={() => toggleDone(t)}
-              onArchive={doArchive}
-              onDelete={doDelete}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-1">
+            {rows.slice((cur - 1) * pageSize, cur * pageSize).map((t) => (
+              <TodoRow
+                key={t.id}
+                t={t}
+                busy={busy}
+                onToggle={() => toggleDone(t)}
+                onArchive={doArchive}
+                onDelete={doDelete}
+              />
+            ))}
+          </div>
+          <Pager
+            total={rows.length}
+            page={cur}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={(n) => {
+              setPageSize(n)
+              setPage(1)
+            }}
+          />
+        </>
       )}
 
       {/* 「已完成」折叠组：仅进行中视图，默认收起（微软 To Do 心智） */}
@@ -266,6 +289,8 @@ export default function Todos() {
     </div>
   )
 }
+
+/** 翻页条（公共组件 @/components/Pager）。 */
 
 /** 「已完成 N」折叠组（微软 To Do：完成后收进这里，默认收起，展开可看/可重开）。 */
 function DoneGroup({

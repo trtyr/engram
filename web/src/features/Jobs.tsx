@@ -4,39 +4,25 @@ import { api, type Job, type JobEvent } from '@/lib/api'
 import { Card, Empty, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
 import { fmtTime, selectCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
+import Pager from '@/components/Pager'
 
 export default function Jobs() {
   const [rows, setRows] = useState<Job[] | null>(null)
   const [status, setStatus] = useState('')
   const [open, setOpen] = useState<Job | null>(null)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const PAGE = 50
+  // 翻页（前端切页：拉满服务端上限 200 条后本地分页，支持页码直跳）
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
   const load = () => {
-    // 自动刷新重拉当前已加载体量（上限 200），不打断已翻页的视图
-    const size = Math.min(Math.max(rows?.length ?? 0, PAGE), 200)
-    const p = new URLSearchParams({ limit: String(size) })
+    // 拉满服务端上限 200 条（5s 自动刷新重拉，不打断翻页视图）
+    const p = new URLSearchParams({ limit: '200' })
     if (status) p.set('status', status)
     api.get<Job[]>(`/jobs?${p}`).then(setRows).catch(() => {})
-  }
-  const loadMore = async () => {
-    if (!rows?.length) return
-    setLoadingMore(true)
-    const p = new URLSearchParams({ limit: String(PAGE), cursor: rows[rows.length - 1].created_at })
-    if (status) p.set('status', status)
-    try {
-      const more = await api.get<Job[]>(`/jobs?${p}`)
-      // 按去重合并（游标重叠防御）
-      const seen = new Set(rows.map((r) => r.id))
-      setRows([...rows, ...more.filter((m) => !seen.has(m.id))])
-    } catch {
-      /* 保持现状 */
-    } finally {
-      setLoadingMore(false)
-    }
   }
   useEffect(() => {
     setRows(null)
     load()
+    setPage(1) // 筛选变化回到第一页
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status])
   // 5s 自动刷新
@@ -45,6 +31,10 @@ export default function Jobs() {
     return () => clearInterval(t)
   })
   if (!rows) return <Spinner />
+
+  // 翻页钳制：自动刷新后总数变少时当前页可能越界
+  const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
+  const cur = Math.min(page, maxPage)
 
   return (
     <div className="space-y-6">
@@ -71,7 +61,7 @@ export default function Jobs() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((j) => (
+              {rows.slice((cur - 1) * pageSize, cur * pageSize).map((j) => (
                 <tr key={j.id} className={`${tableCls.row} cursor-pointer`} onClick={() => setOpen(j)}>
                   <td className={`${tableCls.td} font-medium`}>{j.kind}</td>
                   <td className={tableCls.td}>
@@ -86,12 +76,18 @@ export default function Jobs() {
           </table>
         </Card>
       )}
-      {rows.length > 0 && rows.length % PAGE === 0 && (
-        <div className="flex justify-center">
-          <Button variant="outline" size="sm" disabled={loadingMore} onClick={loadMore}>
-            {loadingMore ? '加载中…' : `加载更多（已显示 ${rows.length} 条）`}
-          </Button>
-        </div>
+      {rows.length > 0 && (
+        <Pager
+          total={rows.length}
+          page={cur}
+          pageSize={pageSize}
+          onPage={setPage}
+          onPageSize={(n) => {
+            setPageSize(n)
+            setPage(1)
+          }}
+          hint={rows.length >= 200 ? '仅载入最近 200 条' : undefined}
+        />
       )}
       {open && <EventTimeline job={open} onClose={() => setOpen(null)} />}
     </div>

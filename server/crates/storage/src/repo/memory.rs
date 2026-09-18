@@ -37,6 +37,47 @@ pub async fn insert_session(
     Ok(row)
 }
 
+/// 幂等写入（公网多Agent P001 步骤1）：client_ref 命中唯一索引时返回既有会话，不新建。
+/// api_key_id/key_name_snapshot 为写者归因；key 删除后 api_key_id 置 NULL、快照名保留。
+#[allow(clippy::too_many_arguments)] // 归因三参为可选直通位——重构收益低于可读性损失
+pub async fn insert_session_identity(
+    pool: &PgPool,
+    id: Uuid,
+    agent: &str,
+    turns: &Value,
+    sensitive: bool,
+    metadata: &Value,
+    api_key_id: Option<Uuid>,
+    key_name_snapshot: Option<&str>,
+    client_ref: Option<&str>,
+) -> StoreResult<SessionDto> {
+    let inserted = sqlx::query_as::<_, SessionDto>(
+        "INSERT INTO raw_sessions (id, agent, content, sensitive, metadata, api_key_id, key_name_snapshot, client_ref) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+         ON CONFLICT (client_ref) WHERE client_ref IS NOT NULL DO NOTHING RETURNING *",
+    )
+    .bind(id)
+    .bind(agent)
+    .bind(sqlx::types::Json(turns))
+    .bind(sensitive)
+    .bind(sqlx::types::Json(metadata))
+    .bind(api_key_id)
+    .bind(key_name_snapshot)
+    .bind(client_ref)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(row) = inserted {
+        return Ok(row);
+    }
+    // 幂等命中：client_ref 已存在 → 返回既有会话（不新建）
+    let existing =
+        sqlx::query_as::<_, SessionDto>("SELECT * FROM raw_sessions WHERE client_ref = $1")
+            .bind(client_ref)
+            .fetch_one(pool)
+            .await?;
+    Ok(existing)
+}
+
 pub async fn insert_session_import(
     pool: &PgPool,
     id: Uuid,

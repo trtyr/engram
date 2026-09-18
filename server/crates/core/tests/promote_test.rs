@@ -3,8 +3,8 @@
 
 mod support;
 
-use engram_core::promote::{PromoteRequest, PromoteService};
 use engram_core::project::ProjectService;
+use engram_core::promote::{PromoteRequest, PromoteService};
 use sqlx::PgPool;
 
 async fn setup() -> (PgPool, PromoteService, ProjectService, support::TestPg) {
@@ -27,7 +27,13 @@ async fn promote_full_chain_page_registration_and_doc_marks() {
         .await
         .unwrap();
     let doc = projects
-        .add_doc(proj.id, "后端", "", "文档工作流", "机器产出原样透传：KV 逐字存。")
+        .add_doc(
+            proj.id,
+            "后端",
+            "",
+            "文档工作流",
+            "机器产出原样透传：KV 逐字存。",
+        )
         .await
         .unwrap();
 
@@ -73,12 +79,17 @@ async fn promote_full_chain_page_registration_and_doc_marks() {
     // ④ 源文档标记双写可见：frontmatter.promoted 数组 + 正文末尾 ⛳ 行
     let doc_after = projects.get_doc(doc.id).await.unwrap();
     assert!(
-        doc_after.frontmatter.to_string().contains("main/ai-passthrough-principle"),
+        doc_after
+            .frontmatter
+            .to_string()
+            .contains("main/ai-passthrough-principle"),
         "frontmatter.promoted 应带 wiki 回链：{:?}",
         doc_after.frontmatter
     );
     assert!(
-        doc_after.content.contains("⛳ 本文「§机器产出原样透传」已晋升为 wiki:main/ai-passthrough-principle"),
+        doc_after
+            .content
+            .contains("⛳ 本文「§机器产出原样透传」已晋升为 wiki:main/ai-passthrough-principle"),
         "正文末尾应有可见标记行：{}",
         doc_after.content
     );
@@ -110,14 +121,8 @@ async fn promote_full_chain_page_registration_and_doc_marks() {
 #[tokio::test]
 async fn promotions_list_filters_by_project() {
     let (_pool, promote, projects, _pg) = setup().await;
-    let proj_a = projects
-        .create_project("项目A", "dev", None)
-        .await
-        .unwrap();
-    let proj_b = projects
-        .create_project("项目B", "dev", None)
-        .await
-        .unwrap();
+    let proj_a = projects.create_project("项目A", "dev", None).await.unwrap();
+    let proj_b = projects.create_project("项目B", "dev", None).await.unwrap();
     let doc_a = projects
         .add_doc(proj_a.id, "后端", "", "A 的文档", "内容A")
         .await
@@ -126,10 +131,7 @@ async fn promotions_list_filters_by_project() {
         .add_doc(proj_b.id, "后端", "", "B 的文档", "内容B")
         .await
         .unwrap();
-    for (proj, doc, slug) in [
-        (&proj_a, &doc_a, "from-a"),
-        (&proj_b, &doc_b, "from-b"),
-    ] {
+    for (proj, doc, slug) in [(&proj_a, &doc_a, "from-a"), (&proj_b, &doc_b, "from-b")] {
         promote
             .promote(PromoteRequest {
                 project: proj.name.clone(),

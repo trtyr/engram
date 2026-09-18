@@ -12,13 +12,16 @@ use tower::util::ServiceExt;
 struct Ctx {
     app: axum::Router,
     token: String,
+    /// 测试库守卫：必须随 Ctx 活到测试结束——提前 drop 会让后台 psql
+    /// 在测试中途 FORCE 删库（曾致多库隔离测试假失败，2026-09-17 定性）。
+    _pg: support::TestPg,
 }
 
 impl Ctx {
     async fn new() -> Self {
         let (app, _pg) = app().await;
         let token = login_token(&app).await;
-        Self { app, token }
+        Self { app, token, _pg }
     }
 
     async fn req(&self, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -78,14 +81,14 @@ async fn wiki_multi_library_isolation() {
 
     // 2) 同名 slug 跨库共存：main 与 climb 各写一页 beta-page
     for (q, content) in [("main", "主库版本的 beta"), ("climb", "攀岩库版本的 beta")] {
-        let (st, _) = ctx
+        let (st, body) = ctx
             .req(
                 "PUT",
                 &format!("/wiki/pages/beta-page?lib={q}"),
                 Some(json!({"title": "多库靶页", "content": content})),
             )
             .await;
-        assert_eq!(st, StatusCode::OK, "{q}");
+        assert_eq!(st, StatusCode::OK, "{q} → {body}");
     }
 
     // 3) 列表/读取按库隔离

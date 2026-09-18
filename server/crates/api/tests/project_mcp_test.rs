@@ -1086,10 +1086,24 @@ async fn project_file_lifecycle_mcp_end_to_end() {
     assert_eq!(old["content"], "<h1>v1</h1>", "历史版本应可回读：{old}");
     assert_eq!(old["version"], 1);
 
-    // ⑤ file_list
+    // ⑤ file_list（EN-68②：bytes = UTF-8 字节数与 content_chars 并列）
     let list = act_json(&app, &key, "file_list", json!({"project_id": pid})).await;
     assert_eq!(list.as_array().unwrap().len(), 1, "应只有 1 个文件：{list}");
     assert_eq!(list[0]["name"], "architecture.html");
+    assert_eq!(
+        list[0]["bytes"], 11,
+        "bytes 应为 UTF-8 字节数（<h1>v2</h1> = 11 字节）：{list}"
+    );
+    assert_eq!(list[0]["content_chars"], 11);
+    let cur = act_json(
+        &app,
+        &key,
+        "file_get",
+        json!({"project_id": pid, "name": "architecture.html"}),
+    )
+    .await;
+    assert_eq!(cur["bytes"], 11, "file_get 应带 bytes：{cur}");
+    assert_eq!(cur["content"], "<h1>v2</h1>");
 
     // ⑥ 非法文件名拒绝（路径分隔）
     let v = act_raw(

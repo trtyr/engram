@@ -33,11 +33,11 @@ use serde_json::json;
 use uuid::Uuid;
 
 pub mod dispatch;
-pub mod wiki;
 pub mod jobs;
+pub mod wiki;
 
 use axum::response::IntoResponse;
-use engram_core::auth::Principal;
+use engram_core::auth::{DomainAccess, Principal};
 use engram_core::state::AppState;
 use engram_core::unified::UnifiedHit;
 
@@ -69,24 +69,23 @@ fn from_project(e: engram_core::project::ProjectError) -> rmcp::ErrorData {
 }
 
 fn require_memory(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    if principal.has_scope("memory") {
-        Ok(())
-    } else {
-        Err(mcp_err(
+    match principal.domain_access("memory") {
+        DomainAccess::None => Err(mcp_err(
             ErrorCode::INVALID_REQUEST,
             "缺少 memory scope——请用带 memory scope 的 amk_ key 连接 MCP",
-        ))
+        )),
+        // Full 直过；ReadOnly 的动作级判定在 call_tool 入口（check_action_access）已做
+        _ => Ok(()),
     }
 }
 
 fn require_project(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    if principal.has_scope("project") {
-        Ok(())
-    } else {
-        Err(mcp_err(
+    match principal.domain_access("project") {
+        DomainAccess::None => Err(mcp_err(
             ErrorCode::INVALID_REQUEST,
             "缺少 project scope——请用带 project scope 的 amk_ key 连接 MCP",
-        ))
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -102,6 +101,7 @@ fn tool_scope(name: &str) -> &'static str {
         "skills" => "skills",
         "wiki" => "wiki",
         "todos" => "todos",
+        "tickets" => "todos", // 工单域与待办同 scope（同表同底座，权限不分家）
         "codegraph" => "codegraph",
         // 平铺名兜底（防御未来再加非域工具）
         other => match other.split('_').next() {
@@ -128,13 +128,12 @@ fn require_erase(principal: &Principal) -> Result<(), rmcp::ErrorData> {
 }
 
 fn require_skills(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    if principal.has_scope("skills") {
-        Ok(())
-    } else {
-        Err(mcp_err(
+    match principal.domain_access("skills") {
+        DomainAccess::None => Err(mcp_err(
             ErrorCode::INVALID_REQUEST,
             "缺少 skills scope——请用带 skills scope 的 amk_ key 连接 MCP",
-        ))
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -150,13 +149,12 @@ fn from_skills(e: engram_core::skills::SkillsError) -> rmcp::ErrorData {
 }
 
 fn require_todos(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    if principal.has_scope("todos") {
-        Ok(())
-    } else {
-        Err(mcp_err(
+    match principal.domain_access("todos") {
+        DomainAccess::None => Err(mcp_err(
             ErrorCode::INVALID_REQUEST,
             "缺少 todos scope——请用带 todos scope 的 amk_ key 连接 MCP",
-        ))
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -192,13 +190,12 @@ fn cg_svc(state: &AppState) -> engram_cg_bridge::CgBridge {
 }
 
 fn require_codegraph(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    if principal.has_scope("codegraph") {
-        Ok(())
-    } else {
-        Err(mcp_err(
+    match principal.domain_access("codegraph") {
+        DomainAccess::None => Err(mcp_err(
             ErrorCode::INVALID_REQUEST,
             "缺少 codegraph scope——请用带 codegraph scope 的 amk_ key 连接 MCP",
-        ))
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -373,6 +370,62 @@ pub struct TodoAddParams {
     /// 工单验收标准（仅 kind=ticket）
     #[schemars(description = "工单验收标准（仅 kind=ticket）。")]
     pub acceptance: Option<String>,
+}
+
+/// 工单域 add 参数：与 TodoAddParams 同字段但**无 kind**（tickets.add 固定开工单）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TicketAddParams {
+    /// 一句话标题（必填）
+    #[schemars(description = "一句话标题（必填，≤200 字）。")]
+    pub title: String,
+    /// 详情（可选 markdown）
+    #[schemars(description = "详情（可选 markdown）。")]
+    pub body: Option<String>,
+    /// 工单严重度 P0-P3
+    #[schemars(description = "可选：工单严重度 P0/P1/P2/P3。")]
+    pub severity: Option<String>,
+    /// 工单症状
+    #[schemars(description = "工单症状/现象描述。")]
+    pub symptom: Option<String>,
+    /// 工单复现路径
+    #[schemars(description = "工单复现路径。")]
+    pub reproduce: Option<String>,
+    /// 工单验收标准
+    #[schemars(description = "工单验收标准。")]
+    pub acceptance: Option<String>,
+    /// 自由标签
+    #[schemars(description = "自由标签。")]
+    pub tags: Option<Vec<String>>,
+    /// 截止时间（ISO8601，可选）
+    #[schemars(description = "可选截止时间（ISO8601）。")]
+    pub due_at: Option<String>,
+    /// 相关项目名提示（纯文本备注，不绑定）
+    #[schemars(description = "可选：相关项目名提示（纯文本备注，不绑定项目）。")]
+    pub project_hint: Option<String>,
+}
+
+/// 工单域 list 参数：与 TodoListParams 同字段但**无 kind**（tickets.list 固定只回工单）。
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct TicketListParams {
+    /// 状态过滤：open/confirmed/in_progress/resolved/verified/archived（缺省全部，open 优先展示）
+    #[schemars(
+        description = "可选状态过滤：open/confirmed/in_progress/resolved/verified/archived。缺省全部（open 优先）。"
+    )]
+    pub status: Option<String>,
+    /// 工单严重度 P0-P3
+    #[schemars(description = "可选：工单严重度 P0-P3。")]
+    pub severity: Option<String>,
+    /// 标签过滤
+    #[schemars(description = "可选标签过滤。")]
+    pub tag: Option<String>,
+    /// 标题/正文子串
+    #[schemars(description = "可选子串过滤（标题或正文）。")]
+    pub q: Option<String>,
+    /// 摘要模式（MCP 默认 true）：只返回 短号/标题/形态/状态/分级/关联计数
+    #[schemars(
+        description = "可选：摘要模式，默认 true——只返回 short_no/标题/形态/状态/分级/标签/关联计数（不含 body/symptom 等长字段）。brief=false 返回全量。"
+    )]
+    pub brief: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -677,6 +730,11 @@ pub struct WriteSessionParams {
         description = "可选：agent 归因名（标识是哪个客户端写的）。缺省用连接本服务的 API key 名。"
     )]
     pub agent: Option<String>,
+    /// 客户端幂等键（可选）：同一 ref 重复调用返回原会话不新建——网络重试防重
+    #[schemars(
+        description = "可选：客户端幂等键（如 UUID）。同一 ref 重复调用返回原会话不新建——网络重试防重。"
+    )]
+    pub client_ref: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -1044,6 +1102,11 @@ pub struct ProjectDocUpdateParams {
         description = "可选：替换整个 Markdown 正文（是替换不是追加——改长文档先 project_doc_get 取原文）。不传不改。"
     )]
     pub content: Option<String>,
+    /// 乐观锁：基于的版本号（doc_get 返回的 version）。给出且与当前不符 → 报版本冲突
+    #[schemars(
+        description = "可选：乐观锁版本号（doc_get 返回的 version）。给出且与当前不符时报「版本冲突」——防并发覆盖。不传 = 不校验。"
+    )]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -1077,6 +1140,11 @@ pub struct ProjectDocPatchParams {
     /// 替换/插入的文本（可多行；delete 忽略）
     #[schemars(description = "替换或插入的文本（可多行）。mode=delete 时不需要。")]
     pub content: Option<String>,
+    /// 乐观锁：基于的版本号。给出且与当前不符 → 报版本冲突
+    #[schemars(
+        description = "可选：乐观锁版本号（doc_get 返回的 version）。给出且与当前不符时报「版本冲突」——行号基于旧版本时防错改。不传 = 不校验。"
+    )]
+    pub expected_version: Option<i64>,
 }
 
 // ---------- 技能域工具参数 ----------
@@ -1114,6 +1182,26 @@ pub struct CgNameParams {
 /// 无参操作（codegraph list）占位：inputSchema 根类型须为 object（同 wiki::WikiNoParams）。
 #[derive(Serialize, Deserialize, JsonSchema, Default)]
 pub struct CgNoParams {}
+
+/// 产物上传（公网模型 P001-4）：客户端本机 CLI index 后推 codegraph.db+HEAD。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CgUploadParams {
+    /// 项目名（不存在则新建 upload 型条目；repo 型拒绝——本机索引不归上传通道管）
+    #[schemars(
+        description = "项目名（不存在则新建 upload 型条目；已存在且为 upload 型则覆盖产物并更新 head；repo 型条目拒绝——本机索引不归上传通道管，请换名或先 delete）。"
+    )]
+    pub name: String,
+    /// commit hash（7~40 位 hex；声明式新鲜度）
+    #[schemars(
+        description = "commit hash（7~40 位 hex，短/长 SHA 都收）——服务端不读代码，按此声明标注新鲜度。客户端本机 `git rev-parse HEAD` 取。"
+    )]
+    pub head: String,
+    /// codegraph.db 内容（base64；原始 SQLite 二进制直接编码，不要压缩）
+    #[schemars(
+        description = "本机 .codegraph/codegraph.db 文件内容的 base64（原始二进制直接编码，不要压缩/文本化）；上限 256MB。"
+    )]
+    pub db_b64: String,
+}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CgQueryParams {
@@ -1627,13 +1715,21 @@ impl EngramMcpServer {
             Principal::ApiKey { name, .. } => name.clone(),
             Principal::Admin => "admin".into(),
         });
+        // P001 身份归因：key 写入自动带 key_id + key 名快照（key 删除不丢归因）
+        let (api_key_id, key_name_snapshot) = match &principal {
+            Principal::ApiKey { key_id, name, .. } => (Some(*key_id), Some(name.as_str())),
+            Principal::Admin => (None, None),
+        };
         let s = self
             .svc()
-            .write_session(
+            .write_session_identity(
                 &agent,
                 turns,
                 wp.distill.as_deref().unwrap_or("auto"),
                 wp.sensitive.unwrap_or(false),
+                api_key_id,
+                key_name_snapshot,
+                wp.client_ref.as_deref(),
             )
             .await
             .map_err(from_memory)?;
@@ -2164,7 +2260,14 @@ impl EngramMcpServer {
             .get_file(id, &dp.name)
             .await
             .map_err(from_project)?;
-        ok_json(serde_json::to_value(&f).unwrap_or(serde_json::json!({})))
+        let mut v = serde_json::to_value(&f).unwrap_or(serde_json::json!({}));
+        // EN-68②：bytes = UTF-8 字节数（content_chars 是字符数，中文 1:3 差异大）
+        if let Some(obj) = v.as_object_mut() {
+            if let Some(c) = obj.get("content").and_then(|x| x.as_str()) {
+                obj.insert("bytes".into(), serde_json::json!(c.len()));
+            }
+        }
+        ok_json(v)
     }
 
     async fn project_file_list(
@@ -2188,7 +2291,8 @@ impl EngramMcpServer {
                 .iter()
                 .map(|f| serde_json::json!({
                     "name": f.name, "mime": f.mime, "version": f.version,
-                    "content_chars": f.content.chars().count(), "updated_at": f.updated_at
+                    "content_chars": f.content.chars().count(), "bytes": f.content.len(),
+                    "updated_at": f.updated_at
                 }))
                 .collect::<Vec<_>>()
         ))
@@ -2317,6 +2421,7 @@ impl EngramMcpServer {
                 dp.folder.as_deref(),
                 dp.title.as_deref(),
                 dp.content.as_deref(),
+                dp.expected_version,
             )
             .await
             .map_err(from_project)?;
@@ -2347,6 +2452,7 @@ impl EngramMcpServer {
                 dp.end_line,
                 dp.mode.as_deref().unwrap_or("replace"),
                 dp.content.as_deref(),
+                dp.expected_version,
             )
             .await
             .map_err(from_project)?;
@@ -2663,6 +2769,42 @@ impl EngramMcpServer {
         }))
     }
 
+    /// 产物上传（公网模型 P001-4）：客户端本机 codegraph CLI index 后，上传
+    /// codegraph.db（base64）+ HEAD——服务端只存 + 声明式新鲜度（head/uploaded_at），
+    /// 无代码、无 git 凭证。
+    ///
+    /// 何时用：本机开发仓库、服务端看不到路径（另一台机器/公网部署）时的接入通道。
+    /// 查询侧照常：upload 型条目 path 即产物目录，explore/query 直接吃 db。
+    async fn codegraph_upload(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<CgUploadParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_codegraph(&p)?;
+        let dp = params.0;
+        use base64::Engine as _;
+        let db_bytes = base64::engine::general_purpose::STANDARD
+            .decode(dp.db_b64.trim())
+            .map_err(|e| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("db_b64 不是合法 base64: {e}"),
+                )
+            })?;
+        let proj = cg_svc(&self.state)
+            .upload_artifact(&dp.name, &dp.head, &db_bytes)
+            .await
+            .map_err(from_cg)?;
+        ok_json(serde_json::json!({
+            "id": proj.id, "name": proj.name, "status": proj.status,
+            "source_kind": proj.source_kind, "head": proj.head,
+            "uploaded_at": proj.uploaded_at, "db_bytes": db_bytes.len(),
+            "path": proj.path,
+            "hint": "产物已就位，codegraph query/list 即查即用；重复 upload 同名覆盖产物并更新 head"
+        }))
+    }
+
     /// 失效条目对账（EN-48）：把「注册状态 ready 但索引产物已丢失 / 路径已不存在」的条目
     /// 落到 error，让 list 不再把幽灵条目冒充可用资产（此前它们会一直显示 ready）。
     ///
@@ -2687,10 +2829,13 @@ impl EngramMcpServer {
                     continue;
                 };
                 let name = item["name"].clone();
-                match engram_jobs::JobQueue::new(self.state.pool.clone()).enqueue(
-                    engram_jobs::JobTemplate::new("cg_index")
-                        .with_payload(serde_json::json!({"project_id": id})),
-                ).await {
+                match engram_jobs::JobQueue::new(self.state.pool.clone())
+                    .enqueue(
+                        engram_jobs::JobTemplate::new("cg_index")
+                            .with_payload(serde_json::json!({"project_id": id})),
+                    )
+                    .await
+                {
                     Ok(job) => queued.push(serde_json::json!({
                         "id": id, "name": name, "job_id": job.id,
                     })),
@@ -2730,7 +2875,10 @@ impl EngramMcpServer {
         use engram_jobs::types::JobError;
         match e {
             JobError::Permanent(m) => mcp_err(ErrorCode::INVALID_PARAMS, m),
-            JobError::Retryable(m) => mcp_err(ErrorCode::INTERNAL_ERROR, format!("临时故障（可重试）：{m}")),
+            JobError::Retryable(m) => mcp_err(
+                ErrorCode::INTERNAL_ERROR,
+                format!("临时故障（可重试）：{m}"),
+            ),
         }
     }
 
@@ -2743,7 +2891,10 @@ impl EngramMcpServer {
         let _ = principal_of(&ctx)?;
         let cursor = match params.0.cursor.as_deref() {
             Some(v) => Some(parse_flex_datetime(v).map_err(|e| {
-                mcp_err(ErrorCode::INVALID_PARAMS, format!("cursor 格式不合法：{e}——用 RFC3339（如 2026-09-17T00:00:00Z）"))
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("cursor 格式不合法：{e}——用 RFC3339（如 2026-09-17T00:00:00Z）"),
+                )
             })?),
             None => None,
         };
@@ -2753,7 +2904,11 @@ impl EngramMcpServer {
                     .0
                     .kind
                     .as_deref()
-                    .map(|v| v.split(',').map(|s| s.trim().to_string()).collect::<Vec<_>>())
+                    .map(|v| {
+                        v.split(',')
+                            .map(|s| s.trim().to_string())
+                            .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default(),
                 &Self::parse_job_statuses(&params.0.status),
                 cursor,
@@ -2776,7 +2931,10 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let _ = principal_of(&ctx)?;
         let id = Uuid::parse_str(&params.0.id).map_err(|_| {
-            mcp_err(ErrorCode::INVALID_PARAMS, format!("任务 id 不是合法 UUID：{}", params.0.id))
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("任务 id 不是合法 UUID：{}", params.0.id),
+            )
         })?;
         let job = engram_jobs::JobQueue::new(self.state.pool.clone())
             .get(id)
@@ -2802,7 +2960,10 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let _ = principal_of(&ctx)?;
         let id = Uuid::parse_str(&params.0.id).map_err(|_| {
-            mcp_err(ErrorCode::INVALID_PARAMS, format!("任务 id 不是合法 UUID：{}", params.0.id))
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("任务 id 不是合法 UUID：{}", params.0.id),
+            )
         })?;
         let rows = engram_jobs::JobQueue::new(self.state.pool.clone())
             .events(id, params.0.after, params.0.limit.unwrap_or(100).min(1000))
@@ -2827,11 +2988,14 @@ impl EngramMcpServer {
                 return Err(mcp_err(
                     ErrorCode::INVALID_REQUEST,
                     "任务复活仅管理员——用 Web 控制台操作，或让管理员处理（HTTP POST /jobs/{id}/revive 同语义）",
-                ))
+                ));
             }
         }
         let id = Uuid::parse_str(&params.0.id).map_err(|_| {
-            mcp_err(ErrorCode::INVALID_PARAMS, format!("任务 id 不是合法 UUID：{}", params.0.id))
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("任务 id 不是合法 UUID：{}", params.0.id),
+            )
         })?;
         let queue = engram_jobs::JobQueue::new(self.state.pool.clone());
         queue.revive(id).await.map_err(Self::from_job)?;
@@ -3581,7 +3745,10 @@ impl EngramMcpServer {
         wiki::require_wiki(&p)?;
         let doc_id = uuid::Uuid::parse_str(&ap.doc_id).map_err(|_| {
             rmcp::ErrorData::invalid_params(
-                format!("doc_id 非法 UUID：{}——用 project-get 看文档列表取 id", ap.doc_id),
+                format!(
+                    "doc_id 非法 UUID：{}——用 project-get 看文档列表取 id",
+                    ap.doc_id
+                ),
                 None,
             )
         })?;
@@ -3774,7 +3941,7 @@ impl EngramMcpServer {
 
     // ---------- 待办域工具（todos scope；第七域） ----------
 
-    /// 快速记一条待办（灵感/学习计划/系统操作/问题排查——不绑定项目）。
+    /// 快速记一条待办（灵感/学习计划/系统操作——不绑定项目）。
     async fn todo_add(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -3783,6 +3950,13 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         require_todos(&p)?;
         let tp = params.0;
+        // 域边界（todos/tickets 拆域 2026-09-18）：待办域不开工单——显式 kind=ticket 指引用户走 tickets 域
+        if tp.kind.as_deref() == Some("ticket") {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "todos 域只管待办（kind=todo）。开工单请用 tickets 域：{\"tool\":\"tickets\",\"action\":\"add\",…}。",
+            ));
+        }
         let dto = todo_svc(&self.state)
             .create(
                 &tp.title,
@@ -3820,6 +3994,93 @@ impl EngramMcpServer {
         ))
     }
 
+    /// 开工单（tickets 域）：kind 固定 ticket——结构化问题跟踪。
+    async fn ticket_add(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TicketAddParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let tp = params.0;
+        let dto = todo_svc(&self.state)
+            .create(
+                &tp.title,
+                tp.body.as_deref().unwrap_or(""),
+                "ticket", // 拆域锁定：tickets.add 固定开工单
+                "",       // ticket 无 priority（分级用 severity）
+                tp.severity.as_deref(),
+                tp.symptom.as_deref().unwrap_or(""),
+                tp.reproduce.as_deref().unwrap_or(""),
+                tp.acceptance.as_deref().unwrap_or(""),
+                tp.tags.as_deref().unwrap_or(&[]),
+                match tp.due_at.as_deref() {
+                    Some(s) => Some(parse_flex_datetime(s)?),
+                    None => None,
+                },
+                tp.project_hint.as_deref(),
+            )
+            .await
+            .map_err(from_todo)?;
+        ok_json(slim_todo(
+            serde_json::to_value(&dto).unwrap_or(serde_json::json!({})),
+        ))
+    }
+
+    /// 工单列表（open 优先；status/severity/tag/q 过滤；仅 kind=ticket）。
+    async fn ticket_list(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TicketListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let lp = params.0;
+        let rows = todo_svc(&self.state)
+            .list(
+                lp.status.as_deref(),
+                Some("ticket"), // 拆域锁定：tickets.list 只回工单（待办走 todos.list）
+                None,           // ticket 无 priority（分级 severity 下方）
+                lp.tag.as_deref(),
+                lp.q.as_deref(),
+                lp.severity.as_deref(),
+                None,
+                500, // 工单量级小，一次拉全
+            )
+            .await
+            .map_err(from_todo)?;
+        if lp.brief.unwrap_or(true) {
+            let counts = todo_svc(&self.state)
+                .link_count_map()
+                .await
+                .unwrap_or_default();
+            let brief: Vec<serde_json::Value> = rows
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "id": t.id,
+                        "short_no": t.short_no,
+                        "ref": format!("EN-{}", t.short_no),
+                        "title": t.title,
+                        "kind": t.kind,
+                        "status": t.status,
+                        "severity": t.severity,
+                        "tags": t.tags,
+                        "links": counts.get(&t.id).copied().unwrap_or(0),
+                        "body_omitted": true,
+                    })
+                })
+                .collect();
+            return ok_json(serde_json::json!({
+                "brief": true,
+                "count": brief.len(),
+                "items": brief,
+                "hint": "摘要模式（body 已省略）——brief=false 取全量；引用条目用 EN-<短号>",
+            }));
+        }
+        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
+    }
+
     /// 待办列表（open 优先；status/priority/tag/q 过滤）。
     async fn todo_list(
         &self,
@@ -3832,7 +4093,7 @@ impl EngramMcpServer {
         let rows = todo_svc(&self.state)
             .list(
                 lp.status.as_deref(),
-                lp.kind.as_deref(),
+                Some("todo"), // 拆域锁定：todos.list 只回待办（工单走 tickets.list）
                 lp.priority.as_deref(),
                 lp.tag.as_deref(),
                 lp.q.as_deref(),
@@ -4110,7 +4371,7 @@ impl EngramMcpServer {
             ));
         }
         let max = params.0.max_per_domain.unwrap_or(3).clamp(1, 10);
-        let scope_of = |s: &str| p.has_scope(s);
+        let scope_of = |s: &str| p.domain_access(s) != DomainAccess::None;
         if !["memory", "wiki", "skills", "todos", "project"]
             .iter()
             .any(|s| scope_of(s))
@@ -5012,16 +5273,40 @@ impl EngramMcpServer {
             return ok_json(dispatch::render_manual("jobs", &cfg.disabled_tools));
         }
         match call.action.as_str() {
-            "list" => self.jobs_list(ctx, Parameters(dispatch::from_args("jobs", "list", call.args)?)).await,
-            "get" => self.jobs_get(ctx, Parameters(dispatch::from_args("jobs", "get", call.args)?)).await,
-            "events" => self.jobs_events(ctx, Parameters(dispatch::from_args("jobs", "events", call.args)?)).await,
-            "revive" => self.jobs_revive(ctx, Parameters(dispatch::from_args("jobs", "revive", call.args)?)).await,
+            "list" => {
+                self.jobs_list(
+                    ctx,
+                    Parameters(dispatch::from_args("jobs", "list", call.args)?),
+                )
+                .await
+            }
+            "get" => {
+                self.jobs_get(
+                    ctx,
+                    Parameters(dispatch::from_args("jobs", "get", call.args)?),
+                )
+                .await
+            }
+            "events" => {
+                self.jobs_events(
+                    ctx,
+                    Parameters(dispatch::from_args("jobs", "events", call.args)?),
+                )
+                .await
+            }
+            "revive" => {
+                self.jobs_revive(
+                    ctx,
+                    Parameters(dispatch::from_args("jobs", "revive", call.args)?),
+                )
+                .await
+            }
             other => Err(dispatch::unknown_action("jobs", other)),
         }
     }
 
-    /// 待办域（todos scope，第七域）：快速记录与跟进不绑定项目的待办
-    /// （灵感/学习计划/系统操作/问题排查）。"add" 秒记，"list" 看进行中，
+    /// 待办域（todos scope）：快速记录与跟进不绑定项目的行动项/灵感速记（kind 固定 todo）。
+    /// 工单在独立 tickets 域（2026-09-18 拆域——同表不同心智）。"add" 秒记，"list" 看进行中，
     /// "done" 完成，"delete" 删。操作全景：action="help"。
     #[tool(
         name = "todos",
@@ -5112,6 +5397,91 @@ impl EngramMcpServer {
         }
     }
 
+    /// 工单域（todos scope）：结构化问题跟踪——severity/symptom/acceptance 结构化字段，
+    /// 状态流转 confirmed/in_progress/resolved/verified（工单六态）。与待办同表不同心智
+    /// （2026-09-18 拆域：todos 纯待办、tickets 纯工单，互不可见）。操作全景：action="help"。
+    #[tool(
+        name = "tickets",
+        annotations(
+            title = "工单域",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn tickets_tool(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(call): Parameters<dispatch::DomainCall>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        if call.action == "help" {
+            let cfg = load_config(&self.state.pool).await;
+            return ok_json(dispatch::render_manual("tickets", &cfg.disabled_tools));
+        }
+        match call.action.as_str() {
+            "add" => {
+                self.ticket_add(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "add", call.args)?),
+                )
+                .await
+            }
+            "list" => {
+                self.ticket_list(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "list", call.args)?),
+                )
+                .await
+            }
+            "get" => {
+                self.todo_get(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "get", call.args)?),
+                )
+                .await
+            }
+            "links" => {
+                self.todo_links(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "links", call.args)?),
+                )
+                .await
+            }
+            "link" => {
+                self.todo_link(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "link", call.args)?),
+                )
+                .await
+            }
+            "unlink" => {
+                self.todo_unlink(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "unlink", call.args)?),
+                )
+                .await
+            }
+            "update" => {
+                self.todo_update(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "update", call.args)?),
+                )
+                .await
+            }
+            "delete" => {
+                self.todo_delete(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "delete", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("tickets", other)),
+        }
+    }
+
     /// 代码图谱域（单一入口）：注册代码库 → 建索引 → 图谱查询
     /// （search/explore/node/callers/callees/impact），读懂陌生代码库的调用关系。
     /// 操作全景：action="help"。
@@ -5173,6 +5543,13 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "upload" => {
+                self.codegraph_upload(
+                    ctx,
+                    Parameters(dispatch::from_args("codegraph", "upload", call.args)?),
+                )
+                .await
+            }
             "gc" => self.codegraph_gc(ctx).await,
             other => Err(dispatch::unknown_action("codegraph", other)),
         }
@@ -5181,8 +5558,8 @@ impl EngramMcpServer {
 
 /// MCP instructions：initialize 时返回给调用方 AI 的顶层使用说明。
 const SERVER_INSTRUCTIONS: &str = "\
-Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：六个领域各一个入口工具\
-（memory 用户记忆 / projects 项目记忆 / skills 技能 / wiki 知识库 / todos 待办 / codegraph 代码图谱），\
+Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：七个领域各一个入口工具\
+（memory 用户记忆 / projects 项目记忆 / skills 技能 / wiki 知识库 / todos 待办 / tickets 工单 / codegraph 代码图谱），\
 外加跨域全局检索 search_all（一次查询并发五域，各回 top-k 摘要）。\
 域工具调用形态 {\"action\":\"<操作名>\", ...参数}；每个工具的描述里带操作目录（常驻可见），\
 参数细节用 {\"action\":\"help\"} 一轮取回全域操作手册。
@@ -5219,14 +5596,19 @@ wiki 域用法：多库知识库（Markdown 页面 + [[wikilink]] + 混合检索
 2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步，产物落同库），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；
 3. 版本与原料：{\"action\":\"versions\"}/{\"action\":\"restore_version\"} 查历史与回滚（误删页可重建）；{\"action\":\"sources\"}/{\"action\":\"delete_source\"} 清理织入原料（lint 报 stale_source 时用）。
 
-todos 域用法：不绑定项目的快速待办（灵感/学习计划/系统操作/问题排查）。
+todos 域用法：不绑定项目的快速待办（灵感/学习计划/系统操作——做完勾掉）。
 {\"action\":\"add\",\"title\":\"…\"} 秒记；{\"action\":\"list\"} 看进行中；{\"action\":\"done\",\"id\":\"…\"} 完成。
+
+tickets 域用法：工单 = 结构化问题跟踪（与待办同表不同心智，2026-09-18 拆域互不可见）。
+{\"action\":\"add\",\"title\":\"…\",\"severity\":\"P1\",\"symptom\":\"…\",\"acceptance\":\"…\"} 开单；
+{\"action\":\"list\"} 看工单（status 六态 open/confirmed/in_progress/resolved/verified/archived）；
+{\"action\":\"update\",\"id\":\"…\",\"status\":\"resolved\",\"resolution\":\"…\"} 流转；链接关系（blocked_by/relates_to/parent）两域通用。
 
 codegraph 域用法：注册代码库 → index/sync → {\"action\":\"query\"}（search/explore/node/callers/callees/impact）读懂调用关系。\
 explore 默认返回符号大纲（不带源码）；单符号源码用 node，整份源码 explore 传 include_source=true。
 
 域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory；查证「客观知识」用 wiki；
-跨会话的工作线用 projects；可复用能力用 skills；不确定在哪域就 search_all。
+跨会话的工作线用 projects；可复用能力用 skills；随手记行动项用 todos；开工单跟踪问题用 tickets；不确定在哪域就 search_all。
 LLM 供应商/模型的配置与排障是管理员专属，走 Web 控制台「设置 → AI 功能」——MCP 工具面
 不提供 provider 配置工具（AI 报 LLM 未配置时，引导用户去设置页，不要尝试自行配置）。
 
@@ -5268,10 +5650,10 @@ impl ServerHandler for EngramMcpServer {
                 scope.as_ref().is_none_or(|p| match t.name.as_ref() {
                     "search_all" => ["memory", "wiki", "skills", "todos", "project"]
                         .iter()
-                        .any(|s| p.has_scope(s)),
+                        .any(|s| p.domain_access(s) != DomainAccess::None),
                     // jobs 无域 scope（对齐 HTTP：任何合法凭证可读任务——AI 轮询自己触发的任务）
                     "jobs" => true,
-                    name => p.has_scope(tool_scope(name)),
+                    name => p.domain_access(tool_scope(name)) != DomainAccess::None,
                 })
             })
             .collect();
@@ -5337,6 +5719,11 @@ impl ServerHandler for EngramMcpServer {
                         format!("操作 {key} 已停用——控制台「MCP」页可重新开启"),
                     ));
                 }
+                // 动作级权限（公网多Agent P001 步骤3）：scope 的 :ro 只读变体只能调本域
+                // 读类动作；拒绝报错列出可用只读动作（报错即文档）。缺 scope 的拒绝保持在
+                // handler 内的 require_*（原语义不变）。
+                let principal = principal_of(&context)?;
+                dispatch::check_action_access(&principal, name, action)?;
             }
         }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);

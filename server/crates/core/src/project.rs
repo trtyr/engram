@@ -539,9 +539,20 @@ impl ProjectService {
         folder: Option<&str>,
         title: Option<&str>,
         content: Option<&str>,
+        expected_version: Option<i64>,
     ) -> Result<ProjectDocDto, ProjectError> {
         // 分类只在「换到别的分类」时校验——分类被项目方移除后，存量文档仍可原地编辑
         let current = self.get_doc(id).await?;
+        // 乐观锁预检（公网多Agent P001 步骤2）：带 expected_version 且与当前不符 → 409。
+        // SQL 层还有原子守卫（WHERE version = $6），预检只为给出更可读的错误。
+        if let Some(ev) = expected_version
+            && ev != current.version
+        {
+            return Err(ProjectError::Conflict(format!(
+                "版本冲突：文档当前 version={}，请求基于 {}——先 doc_get 取最新版本与行号再改",
+                current.version, ev
+            )));
+        }
         if let Some(category) = category
             && category != current.category
         {
@@ -554,9 +565,23 @@ impl ProjectService {
             Some(f) => Some(Self::validate_doc_folder(f)?),
             None => None,
         };
-        let updated =
-            repo::update_doc(&self.pool, id, category, folder.as_deref(), title, content).await?;
+        let updated = repo::update_doc(
+            &self.pool,
+            id,
+            category,
+            folder.as_deref(),
+            title,
+            content,
+            expected_version,
+        )
+        .await?;
         if updated == 0 {
+            // 并发竞态兜底：get_doc 与 UPDATE 之间版本被改（SQL 内 version 守卫拦截）
+            if expected_version.is_some() {
+                return Err(ProjectError::Conflict(
+                    "版本冲突：文档版本已被并发修改——先 doc_get 取最新版本再改".into(),
+                ));
+            }
             return Err(ProjectError::NotFound(format!(
                 "文档 {id} 不存在——先 project-get <项目> 看 docs 列表取 id"
             )));
@@ -740,6 +765,7 @@ impl ProjectService {
         end_line: i64,
         mode: &str,
         content: Option<&str>,
+        expected_version: Option<i64>,
     ) -> Result<ProjectDocDto, ProjectError> {
         let doc = self.get_doc(id).await?;
         if start_line < 1 {
@@ -812,6 +838,7 @@ impl ProjectService {
             }
         }
         let patched = lines.join("\n");
-        self.update_doc(id, None, None, None, Some(&patched)).await
+        self.update_doc(id, None, None, None, Some(&patched), expected_version)
+            .await
     }
 }

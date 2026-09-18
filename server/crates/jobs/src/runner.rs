@@ -149,83 +149,107 @@ impl Runner {
         let handlers = Arc::new(self.handlers);
         let config = self.config;
         let mut shutdown = self.shutdown;
+        // 在途任务追踪（RJ-09 修复）：spawn 的任务持有 semaphore permit 至执行完毕——
+        // 停机后「拿满全部 permit」即「在途清零」。semaphore 在块外创建以便 RunnerHandle 持有。
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(config.concurrency));
 
-        let join = tokio::spawn(async move {
-            // per-kind 分池（R12）：cap 不超过全局并发；启动日志打印生效配置
-            let mut per_kind_sem: HashMap<String, Arc<tokio::sync::Semaphore>> = HashMap::new();
-            for (kind, cap) in &config.per_kind_concurrency {
-                let cap = (*cap).min(config.concurrency);
-                per_kind_sem.insert(kind.clone(), Arc::new(tokio::sync::Semaphore::new(cap)));
-            }
-            if !per_kind_sem.is_empty() {
-                let mut parts: Vec<String> = per_kind_sem
-                    .iter()
-                    .map(|(k, s)| format!("{k}:{}", s.available_permits()))
-                    .collect();
-                parts.sort();
-                tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, per_kind = %parts.join(","), "job runner 启动（per-kind 并发生效）");
-            } else {
-                tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, "job runner 启动");
-            }
-            let semaphore = Arc::new(tokio::sync::Semaphore::new(config.concurrency));
-            let mut last_reap = tokio::time::Instant::now();
-
-            loop {
-                if *shutdown.borrow() {
-                    tracing::info!("job runner 收到停机信号，退出");
-                    break;
+        let join = {
+            let semaphore = semaphore.clone();
+            tokio::spawn(async move {
+                // per-kind 分池（R12）：cap 不超过全局并发；启动日志打印生效配置
+                let mut per_kind_sem: HashMap<String, Arc<tokio::sync::Semaphore>> = HashMap::new();
+                for (kind, cap) in &config.per_kind_concurrency {
+                    let cap = (*cap).min(config.concurrency);
+                    per_kind_sem.insert(kind.clone(), Arc::new(tokio::sync::Semaphore::new(cap)));
                 }
+                if !per_kind_sem.is_empty() {
+                    let mut parts: Vec<String> = per_kind_sem
+                        .iter()
+                        .map(|(k, s)| format!("{k}:{}", s.available_permits()))
+                        .collect();
+                    parts.sort();
+                    tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, per_kind = %parts.join(","), "job runner 启动（per-kind 并发生效）");
+                } else {
+                    tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, "job runner 启动");
+                }
+                let semaphore = semaphore.clone();
+                let mut last_reap = tokio::time::Instant::now();
 
-                // 定期回收僵尸
-                if last_reap.elapsed() >= config.reap_interval {
-                    if let Err(e) = queue.reap_orphans().await {
-                        tracing::warn!(error = %e, "僵尸回收失败（下轮重试）");
+                loop {
+                    if *shutdown.borrow() {
+                        tracing::info!("job runner 收到停机信号，退出");
+                        break;
                     }
-                    last_reap = tokio::time::Instant::now();
-                }
 
-                // 抢一批
-                match queue.claim(&config.worker_id, config.batch_size).await {
-                    Ok(jobs) if jobs.is_empty() => {
-                        tokio::select! {
-                            _ = tokio::time::sleep(config.poll_interval) => {},
-                            _ = shutdown.changed() => {},
+                    // 定期回收僵尸
+                    if last_reap.elapsed() >= config.reap_interval {
+                        if let Err(e) = queue.reap_orphans().await {
+                            tracing::warn!(error = %e, "僵尸回收失败（下轮重试）");
+                        }
+                        last_reap = tokio::time::Instant::now();
+                    }
+
+                    // 抢一批
+                    match queue.claim(&config.worker_id, config.batch_size).await {
+                        Ok(jobs) if jobs.is_empty() => {
+                            tokio::select! {
+                                _ = tokio::time::sleep(config.poll_interval) => {},
+                                _ = shutdown.changed() => {},
+                            }
+                        }
+                        Ok(jobs) => {
+                            for job in jobs {
+                                // R12 双层限流：专属池（若配置）在任务内先拿、全局池后拿。
+                                // 专属等待必须发生在 spawn 内——分派循环若顺序 await 专属信号量，
+                                // 满载的慢 kind 会阻塞同批后面未配置 kind 的派发（饥饿，auditor 抓出）。
+                                let kind_sem = per_kind_sem.get(&job.kind).cloned();
+                                let semaphore = semaphore.clone();
+                                let queue = queue.clone();
+                                let handlers = handlers.clone();
+                                tokio::spawn(async move {
+                                    let _kind_permit = match kind_sem {
+                                        Some(sem) => sem.acquire_owned().await.ok(),
+                                        None => None,
+                                    };
+                                    let Ok(permit) = semaphore.acquire_owned().await else {
+                                        return;
+                                    };
+                                    let _permit = permit;
+                                    execute_job(&queue, handlers, job).await;
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "抢占任务失败，退避后重试");
+                            tokio::time::sleep(Duration::from_secs(2)).await;
                         }
                     }
-                    Ok(jobs) => {
-                        for job in jobs {
-                            // R12 双层限流：专属池（若配置）在任务内先拿、全局池后拿。
-                            // 专属等待必须发生在 spawn 内——分派循环若顺序 await 专属信号量，
-                            // 满载的慢 kind 会阻塞同批后面未配置 kind 的派发（饥饿，auditor 抓出）。
-                            let kind_sem = per_kind_sem.get(&job.kind).cloned();
-                            let semaphore = semaphore.clone();
-                            let queue = queue.clone();
-                            let handlers = handlers.clone();
-                            tokio::spawn(async move {
-                                let _kind_permit = match kind_sem {
-                                    Some(sem) => sem.acquire_owned().await.ok(),
-                                    None => None,
-                                };
-                                let Ok(permit) = semaphore.acquire_owned().await else {
-                                    return;
-                                };
-                                let _permit = permit;
-                                execute_job(&queue, handlers, job).await;
-                            });
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "抢占任务失败，退避后重试");
-                        tokio::time::sleep(Duration::from_secs(2)).await;
-                    }
                 }
-            }
-        });
+            })
+        };
 
         RunnerHandle {
             join,
             shutdown_tx: self.shutdown_tx,
+            semaphore,
+            concurrency: config.concurrency,
         }
+    }
+}
+
+/// 等待在途任务清零（semaphore 全部 permit 归位）：优雅停机的「等在途」语义（RJ-09 修复）。
+/// 每 100ms 轮询一次 try_acquire_many；超时返回 false（仍有任务在途，调用方决定放弃策略）。
+async fn wait_inflight_idle(sem: &tokio::sync::Semaphore, total: usize, timeout: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if let Ok(permits) = sem.try_acquire_many(total as u32) {
+            drop(permits); // 立即归还，保持 semaphore 状态不变
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -233,17 +257,18 @@ impl Runner {
 pub struct RunnerHandle {
     join: tokio::task::JoinHandle<()>,
     shutdown_tx: tokio::sync::watch::Sender<bool>,
+    semaphore: Arc<tokio::sync::Semaphore>,
+    concurrency: usize,
 }
 
 impl RunnerHandle {
-    /// 请求停机（优雅：worker 完成当前任务后退出）。
-    pub fn shutdown(&self) {
+    /// 请求停机并等待在途任务完成（优雅语义；RJ-09 修复——此前只发信号不等任务，
+    /// SIGTERM 会腰斩执行中的 job）。
+    /// 返回 true = 在途全部落库完成；false = 超时放弃（未完成任务由 reap_orphans 兜底回收）。
+    pub async fn shutdown_and_wait(self, timeout: Duration) -> bool {
         let _ = self.shutdown_tx.send(true);
-    }
-
-    /// 等待 runner 退出。
-    pub async fn join(self) {
         let _ = self.join.await;
+        wait_inflight_idle(&self.semaphore, self.concurrency, timeout).await
     }
 }
 
@@ -316,5 +341,24 @@ mod per_kind_tests {
             !cfg.per_kind_concurrency.contains_key("embed"),
             "未配置 kind 回退全局"
         );
+    }
+
+    /// RJ-09：停机「等在途」语义——permit 未归位时超时放行（false），归位后立即通过（true）。
+    #[tokio::test]
+    async fn wait_inflight_idle_blocks_until_released() {
+        let sem = Arc::new(tokio::sync::Semaphore::new(2));
+        let p1 = sem.clone().acquire_owned().await.unwrap();
+        // 1 个 permit 在途：拿不满 2 → 超时 false
+        assert!(!wait_inflight_idle(&sem, 2, Duration::from_millis(150)).await);
+        drop(p1);
+        assert!(wait_inflight_idle(&sem, 2, Duration::from_millis(500)).await);
+        // 归还语义：等待成功后 semaphore 仍可用（permits 完整）
+        assert_eq!(sem.available_permits(), 2);
+    }
+
+    #[tokio::test]
+    async fn wait_inflight_idle_immediate_when_idle() {
+        let sem = Arc::new(tokio::sync::Semaphore::new(3));
+        assert!(wait_inflight_idle(&sem, 3, Duration::from_millis(100)).await);
     }
 }

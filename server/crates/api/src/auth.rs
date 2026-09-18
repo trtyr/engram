@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 
-pub use engram_core::auth::{normalize_scope, unknown_scope_message, Principal, SCOPES};
+pub use engram_core::auth::{Principal, SCOPES, normalize_scope, unknown_scope_message};
 
 fn sha256_hex(input: &str) -> String {
     let mut h = Sha256::new();
@@ -29,6 +29,8 @@ pub async fn login(
     username: &str,
     password: &str,
     env_fallback: Option<&str>,
+    ip: Option<&str>,
+    user_agent: Option<&str>,
 ) -> Result<(String, String), ApiError> {
     let ok = engram_core::auth::verify_login(pool, username, password, env_fallback)
         .await
@@ -43,7 +45,7 @@ pub async fn login(
     let hash = sha256_hex(&token);
     let expires = Utc::now() + Duration::days(7);
 
-    repo::create_admin_session(pool, &hash, expires)
+    repo::create_admin_session(pool, &hash, expires, ip, user_agent)
         .await
         .map_err(ApiError::from)?;
 
@@ -75,19 +77,23 @@ pub async fn create_api_key(
 ) -> Result<(Uuid, String), ApiError> {
     let scopes: Vec<String> = scopes
         .iter()
-        .map(|s| {
-            normalize_scope(s)
-                .map(str::to_string)
-                .ok_or_else(|| ApiError::BadRequest(unknown_scope_message(s)))
-        })
+        .map(|s| normalize_scope(s).ok_or_else(|| ApiError::BadRequest(unknown_scope_message(s))))
         .collect::<Result<Vec<_>, _>>()?;
     let mut raw = [0u8; 24];
     rand::rng().fill_bytes(&mut raw);
     let key = format!("amk_{}", hex(&raw));
     let id = Uuid::now_v7();
-    repo::insert_api_key(pool, id, name, &sha256_hex(&key), &key[..12], &scopes, expires_at)
-        .await
-        .map_err(ApiError::from)?;
+    repo::insert_api_key(
+        pool,
+        id,
+        name,
+        &sha256_hex(&key),
+        &key[..12],
+        &scopes,
+        expires_at,
+    )
+    .await
+    .map_err(ApiError::from)?;
     Ok((id, key))
 }
 

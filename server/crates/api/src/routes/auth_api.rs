@@ -50,16 +50,39 @@ fn env_password(state: &AppState) -> Option<String> {
     ))]
 pub async fn login_handler(
     State(state): State<AppState>,
+    axum::Extension(client_ip): axum::Extension<crate::client_ip::ClientIp>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
-    let (token, _hash) = crate::auth::login(
+    // 公网加固（P001-t8）：登录防爆破——锁定窗口内的用户名直接 429（连续失败 5 次锁 15 分钟）
+    if crate::login_throttle::is_locked(&req.username) {
+        return Err(ApiError::TooManyRequests);
+    }
+    // 会话上下文：IP 由 client_ip 中间件注入（XFF 首段优先，直连取对端）；UA 原样存
+    let ip = client_ip.0;
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    match crate::auth::login(
         &state.pool,
         &req.username,
         &req.password,
         env_password(&state).as_deref(),
+        ip.as_deref(),
+        user_agent.as_deref(),
     )
-    .await?;
-    Ok(Json(LoginResponse { token }))
+    .await
+    {
+        Ok((token, _hash)) => {
+            crate::login_throttle::record_success(&req.username);
+            Ok(Json(LoginResponse { token }))
+        }
+        Err(e) => {
+            crate::login_throttle::record_failure(&req.username);
+            Err(e)
+        }
+    }
 }
 
 /// 当前用户名（管理页展示用；未初始化 → null）。
@@ -75,6 +98,29 @@ pub async fn username(
         .await
         .map_err(ApiError::Unavailable)?;
     Ok(Json(serde_json::json!({ "username": username })))
+}
+
+/// 登出：删除当前会话（后端行当场删掉，不等 7 天 TTL）。
+#[utoipa::path(post, path = "/auth/logout", responses((status = 204)))]
+pub async fn logout(
+    principal: axum::Extension<Principal>,
+    headers: axum::http::HeaderMap,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiError> {
+    if !matches!(principal.0, Principal::Admin) {
+        return Err(ApiError::Forbidden("仅管理员会话可登出".into()));
+    }
+    let current_hash = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(sha256_hex);
+    if let Some(hash) = current_hash {
+        keys_repo::delete_admin_session(&state.pool, &hash)
+            .await
+            .map_err(ApiError::from)?;
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// 登录状态（无鉴权，登录页用）：账号是否已初始化。
@@ -102,6 +148,8 @@ pub struct InitAccountRequest {
     responses((status = 201, body = LoginResponse), (status = 409, body = crate::error::ErrorEnvelope)))]
 pub async fn init_account(
     State(state): State<AppState>,
+    axum::Extension(client_ip): axum::Extension<crate::client_ip::ClientIp>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<InitAccountRequest>,
 ) -> Result<(StatusCode, Json<LoginResponse>), ApiError> {
     let username = req.username.trim();
@@ -124,7 +172,20 @@ pub async fn init_account(
     if !created {
         return Err(ApiError::Conflict("账号已存在——直接登录即可".into()));
     }
-    let (token, _hash) = crate::auth::login(&state.pool, username, &req.password, None).await?;
+    let ip = client_ip.0;
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let (token, _hash) = crate::auth::login(
+        &state.pool,
+        username,
+        &req.password,
+        None,
+        ip.as_deref(),
+        user_agent.as_deref(),
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(LoginResponse { token })))
 }
 
@@ -185,6 +246,10 @@ pub struct AdminSessionDto {
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
+    /// 登录 IP（X-Forwarded-For 首段；直连无反代时为空）
+    pub ip: Option<String>,
+    /// 登录浏览器 User-Agent（原样）
+    pub user_agent: Option<String>,
     /// 是否为当前请求的会话
     pub current: bool,
 }
@@ -210,12 +275,14 @@ pub async fn list_sessions(
     Ok(Json(
         rows.into_iter()
             .map(
-                |(hash, created_at, expires_at, last_used_at)| AdminSessionDto {
+                |(hash, created_at, expires_at, last_used_at, ip, user_agent)| AdminSessionDto {
                     current: current_hash.as_deref() == Some(hash.as_str()),
                     id: hash.chars().take(12).collect(),
                     created_at,
                     expires_at,
                     last_used_at,
+                    ip,
+                    user_agent,
                 },
             )
             .collect(),

@@ -16,10 +16,25 @@ pub async fn create_admin_session(
     pool: &PgPool,
     token_hash: &str,
     expires_at: DateTime<Utc>,
+    ip: Option<&str>,
+    user_agent: Option<&str>,
 ) -> StoreResult<()> {
-    sqlx::query("INSERT INTO admin_sessions (token_hash, expires_at) VALUES ($1, $2)")
+    // 惰性清理：登录时顺手删掉已过期的旧会话（活跃会话列表不再无限堆积）
+    sqlx::query("DELETE FROM admin_sessions WHERE expires_at < now()")
+        .execute(pool)
+        .await?;
+    // 同设备顶替：同 User-Agent 的活跃旧会话删掉（一个浏览器只挂最新一条；UA 为 NULL 不参与）
+    if let Some(ua) = user_agent {
+        sqlx::query("DELETE FROM admin_sessions WHERE user_agent = $1")
+            .bind(ua)
+            .execute(pool)
+            .await?;
+    }
+    sqlx::query("INSERT INTO admin_sessions (token_hash, expires_at, ip, user_agent) VALUES ($1, $2, $3, $4)")
         .bind(token_hash)
         .bind(expires_at)
+        .bind(ip)
+        .bind(user_agent)
         .execute(pool)
         .await?;
     Ok(())
@@ -163,12 +178,21 @@ pub async fn upsert_admin_account(
 
 // ---------- 会话管理（列表 / 吊销） ----------
 
-/// 会话行：(token_hash, created_at, expires_at, last_used_at)。
+/// 会话行：(token_hash, created_at, expires_at, last_used_at, ip, user_agent)。
 pub async fn list_admin_sessions(
     pool: &PgPool,
-) -> StoreResult<Vec<(String, DateTime<Utc>, DateTime<Utc>, Option<DateTime<Utc>>)>> {
+) -> StoreResult<
+    Vec<(
+        String,
+        DateTime<Utc>,
+        DateTime<Utc>,
+        Option<DateTime<Utc>>,
+        Option<String>,
+        Option<String>,
+    )>,
+> {
     let rows = sqlx::query_as(
-        "SELECT token_hash, created_at, expires_at, last_used_at FROM admin_sessions \
+        "SELECT token_hash, created_at, expires_at, last_used_at, ip, user_agent FROM admin_sessions \
          WHERE expires_at > now() ORDER BY created_at DESC",
     )
     .fetch_all(pool)

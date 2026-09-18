@@ -138,15 +138,25 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
         ],
         "todos" => action_docs![
-            "add", false, "记一条（默认 todo 行动项；kind=ticket 开工单——结构化问题跟踪，建议填 severity/symptom/acceptance）" => crate::TodoAddParams;
-            "list", false, "列表（open 优先；status/priority/tag/q 过滤；ticket 状态含 confirmed/in_progress/resolved/verified；默认摘要模式 brief 只回短号/标题/状态/分级/关联计数）" => crate::TodoListParams;
+            "add", false, "记一条待办（kind 固定 todo——行动项/灵感速记；开工单用 tickets 域）" => crate::TodoAddParams;
+            "list", false, "待办列表（仅 kind=todo；status/priority/tag/q 过滤；默认摘要模式 brief 只回短号/标题/状态/优先级/关联计数）" => crate::TodoListParams;
             "link", false, "建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号" => crate::TodoLinkParams;
             "unlink", false, "解除关联" => crate::TodoUnlinkParams;
             "links", false, "双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口" => crate::TodoLinksParams;
-            "get", false, "详情（含工单的 severity/symptom/acceptance/resolution）" => crate::TodoIdParams;
-            "done", false, "标记完成（记 done_at；仅 kind=todo——工单用 update 转 resolved）" => crate::TodoIdParams;
-            "update", false, "编辑（标题/详情/优先级/状态/截止/工单字段；状态机按 kind 校验）" => crate::TodoUpdateParams;
+            "get", false, "详情" => crate::TodoIdParams;
+            "done", false, "标记完成（记 done_at）" => crate::TodoIdParams;
+            "update", false, "编辑（标题/详情/优先级/状态/截止）" => crate::TodoUpdateParams;
             "delete", true, "删除待办（不可逆）" => crate::TodoIdParams
+        ],
+        "tickets" => action_docs![
+            "add", false, "开工单（kind 固定 ticket——结构化问题跟踪；建议填 severity/symptom/acceptance）" => crate::TicketAddParams;
+            "list", false, "工单列表（仅 kind=ticket；status 含 confirmed/in_progress/resolved/verified 六态；默认摘要模式 brief 只回短号/标题/状态/分级/关联计数）" => crate::TicketListParams;
+            "link", false, "建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号" => crate::TodoLinkParams;
+            "unlink", false, "解除关联" => crate::TodoUnlinkParams;
+            "links", false, "双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口" => crate::TodoLinksParams;
+            "get", false, "详情（含 severity/symptom/acceptance/resolution）" => crate::TodoIdParams;
+            "update", false, "编辑与状态流转（confirmed/in_progress/resolved/verified/archived；工单字段 severity/symptom/acceptance/resolution）" => crate::TodoUpdateParams;
+            "delete", true, "删除工单（不可逆）" => crate::TodoIdParams
         ],
         "codegraph" => action_docs![
             "list", false, "列出已注册代码库（注册状态/索引规模/当下可用性 usable）" => crate::CgNoParams;
@@ -155,6 +165,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "query", false, "代码图谱查询（search/explore大纲/node/callers/callees/impact/full_graph全图）" => crate::CgQueryParams;
             "index", false, "建索引/重建索引（异步 job）" => crate::CgNameParams;
             "sync", false, "增量同步索引（小改动后刷新）" => crate::CgNameParams;
+            "upload", true, "产物上传（公网模型）——客户端本机 codegraph index 后上传 db(base64)+HEAD；服务端只存+声明式新鲜度，无代码无 git 凭证" => crate::CgUploadParams;
             "delete", true, "注销代码图谱项目（删注册与索引；源码不动）" => crate::CgNameParams
         ],
         "jobs" => action_docs![
@@ -168,7 +179,16 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
 }
 
 /// 域工具名（= scope 名，projects 例外——scope 叫 project）。
-pub const DOMAIN_TOOLS: &[&str] = &["memory", "projects", "skills", "wiki", "todos", "codegraph", "jobs"];
+pub const DOMAIN_TOOLS: &[&str] = &[
+    "memory",
+    "projects",
+    "skills",
+    "wiki",
+    "todos",
+    "tickets",
+    "codegraph",
+    "jobs",
+];
 
 pub fn is_domain_tool(name: &str) -> bool {
     DOMAIN_TOOLS.contains(&name)
@@ -205,6 +225,144 @@ pub fn unknown_action(domain: &str, action: &str) -> rmcp::ErrorData {
             known.join("、")
         ),
     )
+}
+
+// ---------- 动作级权限（公网多Agent P001 步骤3） ----------
+
+/// 写类 action 清单（`:ro` 只读变体的拒绝面）。
+///
+/// 与 [`is_read_action`] 互补——完备性由下方测试保证：新增 action 落 [`action_docs`]
+/// 表时两边都要归类，漏归类测试红（CI 抓住，`:ro` 机制不会静默漏权）。
+pub fn is_write_action(domain: &str, action: &str) -> bool {
+    matches!(
+        (domain, action),
+        (
+            "memory",
+            "kv_put" | "remember" | "write_session" | "append_session" | "forget"
+        ) | (
+            "projects",
+            "create"
+                | "update"
+                | "delete"
+                | "batch_delete"
+                | "location_add"
+                | "location_update"
+                | "location_delete"
+                | "doc_add"
+                | "doc_patch"
+                | "doc_update"
+                | "doc_delete"
+                | "file_put"
+                | "file_delete"
+        ) | (
+            "skills",
+            "create" | "update" | "import" | "restore" | "delete" | "file_put"
+        ) | (
+            "wiki",
+            "write_page"
+                | "ingest"
+                | "archive_query"
+                | "restore_version"
+                | "delete_source"
+                | "lint_deep"
+                | "document_add"
+                | "review_resolve"
+                | "archive"
+                | "promote"
+                | "delete_page"
+        ) | (
+            "todos",
+            "add" | "link" | "unlink" | "done" | "update" | "delete"
+        ) | ("tickets", "add" | "link" | "unlink" | "update" | "delete")
+            | (
+                "codegraph",
+                "register" | "index" | "sync" | "gc" | "delete" | "upload"
+            )
+            | ("jobs", "revive")
+    )
+}
+
+/// 读类 action 清单（`:ro` 可用面）。与 [`is_write_action`] 互补。
+pub fn is_read_action(domain: &str, action: &str) -> bool {
+    matches!(
+        (domain, action),
+        (
+            "memory",
+            "context"
+                | "search"
+                | "distill_result"
+                | "kv_get"
+                | "kv_list"
+                | "kv_search"
+                | "list_sessions"
+                | "get_session"
+                | "list_atoms"
+                | "entities"
+        ) | (
+            "projects",
+            "types" | "list" | "get" | "doc_get" | "doc_search" | "file_get" | "file_list"
+        ) | ("skills", "list" | "get" | "file_get" | "versions")
+            | (
+                "wiki",
+                "search"
+                    | "list_pages"
+                    | "get_page"
+                    | "versions"
+                    | "version_content"
+                    | "sources"
+                    | "graph"
+                    | "lint"
+                    | "document_get"
+                    | "documents_search"
+                    | "reviews"
+                    | "index"
+                    | "libraries"
+                    | "purpose"
+                    | "insights"
+                    | "promotions"
+            )
+            | ("todos", "list" | "links" | "get")
+            | ("tickets", "list" | "links" | "get")
+            | ("codegraph", "list" | "query")
+            | ("jobs", "list" | "get" | "events")
+    )
+}
+
+/// 动作级权限检查：Admin/全量 scope 直过；`:ro` 变体只放行读类动作。
+///
+/// None 不在此拒——缺 scope 的拒绝保持在 handler 内的 require_*（原报错语义不变）。
+/// `tool` 是域工具名（memory/projects/…，projects 与 scope 单复数差异由 tool_scope 换算）。
+pub fn check_action_access(
+    principal: &engram_core::auth::Principal,
+    tool: &str,
+    action: &str,
+) -> Result<(), rmcp::ErrorData> {
+    use engram_core::auth::DomainAccess;
+    let scope = crate::tool_scope(tool);
+    match principal.domain_access(scope) {
+        DomainAccess::Full | DomainAccess::None => Ok(()),
+        DomainAccess::ReadOnly => {
+            if is_write_action(tool, action) {
+                let reads: Vec<&str> = action_docs(tool)
+                    .map(|docs| {
+                        docs.iter()
+                            .filter(|d| is_read_action(tool, d.action))
+                            .map(|d| d.action)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Err(mcp_err(
+                    ErrorCode::INVALID_REQUEST,
+                    format!(
+                        "权限不足：key 的 {scope} scope 是只读变体（:ro），不能调用 {tool}.{action}。可用只读动作：{}。需要写权限请用全量 {scope} scope 的 key。",
+                        reads.join("、")
+                    ),
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
 }
 
 /// L0 目录：一行一操作的紧凑清单（拼进域工具描述尾部，tools/list 与管理台共用）。
@@ -329,5 +487,23 @@ mod tests {
             "报错应提示 help：{}",
             err.message
         );
+    }
+
+    /// 完备性：每个域的每个 action 必须恰好归入读/写一类。
+    /// 新增 action 漏归类 → 本测试红（CI 抓住，`:ro` 机制不会静默漏权）。
+    #[test]
+    fn action_rw_classification_covers_everything() {
+        for domain in DOMAIN_TOOLS {
+            let docs = action_docs(domain).unwrap_or_else(|| panic!("域 {domain} 缺 action 表"));
+            for d in docs {
+                let w = is_write_action(domain, d.action);
+                let r = is_read_action(domain, d.action);
+                assert!(
+                    w ^ r,
+                    "动作 {domain}.{} 归类缺失或重复（write={w} read={r}）——新增 action 请同步归类到 is_write_action / is_read_action",
+                    d.action
+                );
+            }
+        }
     }
 }

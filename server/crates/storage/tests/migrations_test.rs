@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 47 份迁移：0047 = wiki_promotions 晋升登记，EN-59）
+    // 版本可查（当前 50 份迁移：0050 = 项目文档乐观锁，公网多Agent P001 步骤2）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(48), "0001-0048 迁移应已应用");
+    assert_eq!(version, Some(52), "0001-0052 迁移应已应用");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")
@@ -211,16 +211,17 @@ async fn default_main_library_guaranteed_and_idempotent() {
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接容器");
 
-    engram_storage::run_migrations(&pool).await.expect("迁移执行");
+    engram_storage::run_migrations(&pool)
+        .await
+        .expect("迁移执行");
 
     // 空库跑完全部迁移 → main 存在（0037 建名「主库」；0046 对已有行 DO NOTHING
     // 不覆盖——name 是用户可改字段，迁移不钉死）
-    let (slug, name): (String, String) = sqlx::query_as(
-        "SELECT slug, name FROM wiki_libraries WHERE slug = 'main'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("迁移后应存在 main 库");
+    let (slug, name): (String, String) =
+        sqlx::query_as("SELECT slug, name FROM wiki_libraries WHERE slug = 'main'")
+            .fetch_one(&pool)
+            .await
+            .expect("迁移后应存在 main 库");
     assert_eq!(slug, "main");
     assert!(!name.is_empty(), "main 应有名字");
     let id_before: uuid::Uuid =
@@ -230,7 +231,9 @@ async fn default_main_library_guaranteed_and_idempotent() {
             .unwrap();
 
     // 幂等：再次执行全部迁移（或单独重放 0046 的 INSERT）不破坏已有行
-    engram_storage::run_migrations(&pool).await.expect("幂等重放");
+    engram_storage::run_migrations(&pool)
+        .await
+        .expect("幂等重放");
     sqlx::query(
         "INSERT INTO wiki_libraries (id, slug, name) \
          VALUES ('00000000-0000-4000-8000-000000000001', 'main', '个人知识库') \
@@ -240,12 +243,11 @@ async fn default_main_library_guaranteed_and_idempotent() {
     .await
     .unwrap();
 
-    let (id_after, name_after): (uuid::Uuid, String) = sqlx::query_as(
-        "SELECT id, name FROM wiki_libraries WHERE slug = 'main'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (id_after, name_after): (uuid::Uuid, String) =
+        sqlx::query_as("SELECT id, name FROM wiki_libraries WHERE slug = 'main'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(id_after, id_before, "幂等重放不应改变已有 main 的 id");
     assert_eq!(name_after, name, "幂等重放不应改变已有 main 的 name");
     assert_eq!(

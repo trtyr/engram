@@ -954,7 +954,6 @@ impl WikiService {
 
     // ---------- 版本历史（R 报告建议 #5：列表 + 回滚；快照按 (library_id, slug) 隔离） ----------
 
-
     /// 裁剪旧快照（每 slug 只留最近 VERSION_KEEP 条；best-effort，不影响主流程）。
     async fn prune(&self, lib: Uuid, slug: &str) {
         prune_page_versions(&self.pool, lib, slug, VERSION_KEEP).await;
@@ -1189,12 +1188,7 @@ impl WikiService {
 }
 
 /// 版本快照裁剪（模块级：put_page 与 promote_page 共用；EN-59 提升可见性到 pub(crate)）。
-pub(crate) async fn prune_page_versions(
-    pool: &sqlx::PgPool,
-    lib: Uuid,
-    slug: &str,
-    keep: i64,
-) {
+pub(crate) async fn prune_page_versions(pool: &sqlx::PgPool, lib: Uuid, slug: &str, keep: i64) {
     sqlx::query(
         "DELETE FROM wiki_page_versions WHERE slug = $1 AND library_id = $2 \
          AND id NOT IN ( \

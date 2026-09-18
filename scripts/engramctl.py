@@ -12,6 +12,20 @@
   python3 scripts/engramctl.py logs   [N]               # 看最后 N 行日志（默认 50）
   python3 scripts/engramctl.py restart [--skip-build]   # 先 build 成功 → 安装 → 再 stop + start
   python3 scripts/engramctl.py install                  # 把 target 构建产物装进 ~/.engram/bin（不重启）
+  python3 scripts/engramctl.py sync push|pull <目标地址> [--token <migrate_key>]
+                                      [--local <本机实例地址>] [--dry-run] [--allow-insecure]
+                                                        # 数据同步（手动触发，非定期）：
+                                                        # push=本地→目标；pull=目标→本地。
+                                                        # 目标侧凭证用 migrate scope 的 API key
+                                                        # （--token 或环境变量 ENGRAM_SYNC_TOKEN）——
+                                                        # admin 密码不过公网；本机侧自动用本地 admin。
+                                                        # --local 覆盖本机侧地址（默认
+                                                        # http://127.0.0.1:17654；对临时测试实例
+                                                        # 做 pull 验收时指向它）。
+                                                        # 非 loopback 目标强制 https（http 拒绝，
+                                                        # --allow-insecure 逃生）；ssh 隧道场景：
+                                                        # ssh -L 17654:127.0.0.1:17654 user@cloud
+                                                        # 后目标填 http://127.0.0.1:17654
 
 配置源：~/.engram/.env（KEY=VALUE）——需含：
   AGENT_MEMORY_ADMIN_PASSWORD / AGENT_MEMORY_MASTER_KEY
@@ -21,12 +35,15 @@
 
 from __future__ import annotations  # 兼容 3.9 解析 `int | None` 注解（注解惰性化）
 
+import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -277,6 +294,164 @@ def cmd_logs(n: int) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# 数据同步（2026-09-18 数据同步线）：sync push|pull <目标地址>——手动触发，非定期
+# ---------------------------------------------------------------------------
+
+
+def _sync_check_target(target: str, allow_insecure: bool) -> str | None:
+    """目标地址安全口径：非 loopback 强制 https，http 明文拒绝（--allow-insecure 逃生）。
+
+    无 scheme 时默认按 https 解析（宁可安全侧失败）。
+    """
+    raw = target if "://" in target else f"https://{target}"
+    parsed = urllib.parse.urlparse(raw)
+    scheme, host = parsed.scheme.lower(), parsed.hostname or ""
+    loopback = host in ("127.0.0.1", "localhost", "::1")
+    if scheme != "https" and not loopback and not allow_insecure:
+        print(f"❌ 目标 {target} 非 loopback 且为 http 明文——公网同步必须走 TLS（迁移安全同口径）")
+        print("   方式一：目标用 https:// 域名（反代/TLS 终结后）")
+        print("   方式二：ssh 隧道后用 loopback——ssh -L 17654:127.0.0.1:17654 user@cloud，")
+        print("           目标填 http://127.0.0.1:17654")
+        print("   （本地试跑确要明文：加 --allow-insecure）")
+        return None
+    return target.rstrip("/")
+
+
+def _http_json(
+    url: str, method: str, token: str, payload: dict | None = None, timeout: int = 600
+) -> tuple[int, dict]:
+    """极简 JSON API 客户端（纯标准库）：返回 (status, body)。网络错误按 (0, {}) 处理。"""
+    req = urllib.request.Request(url, method=method.upper())
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    data = None
+    if payload is not None:
+        req.add_header("Content-Type", "application/json")
+        data = json.dumps(payload).encode()
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=timeout) as resp:
+            return resp.status, json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode() or "{}")
+        except Exception:
+            return e.code, {}
+    except Exception as e:
+        print(f"❌ 请求失败 {method} {url}: {e}")
+        return 0, {}
+
+
+def _local_admin_token(base: str) -> str | None:
+    """本机侧 admin 凭证登录（默认 loopback 生产实例；--local 可指向临时测试实例）。"""
+    pw = load_env().get("AGENT_MEMORY_ADMIN_PASSWORD")
+    if not pw:
+        print("❌ 本机 ~/.engram/.env 缺 AGENT_MEMORY_ADMIN_PASSWORD")
+        return None
+    st, v = _http_json(f"{base}/auth/login", "POST", "", {"password": pw}, timeout=15)
+    if st != 200 or not v.get("token"):
+        print(f"❌ 本机登录失败（HTTP {st}，{base}）——服务在跑吗？python3 scripts/engramctl.py status")
+        return None
+    return v["token"]
+
+
+def _print_bundle_summary(tag: str, bundle: dict) -> None:
+    counts = bundle.get("counts", {})
+    if not counts:
+        print(f"[{tag}] ⚠️ 迁移包无 counts 字段：{list(bundle)[:6]}…")
+        return
+    print(f"[{tag}] 迁移包分域行数（exported_at={bundle.get('exported_at', '?')}）：")
+    for k in sorted(counts):
+        print(f"    {k}: {counts[k]}")
+
+
+def _print_import_report(tag: str, report: dict) -> None:
+    """导入报告递归打印（分域 imported/skipped）。"""
+    print(f"[{tag}] 导入报告（+imported / 跳过 skipped）：")
+
+    def walk(prefix: str, node: dict) -> None:
+        for k in sorted(node):
+            v = node[k]
+            if isinstance(v, dict):
+                if "imported" in v:
+                    print(f"    {prefix}{k}: +{v.get('imported', 0)} / 跳过 {v.get('skipped', 0)}")
+                else:
+                    walk(f"{prefix}{k}.", v)
+
+    walk("", report)
+
+
+def cmd_sync(args: list[str]) -> int:
+    """数据同步（手动触发，非定期）：push=本地→目标（正向迁移）；pull=目标→本地（反向回拉）。
+
+    凭证：目标侧 migrate scope 的 API key（--token / ENGRAM_SYNC_TOKEN；admin 密码不过公网），
+         本机侧本地 admin（~/.engram/.env 自动登录，仅 loopback）。
+    语义：merge 先写为准（冲突跳过）——重跑安全；方向敲反顶多无效果，不毁数据。
+    注意：embedding/LLM provider/账号均不随迁（见《上云迁移清单 2026-09-18》）。
+    """
+    usage = (
+        "用法：engramctl sync push|pull <目标地址> [--token <migrate_key>] [--dry-run] [--allow-insecure]"
+    )
+    if len(args) < 2 or args[0] not in ("push", "pull"):
+        print(usage)
+        return 2
+    direction, target = args[0], args[1]
+    dry_run = "--dry-run" in args
+    allow_insecure = "--allow-insecure" in args
+    token: str | None = None
+    if "--token" in args:
+        i = args.index("--token")
+        if i + 1 >= len(args):
+            print("❌ --token 后面要跟 key 值")
+            return 2
+        token = args[i + 1]
+    if token is None:
+        token = os.environ.get("ENGRAM_SYNC_TOKEN")
+    if not token:
+        print("❌ 缺目标侧凭证——用 migrate scope 的 API key（目标机 /account 页创建）")
+        print("   传入：--token <key> 或环境变量 ENGRAM_SYNC_TOKEN（不要拿 admin 密码过公网）")
+        return 2
+
+    base = _sync_check_target(target, allow_insecure)
+    if base is None:
+        return 1
+
+    local = f"http://127.0.0.1:{PORT}"
+    if "--local" in args:
+        i = args.index("--local")
+        if i + 1 >= len(args):
+            print("❌ --local 后面要跟本机实例地址")
+            return 2
+        local = args[i + 1].rstrip("/")
+    local_token = _local_admin_token(local)
+    if local_token is None:
+        return 1
+
+    src_label, dst_label = ("本地", "目标") if direction == "push" else ("目标", "本地")
+    src_base, src_tok = (local, local_token) if direction == "push" else (base, token)
+    dst_base, dst_tok = (base, token) if direction == "push" else (local, local_token)
+
+    print(f"[sync {direction}] ① 导出：{src_label} GET /migrate/export ...")
+    st, bundle = _http_json(f"{src_base}/migrate/export", "GET", src_tok)
+    if st != 200:
+        print(f"❌ {src_label}导出失败（HTTP {st}）：{json.dumps(bundle, ensure_ascii=False)[:300]}")
+        return 1
+    _print_bundle_summary(src_label, bundle)
+
+    if dry_run:
+        print(f"[sync {direction}] --dry-run：不写入{dst_label}。以上为将同步的内容。")
+        return 0
+
+    print(f"[sync {direction}] ② 导入：{dst_label} POST /migrate/import ...")
+    st, report = _http_json(f"{dst_base}/migrate/import", "POST", dst_tok, payload=bundle)
+    if st != 200:
+        print(f"❌ {dst_label}导入失败（HTTP {st}）：{json.dumps(report, ensure_ascii=False)[:300]}")
+        return 1
+    _print_import_report(dst_label, report)
+    print(f"[sync {direction}] ✅ 完成。提醒：embedding/LLM provider/账号不随迁（清单见《上云迁移清单 2026-09-18》）。")
+    return 0
+
+
 def main() -> int:
     args = sys.argv[1:]
     cmd = args[0] if args else "status"
@@ -291,6 +466,8 @@ def main() -> int:
         return cmd_status()
     if cmd == "install":
         return cmd_install()
+    if cmd == "sync":
+        return cmd_sync(args[1:])
     if cmd == "logs":
         n = int(args[1]) if len(args) > 1 else 50
         return cmd_logs(n)

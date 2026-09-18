@@ -56,13 +56,27 @@ async fn promote_register_insert_list_and_unique_guard() {
     let (project_id, doc_id) = mk_project_doc(&pool, "晋升源项目").await;
 
     // ① 首次登记成功
-    let id = repo::insert(&pool, lib, "pass-through-principle", project_id, doc_id, "§机器产出")
-        .await
-        .expect("首次登记应成功");
+    let id = repo::insert(
+        &pool,
+        lib,
+        "pass-through-principle",
+        project_id,
+        doc_id,
+        "§机器产出",
+    )
+    .await
+    .expect("首次登记应成功");
 
     // ② 同 (project, doc, page) 重复登记 → Conflict（服务层转「已晋升」友好提示）
-    let dup = repo::insert(&pool, lib, "pass-through-principle", project_id, doc_id, "§机器产出")
-        .await;
+    let dup = repo::insert(
+        &pool,
+        lib,
+        "pass-through-principle",
+        project_id,
+        doc_id,
+        "§机器产出",
+    )
+    .await;
     assert!(dup.is_err(), "重复登记应被 UNIQUE 拒绝");
     assert!(
         matches!(dup.unwrap_err(), engram_storage::StoreError::Conflict(_)),
@@ -81,7 +95,9 @@ async fn promote_register_insert_list_and_unique_guard() {
     repo::insert(&pool, lib, "pass-through-principle", _p2, doc2, "§另一处")
         .await
         .unwrap();
-    let by_page = repo::list_by_page(&pool, lib, "pass-through-principle").await.unwrap();
+    let by_page = repo::list_by_page(&pool, lib, "pass-through-principle")
+        .await
+        .unwrap();
     assert_eq!(by_page.len(), 2, "同页可承接多个来源文档的晋升");
 }
 
@@ -93,7 +109,13 @@ async fn doc_delete_cascades_registration() {
     repo::insert(&pool, lib, "some-page", project_id, doc_id, "§锚点")
         .await
         .unwrap();
-    assert_eq!(repo::list_by_project(&pool, project_id).await.unwrap().len(), 1);
+    assert_eq!(
+        repo::list_by_project(&pool, project_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 
     // 删 project_docs 行 → DB 级 CASCADE 清登记（0047 外键语义）
     sqlx::query("DELETE FROM project_docs WHERE id = $1")
@@ -102,7 +124,10 @@ async fn doc_delete_cascades_registration() {
         .await
         .unwrap();
     assert!(
-        repo::list_by_project(&pool, project_id).await.unwrap().is_empty(),
+        repo::list_by_project(&pool, project_id)
+            .await
+            .unwrap()
+            .is_empty(),
         "doc 删除应级联清理登记"
     );
 }
@@ -117,7 +142,14 @@ async fn delete_by_page_clears_registrations() {
         .unwrap();
 
     // wiki 页删除（page_slug 无 FK）→ 服务层显式清理
-    let n = repo::delete_by_page(&pool, lib, "doomed-page").await.unwrap();
+    let n = repo::delete_by_page(&pool, lib, "doomed-page")
+        .await
+        .unwrap();
     assert_eq!(n, 1);
-    assert!(repo::list_by_page(&pool, lib, "doomed-page").await.unwrap().is_empty());
+    assert!(
+        repo::list_by_page(&pool, lib, "doomed-page")
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

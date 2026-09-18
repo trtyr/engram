@@ -145,6 +145,12 @@ async fn main() -> anyhow::Result<()> {
             "使用占位主密钥（AGENT_MEMORY_MASTER_KEY 未设置）：此时创建的 provider API key 在换用真实主密钥后将无法解密。请尽早设置环境变量；轮换后调用 POST /settings/llm/providers/re-encrypt 迁移存量密钥"
         );
     }
+    // 公网加固（P001-t8）：弱熵主密钥告警——已设置但模式化（公网部署下离线爆破代价近零）
+    if state.is_weak_master_key() {
+        tracing::warn!(
+            "主密钥熵过低（64 hex 字符种类 < 8，疑似人手敲的模式串）——公网部署下离线爆破代价接近零。请用 `openssl rand -hex 32` 重新生成，并调用 POST /settings/llm/providers/re-encrypt 迁移存量密钥"
+        );
+    }
 
     let app = routes::router(state).layer(TraceLayer::new_for_http());
 
@@ -153,11 +159,21 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(%addr, "HTTP 监听");
 
     // 6. 优雅停机（容器 SIGTERM）：先等 HTTP 再停 runner
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-    runner_handle.shutdown();
-    runner_handle.join().await;
+    // connect_info：注入连接对端地址（client_ip 中间件读取——活跃会话归因直连场景）
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
+    // RJ-09 修复：等在途任务完成（上限 30s）再退出——SIGTERM 不再腰斩执行中的 job；
+    // 超时未完成者由 reap_orphans 兜底回收（孤儿重排）
+    if !runner_handle
+        .shutdown_and_wait(std::time::Duration::from_secs(30))
+        .await
+    {
+        tracing::warn!("停机等待超时（30s）：仍有在途任务未完成，交由 reap_orphans 兜底回收");
+    }
     Ok(())
 }
 

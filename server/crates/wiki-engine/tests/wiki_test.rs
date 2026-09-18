@@ -237,8 +237,9 @@ async fn two_docs_interlinked_no_duplicate() {
     assert!(qpage.content.contains("**问**"), "queries 页应含问答结构");
     wait_jobs(&pool, &["wiki_analyze"]).await;
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 人写页面不被 LLM 覆盖 → proposal。
@@ -313,8 +314,9 @@ async fn human_page_produces_proposal_not_overwrite() {
     assert_eq!(merged.version, 2);
     assert!(merged.content.contains("LLM 版内容"));
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 文档织入双路（2026-09-04）：upload 文档（raw_path）走原文件；URL 文档
@@ -397,8 +399,9 @@ async fn ingest_document_url_fallback_uses_chunks() {
         Err(engram_wiki_engine::WikiError::NotFound(_))
     ));
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// S-7：via 执行者标记落 frontmatter——AI 代执行（"ai"）与真人编辑可区分；
@@ -427,8 +430,9 @@ async fn put_page_via_lands_in_frontmatter() {
         "无 via 的更新不得清除已有执行者标记"
     );
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// lint：注入死链 + 孤儿页 → 全部报出。
@@ -515,8 +519,9 @@ async fn lint_reports_dead_links_and_orphans() {
     assert!(!dead.iter().any(|i| i.slug == "正常页A"));
     assert!(!orphan.iter().any(|i| i.slug == "正常页A"));
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// lint 第 5 步（过时源）：id 曾以 text 形式回查 wiki_sources.id（uuid 列），
@@ -547,8 +552,9 @@ async fn lint_with_ingested_source_reports_stale_without_type_error() {
         report.issues
     );
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// review resolve 未命中（不存在或已处理）应按 NotFound 语义返回，
@@ -565,8 +571,9 @@ async fn review_resolve_miss_returns_not_found() {
         "未命中应报不存在或已处理: {msg}"
     );
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
     let _ = pool;
 }
 
@@ -654,8 +661,9 @@ async fn w1_generate_failure_resubmit_recovers() {
     let page = wiki.get_page(lib, "w1-page").await.unwrap();
     assert!(page.content.contains("W1 内容词"));
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 // ---------- W2/W3：内容词检索 + 嵌入失败不丢索引 ----------
@@ -689,8 +697,9 @@ async fn w2_content_word_search_hits_llm_pages() {
     .unwrap();
     assert!(tsv_len > 0, "tsv 应已写入（旧实现只嵌 slug）");
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// W3：嵌入整体失败——页面仍入库、tsv 仍写、内容词仍可检索（不再从检索消失）。
@@ -740,8 +749,9 @@ async fn w3_embed_failure_keeps_fts_searchable() {
             .unwrap();
     assert!(events >= 1, "嵌入失败应有事件");
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 // ---------- W4：Permanent 失败标 failed + error 落列（'failed' 不再是幽灵态） ----------
@@ -802,8 +812,9 @@ async fn w4_permanent_failure_marks_source_failed() {
     assert_eq!(s, "ready", "自愈后应 ready");
     assert!(e.is_none(), "自愈应清 error");
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 // ---------- W6：UPSERT 原子化（human 保护 + 并发不撞 UNIQUE） ----------
@@ -998,8 +1009,9 @@ async fn archive_query_is_idempotent_by_title() {
     assert_eq!(n, 1, "同 title 只落一条 queries 页");
     assert_eq!(ver, 1, "重复存档不应 version+1");
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// W-7③（2026-09-04）：单次织入建页量软上限——generate 返回 21 页，截断到 20 + 告警事件。
@@ -1047,8 +1059,9 @@ async fn generate_page_cap_truncates_and_warns() {
             .unwrap();
     assert_eq!(warned, 1, "应有告警事件标记截断");
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// R9/D28：list_pages keyset 游标翻页——无重复、无丢失、垃圾游标响亮拒。
@@ -1587,9 +1600,16 @@ async fn en63_tsv_coverage_and_system_page_exclusion() {
             "正文提到 pi-extension 与透传原则。",
         ),
         ("en63-index", "index", "EN63 索引页", "en63 全部页面总览"),
-        ("en63-overview", "overview", "EN63 总览", "透传 复合词 关键词汤"),
+        (
+            "en63-overview",
+            "overview",
+            "EN63 总览",
+            "透传 复合词 关键词汤",
+        ),
     ] {
-        svc.put_page(lib, slug, title, content, None, None).await.unwrap();
+        svc.put_page(lib, slug, title, content, None, None)
+            .await
+            .unwrap();
         // put_page 会生成 page_type=concept——系统页类型手动改 + tsv 置 NULL
         //（模拟历史状态：系统页从不参与 FTS）
         if ptype != "concept" {
@@ -1620,8 +1640,14 @@ async fn en63_tsv_coverage_and_system_page_exclusion() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(compound_ok, "内容页 tsv 应含 slug 归一 token（en63/compound/page）");
-    assert!(sys_null, "系统页（overview）重刷后 tsv 应仍为 NULL——结构页不参与 FTS");
+    assert!(
+        compound_ok,
+        "内容页 tsv 应含 slug 归一 token（en63/compound/page）"
+    );
+    assert!(
+        sys_null,
+        "系统页（overview）重刷后 tsv 应仍为 NULL——结构页不参与 FTS"
+    );
 
     // 搜索验证：slug 复合词与中文子串命中目标页，且 overview 不出现在结果
     let hits = svc.search(lib, "ai-en63-compound-page", 20).await.unwrap();
@@ -1636,9 +1662,12 @@ async fn en63_tsv_coverage_and_system_page_exclusion() {
         "中文子串「透传」应命中（cut_for_search 子词）"
     );
     assert!(
-        hits.iter().all(|p| !matches!(p.page_type.as_str(), "index" | "log" | "overview")),
+        hits.iter()
+            .all(|p| !matches!(p.page_type.as_str(), "index" | "log" | "overview")),
         "系统页（index/log/overview）不应出现在搜索结果（向量腿也在排除内）：{:?}",
-        hits.iter().map(|p| (&p.slug, &p.page_type)).collect::<Vec<_>>()
+        hits.iter()
+            .map(|p| (&p.slug, &p.page_type))
+            .collect::<Vec<_>>()
     );
 
     // import_wiki_page：导入页 tsv 同口径（slug token 在）；系统页导入 tsv=NULL
@@ -1651,7 +1680,16 @@ async fn en63_tsv_coverage_and_system_page_exclusion() {
         "origin": "llm",
         "version": 1,
     });
-    let imported = engram_storage::repo::transfer::import_wiki_page(&pool, &doc, &engram_search::tokenize::tsv_text_wiki("en63-imported-page EN63 导入页 导入正文提到 pi-extension。")).await.unwrap();
+    let imported = engram_storage::repo::transfer::import_wiki_page(
+        &pool,
+        &doc,
+        &engram_search::tokenize::tsv_text_wiki(
+            "en63-imported-page EN63 导入页 导入正文提到 pi-extension。",
+        ),
+        lib,
+    )
+    .await
+    .unwrap();
     assert!(imported, "导入应成功");
     let (imp_ok,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM unnest(tsvector_to_array(tsv)) t WHERE t = 'imported') \

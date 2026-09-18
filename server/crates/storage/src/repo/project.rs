@@ -14,8 +14,7 @@ const PROJECT_COLS: &str =
     "id, name, type, status, description, categories, frontmatter, created_at, updated_at";
 const LOCATION_COLS: &str =
     "id, project_id, ip, host, os, path, purpose, sort_order, created_at, updated_at";
-const DOC_COLS: &str =
-    "id, project_id, category, folder, title, content, frontmatter, created_at, updated_at";
+const DOC_COLS: &str = "id, project_id, category, folder, title, content, frontmatter, version, created_at, updated_at";
 
 pub async fn insert_project(
     pool: &PgPool,
@@ -279,17 +278,21 @@ pub async fn update_doc(
     folder: Option<&str>,
     title: Option<&str>,
     content: Option<&str>,
+    expected_version: Option<i64>,
 ) -> StoreResult<u64> {
+    // 乐观锁（公网多Agent P001 步骤2）：expected_version 给出时原子校验当前版本，
+    // 不匹配则 0 行更新（core 层转 409 Conflict）；每次成功写入 version + 1。
     let res = sqlx::query(
         "UPDATE project_docs SET category = COALESCE($2, category), folder = COALESCE($3, folder), \
-         title = COALESCE($4, title), content = COALESCE($5, content), updated_at = now() \
-         WHERE id = $1",
+         title = COALESCE($4, title), content = COALESCE($5, content), version = version + 1, updated_at = now() \
+         WHERE id = $1 AND ($6::bigint IS NULL OR version = $6)",
     )
     .bind(id)
     .bind(category)
     .bind(folder)
     .bind(title)
     .bind(content)
+    .bind(expected_version)
     .execute(pool)
     .await?;
     Ok(res.rows_affected())

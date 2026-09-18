@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/auth/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改用户名/密码（改后自动吊销其他会话；当前会话保留）。 */
+        put: operations["change_credentials"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/init": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 初始化管理员账号（仅账号未创建时有效；创建后即以此登录）。 */
+        post: operations["init_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -21,6 +55,113 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 会话列表（活跃会话；标记当前会话）。 */
+        get: operations["list_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions/revoke-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 吊销除当前会话外的全部会话（改密码后自动执行；也可手动触发）。 */
+        post: operations["revoke_others"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 吊销指定会话（不可吊销当前会话——用「吊销其他」或登出）。 */
+        delete: operations["revoke_session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 登录状态（无鉴权，登录页用）：账号是否已初始化。 */
+        get: operations["status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/username": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 当前用户名（管理页展示用；未初始化 → null）。 */
+        get: operations["username"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/codegraph/gc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 失效条目对账（EN-48）：路径已不存在 / 索引产物已丢失的 ready 条目标为 error，
+         *     使列表不再把幽灵条目冒充可用资产。
+         * @description 自愈（EN-48 残留）：对「路径仍在、仅产物丢失」的条目自动入队重建 job——
+         *     报告 `queued_rebuild` 带各条目的 job_id；入队失败不中断对账（报告里如实标注）。
+         */
+        post: operations["gc"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/codegraph/projects": {
         parameters: {
             query?: never;
@@ -30,7 +171,7 @@ export interface paths {
         };
         get: operations["list_projects"];
         put?: never;
-        /** 注册项目（本地路径或 git URL）。 */
+        /** 注册项目（本地路径或 git URL；同源只许注册一次）。 */
         post: operations["register_project"];
         delete?: never;
         options?: never;
@@ -48,6 +189,27 @@ export interface paths {
         get: operations["get_project"];
         put?: never;
         post?: never;
+        /** 删除项目（git clone 的工作目录一并清理；本地路径项目不动源码）。 */
+        delete: operations["delete_codegraph_project"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/codegraph/projects/{id}/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 调用图：带 symbol = 以该符号为中心的 callers/callees 子图；
+         *     不带 symbol = 文件级全图（全部跨文件依赖按文件聚合，看项目全貌）。
+         */
+        get: operations["graph"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -63,6 +225,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** 建索引/重建索引：入队 cg_index job 异步执行（202 + job_id；进度看 jobs 与项目状态）。 */
         post: operations["index_project"];
         delete?: never;
         options?: never;
@@ -96,7 +259,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** 增量同步：入队 cg_sync job 异步执行。 */
         post: operations["sync_project"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/codegraph/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** CLI 可用性（前端状态条：装没装、版本、pin）。 */
+        get: operations["codegraph_status"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -513,6 +694,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/kv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** KV 列表（只读治理面）：按 updated_at 倒序，含 context/tags/source/updated_at。 */
+        get: operations["list_kv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/kv/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** KV 单条（只读治理面）：按 key 精确取。 */
+        get: operations["get_kv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/persona": {
         parameters: {
             query?: never;
@@ -688,10 +903,47 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_sessions"];
+        get: operations["list_memory_sessions"];
         put?: never;
         /** 写入 L0 会话（AI 客户端的主要写入口）。 */
         post: operations["write_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/sessions/batch-erase": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批量擦除（Web「擦除所选」）：物理删除，逐条含原子级联；与单条擦除同级——需 erase scope。 */
+        post: operations["batch_erase_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/sessions/batch-restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量撤销作废（Web「恢复所选」）：逐条恢复，单条失败不影响其余。
+         *     混合选择（含非 void）时 failed 逐条带原因。
+         */
+        post: operations["batch_restore_sessions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -748,6 +1000,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/sessions/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 撤销作废（Web 前端「恢复」按钮的通道，与 MCP forget mode=restore 同一 core 服务）：
+         *     会话状态照作废时存档还原，被级联归档的原子一并恢复。非破坏性——不需要 erase scope。
+         */
+        post: operations["restore_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/sessions/{id}/void": {
         parameters: {
             query?: never;
@@ -757,7 +1029,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** P5 会话作废：「这段白记了」——蒸馏跳过、记录保留（只对未蒸馏会话）。 */
+        /**
+         * P5 会话作废（v2 扩大语义）：「这段白记了」——任何会话可作废：pending/off 蒸馏跳过；
+         *     done 会话作废时其蒸馏产出的 active 原子级联归档（检索/context 立即失效），原文保留可审计。
+         */
         post: operations["void_session"];
         delete?: never;
         options?: never;
@@ -776,6 +1051,57 @@ export interface paths {
         get: operations["timeline"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/migrate/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全系统导出：五域迁移包（JSON 下载；派生列 embedding/tsv 不含——导入端重建）。 */
+        get: operations["export_bundle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/migrate/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 导入迁移包（冲突跳过，分域报告）。合并语义：已存在的记录不动。 */
+        post: operations["import_bundle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/migrate/pull": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 远程拉取迁移（A → B 一键迁移）：登录 A 拉迁移包，落地到本机（冲突跳过）。 */
+        post: operations["pull"];
         delete?: never;
         options?: never;
         head?: never;
@@ -889,6 +1215,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出项目文件（含内容；列表页用 mime 决定预览形态）。 */
+        get: operations["list_files"];
+        /** 覆盖式写入项目文件（存在则 version+1，旧版进快照）。 */
+        put: operations["upsert_file"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}/files/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读单个文件。 */
+        get: operations["get_file"];
+        put?: never;
+        post?: never;
+        /** 删除项目文件（版本快照级联删）。 */
+        delete: operations["delete_file"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}/files/{name}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 文件历史版本列表（不含内容）。 */
+        get: operations["list_file_versions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{id}/files/{name}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读某历史版本内容。 */
+        get: operations["get_file_version"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{id}/locations": {
         parameters: {
             query?: never;
@@ -994,6 +1390,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/api-keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 编辑已有 API key：改名 / 调整 scope（全量替换，即时生效——bearer 每请求查库，无需吊销重签）。 */
+        put: operations["update_api_key"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/api-keys/{id}/revoke": {
         parameters: {
             query?: never;
@@ -1023,6 +1436,26 @@ export interface paths {
         put?: never;
         /** 注册 LLM provider（key 加密落库）。L1：写入口全量校验；L3：默认唯一性事务降级。 */
         post: operations["create_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/llm/providers/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 自动获取供应商的模型 ID 列表（OpenAI 兼容 GET /models）。
+         *     两种用法：新建表单传 base_url+api_key；编辑已存 provider 传 base_url+provider_id。
+         */
+        post: operations["fetch_models"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1189,6 +1622,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills/import-transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 技能导入闭环：吃 /skills/export 同构数据（含附属文件），slug 冲突跳过。
+         *     与 POST /skills/import（SKILL.md 文本粘贴）互补——本端点做迁移/合并。
+         */
+        post: operations["skills_import_transfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/skills/{slug}": {
         parameters: {
             query?: never;
@@ -1196,13 +1649,49 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 技能详情（含 markdown 正文）。 */
+        /** 技能详情（含 markdown 正文；script 型从 local_path 现读，指针失效报 404）。 */
         get: operations["skills_get"];
         /** 编辑技能（语义字段变更留版本快照；enabled-only 不留）。 */
         put: operations["update_skill"];
         post?: never;
         /** 删除技能（级联删版本快照，不可逆）。 */
         delete: operations["delete_skill"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{slug}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读一个附属文件全文。 */
+        get: operations["skills_file_get"];
+        /** 写（upsert）一个附属文件；返回 path 与字节数。 */
+        put: operations["skills_file_put"];
+        post?: never;
+        /** 删除一个附属文件。 */
+        delete: operations["skills_file_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{slug}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 附属文件索引（path + 字节大小；SKILL.md 本体不在其中）。 */
+        get: operations["skills_files_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1237,6 +1726,60 @@ export interface paths {
         /** 回滚到某版本（回滚前先快照现状，回滚本身可再撤销）。 */
         post: operations["restore_revision"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/todos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 待办列表（open 优先；status/priority/tag/q 过滤）。 */
+        get: operations["list_todos"];
+        put?: never;
+        /** 新建待办。 */
+        post: operations["create_todo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/todos/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 待办全量导出（P4 数据主权）。 */
+        get: operations["export_todos"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/todos/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 待办详情。 */
+        get: operations["get_todo"];
+        /** 更新待办（部分字段，None 不动；status=done 自动记 done_at）。 */
+        put: operations["update_todo"];
+        post?: never;
+        /** 删除待办（物理删除；归档语义走 status=archived）。 */
+        delete: operations["delete_todo"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1332,7 +1875,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["graph"];
+        get: operations["wiki_graph"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1350,7 +1893,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 触发两步 ingest（sha 命中秒跳过，返回 skipped=true）。 */
+        /**
+         * 触发两步 ingest（D27 三态：skipped 仅表示同内容曾成功织入；
+         *     in_flight=同内容任务处理中（勿重提也非丢失）；enqueued=新入队）。
+         */
         post: operations["ingest"];
         delete?: never;
         options?: never;
@@ -1409,6 +1955,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/wiki/libraries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_libraries"];
+        put?: never;
+        post: operations["create_library"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/libraries/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除库（非空需 force=true 级联；不可逆）。 */
+        delete: operations["delete_library"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/links/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 存量回填：重析全部页面正文重建 wiki_links（D4 存量修复；幂等）。 */
+        post: operations["rebuild_links"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wiki/lint": {
         parameters: {
             query?: never;
@@ -1452,6 +2048,43 @@ export interface paths {
         get: operations["get_page"];
         /** 人工编辑（origin=human，版本递增；LLM 后续只提案不覆盖）。 */
         put: operations["put_page"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 wiki synthesis 页。
+         *     服务端自动双向回链：页 frontmatter 带 promoted_from + 源文档追加 ⛳ 标记 + 登记表。
+         */
+        post: operations["promote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/promotions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 晋升登记列表（可选按来源项目名/id 过滤）。 */
+        get: operations["promotions"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1503,9 +2136,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 读取 purpose（wiki 方向意图）。 */
+        /** 读取 purpose（wiki 方向意图；每库一份）。 */
         get: operations["get_purpose"];
-        /** 设置 purpose（ingest/query 时注入 LLM）。 */
+        /** 设置 purpose（ingest/query 时注入 LLM；每库一份）。 */
         put: operations["set_purpose"];
         post?: never;
         delete?: never;
@@ -1614,6 +2247,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/wiki/tsv/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 存量内容页 tsv 重刷（EN-63）：slug+title+content、wiki 分词变体；排除 index/log/overview
+         *     系统页（结构页不参与 FTS——重刷包含会让系统页霸榜）。对齐 rebuild_links 先例；幂等。
+         */
+        post: operations["rebuild_tsv"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wiki/upload": {
         parameters: {
             query?: never;
@@ -1635,7 +2288,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AdminSessionDto: {
+            /** Format: date-time */
+            created_at: string;
+            /** @description 是否为当前请求的会话 */
+            current: boolean;
+            /** Format: date-time */
+            expires_at: string;
+            /** @description 会话标识（token hash 前 12 位） */
+            id: string;
+            /** Format: date-time */
+            last_used_at?: string | null;
+        };
         ApiKeyCreated: {
+            /**
+             * Format: date-time
+             * @description 过期时间（null = 永不过期）
+             */
+            expires_at?: string | null;
             /** Format: uuid */
             id: string;
             /** @description 明文 key（amk_ 前缀；只在创建响应出现一次） */
@@ -1645,6 +2315,11 @@ export interface components {
         ApiKeyDto: {
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description 过期时间（null = 永不过期）
+             */
+            expires_at?: string | null;
             /** Format: uuid */
             id: string;
             key_prefix: string;
@@ -1696,8 +2371,12 @@ export interface components {
             scenario_id?: string | null;
             /** @description P3 隐私标记：医疗/感情/财务类——默认不进检索与 context_pack，reveal 才可见 */
             sensitive: boolean;
+            /** @description 断言来源：user_stated/verified_probe/agent_inferred/doc */
+            source_kind: string;
             source_refs: Record<string, never>;
             status: string;
+            /** @description 断言强度：fact=用户明示/机器验证, inference=agent 推断, assumption=假设 */
+            strength: string;
             /** Format: uuid */
             superseded_by?: string | null;
             /** Format: date-time */
@@ -1736,6 +2415,11 @@ export interface components {
             forget?: boolean;
             ids: string[];
         };
+        /** @description 批量遗忘请求：会话 id 列表。 */
+        BatchIdsRequest: {
+            /** @description 要操作的会话 id 列表（1~200 条） */
+            ids: string[];
+        };
         BatchRevokeRequest: {
             ids: string[];
         };
@@ -1752,15 +2436,30 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             error?: string | null;
+            /** @description 上传型：客户端声明的 commit hash（声明式新鲜度——服务端不读代码，只存声明） */
+            head?: string | null;
             /** Format: uuid */
             id: string;
             /** Format: date-time */
             last_synced_at?: string | null;
             name: string;
             path: string;
+            /** @description 条目来源：repo（服务端路径/git clone，本机索引）| upload（客户端推产物，公网模型） */
+            source_kind: string;
             source_uri: string;
             stats?: Record<string, never> | null;
             status: string;
+            /**
+             * Format: date-time
+             * @description 上传型：最近一次产物上传时间
+             */
+            uploaded_at?: string | null;
+            /**
+             * @description 当下可用性（**派生字段，不落库**，EN-48）：`status`/`stats` 只说明「最后一次索引成功过」，
+             *     是历史陈述；本字段才是「现在能不能用」的当下断言——status=ready **且**索引产物确在盘。
+             *     目录被重新 clone / 清理后 `.codegraph/` 不会自己回来，那时 status 仍是 ready，靠本字段区分。
+             */
+            usable: boolean;
         };
         CgQueryRequest: {
             /**
@@ -1768,14 +2467,31 @@ export interface components {
              * @description explore→max-files；impact→depth
              */
             depth?: number | null;
+            /**
+             * @description explore 专用：true = CLI 原生输出（含完整源码）；缺省 true（HTTP 是人与 Web UI 的
+             *     通道，保留源码形态；MCP 侧缺省 false 走符号大纲，R 报告 P0-3 省 AI 上下文）
+             */
+            include_source?: boolean | null;
             /** @description explore | search | node | callers | callees | impact */
             kind: string;
             /** @description 查询文本或符号名 */
             target: string;
         };
+        ChangeCredentialsRequest: {
+            /** @description 当前密码（必填校验） */
+            current_password: string;
+            /** @description 新密码（可选；不传保持不变） */
+            new_password?: string | null;
+            /** @description 新用户名（可选；不传保持不变） */
+            new_username?: string | null;
+        };
         ChunkHit: {
             /** Format: uuid */
             chunk_id: string;
+            /** @description R9：后一相邻块片段（≤200 字；文档末块为空串） */
+            context_next: string;
+            /** @description R9：前一相邻块片段（≤200 字；文档首块为空串） */
+            context_prev: string;
             /** Format: uuid */
             document_id: string;
             document_title: string;
@@ -1785,6 +2501,12 @@ export interface components {
             /** Format: int32 */
             seq: number;
             snippet: string;
+        };
+        /** @description CLI 可用性（GET /codegraph/status 响应）。 */
+        CliStatus: {
+            available: boolean;
+            pin: string;
+            version?: string | null;
         };
         CommunityInfo: {
             /** Format: double */
@@ -1818,8 +2540,17 @@ export interface components {
             scenarios: components["schemas"]["ScenarioDto"][];
         };
         CreateApiKeyRequest: {
+            /**
+             * Format: date-time
+             * @description 可选：过期时间（RFC3339，如 2027-01-01T00:00:00Z）——缺省永不过期；到期后该 key 返回 401（带到期说明）（EN-62）
+             */
+            expires_at?: string | null;
             name: string;
-            scopes?: string[];
+            /**
+             * @description scope 全量集合（EN-62：显式必填——不传请求直接 400，不再有任何隐式默认；
+             *     常见误写「projects」自动归一为「project」）
+             */
+            scopes: string[];
         };
         CreateAtomRequest: {
             /** Format: float */
@@ -1833,6 +2564,10 @@ export interface components {
             occurred_at?: string | null;
             /** @description P3 隐私标记：默认不进检索与 context_pack（reveal 才可见） */
             sensitive?: boolean;
+            /** @description 断言来源：user_stated/verified_probe/agent_inferred/doc（缺省 user_stated） */
+            source?: string | null;
+            /** @description 断言强度：fact=用户明示/机器验证, inference=agent 推断, assumption=假设（缺省 fact） */
+            strength?: string | null;
             /**
              * Format: date-time
              * @description 有效期（ISO8601；到期事件可过滤/降权）
@@ -1845,6 +2580,12 @@ export interface components {
             name: string;
             /** @description 画像摘要（关系行文，可后补） */
             summary?: string;
+        };
+        CreateLibraryRequest: {
+            /** @description 显示名 */
+            name: string;
+            /** @description 库 slug（小写字母/数字/连字符，≤40 字符，唯一） */
+            slug: string;
         };
         CreateProjectRequest: {
             description?: string | null;
@@ -1873,10 +2614,36 @@ export interface components {
             content?: string;
             description?: string;
             enabled?: boolean;
+            /** @description 存储形态：text=整体入库（缺省）/ script=脚本存本地、库中只存指针 */
+            kind?: string;
+            /** @description script 型必填：本地技能文件夹路径（含 SKILL.md）；text 型不接受 */
+            local_path?: string | null;
             name: string;
+            /** @description 来源：self=自建（缺省）/ github=源自 GitHub / both=自建且已发布 */
+            origin?: string;
+            /** @description origin 含 github 时可填：仓库地址（纯元数据，不做远端拉取） */
+            repo_url?: string | null;
             /** @description kebab-case 标识（缺省从 name 推导；中文名必须显式给） */
             slug?: string | null;
             tags?: string[];
+        };
+        CreateTodoRequest: {
+            acceptance?: string;
+            body?: string;
+            /** Format: date-time */
+            due_at?: string | null;
+            /** @description 可选：todo（行动项，默认）/ ticket（工单） */
+            kind?: string | null;
+            /** @description 缺省按 kind：todo=normal / ticket=空串（severity 才是工单分级） */
+            priority?: string | null;
+            /** @description 可选：相关项目名提示（纯文本，不做绑定） */
+            project_hint?: string | null;
+            reproduce?: string;
+            /** @description 可选：工单严重度 P0-P3（仅 kind=ticket） */
+            severity?: string | null;
+            symptom?: string;
+            tags?: string[];
+            title: string;
         };
         DismissInsightRequest: {
             key: string;
@@ -1893,6 +2660,13 @@ export interface components {
         DocRequest: {
             category: string;
             content: string;
+            /**
+             * Format: int64
+             * @description 乐观锁：基于的版本号（GET 文档返回的 version）。给出且与当前不符 → 409
+             */
+            expected_version?: number | null;
+            /** @description 子文件夹相对路径（/ 分隔，'' = 分类根下；如 审计、归档/ai-permissions） */
+            folder?: string;
             title: string;
         };
         DocumentDto: {
@@ -1901,6 +2675,11 @@ export interface components {
             error?: string | null;
             /** Format: uuid */
             id: string;
+            /**
+             * Format: uuid
+             * @description 所属库（0037 多库；slug 见 /wiki/libraries）
+             */
+            library_id: string;
             mime?: string | null;
             source_uri: string;
             status: string;
@@ -1980,6 +2759,25 @@ export interface components {
         ErrorEnvelope: {
             error: components["schemas"]["ErrorBody"];
         };
+        FetchModelsRequest: {
+            /** @description 明文 API key（新建场景直接传；编辑已存 provider 时可省略——用库存密钥） */
+            api_key?: string | null;
+            /** @description base_url（新建未保存场景直接传） */
+            base_url: string;
+            /**
+             * Format: uuid
+             * @description 已保存 provider 的 id（api_key 省略时用其库存密钥解密）
+             */
+            provider_id?: string | null;
+        };
+        FileRequest: {
+            /** @description 文本内容（HTML/SVG/JSON/配置等；≤8MB） */
+            content: string;
+            /** @description 可选：显式 MIME（缺省按扩展名推断） */
+            mime?: string | null;
+            /** @description 文件名（禁路径分隔，≤200 字符；扩展名推断 mime，可显式覆盖） */
+            name: string;
+        };
         GraphDto: {
             /** @description Louvain 社区信息（id → 凝聚度） */
             communities?: components["schemas"]["CommunityInfo"][];
@@ -2025,7 +2823,20 @@ export interface components {
             overwrite?: boolean;
         };
         IngestAccepted: {
+            /**
+             * Format: uuid
+             * @description 织入任务 id（GET /jobs/{job_id} 直查进度；仅 /wiki/ingest 返回）
+             */
+            job_id?: string | null;
+            /** @description 仅「同内容曾成功织入」为 true；in_flight/enqueued 均为 false */
             skipped: boolean;
+            /**
+             * Format: uuid
+             * @description wiki_sources 行 id（任务页/审计追踪用；仅 /wiki/ingest 返回）
+             */
+            source_id?: string | null;
+            /** @description ready | in_flight | enqueued（仅 /wiki/ingest 返回；queries/archive 无此字段） */
+            status?: string | null;
         };
         IngestRequest: {
             /**
@@ -2036,6 +2847,12 @@ export interface components {
             /** @description 源文本（也可通过 wiki 文档 ID） */
             text?: string | null;
             title: string;
+        };
+        InitAccountRequest: {
+            /** @description 密码（≥8 位） */
+            password: string;
+            /** @description 用户名（3~32 字符：字母/数字/_-.） */
+            username: string;
         };
         Insight: {
             detail: string;
@@ -2101,6 +2918,22 @@ export interface components {
          * @enum {string}
          */
         JobStatus: "pending" | "running" | "succeeded" | "failed" | "dead" | "cancelled";
+        /** @description KV 值保值条目：value 逐字保存（蒸馏零介入），key 唯一 UPSERT 就地更新。 */
+        KvEntryDto: {
+            context: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            id: string;
+            key: string;
+            source: string;
+            /** @description 陈旧提示（返回时按 updated_at 计算，非列）：超过 KV_STALE_DAYS 天时提示可能过期 */
+            stale_hint?: string | null;
+            tags: string[];
+            /** Format: date-time */
+            updated_at: string;
+            value: string;
+        };
         LintIssue: {
             detail: string;
             rule: string;
@@ -2119,10 +2952,25 @@ export interface components {
         };
         LoginRequest: {
             password: string;
+            /** @description 用户名（缺省 admin——env 兼容模式与默认账号；改过用户名后必须显式传） */
+            username?: string;
         };
         LoginResponse: {
             /** @description 会话 token（ams_ 前缀，7 天有效；只在登录响应出现一次） */
             token: string;
+        };
+        /** @description 域内操作条目（渐进式发现：域工具下的 action 清单，控制台两级展示 + 单操作开关）。 */
+        McpActionInfo: {
+            /** @description 操作名（与调用时 {"action":"…"} 一致） */
+            action: string;
+            /** @description 破坏性操作（不可逆/删除类） */
+            destructive: boolean;
+            /** @description 是否已被停用（disabled_tools 里的 `域.action`） */
+            disabled: boolean;
+            /** @description 参数 JSON Schema（help 手册同源；控制台详情展示用） */
+            parameters: Record<string, never>;
+            /** @description 一行摘要（与 AI 看到的 L0 目录同源） */
+            summary: string;
         };
         McpConfigUpdate: {
             /** @description 停用工具全量清单（覆盖式；空数组 = 全部启用）。未知工具名 400。 */
@@ -2130,8 +2978,9 @@ export interface components {
             /** @description 服务总开关 */
             enabled?: boolean | null;
         };
+        /** @description MCP 服务信息。 */
         McpInfo: {
-            /** @description 停用的工具名（tools/list 对 AI 隐身、call 拒绝） */
+            /** @description 停用清单：域工具名（整个工具隐身）或 `域.action`（单操作停用） */
             disabled_tools: string[];
             /** @description 服务总开关（false = /mcp 整体 503） */
             enabled: boolean;
@@ -2145,12 +2994,17 @@ export interface components {
             server_version: string;
             tools: components["schemas"]["McpToolInfo"][];
         };
+        /** @description MCP 工具条目（控制台工具清单；域工具下挂 actions）。 */
         McpToolInfo: {
+            /** @description 域内操作（非域工具为空表） */
+            actions: components["schemas"]["McpActionInfo"][];
             description: string;
             destructive?: boolean | null;
-            /** @description 所属资产域（工具名前缀；memory → 用户记忆，wiki → Wiki，未来逐域扩展） */
+            /** @description 所属资产域（渐进式发现后工具名即域名：memory/projects/skills/wiki/todos/codegraph） */
             domain: string;
             name: string;
+            /** @description 参数 JSON Schema（tools/list 的 inputSchema 同源；控制台详情展示用） */
+            parameters: Record<string, never>;
             read_only?: boolean | null;
         };
         MergeEntityRequest: {
@@ -2203,6 +3057,8 @@ export interface components {
             content: string;
             /** Format: date-time */
             created_at: string;
+            /** @description 子文件夹相对路径（/ 分隔，'' = 分类根下；树形呈现 = category → folder → 文档） */
+            folder: string;
             frontmatter: Record<string, never>;
             /** Format: uuid */
             id: string;
@@ -2211,6 +3067,11 @@ export interface components {
             title: string;
             /** Format: date-time */
             updated_at: string;
+            /**
+             * Format: int64
+             * @description 乐观锁版本：doc_update/patch 成功 +1；写入方可带 expected_version 检测陈旧
+             */
+            version: number;
         };
         ProjectDto: {
             categories: string[];
@@ -2225,6 +3086,23 @@ export interface components {
             type: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description 项目文件（非 markdown 制品：架构图 HTML / 配置样例 / 导出报告；0045） */
+        ProjectFileDto: {
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            id: string;
+            /** @description MIME 类型；渲染契约：text/html → iframe sandbox 查看器，text/markdown → WikiMarkdown，其余 <pre> */
+            mime: string;
+            name: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: int32 */
+            version: number;
         };
         ProjectLocationDto: {
             /** Format: date-time */
@@ -2249,6 +3127,26 @@ export interface components {
             label: string;
             type: string;
         };
+        /** @description 晋升请求体。 */
+        PromoteRequest: {
+            /** @description 源定位（小节标题/行区间说明） */
+            anchor?: string;
+            /** @description 提炼后的通用知识正文（markdown）——提炼由调用方完成 */
+            content: string;
+            /**
+             * Format: uuid
+             * @description 来源文档 id
+             */
+            doc_id: string;
+            /** @description 可选：目标库 slug（缺省 main） */
+            library?: string | null;
+            /** @description 来源项目（名或 id） */
+            project: string;
+            /** @description 目标页 slug */
+            slug: string;
+            /** @description 页标题（提炼后的通用标题） */
+            title: string;
+        };
         ProviderDto: {
             base_url: string;
             capability: string;
@@ -2259,6 +3157,12 @@ export interface components {
             name: string;
             /** @description L10：占位主密钥生效时的告示（不阻断；换真实密钥后需 re-encrypt 迁移） */
             warning?: string | null;
+        };
+        PullRequest: {
+            /** @description A 机的管理员密码（仅请求期使用，不落库） */
+            source_admin_password: string;
+            /** @description A 机基地址（如 http://a-host:8080） */
+            source_url: string;
         };
         /**
          * @description P11 按 agent 清场（测试隔离）：会话置 void + 产出 active 原子归档（可恢复）。
@@ -2337,7 +3241,13 @@ export interface components {
             search_queries: string[];
             /** Format: uuid */
             source_id?: string | null;
+            /** @description 腐烂标注（返回时计算，非列）：提案指向的 slug 已不存在 → 列出已删 slug */
+            stale?: string[] | null;
             status: string;
+        };
+        RevokeOthersResult: {
+            /** Format: int64 */
+            revoked: number;
         };
         RollbackRequest: {
             aspect: string;
@@ -2380,6 +3290,8 @@ export interface components {
             /** Format: int64 */
             limit?: number;
             query: string;
+            /** @description R6：可选 LLM 精排（默认关——开启时 top 候选多一次 LLM 调用，失败降级原序） */
+            rerank?: boolean;
         };
         SearchResponse: {
             hits: components["schemas"]["UnifiedHit"][];
@@ -2387,12 +3299,21 @@ export interface components {
         };
         SessionDto: {
             agent: string;
+            /**
+             * Format: uuid
+             * @description 归因：哪把 API key 写入（key 删除后置 NULL，不级联删会话）
+             */
+            api_key_id?: string | null;
+            /** @description 客户端幂等键（同 ref 重试返回原会话，防网络重试重复入库） */
+            client_ref?: string | null;
             content: Record<string, never>;
             /** Format: date-time */
             created_at: string;
             distill_status: string;
             /** Format: uuid */
             id: string;
+            /** @description key 名快照（key 改名/删除后历史归因仍可读） */
+            key_name_snapshot?: string | null;
             /** @description 会话元数据（source=import 标记批量导入的历史；蒸馏据此过滤对方观点） */
             metadata: Record<string, never>;
             /** @description 会话级敏感标记：蒸馏产物自动继承 */
@@ -2404,7 +3325,7 @@ export interface components {
             scope?: string[];
             thesis?: string | null;
         };
-        /** @description 详情（含 markdown 正文）。 */
+        /** @description 详情（含 markdown 正文；script 型 content 恒空，正文由服务层从 local_path 现读组装）。 */
         SkillDto: {
             content: string;
             /** Format: date-time */
@@ -2413,12 +3334,41 @@ export interface components {
             enabled: boolean;
             /** Format: uuid */
             id: string;
+            kind: string;
+            local_path?: string | null;
             name: string;
+            origin: string;
+            repo_url?: string | null;
             slug: string;
             source: string;
             tags: string[];
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description 导出条目：技能本体 + 附属文件（folder 形态完整带走）。 */
+        SkillExportDto: components["schemas"]["SkillDto"] & {
+            files: components["schemas"]["SkillFileEntryDto"][];
+        };
+        /** @description 导出条目里的附属文件（含内容）。 */
+        SkillFileEntryDto: {
+            content: string;
+            path: string;
+        };
+        /** @description 附属文件索引条目（不含内容）。 */
+        SkillFileInfoDto: {
+            /** @description 相对路径（/ 分隔，如 scripts/run.py） */
+            path: string;
+            /**
+             * Format: int64
+             * @description 内容字节数
+             */
+            size: number;
+        };
+        SkillFilePutRequest: {
+            /** @description 文本内容 */
+            content: string;
+            /** @description 相对路径（/ 分隔；禁止 .. 与绝对路径；SKILL.md 本体走技能更新） */
+            path: string;
         };
         /** @description 批量导入的单条结果（逐条成败互不阻断）。 */
         SkillImportItem: {
@@ -2453,15 +3403,25 @@ export interface components {
             skill_id: string;
             tags: string[];
         };
-        /** @description 列表/导入/概览用摘要（不含正文——列表与仪表盘不必拖全量指令）。 */
+        /**
+         * @description 列表/导入/概览用摘要（不含正文——列表与仪表盘不必拖全量指令）。
+         *     content_chars = 正文字符数（R 报告 P1-7：列表层给「值不值得拉全文」的决策依据）。
+         *     kind/origin：二态存储（0038）——text=入库 / script=本地指针；origin=self/github/both。
+         */
         SkillSummaryDto: {
+            /** Format: int64 */
+            content_chars: number;
             /** Format: date-time */
             created_at: string;
             description: string;
             enabled: boolean;
             /** Format: uuid */
             id: string;
+            kind: string;
+            local_path?: string | null;
             name: string;
+            origin: string;
+            repo_url?: string | null;
             slug: string;
             source: string;
             tags: string[];
@@ -2485,6 +3445,37 @@ export interface components {
             /** @description atom | scenario | entity */
             kind: string;
         };
+        TodoDto: {
+            acceptance: string;
+            body: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            done_at?: string | null;
+            /** Format: date-time */
+            due_at?: string | null;
+            /** Format: uuid */
+            id: string;
+            kind: string;
+            priority: string;
+            project_hint?: string | null;
+            reproduce: string;
+            resolution: string;
+            /** Format: date-time */
+            resolved_at?: string | null;
+            severity?: string | null;
+            /**
+             * Format: int32
+             * @description 全局单调短号（显示为 EN-<n>；人类可读引用）
+             */
+            short_no: number;
+            status: string;
+            symptom: string;
+            tags: string[];
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         /** @description 统一命中（跨域检索的最小公分母）。 */
         UnifiedHit: {
             /** @description 域标签：memory | wiki */
@@ -2500,6 +3491,17 @@ export interface components {
             score: number;
             snippet: string;
             title?: string | null;
+        };
+        UpdateApiKeyRequest: {
+            /**
+             * Format: date-time
+             * @description 过期时间（EN-62）：不传保持不变；null = 改回永不过期
+             */
+            expires_at?: string | null;
+            /** @description 新名称（不传保持不变） */
+            name?: string | null;
+            /** @description 新 scope 全量集合（不传保持不变；传 [] 即清空全部权限） */
+            scopes?: string[] | null;
         };
         UpdateAtomRequest: {
             /** Format: float */
@@ -2550,8 +3552,33 @@ export interface components {
             content?: string | null;
             description?: string | null;
             enabled?: boolean | null;
+            /** @description script 型指针改址（script 型专用） */
+            local_path?: string | null;
             name?: string | null;
+            /** @description 来源（终值语义；origin=self 时 repo_url 自动清空） */
+            origin?: string | null;
+            /** @description 仓库地址（origin 含 github 时有意义） */
+            repo_url?: string | null;
             tags?: string[] | null;
+        };
+        UpdateTodoRequest: {
+            acceptance?: string | null;
+            body?: string | null;
+            /** Format: date-time */
+            due_at?: string | null;
+            /** @description 可选：形态转换 todo ↔ ticket */
+            kind?: string | null;
+            priority?: string | null;
+            project_hint?: string | null;
+            reproduce?: string | null;
+            resolution?: string | null;
+            /** @description 可选：工单严重度 P0-P3（仅 kind=ticket） */
+            severity?: string | null;
+            /** @description todo: open | done | archived；ticket: open | confirmed | in_progress | resolved | verified | archived */
+            status?: string | null;
+            symptom?: string | null;
+            tags?: string[] | null;
+            title?: string | null;
         };
         /** @description 用量记账行。 */
         UsageRecord: {
@@ -2576,6 +3603,25 @@ export interface components {
             max_items?: number | null;
             query: string;
         };
+        /** @description 库摘要（带 pages/sources 计数，供 UI 展示与删除前确认）。 */
+        WikiLibraryDto: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description 库内页面数（wiki_pages）
+             */
+            pages: number;
+            slug: string;
+            /**
+             * Format: int64
+             * @description 库内原料数（wiki_sources）
+             */
+            sources: number;
+        };
         WikiPageDto: {
             content: string;
             /** @description 目录树层级（/ 分隔多级，Obsidian 式文件夹） */
@@ -2592,7 +3638,23 @@ export interface components {
             /** Format: int32 */
             version: number;
         };
+        WikiPromotionDto: {
+            anchor: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            doc_id: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            library_id: string;
+            page_slug: string;
+            /** Format: uuid */
+            project_id: string;
+        };
         WikiSearchRequest: {
+            /** @description 库 slug（缺省 main） */
+            library?: string | null;
             /** Format: int64 */
             max_items?: number | null;
             query: string;
@@ -2605,6 +3667,8 @@ export interface components {
         };
         WriteSessionRequest: {
             agent?: string | null;
+            /** @description 客户端幂等键（可选）：同一 ref 重复调用返回原会话不新建——网络重试防重 */
+            client_ref?: string | null;
             /** @description auto（默认，防抖触发蒸馏）| manual（立即）| off */
             distill?: string;
             /** @description 会话级敏感标记：整段对话含隐私（医疗/感情/财务），蒸馏产物自动继承 sensitive */
@@ -2621,6 +3685,68 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    change_credentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeCredentialsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    init_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InitAccountRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     login_handler: {
         parameters: {
             query?: never;
@@ -2648,6 +3774,128 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSessionDto"][];
+                };
+            };
+        };
+    };
+    revoke_others: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevokeOthersResult"];
+                };
+            };
+        };
+    };
+    revoke_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    username: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    gc: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
                 };
             };
         };
@@ -2715,6 +3963,51 @@ export interface operations {
             };
         };
     };
+    delete_codegraph_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    graph: {
+        parameters: {
+            query?: {
+                /** @description 中心符号名（省略 = 返回文件级全图——全部跨文件依赖按文件聚合） */
+                symbol?: string | null;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
     index_project: {
         parameters: {
             query?: never;
@@ -2731,7 +4024,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CgProjectDto"];
+                    "application/json": Record<string, never>;
                 };
             };
         };
@@ -2772,12 +4065,31 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    codegraph_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CgProjectDto"];
+                    "application/json": components["schemas"]["CliStatus"];
                 };
             };
         };
@@ -3469,6 +4781,58 @@ export interface operations {
             };
         };
     };
+    list_kv: {
+        parameters: {
+            query?: {
+                /** @description 可选：key/value/context 字面量子串过滤（ILIKE） */
+                q?: string | null;
+                /** @description 条数上限（缺省 100，上限 500） */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KvEntryDto"][];
+                };
+            };
+        };
+    };
+    get_kv: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description KV key */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KvEntryDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_persona: {
         parameters: {
             query?: never;
@@ -3724,7 +5088,7 @@ export interface operations {
             };
         };
     };
-    list_sessions: {
+    list_memory_sessions: {
         parameters: {
             query?: {
                 agent?: string | null;
@@ -3767,6 +5131,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SessionDto"];
                 };
+            };
+        };
+    };
+    batch_erase_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchIdsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    batch_restore_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchIdsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3873,6 +5301,34 @@ export interface operations {
             };
         };
     };
+    restore_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description 不存在或非 void 状态 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     void_session: {
         parameters: {
             query?: never;
@@ -3919,6 +5375,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TimelineEvent"][];
+                };
+            };
+        };
+    };
+    export_bundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    import_bundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    pull: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PullRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
                 };
             };
         };
@@ -4169,6 +5690,139 @@ export interface operations {
             };
         };
     };
+    list_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectFileDto"][];
+                };
+            };
+        };
+    };
+    upsert_file: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FileRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectFileDto"];
+                };
+            };
+        };
+    };
+    get_file: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectFileDto"];
+                };
+            };
+        };
+    };
+    delete_file: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_file_versions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description [{version, created_at}] */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_file_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                name: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectFileDto"];
+                };
+            };
+        };
+    };
     add_location: {
         parameters: {
             query?: never;
@@ -4378,6 +6032,47 @@ export interface operations {
             };
         };
     };
+    update_api_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateApiKeyRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     revoke_api_key: {
         parameters: {
             query?: never;
@@ -4435,6 +6130,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderDto"];
+                };
+            };
+        };
+    };
+    fetch_models: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FetchModelsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
                 };
             };
         };
@@ -4703,7 +6421,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SkillDto"][];
+                    "application/json": components["schemas"]["SkillExportDto"][];
                 };
             };
         };
@@ -4727,6 +6445,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SkillImportReport"];
+                };
+            };
+        };
+    };
+    skills_import_transfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
                 };
             };
         };
@@ -4797,6 +6538,103 @@ export interface operations {
             };
         };
     };
+    skills_file_get: {
+        parameters: {
+            query: {
+                /** @description 相对路径（/ 分隔，如 scripts/run.py） */
+                path: string;
+                /** @description raw=1 → 直接回文件本体（text/plain），curl -o 一条命令落盘（消费形态②：只要一个文件） */
+                raw?: string | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillExportDto"];
+                };
+            };
+        };
+    };
+    skills_file_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillFilePutRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillFileInfoDto"];
+                };
+            };
+        };
+    };
+    skills_file_delete: {
+        parameters: {
+            query: {
+                /** @description 相对路径（/ 分隔，如 scripts/run.py） */
+                path: string;
+                /** @description raw=1 → 直接回文件本体（text/plain），curl -o 一条命令落盘（消费形态②：只要一个文件） */
+                raw?: string | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    skills_files_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 技能 slug */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillFileInfoDto"][];
+                };
+            };
+        };
+    };
     list_revisions: {
         parameters: {
             query?: never;
@@ -4840,9 +6678,173 @@ export interface operations {
             };
         };
     };
+    list_todos: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                /** @description 可选：todo / ticket */
+                kind?: string | null;
+                priority?: string | null;
+                tag?: string | null;
+                q?: string | null;
+                /** @description 可选：工单严重度 P0-P3（仅命中 kind=ticket 的行） */
+                severity?: string | null;
+                /** @description keyset 分页游标：{1|0}|{updated_at ISO8601}|{id}（1=该条 status=open） */
+                cursor?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDto"][];
+                };
+            };
+        };
+    };
+    create_todo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTodoRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDto"];
+                };
+            };
+        };
+    };
+    export_todos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDto"][];
+                };
+            };
+        };
+    };
+    get_todo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    update_todo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTodoRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDto"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_todo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     list_documents: {
         parameters: {
             query?: {
+                /** @description 库 slug（缺省 main 主库） */
+                lib?: string | null;
                 status?: string | null;
                 cursor?: string | null;
                 limit?: number | null;
@@ -4865,7 +6867,10 @@ export interface operations {
     };
     submit_url: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main 主库） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4888,7 +6893,10 @@ export interface operations {
     };
     wiki_docs_search: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main 主库） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4911,7 +6919,10 @@ export interface operations {
     };
     get_document: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main 主库） */
+                lib?: string | null;
+            };
             header?: never;
             path: {
                 id: string;
@@ -4932,7 +6943,10 @@ export interface operations {
     };
     delete_document: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main 主库） */
+                lib?: string | null;
+            };
             header?: never;
             path: {
                 id: string;
@@ -4951,7 +6965,10 @@ export interface operations {
     };
     document_chunks: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main 主库） */
+                lib?: string | null;
+            };
             header?: never;
             path: {
                 id: string;
@@ -4976,7 +6993,10 @@ export interface operations {
     };
     reembed: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main 主库） */
+                lib?: string | null;
+            };
             header?: never;
             path: {
                 id: string;
@@ -4994,9 +7014,12 @@ export interface operations {
             };
         };
     };
-    graph: {
+    wiki_graph: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5015,7 +7038,10 @@ export interface operations {
     };
     ingest: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main 主库） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5038,7 +7064,10 @@ export interface operations {
     };
     insights: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5057,7 +7086,10 @@ export interface operations {
     };
     dismiss_insight: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5078,7 +7110,10 @@ export interface operations {
     };
     reset_insights: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5093,9 +7128,112 @@ export interface operations {
             };
         };
     };
-    lint: {
+    list_libraries: {
         parameters: {
             query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WikiLibraryDto"][];
+                };
+            };
+        };
+    };
+    create_library: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateLibraryRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WikiLibraryDto"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_library: {
+        parameters: {
+            query?: {
+                /** @description true = 连同库内页面/原料一起删（缺省 false：非空库拒绝删除） */
+                force?: boolean | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    rebuild_links: {
+        parameters: {
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    lint: {
+        parameters: {
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5115,7 +7253,11 @@ export interface operations {
     list_pages: {
         parameters: {
             query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
                 page_type?: string | null;
+                /** @description keyset 分页游标：{updated_at ISO8601}|{id}（上一页最后一条） */
+                cursor?: string | null;
                 limit?: number | null;
             };
             header?: never;
@@ -5136,7 +7278,10 @@ export interface operations {
     };
     get_page: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path: {
                 slug: string;
@@ -5157,7 +7302,10 @@ export interface operations {
     };
     put_page: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path: {
                 slug: string;
@@ -5176,6 +7324,63 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WikiPageDto"];
+                };
+            };
+        };
+    };
+    promote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoteRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    promotions: {
+        parameters: {
+            query?: {
+                /** @description 可选：按来源项目（名或 id）过滤 */
+                project?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WikiPromotionDto"][];
                 };
             };
         };
@@ -5201,7 +7406,10 @@ export interface operations {
     };
     apply_proposal: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5224,7 +7432,10 @@ export interface operations {
     };
     get_purpose: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5243,7 +7454,10 @@ export interface operations {
     };
     set_purpose: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5264,7 +7478,10 @@ export interface operations {
     };
     archive_query: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5287,7 +7504,10 @@ export interface operations {
     };
     list_reviews: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5352,7 +7572,10 @@ export interface operations {
     };
     list_sources: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5371,7 +7594,10 @@ export interface operations {
     };
     delete_source: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
             header?: never;
             path: {
                 id: string;
@@ -5390,9 +7616,34 @@ export interface operations {
             };
         };
     };
+    rebuild_tsv: {
+        parameters: {
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
     upload: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 库 slug（缺省 main 主库） */
+                lib?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;

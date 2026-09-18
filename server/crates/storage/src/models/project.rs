@@ -60,4 +60,6 @@ pub struct ProjectDocDto {
     pub frontmatter: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// 乐观锁版本：doc_update/patch 成功 +1；写入方可带 expected_version 检测陈旧
+    pub version: i64,
 }

@@ -20,10 +20,11 @@ import {
   Search,
   Settings as SettingsIcon,
   Ticket,
+  UserCircle,
   Users,
   Waypoints,
 } from 'lucide-react'
-import { clearToken, getToken } from '@/lib/api'
+import { clearToken, getToken, logoutSession } from '@/lib/api'
 import { useSystemStatus } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/ui-bits'
@@ -44,7 +45,9 @@ const Todos = lazy(() => import('@/features/Todos'))
 const Tickets = lazy(() => import('@/features/Tickets'))
 const Jobs = lazy(() => import('@/features/Jobs'))
 const Settings = lazy(() => import('@/features/Settings'))
+const Account = lazy(() => import('@/features/Account'))
 const Mcp = lazy(() => import('@/features/Mcp'))
+const FileView = lazy(() => import('@/features/FileView'))
 
 type NavItem = {
   to: string
@@ -78,6 +81,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
     items: [
       { to: '/jobs', label: '任务', icon: ListChecks, badge: (s) => s.failed || null },
       { to: '/mcp', label: 'MCP', icon: Plug },
+      { to: '/account', label: '账号与安全', icon: UserCircle },
       { to: '/settings', label: '设置', icon: SettingsIcon },
     ],
   },
@@ -329,7 +333,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/tickets" element={<Tickets />} />
               <Route path="/jobs" element={<Jobs />} />
               <Route path="/mcp" element={<Mcp />} />
-              <Route path="/settings" element={<Settings />} />
+              <Route path="/account" element={<Account />} />
+        <Route path="/settings" element={<Settings />} />
             </Routes>
           </Suspense>
         </div>
@@ -375,8 +380,9 @@ export default function App() {
   // 登录成功的状态上抛（Login 组件 prop）
   const onAuthed = useCallback(() => setAuthed(true), [])
 
-  // 登出：客户端清除会话（后端无 logout 端点，ams_ 随 TTL 自然过期），authed=false 路由自动回 /login
+  // 登出：先删后端会话（/auth/logout，失败不阻塞）再清本地——活跃会话列表不再挂死会话
   const onLogout = useCallback(() => {
+    logoutSession()
     clearToken()
     setAuthed(false)
   }, [])
@@ -389,6 +395,8 @@ export default function App() {
         path="/login"
         element={authed ? <Navigate to="/" replace /> : <Login onAuthed={onAuthed} />}
       />
+      {/* 独立全屏文件查看页——顶层路由绕开 Shell 侧边栏，新标签页专用 */}
+      <Route path="/file-view" element={authed ? <FileView /> : <Navigate to="/login" replace />} />
       <Route path="/*" element={authed ? <Shell onLogout={onLogout} /> : <Navigate to="/login" replace />} />
     </Routes>
   )

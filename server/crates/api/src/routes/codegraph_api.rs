@@ -107,7 +107,7 @@ pub async fn get_project(
 }
 
 /// 删除项目（git clone 的工作目录一并清理；本地路径项目不动源码）。
-#[utoipa::path(delete, path = "/codegraph/projects/{id}", responses((status = 200, body = Object)))]
+#[utoipa::path(delete, path = "/codegraph/projects/{id}", operation_id = "delete_codegraph_project", responses((status = 200, body = Object)))]
 pub async fn delete_project(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
@@ -154,7 +154,7 @@ pub async fn sync_project(
 }
 
 /// CLI 可用性（前端状态条：装没装、版本、pin）。
-#[utoipa::path(get, path = "/codegraph/status", responses((status = 200, body = CliStatus)))]
+#[utoipa::path(get, path = "/codegraph/status", operation_id = "codegraph_status", responses((status = 200, body = CliStatus)))]
 pub async fn status(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,

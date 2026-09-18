@@ -441,8 +441,8 @@ async fn mcp_admin_info_endpoint() {
     let tools = info["tools"].as_array().expect("工具清单");
     assert_eq!(
         tools.len(),
-        8,
-        "应为七个域工具（含 jobs）+ search_all：{}",
+        9,
+        "应为八个域工具（含 jobs/tickets）+ search_all：{}",
         tools.len()
     );
     let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();
@@ -651,7 +651,7 @@ async fn mcp_progressive_discovery_help_and_unknown_action() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
-    assert_eq!(names, vec!["jobs", "search_all", "todos"]);
+    assert_eq!(names, vec!["jobs", "search_all", "tickets", "todos"]);
 
     // help：一轮取回全域操作手册（含参数 schema）
     let (_, v) = mcp_rpc(&app, &key, call(2, "todos", "help", json!({}))).await;
@@ -1381,7 +1381,11 @@ async fn wiki_mcp_tool_toggle_hides_and_rejects() {
     sorted.sort();
     assert_eq!(
         sorted,
-        vec!["jobs".to_string(), "search_all".to_string(), "wiki".to_string()],
+        vec![
+            "jobs".to_string(),
+            "search_all".to_string(),
+            "wiki".to_string()
+        ],
         "域工具应保留（+跨域 search_all；jobs 无域 scope 恒可见）：{names:?}"
     );
     let description = result["tools"]
@@ -1436,7 +1440,11 @@ async fn todos_model_refinement_mcp_end_to_end() {
     let mut call = |action: &str, mut args: serde_json::Value| {
         seq += 1;
         args["action"] = json!(action);
-        rpc(seq, "tools/call", json!({"name":"todos","arguments":args}))
+        rpc(
+            seq,
+            "tools/call",
+            json!({"name":"tickets","arguments":args}),
+        )
     };
     let _ = &mut call;
     // expect_result 解到 content 包装层；内层 text 是 JSON 字符串——二次解析
@@ -1452,7 +1460,7 @@ async fn todos_model_refinement_mcp_end_to_end() {
         call(
             "add",
             json!({
-                "title":"短号往返 MCP", "kind":"ticket", "severity":"P2"
+                "title":"短号往返工单", "severity":"P2"
             }),
         ),
     )
@@ -1473,10 +1481,7 @@ async fn todos_model_refinement_mcp_end_to_end() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(
-            "add",
-            json!({"title":"根因票 MCP","kind":"ticket","severity":"P1"}),
-        ),
+        call("add", json!({"title":"根因票","severity":"P1"})),
     )
     .await;
     let root = parse_text(&v);
@@ -1519,7 +1524,7 @@ async fn todos_model_refinement_mcp_end_to_end() {
     );
 
     // ③ list 默认 brief：无 body/symptom，body_omitted=true
-    let (_, v) = mcp_rpc(&app, &key, call("list", json!({"kind":"ticket"}))).await;
+    let (_, v) = mcp_rpc(&app, &key, call("list", json!({}))).await;
     let parsed = parse_text(&v);
     assert_eq!(parsed["brief"], json!(true));
     let first = parsed["items"][0].clone();
@@ -1536,15 +1541,12 @@ async fn todos_model_refinement_mcp_end_to_end() {
         call(
             "add",
             json!({
-                "title":"分级合并验证", "kind":"ticket", "priority":"high", "severity":"P1"
+                "title":"分级合并验证", "priority":"high", "severity":"P1"
             }),
         ),
     )
     .await;
-    // 400 错误走 JSON-RPC error 载荷（message 带提示）
-    let err_text = v["error"]["message"].as_str().unwrap_or_default();
-    assert!(
-        err_text.contains("工单分级用 severity"),
-        "应 400 提示用 severity: {err_text}"
-    );
+    // 拆域后 tickets.add 参数层面无 priority 字段（传入被 serde 忽略）——分级走 severity
+    let added4 = parse_text(&v);
+    assert_eq!(added4["severity"], "P1", "工单分级应用 severity：{added4}");
 }

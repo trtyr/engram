@@ -193,8 +193,9 @@ async fn runner_executes_registered_handler() {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 
     let done = done.expect("任务应在 runner 内执行成功");
     assert_eq!(done.progress.unwrap().0["doubled"], 42);
@@ -282,8 +283,9 @@ async fn per_kind_concurrency_actually_caps_running_jobs() {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
     assert!(all_done, "全部任务应执行完");
 
     let slow = slow_peak.load(std::sync::atomic::Ordering::SeqCst);

@@ -13,6 +13,8 @@ import {
   Tabs,
 } from '@/components/ui-bits'
 import { PersonaHistoryDrawer } from '@/components/PersonaHistory'
+import ClampText from '@/components/ClampText'
+import Pager from '@/components/Pager'
 import { fmtTime, relTime, inputCls, selectCls, tableCls } from '@/lib/ui'
 import { useSystemStatus } from '@/lib/status'
 import { Button } from '@/components/ui/button'
@@ -20,6 +22,9 @@ import { cn } from '@/lib/utils'
 import { appConfirm, type ConfirmOptions } from '@/components/confirm'
 
 type Tab = 'sessions' | 'atoms' | 'review' | 'scenarios' | 'persona' | 'search' | 'kv'
+
+/** 原子 kind 枚举（迁移 0005 CHECK）——筛选器与表格共用。 */
+const ATOM_KINDS = ['preference', 'fact', 'decision', 'event', 'insight', 'correction', 'failure', 'convention']
 
 /** 原子 kind 中英对照（蒸馏产出的 8 类记忆形态）。 */
 const KIND_LABEL: Record<string, string> = {
@@ -62,6 +67,9 @@ function MemoryPage() {
     const valid: readonly string[] = ['sessions', 'atoms', 'review', 'scenarios', 'persona', 'search', 'kv']
     return valid.includes(t ?? '') ? (t as Tab) : 'sessions'
   })
+  // 原子筛选状态提升——筛选器挂在 tab 行右侧（与蒸馏条同款布局，省一整行）
+  const [atomKind, setAtomKind] = useState('')
+  const [atomReview, setAtomReview] = useState(false)
   // tab 计数（原管线条带的职责）：挂载时取一次；蒸馏脉冲只表「正在炼」（processing）
   const [counts, setCounts] = useState<{ l0: number; l1: number; l2: number; l3: number; review: number; kv: number } | null>(null)
   useEffect(() => {
@@ -96,9 +104,35 @@ function MemoryPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="用户记忆" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
-      <Tabs items={tabs} value={tab} onChange={setTab} />
+      {/* tab 行右侧挂蒸馏条（会话）/ 筛选器（原子）——合并节省一行 */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Tabs items={tabs} value={tab} onChange={setTab} />
+        <div className="flex items-center gap-3">
+          {tab === 'sessions' && <DistillBar />}
+          {tab === 'atoms' && (
+            <>
+              <select
+                className={selectCls}
+                value={atomKind}
+                onChange={(e) => setAtomKind(e.target.value)}
+                aria-label="kind 筛选"
+              >
+                <option value="">全部 kind</option>
+                {ATOM_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_LABEL[k] ?? k} {k}
+                  </option>
+                ))}
+              </select>
+              <Checkbox checked={atomReview} onChange={setAtomReview}>
+                仅人审
+              </Checkbox>
+            </>
+          )}
+        </div>
+      </div>
       {tab === 'sessions' && <Sessions />}
-      {tab === 'atoms' && <Atoms />}
+      {tab === 'atoms' && <Atoms kind={atomKind} review={atomReview} />}
 
       {tab === 'review' && <ReviewQueue onGoAtoms={() => setTab('atoms')} />}
       {tab === 'scenarios' && <Scenarios />}
@@ -118,19 +152,22 @@ function Sessions() {
   const [rows, setRows] = useState<Session[] | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [err, setErr] = useState('')
-  const [distillBusy, setDistillBusy] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [notice, setNotice] = useState('')
-  const load = () => api.get<Session[]>('/memory/sessions?limit=50').then(setRows).catch((e) => setErr(e.message))
+  // 翻页（前端切页：拉满后本地分页，支持页码直跳）
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const load = () => api.get<Session[]>('/memory/sessions?limit=200').then(setRows).catch((e) => setErr(e.message))
   useEffect(() => {
     load()
   }, [])
   if (err) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
 
-  // 积压（pending 未蒸馏）是存量不是进行时——灰字静默，不全局闪
-  const backlog = rows.filter((s) => s.distill_status === 'pending').length
+  // 翻页钳制：批量操作后总数变少时当前页可能越界
+  const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
+  const cur = Math.min(page, maxPage)
   const toggle = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev)
@@ -161,35 +198,9 @@ function Sessions() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="min-h-5 text-xs text-muted-foreground">
-          {notice ? (
-            <span className={notice.includes('失败') ? 'text-destructive' : 'text-info'}>{notice}</span>
-          ) : (
-            backlog > 0 && <span>{backlog} 条未蒸馏</span>
-          )}
-        </p>
-        <Button
-          size="sm"
-          disabled={distillBusy}
-          onClick={async () => {
-            setDistillBusy(true)
-            setNotice('')
-            try {
-              // 202 返回入队的 Job[]——空数组 = 没有待蒸馏会话
-              const jobs = await api.post<Job[]>('/memory/distill', { full: false })
-              setNotice(jobs.length > 0 ? `已入队 ${jobs.length} 个蒸馏任务，产出将陆续出现在 L1` : '没有待蒸馏的会话')
-              load()
-            } catch (e) {
-              setNotice(e instanceof Error ? `触发失败：${e.message}` : '触发失败')
-            } finally {
-              setDistillBusy(false)
-            }
-          }}
-        >
-          {distillBusy ? '提交中…' : '触发蒸馏'}
-        </Button>
-      </div>
+      {notice && (
+        <p className={cn('text-xs', notice.includes('失败') ? 'text-destructive' : 'text-info')}>{notice}</p>
+      )}
 
       {/* 批量操作条：勾选即现——「全选已作废」直击测试残留清场场景 */}
       {selected.size > 0 && (
@@ -229,7 +240,8 @@ function Sessions() {
       {rows.length === 0 ? (
         <Empty text="暂无会话——对话通过 API / MCP 写入后在此列出，蒸馏沉淀为 L1 原子" />
       ) : (
-        <Card className="overflow-x-auto">
+        <>
+          <Card className="overflow-x-auto">
           <table className={tableCls.root}>
             <thead className={tableCls.thead}>
               <tr>
@@ -251,7 +263,7 @@ function Sessions() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((s) => (
+              {rows.slice((cur - 1) * pageSize, cur * pageSize).map((s) => (
                 <Fragment key={s.id}>
                   <tr className={tableCls.row}>
                     <td className={`${tableCls.td} w-10`}>
@@ -349,15 +361,65 @@ function Sessions() {
             </tbody>
           </table>
         </Card>
+        <Pager
+          total={rows.length}
+          page={cur}
+          pageSize={pageSize}
+          onPage={setPage}
+          onPageSize={(n) => {
+            setPageSize(n)
+            setPage(1)
+          }}
+        />
+        </>
       )}
     </div>
   )
 }
 
-function Atoms() {
+/** 蒸馏条：积压提示 + 触发蒸馏——挂在 tab 行右侧，不再独占一行。 */
+function DistillBar() {
+  const [busy, setBusy] = useState(false)
+  const [backlog, setBacklog] = useState(0)
+  const [msg, setMsg] = useState('')
+  const count = () =>
+    api
+      .get<Session[]>('/memory/sessions?limit=200')
+      .then((r) => setBacklog(r.filter((s) => s.distill_status === 'pending').length))
+      .catch(() => undefined)
+  useEffect(() => {
+    count()
+  }, [])
+  return (
+    <div className="flex items-center gap-2">
+      {msg && <span className={cn('text-xs', msg.includes('失败') ? 'text-destructive' : 'text-info')}>{msg}</span>}
+      {!msg && backlog > 0 && <span className="text-xs text-muted-foreground">{backlog} 条未蒸馏</span>}
+      <Button
+        size="sm"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true)
+          setMsg('')
+          try {
+            // 202 返回入队的 Job[]——空数组 = 没有待蒸馏会话
+            const jobs = await api.post<Job[]>('/memory/distill', { full: false })
+            setMsg(jobs.length > 0 ? `已入队 ${jobs.length} 个蒸馏任务` : '没有待蒸馏的会话')
+            count()
+          } catch (e) {
+            setMsg(e instanceof Error ? `触发失败：${e.message}` : '触发失败')
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        {busy ? '提交中…' : '触发蒸馏'}
+      </Button>
+    </div>
+  )
+}
+
+function Atoms({ kind, review }: { kind: string; review: boolean }) {
   const [rows, setRows] = useState<Atom[] | null>(null)
-  const [kind, setKind] = useState('')
-  const [review, setReview] = useState(false)
   const [err, setErr] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -366,6 +428,9 @@ function Atoms() {
   // 重嵌修复：缺失向量可见 + 一键补嵌（换 embedding 供应商后的修复路径）
   const [missing, setMissing] = useState<{ atoms_missing: number; scenarios_missing: number } | null>(null)
   const [reembedMsg, setReembedMsg] = useState('')
+  // 翻页（前端切页：拉满后本地分页，支持页码直跳）
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
   // 蒸馏进行中（系统状态轮询源）才有新原子产出——闲时不轮询，省请求
   const { distilling } = useSystemStatus()
   useEffect(() => {
@@ -385,6 +450,7 @@ function Atoms() {
   }
   useEffect(() => {
     load()
+    setPage(1) // 筛选变化回到第一页
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, review])
   useEffect(() => {
@@ -396,7 +462,9 @@ function Atoms() {
   if (err) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
 
-  const kinds = ['preference', 'fact', 'decision', 'event', 'insight', 'correction', 'failure', 'convention']
+  // 翻页钳制：蒸馏刷新后总数变少时当前页可能越界
+  const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
+  const cur = Math.min(page, maxPage)
 
   return (
     <div className="space-y-4">
@@ -423,20 +491,6 @@ function Atoms() {
           {reembedMsg && <span className="text-xs text-muted-foreground">{reembedMsg}</span>}
         </div>
       )}
-      <div className="flex items-center gap-3">
-        <select className={selectCls} value={kind} onChange={(e) => setKind(e.target.value)}>
-          <option value="">全部 kind</option>
-          {kinds.map((k) => (
-            <option key={k} value={k}>
-              {KIND_LABEL[k] ?? k} {k}
-            </option>
-          ))}
-        </select>
-        <Checkbox checked={review} onChange={setReview}>
-          仅人审
-        </Checkbox>
-      </div>
-
       {superseding && (
         <Card className="border-warning/40 bg-warning/10 p-4" data-testid="supersede-panel">
           <p className="mb-2 text-sm font-medium">supersede：输入取代旧记忆的新事实</p>
@@ -481,13 +535,13 @@ function Atoms() {
                   <th className={tableCls.th}>内容</th>
                   <th className={tableCls.th}>置信</th>
                   <th className={tableCls.th}>状态</th>
-                  <th className={tableCls.th}>溯源</th>
-                  <th className={tableCls.th}>命中</th>
+                  <th className={`${tableCls.th} whitespace-nowrap`}>溯源</th>
+                  <th className={`${tableCls.th} whitespace-nowrap`}>命中</th>
                   <th className={tableCls.th} />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((a) => {
+                {rows.slice((cur - 1) * pageSize, cur * pageSize).map((a) => {
                   const refIds = (a.source_refs ?? [])
                     .map((r) => (r.session_id ? r.session_id.slice(0, 8) + (r.erased ? '（已擦除）' : '') : ''))
                     .filter(Boolean)
@@ -495,9 +549,9 @@ function Atoms() {
                   return (
                     <tr key={a.id} className={tableCls.row}>
                       <td className={tableCls.td}>
-                        {/* 中英对照：中文为主（可读），kind 英文 mono 为数据标识 */}
-                        <span className="block text-sm">{KIND_LABEL[a.kind] ?? a.kind}</span>
-                        <span className="block font-mono text-xs text-muted-foreground">{a.kind}</span>
+                        {/* 中英对照一行：中文为主（可读），kind 英文 mono 为数据标识 */}
+                        <span className="text-sm">{KIND_LABEL[a.kind] ?? a.kind}</span>
+                        <span className="ml-1.5 font-mono text-xs text-muted-foreground">{a.kind}</span>
                       </td>
                       <td className={tableCls.td}>
                         {editing === a.id ? (
@@ -610,9 +664,17 @@ function Atoms() {
               </tbody>
             </table>
           </Card>
-          {rows.length === 200 && (
-            <p className="text-xs text-muted-foreground">已显示前 200 条——收窄 kind / 人审筛选，或提高 limit 查看更多</p>
-          )}
+          <Pager
+            total={rows.length}
+            page={cur}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={(n) => {
+              setPageSize(n)
+              setPage(1)
+            }}
+            hint={rows.length >= 200 ? '仅载入最近 200 条' : undefined}
+          />
         </>
       )}
       {historyAtom && (
@@ -646,7 +708,7 @@ function Scenarios() {
             </button>
             <span className="shrink-0 font-mono text-xs text-muted-foreground">v{s.version}</span>
           </div>
-          <p className="mt-1.5 text-sm text-muted-foreground">{s.summary}</p>
+          <ClampText content={s.summary} title={s.topic} meta={`v${s.version} · ${relTime(s.updated_at)}`} maxHeight={120} />
           <p className="mt-3 flex items-center gap-2 font-mono text-xs text-muted-foreground/70">
             <span>{s.atom_refs.length} 原子</span>
             <span aria-hidden="true">·</span>
@@ -760,7 +822,11 @@ function PersonaView({ onGoScenario }: { onGoScenario: () => void }) {
               </div>
             </div>
           ) : (
-            <p className="mt-2 flex-1 whitespace-pre-wrap text-sm text-muted-foreground">{p.content}</p>
+            <ClampText
+              content={p.content}
+              title={ASPECT_LABEL[p.aspect] ?? p.aspect}
+              meta={`${p.aspect} · v${p.version} · ${relTime(p.created_at)}`}
+            />
           )}
           <p className="mt-3 font-mono text-xs text-muted-foreground/70">
             {(() => {
@@ -1176,6 +1242,9 @@ function KvPane() {
   const [err, setErr] = useState('')
   const [q, setQ] = useState('')
   const [openKey, setOpenKey] = useState<string | null>(null)
+  // 翻页（前端切页：KV 一次拉全，支持页码直跳）
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
   const load = (query: string) =>
     api
       .get<KvEntry[]>(`/memory/kv?limit=500${query ? `&q=${encodeURIComponent(query)}` : ''}`)
@@ -1186,6 +1255,18 @@ function KvPane() {
   }, [])
   if (err) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
+
+  // 翻页钳制
+  const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
+  const cur = Math.min(page, maxPage)
+  // value 尽量按 JSON 美化（parse 失败按原样展示）
+  const pretty = (v: string) => {
+    try {
+      return JSON.stringify(JSON.parse(v), null, 2)
+    } catch {
+      return v
+    }
+  }
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
@@ -1210,34 +1291,46 @@ function KvPane() {
       {rows.length === 0 ? (
         <Empty text="没有命中的 KV 条目" />
       ) : (
-        <div className="overflow-hidden rounded-md border border-border">
-          <table className={tableCls.root}>
-            <thead>
-              <tr>
-                <th>key</th>
-                <th>value</th>
-                <th>context</th>
-                <th>source</th>
-                <th>更新</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.key}
-                  className="cursor-pointer hover:bg-muted/40"
-                  onClick={() => setOpenKey(openKey === r.key ? null : r.key)}
-                >
-                  <td className="max-w-52 truncate font-mono text-xs font-medium">{r.key}</td>
-                  <td className="max-w-64 truncate font-mono text-xs">{r.value}</td>
-                  <td className="max-w-72 truncate text-xs text-muted-foreground">{r.context}</td>
-                  <td className="whitespace-nowrap font-mono text-xs text-muted-foreground">{r.source}</td>
-                  <td className="whitespace-nowrap text-xs text-muted-foreground">{relTime(r.updated_at)}</td>
+        <>
+          <div className="overflow-hidden rounded-md border border-border">
+            <table className={tableCls.root}>
+              <thead className={tableCls.thead}>
+                <tr>
+                  <th className={tableCls.th}>key</th>
+                  <th className={tableCls.th}>value</th>
+                  <th className={tableCls.th}>context</th>
+                  <th className={tableCls.th}>source</th>
+                  <th className={tableCls.th}>更新</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {rows.slice((cur - 1) * pageSize, cur * pageSize).map((r) => (
+                  <tr
+                    key={r.key}
+                    className={`${tableCls.row} cursor-pointer`}
+                    onClick={() => setOpenKey(openKey === r.key ? null : r.key)}
+                  >
+                    <td className={`${tableCls.tdMono} max-w-52 truncate font-medium`} title={r.key}>{r.key}</td>
+                    <td className={`${tableCls.tdMono} max-w-64 truncate`} title={r.value}>{r.value}</td>
+                    <td className={`${tableCls.td} max-w-72 truncate text-muted-foreground`} title={r.context}>{r.context}</td>
+                    <td className={`${tableCls.td} whitespace-nowrap text-muted-foreground`}>{r.source}</td>
+                    <td className={`${tableCls.td} whitespace-nowrap text-muted-foreground`}>{relTime(r.updated_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager
+            total={rows.length}
+            page={cur}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={(n) => {
+              setPageSize(n)
+              setPage(1)
+            }}
+          />
+        </>
       )}
       {openKey &&
         (() => {
@@ -1258,7 +1351,9 @@ function KvPane() {
               <dl className="mt-3 space-y-2">
                 <div>
                   <dt className="text-xs text-muted-foreground">value（逐字）</dt>
-                  <dd className="mt-0.5 break-all rounded bg-background p-2 font-mono text-xs">{r.value}</dd>
+                  <dd className="mt-0.5 max-h-80 overflow-auto break-all rounded bg-background p-2 font-mono text-xs whitespace-pre-wrap">
+                    {pretty(r.value)}
+                  </dd>
                 </div>
                 {r.context && (
                   <div>

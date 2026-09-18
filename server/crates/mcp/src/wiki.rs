@@ -20,13 +20,13 @@ pub fn from_wiki(e: engram_core::wiki::WikiError) -> rmcp::ErrorData {
 }
 
 pub fn require_wiki(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    if principal.has_scope("wiki") {
-        Ok(())
-    } else {
-        Err(mcp_err(
+    match principal.domain_access("wiki") {
+        engram_core::auth::DomainAccess::None => Err(mcp_err(
             rmcp::model::ErrorCode::INVALID_REQUEST,
             "缺少 wiki scope——请用带 wiki scope 的 amk_ key 连接 MCP",
-        ))
+        )),
+        // Full 直过；ReadOnly 的动作级判定在 call_tool 入口（check_action_access）已做
+        _ => Ok(()),
     }
 }
 

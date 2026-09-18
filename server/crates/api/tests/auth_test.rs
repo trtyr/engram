@@ -496,7 +496,9 @@ async fn api_key_expires_at_enforced() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(
         v["expires_at"],
@@ -517,7 +519,9 @@ async fn api_key_expires_at_enforced() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "过期 key 立即 401");
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let text = String::from_utf8_lossy(&body);
     assert!(text.contains("过期"), "401 说明带「过期」：{text}");
     assert!(text.contains("2020-01-01"), "401 带具体到期时间：{text}");
@@ -538,7 +542,9 @@ async fn api_key_expires_at_enforced() {
         )
         .await
         .unwrap();
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let future_key = v["key"].as_str().unwrap().to_string();
 
@@ -568,7 +574,11 @@ async fn api_key_expires_at_enforced() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "无 expires_at（存量语义）正常通行");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "无 expires_at（存量语义）正常通行"
+    );
 }
 
 /// EN-62：scope 别名规范化 + 可行动报错——签发带 projects 落库为 project；
@@ -594,8 +604,14 @@ async fn api_key_scope_alias_and_actionable_error() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED, "别名 projects/skill 应签发成功");
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::CREATED,
+        "别名 projects/skill 应签发成功"
+    );
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let key = v["key"].as_str().unwrap().to_string();
 
@@ -611,7 +627,9 @@ async fn api_key_scope_alias_and_actionable_error() {
         )
         .await
         .unwrap();
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let list: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let row = list
         .as_array()
@@ -637,7 +655,11 @@ async fn api_key_scope_alias_and_actionable_error() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "归一后的 project scope 应真实可用");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "归一后的 project scope 应真实可用"
+    );
 
     // ② 未知 scope → 400 报错含全部 9 个合法值与别名提示
     let resp = app
@@ -654,14 +676,29 @@ async fn api_key_scope_alias_and_actionable_error() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let msg = v["error"]["message"].as_str().unwrap();
     assert!(msg.contains("未知 scope: nope"), "报错点名坏值：{msg}");
-    for legal in ["memory", "wiki", "codegraph", "project", "skills", "todos", "llm", "erase", "cron"] {
+    for legal in [
+        "memory",
+        "wiki",
+        "codegraph",
+        "project",
+        "skills",
+        "todos",
+        "llm",
+        "erase",
+        "cron",
+    ] {
         assert!(msg.contains(legal), "报错应含合法值 {legal}：{msg}");
     }
-    assert!(msg.contains("projects"), "报错应带 projects→project 别名提示：{msg}");
+    assert!(
+        msg.contains("projects"),
+        "报错应带 projects→project 别名提示：{msg}"
+    );
 
     // ②b scopes 缺失 → 400（EN-62 ④：显式必填，无任何隐式默认）
     let resp = app
@@ -677,8 +714,14 @@ async fn api_key_scope_alias_and_actionable_error() {
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY, "缺 scopes 应 422（serde missing field——字段名显式可自愈）");
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "缺 scopes 应 422（serde missing field——字段名显式可自愈）"
+    );
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let text = String::from_utf8_lossy(&body);
     assert!(text.contains("scopes"), "422 提示 scopes 字段：{text}");
 
@@ -698,7 +741,9 @@ async fn api_key_scope_alias_and_actionable_error() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(
         v["scopes"],
@@ -1656,6 +1701,7 @@ async fn openapi_snapshot() {
             "/auth/account",
             "/auth/init",
             "/auth/login",
+            "/auth/logout",
             "/auth/sessions",
             "/auth/sessions/revoke-others",
             "/auth/sessions/{id}",
@@ -1717,6 +1763,7 @@ async fn openapi_snapshot() {
             "/migrate/export",
             "/migrate/import",
             "/migrate/pull",
+            "/migrate/sync",
             "/projects",
             "/projects/batch-delete",
             "/projects/types",
@@ -2151,5 +2198,251 @@ async fn empty_search_query_rejected() {
             "错误文案应三问指路：{v}"
         );
     }
+    drop(container);
+}
+
+/// RJ-01（2026-09-18 修复）：revoke-others 路由从 POST /auth/sessions 挪到文档口径
+/// POST /auth/sessions/revoke-others——此前 OpenAPI 注解/报错文案/前端三处都是后者，
+/// 前端「吊销其他设备」按钮实际 404。活体验证新路径 + 吊销语义。
+#[tokio::test]
+async fn revoke_others_at_documented_path() {
+    let (app, container) = app().await;
+    let t1 = login_token(&app).await; // 会话 A
+    let t2 = login_token(&app).await; // 会话 B
+
+    // 会话 B 吊销其他：revoked=1（A 失效，B 保留）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/sessions/revoke-others")
+                .header("authorization", format!("Bearer {t2}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "revoke-others 应 200：{}",
+        String::from_utf8_lossy(&body)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["revoked"], 1, "应吊销会话 A（当前会话 B 保留）：{v}");
+
+    // 会话 A 已失效（401）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/sessions")
+                .header("authorization", format!("Bearer {t1}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+    // 当前会话 B 保留可用
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/sessions")
+                .header("authorization", format!("Bearer {t2}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    drop(container);
+}
+
+/// 会话上下文（2026-09-18）：登录带 UA / X-Forwarded-For → /auth/sessions 返回 ip + user_agent。
+#[tokio::test]
+async fn session_records_ip_and_user_agent() {
+    let (app, container) = app().await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/login")
+                .header("content-type", "application/json")
+                .header("user-agent", "Mozilla/5.0 (Macintosh) TestBrowser/1.0")
+                .header("x-forwarded-for", "203.0.113.7, 10.0.0.1")
+                .body(Body::from(r#"{"password":"test-admin-pw"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let token = serde_json::from_slice::<serde_json::Value>(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/sessions")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let sessions = serde_json::from_slice::<serde_json::Value>(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let first = &sessions[0];
+    assert_eq!(first["ip"], "203.0.113.7", "X-Forwarded-For 应取首段");
+    assert!(
+        first["user_agent"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("TestBrowser"),
+        "user_agent 应原样保存：{first}"
+    );
+    drop(container);
+}
+
+/// 同设备顶替（2026-09-18）：同 UA 重复登录只保留最新一条会话。
+#[tokio::test]
+async fn same_device_login_replaces_old_session() {
+    let (app, container) = app().await;
+    let ua = "Mozilla/5.0 (Macintosh) TestBrowser/2.0";
+    let login = |ua: &'static str| {
+        let app = app.clone();
+        async move {
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/auth/login")
+                        .header("content-type", "application/json")
+                        .header("user-agent", ua)
+                        .body(Body::from(r#"{"password":"test-admin-pw"}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            serde_json::from_slice::<serde_json::Value>(
+                &axum::body::to_bytes(resp.into_body(), usize::MAX)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap()["token"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+    };
+    let t1 = login(ua).await;
+    let t2 = login(ua).await;
+    assert_ne!(t1, t2);
+    // 第二次登录后：同 UA 只剩 1 条（旧会话被顶掉），且用旧 token 已失效
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/sessions")
+                .header("authorization", format!("Bearer {t2}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let sessions = serde_json::from_slice::<serde_json::Value>(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let count = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["user_agent"] == ua)
+        .count();
+    assert_eq!(count, 1, "同 UA 只应保留最新一条：{sessions}");
+    // 旧 token 失效
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/sessions")
+                .header("authorization", format!("Bearer {t1}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "被顶掉的旧 token 应失效"
+    );
+    drop(container);
+}
+
+/// 登出（2026-09-18）：POST /auth/logout 删除当前会话行——旧 token 立即失效，列表不再挂死会话。
+#[tokio::test]
+async fn logout_deletes_backend_session() {
+    let (app, container) = app().await;
+    let token = login_token(&app).await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/logout")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    // 登出后旧 token 失效
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/sessions")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "登出后旧 token 应失效"
+    );
     drop(container);
 }

@@ -105,6 +105,9 @@ pub struct DocRequest {
     pub folder: String,
     pub title: String,
     pub content: String,
+    /// 乐观锁：基于的版本号（GET 文档返回的 version）。给出且与当前不符 → 409
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -370,6 +373,7 @@ pub async fn update_doc(
             Some(&req.folder),
             Some(&req.title),
             Some(&req.content),
+            req.expected_version,
         )
         .await
         .map_err(pe)?,

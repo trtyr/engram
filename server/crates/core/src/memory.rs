@@ -245,6 +245,24 @@ impl MemoryService {
         distill: &str,
         sensitive: bool,
     ) -> Result<SessionDto, MemoryError> {
+        self.write_session_identity(agent, turns, distill, sensitive, None, None, None)
+            .await
+    }
+
+    /// 带身份归因与幂等键的写入（公网多Agent P001 步骤1）。
+    /// api_key_id/key_name 由请求凭据自动注入；client_ref 命中唯一索引时返回既有会话
+    /// （幂等——网络重试不产生重复会话）。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn write_session_identity(
+        &self,
+        agent: &str,
+        turns: serde_json::Value,
+        distill: &str,
+        sensitive: bool,
+        api_key_id: Option<Uuid>,
+        key_name_snapshot: Option<&str>,
+        client_ref: Option<&str>,
+    ) -> Result<SessionDto, MemoryError> {
         validate_distill(distill, &["auto", "manual", "off"])?;
         // D 观察项：空串 agent 归一化（回读 agent="" 无意义）
         let agent = agent.trim();
@@ -265,7 +283,18 @@ impl MemoryService {
         } else {
             json!({})
         };
-        let row = repo::insert_session(&self.pool, id, agent, &turns, sensitive, &metadata).await?;
+        let row = repo::insert_session_identity(
+            &self.pool,
+            id,
+            agent,
+            &turns,
+            sensitive,
+            &metadata,
+            api_key_id,
+            key_name_snapshot,
+            client_ref,
+        )
+        .await?;
 
         // LLM 未配置时显式暴露（MCP 黑盒测试 D1：蒸馏静默失败不可接受——
         // manual 最应显式失败；auto 已入库但提示不会蒸馏）

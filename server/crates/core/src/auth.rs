@@ -6,7 +6,7 @@
 use uuid::Uuid;
 
 /// 资产域 scope。
-pub const SCOPES: [&str; 9] = [
+pub const SCOPES: [&str; 10] = [
     "memory",
     "wiki",
     "codegraph",
@@ -16,25 +16,39 @@ pub const SCOPES: [&str; 9] = [
     "llm",
     "erase",
     "cron",
+    "migrate",
 ];
 
 /// 常见误写 → 合法 scope（签发/更新入口规范化；存量 key 值不受影响）。
 ///
 /// 「projects」是最高频误写——域工具叫 projects（复数），scope 用单数 project
 ///（EN-62）：签发入口就地归一，写的人不用知道这个历史例外。
-pub fn normalize_scope(s: &str) -> Option<&'static str> {
-    match s.trim() {
-        "projects" => Some("project"),
-        "todo" => Some("todos"),
-        "skill" => Some("skills"),
-        other => SCOPES.iter().copied().find(|x| *x == other),
-    }
+///
+/// 支持只读变体 `<scope>:ro`（动作级权限，公网多Agent P001 步骤3）：
+/// 如 `project:ro` = projects 域只读——只能调该域读类动作（写类在 MCP 分发层拒绝）。
+pub fn normalize_scope(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    let (base, ro) = match trimmed.strip_suffix(":ro") {
+        Some(b) => (b, true),
+        None => (trimmed, false),
+    };
+    let base = match base {
+        "projects" => "project",
+        "todo" => "todos",
+        "skill" => "skills",
+        other => SCOPES.iter().copied().find(|x| *x == other)?,
+    };
+    Some(if ro {
+        format!("{base}:ro")
+    } else {
+        base.to_string()
+    })
 }
 
 /// 未知 scope 的可行动报错：带全部合法值 + 别名提示（报错即文档，EN-62）。
 pub fn unknown_scope_message(bad: &str) -> String {
     format!(
-        "未知 scope: {bad}——合法值 {} 个：{}；「projects」会自动归一为 project（域工具叫 projects，scope 用单数）",
+        "未知 scope: {bad}——合法值 {} 个：{}；「projects」会自动归一为 project（域工具叫 projects，scope 用单数）；域 scope 支持只读变体 `:ro`（如 project:ro——只能调该域读类动作）",
         SCOPES.len(),
         SCOPES.join(", ")
     )
@@ -61,6 +75,37 @@ impl Principal {
             Principal::ApiKey { scopes, .. } => scopes.iter().any(|s| s == scope),
         }
     }
+
+    /// 域访问级别（动作级权限，公网多Agent P001 步骤3）。
+    pub fn domain_access(&self, scope: &str) -> DomainAccess {
+        match self {
+            Principal::Admin => DomainAccess::Full,
+            Principal::ApiKey { scopes, .. } => {
+                if scopes.iter().any(|s| s == scope) {
+                    DomainAccess::Full
+                } else {
+                    let ro = format!("{scope}:ro");
+                    if scopes.iter().any(|s| s == &ro) {
+                        DomainAccess::ReadOnly
+                    } else {
+                        DomainAccess::None
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 域访问级别：全量 scope → [`DomainAccess::Full`]；`<scope>:ro` 只读变体 →
+/// [`DomainAccess::ReadOnly`]（写类动作在 MCP 分发层拒绝，读类放行）；否则 None。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DomainAccess {
+    /// 全量 scope——域内全部动作可用
+    Full,
+    /// 只读变体——仅读类动作（写类拒绝面在 `mcp::dispatch::check_action_access`）
+    ReadOnly,
+    /// 无该域权限
+    None,
 }
 
 // ---------- 管理员账号（单用户；0033） ----------

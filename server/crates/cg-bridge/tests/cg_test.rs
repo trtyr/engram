@@ -192,7 +192,10 @@ async fn lost_artifact_detected_by_list_query_and_gc() {
         .unwrap();
 
     // ① 产物在盘 → usable
-    assert!(bridge.get(proj.id).await.unwrap().usable, "产物在盘时应可用");
+    assert!(
+        bridge.get(proj.id).await.unwrap().usable,
+        "产物在盘时应可用"
+    );
 
     // ② 删掉 .codegraph（= 目录被重新 clone / 被清理）→ status 仍是 ready，usable 翻假
     std::fs::remove_dir_all(dir.path().join(".codegraph")).unwrap();
@@ -231,7 +234,10 @@ async fn lost_artifact_detected_by_list_query_and_gc() {
     // 自愈清单（EN-48 残留）：victim 路径仍在、仅产物丢失 → 必须进 needs_rebuild
     let needs = report["needs_rebuild"].as_array().unwrap();
     assert_eq!(needs.len(), 1, "{report}");
-    assert_eq!(needs[0]["id"].as_str(), Some(proj.id.to_string()).as_deref());
+    assert_eq!(
+        needs[0]["id"].as_str(),
+        Some(proj.id.to_string()).as_deref()
+    );
 
     // ⑤ 另一类幽灵：路径整个不存在（容器形态注册、宿主上不可见的条目）
     let ghost_dir = tempfile::tempdir().unwrap();
@@ -263,7 +269,10 @@ async fn lost_artifact_detected_by_list_query_and_gc() {
     let ghost_after = bridge.get(ghost.id).await.unwrap();
     assert_eq!(ghost_after.status, "error");
     assert!(
-        ghost_after.error.unwrap_or_default().contains("项目路径不存在"),
+        ghost_after
+            .error
+            .unwrap_or_default()
+            .contains("项目路径不存在"),
         "幽灵病因要写「路径不存在」而非「产物丢失」"
     );
 }

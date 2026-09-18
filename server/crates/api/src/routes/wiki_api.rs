@@ -24,7 +24,10 @@ fn we(e: WikiError) -> ApiError {
     match e {
         WikiError::NotFound(m) => ApiError::NotFound(m),
         WikiError::BadRequest(m) => ApiError::BadRequest(m),
-        WikiError::Storage(m) => ApiError::Unavailable(m),
+        WikiError::Storage(m) => {
+            tracing::error!("wiki 存储错误（对外 503 unavailable）: {m}");
+            ApiError::Unavailable(m)
+        }
     }
 }
 
@@ -273,7 +276,7 @@ pub async fn put_page(
     ))
 }
 
-#[utoipa::path(get, path = "/wiki/graph", params(LibOnlyParams),
+#[utoipa::path(get, path = "/wiki/graph", params(LibOnlyParams), operation_id = "wiki_graph",
     responses((status = 200, body = engram_core::wiki::GraphDto)))]
 pub async fn graph(
     principal: axum::Extension<Principal>,

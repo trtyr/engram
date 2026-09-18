@@ -792,8 +792,7 @@ pub async fn create_api_key_handler(
     Json(req): Json<CreateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<ApiKeyCreated>), ApiError> {
     require_admin(&principal)?;
-    let (id, key) =
-        create_api_key(&state.pool, &req.name, req.scopes, req.expires_at).await?;
+    let (id, key) = create_api_key(&state.pool, &req.name, req.scopes, req.expires_at).await?;
     Ok((
         StatusCode::CREATED,
         Json(ApiKeyCreated {
@@ -904,10 +903,7 @@ pub async fn update_api_key(
             list.iter()
                 .map(|s| {
                     crate::auth::normalize_scope(s)
-                        .map(str::to_string)
-                        .ok_or_else(|| {
-                            ApiError::BadRequest(crate::auth::unknown_scope_message(s))
-                        })
+                        .ok_or_else(|| ApiError::BadRequest(crate::auth::unknown_scope_message(s)))
                 })
                 .collect::<Result<Vec<String>, _>>()
         })

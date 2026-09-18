@@ -888,6 +888,7 @@ name = "engram-mcp"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chrono",
  "engram-cg-bridge",
  "engram-core",

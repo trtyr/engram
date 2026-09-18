@@ -82,6 +82,12 @@ pub struct CgProjectDto {
     pub stats: Option<serde_json::Value>,
     pub error: Option<String>,
     pub last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// 条目来源：repo（服务端路径/git clone，本机索引）| upload（客户端推产物，公网模型）
+    pub source_kind: String,
+    /// 上传型：客户端声明的 commit hash（声明式新鲜度——服务端不读代码，只存声明）
+    pub head: Option<String>,
+    /// 上传型：最近一次产物上传时间
+    pub uploaded_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -268,6 +274,110 @@ impl CgBridge {
         Ok(row)
     }
 
+    /// 产物上传（公网多Agent P001 步骤4）：客户端本机 codegraph CLI index 后，
+    /// 上传 `.codegraph/codegraph.db` + HEAD——服务端只存产物 + 声明式新鲜度
+    /// （head/uploaded_at），无代码、无 git 凭证。CLI 是基础设施（CG_VERSION_PIN），
+    /// 客户端宿主零依赖。
+    ///
+    /// name 不存在则新建条目（status=ready）；存在且为 upload 型则覆盖产物；
+    /// repo 型拒绝覆盖（本机索引不归上传通道管）。
+    pub async fn upload_artifact(
+        &self,
+        name: &str,
+        head: &str,
+        db_bytes: &[u8],
+    ) -> Result<CgProjectDto, CgError> {
+        // 校验：head 是 commit hash（7~40 位 hex，短/长 SHA 都收）
+        let head = head.trim();
+        if !(7..=40).contains(&head.len()) || !head.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(CgError::BadRequest(format!(
+                "head 不是合法 commit hash（7~40 位 hex，收到 {} 字符）——客户端本机 `git rev-parse HEAD` 取",
+                head.len()
+            )));
+        }
+        // 校验：SQLite 魔数（坏产物当场拒——「能存进去但查不了」才是最差的体验）
+        const SQLITE_MAGIC: &[u8] = b"SQLite format 3\x00";
+        if db_bytes.len() < SQLITE_MAGIC.len() || &db_bytes[..SQLITE_MAGIC.len()] != SQLITE_MAGIC {
+            return Err(CgError::BadRequest(
+                "db 不是 SQLite 文件（缺「SQLite format 3」魔数）——请上传 codegraph CLI 产出的 \
+                 .codegraph/codegraph.db 本体（原始二进制，不要压缩/文本化）"
+                    .into(),
+            ));
+        }
+        // 上限 256MB（单用户系统，一次 HTTP body 可承载；再大说明仓库该拆了）
+        if db_bytes.len() > 256 * 1024 * 1024 {
+            return Err(CgError::BadRequest(format!(
+                "db 超限（{} MB > 256 MB）——拆分仓库或精简索引范围后重传",
+                db_bytes.len() / 1024 / 1024
+            )));
+        }
+
+        let existing: Option<(Uuid, String)> =
+            sqlx::query_as("SELECT id, source_kind FROM cg_projects WHERE name = $1")
+                .bind(name)
+                .fetch_optional(&self.pool)
+                .await?;
+        let id = match existing {
+            Some((id, kind)) => {
+                if kind != "upload" {
+                    return Err(CgError::BadRequest(format!(
+                        "项目 {name} 是 repo 型（服务端本机索引）——产物上传只作用于 upload 型条目；\
+                         请换名注册，或先 delete 再以 upload 重建"
+                    )));
+                }
+                id
+            }
+            None => {
+                let nid = Uuid::now_v7();
+                let dir = self
+                    .root
+                    .join("uploads")
+                    .join(nid.to_string())
+                    .join(".codegraph");
+                sqlx::query_as::<_, CgProjectDto>(
+                    "INSERT INTO cg_projects (id, name, path, source_uri, status, source_kind) \
+                     VALUES ($1, $2, $3, $4, 'ready', 'upload') RETURNING *",
+                )
+                .bind(nid)
+                .bind(name)
+                .bind(dir.parent().unwrap().to_string_lossy().as_ref())
+                .bind(format!("upload://{head}"))
+                .fetch_one(&self.pool)
+                .await?;
+                nid
+            }
+        };
+
+        // 原子落盘：temp + rename（半写的 db 不该被查询看到）
+        let dir = self
+            .root
+            .join("uploads")
+            .join(id.to_string())
+            .join(".codegraph");
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| CgError::Storage(e.to_string()))?;
+        let tmp = dir.join("codegraph.db.tmp");
+        let dst = dir.join("codegraph.db");
+        tokio::fs::write(&tmp, db_bytes)
+            .await
+            .map_err(|e| CgError::Storage(e.to_string()))?;
+        tokio::fs::rename(&tmp, &dst)
+            .await
+            .map_err(|e| CgError::Storage(e.to_string()))?;
+
+        // 声明式新鲜度：head + uploaded_at，status 直接 ready（产物确在盘）
+        sqlx::query(
+            "UPDATE cg_projects SET head = $2, uploaded_at = now(), status = 'ready', \
+             error = NULL, last_synced_at = now(), updated_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(head)
+        .execute(&self.pool)
+        .await?;
+        self.get(id).await
+    }
+
     /// 索引新鲜度：**优先比快照戳**（`snapshot_head` vs HEAD——「图基于哪个 commit」对
     /// 「代码在哪个 commit」，直接判据），无快照戳时才退回「HEAD 提交时间 vs last_indexed」。
     /// 只读 .git（git log），不新增后台扫描。HEAD 不可读（非 git 仓库/权限）→ 只报快照戳 +
@@ -363,11 +473,10 @@ impl CgBridge {
     }
 
     pub async fn list(&self) -> Result<Vec<CgProjectDto>, CgError> {
-        let mut rows = sqlx::query_as::<_, CgProjectDto>(
-            "SELECT * FROM cg_projects ORDER BY created_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let mut rows =
+            sqlx::query_as::<_, CgProjectDto>("SELECT * FROM cg_projects ORDER BY created_at DESC")
+                .fetch_all(&self.pool)
+                .await?;
         // usable 是派生字段（EN-48）：库里没有它的列，每次读取按磁盘事实现算。
         for r in &mut rows {
             r.usable = index_usable(r);
@@ -449,6 +558,15 @@ impl CgBridge {
                         "项目路径不存在（{}）——目录已删除或移动（容器形态注册的路径在宿主上不可见）；\
                          请重新注册或删除该条目",
                         proj.path
+                    ),
+                    false,
+                )
+            } else if proj.source_kind == "upload" {
+                (
+                    format!(
+                        "上传产物已丢失（{}）——upload 型条目服务端无源码，无法本机重建；\
+                         请客户端本机 codegraph index 后重新 upload",
+                        index_db_path(Path::new(&proj.path)).display()
                     ),
                     false,
                 )
@@ -1208,6 +1326,9 @@ mod tests {
             stats: Some(stats),
             error: None,
             last_synced_at: None,
+            source_kind: "repo".into(),
+            head: None,
+            uploaded_at: None,
             created_at: chrono::Utc::now(),
         };
 
@@ -1304,6 +1425,9 @@ mod tests {
             stats: Some(stats),
             error: None,
             last_synced_at: None,
+            source_kind: "repo".into(),
+            head: None,
+            uploaded_at: None,
             created_at: chrono::Utc::now(),
         };
 
@@ -1387,6 +1511,9 @@ mod tests {
             stats: None,
             error: None,
             last_synced_at: None,
+            source_kind: "repo".into(),
+            head: None,
+            uploaded_at: None,
             created_at: chrono::Utc::now(),
         };
 
@@ -1428,6 +1555,9 @@ mod tests {
             stats: None,
             error: None,
             last_synced_at: None,
+            source_kind: "repo".into(),
+            head: None,
+            uploaded_at: None,
             created_at: chrono::Utc::now(),
         };
         assert!(index_usable(&p), "子目录注册也应认仓库根的索引产物");
@@ -1472,6 +1602,9 @@ mod tests {
             stats: None,
             error: None,
             last_synced_at: None,
+            source_kind: "repo".into(),
+            head: None,
+            uploaded_at: None,
             created_at: chrono::Utc::now(),
         };
         let tmp = std::env::temp_dir();

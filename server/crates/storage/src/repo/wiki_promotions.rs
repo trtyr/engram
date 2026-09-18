@@ -8,8 +8,8 @@
 
 use crate::error::{StoreError, StoreResult};
 use crate::models::wiki_promotions::WikiPromotionDto;
-use sqlx::Row;
 use sqlx::PgPool;
+use sqlx::Row;
 use uuid::Uuid;
 
 /// 登记一次晋升。返回新登记行 id；该 (project, doc, page) 已登记时返回

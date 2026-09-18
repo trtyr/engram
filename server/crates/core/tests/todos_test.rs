@@ -261,7 +261,10 @@ async fn cursor_pagination_walks_all_without_loss() {
     let mut cursor: Option<String> = None;
     loop {
         let c = cursor.as_deref();
-        let page = svc.list(None, None, None, None, None, None, c, 5).await.unwrap();
+        let page = svc
+            .list(None, None, None, None, None, None, c, 5)
+            .await
+            .unwrap();
         assert!(page.len() <= 5);
         if page.is_empty() {
             break;
@@ -738,26 +741,84 @@ async fn list_supports_ticket_status_and_severity_filters() {
     let (_pool, svc, _pg) = setup().await;
     // 两条工单：P0 + P2；一条普通 todo
     let t_p0 = svc
-        .create("工单P0", "", "ticket", "", Some("P0"), "症状A", "", "", &[], None, None)
+        .create(
+            "工单P0",
+            "",
+            "ticket",
+            "",
+            Some("P0"),
+            "症状A",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
         .await
         .unwrap();
     let t_p2 = svc
-        .create("工单P2", "", "ticket", "", Some("P2"), "症状B", "", "", &[], None, None)
+        .create(
+            "工单P2",
+            "",
+            "ticket",
+            "",
+            Some("P2"),
+            "症状B",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
         .await
         .unwrap();
     let _todo = svc
-        .create("普通待办", "", "todo", "normal", None, "", "", "", &[], None, None)
+        .create(
+            "普通待办",
+            "",
+            "todo",
+            "normal",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
         .await
         .unwrap();
 
     // ① 工单态 status=confirmed 直接可用（旧实现 400）
     svc.update(
-        t_p0.id, None, None, None, None, Some("confirmed"), None, None, None, None, None, None, None, None,
+        t_p0.id,
+        None,
+        None,
+        None,
+        None,
+        Some("confirmed"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     )
     .await
     .unwrap();
     let confirmed = svc
-        .list(Some("confirmed"), Some("ticket"), None, None, None, None, None, 200)
+        .list(
+            Some("confirmed"),
+            Some("ticket"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            200,
+        )
         .await
         .unwrap();
     assert_eq!(confirmed.len(), 1, "confirmed 工单应恰好 1 条");
@@ -765,7 +826,16 @@ async fn list_supports_ticket_status_and_severity_filters() {
 
     // ② severity=P2 过滤真实生效（旧实现该参数不存在，返回全部）
     let p2 = svc
-        .list(None, Some("ticket"), None, None, None, Some("P2"), None, 200)
+        .list(
+            None,
+            Some("ticket"),
+            None,
+            None,
+            None,
+            Some("P2"),
+            None,
+            200,
+        )
         .await
         .unwrap();
     assert_eq!(p2.len(), 1, "P2 工单应恰好 1 条");
@@ -773,14 +843,32 @@ async fn list_supports_ticket_status_and_severity_filters() {
 
     // ③ 组合过滤：P0 + status=open（P0 那条已 confirmed，应空）
     let p0_open = svc
-        .list(Some("open"), Some("ticket"), None, None, None, Some("P0"), None, 200)
+        .list(
+            Some("open"),
+            Some("ticket"),
+            None,
+            None,
+            None,
+            Some("P0"),
+            None,
+            200,
+        )
         .await
         .unwrap();
     assert!(p0_open.is_empty(), "P0 已 confirmed，open 组合应为空");
 
     // ④ 非法 severity 响亮拒（不静默吞）
     let err = svc
-        .list(None, Some("ticket"), None, None, None, Some("P9"), None, 200)
+        .list(
+            None,
+            Some("ticket"),
+            None,
+            None,
+            None,
+            Some("P9"),
+            None,
+            200,
+        )
         .await
         .expect_err("非法 severity 应报错");
     assert!(err.to_string().contains("severity"), "{err}");
@@ -798,24 +886,74 @@ async fn list_order_is_open_first_then_updated_at_desc() {
     let mut ids = Vec::new();
     for title in ["A-open", "B-confirmed", "C-open", "D-inprog", "E-resolved"] {
         let t = svc
-            .create(title, "", "ticket", "", Some("P3"), "", "", "", &[], None, None)
+            .create(
+                title,
+                "",
+                "ticket",
+                "",
+                Some("P3"),
+                "",
+                "",
+                "",
+                &[],
+                None,
+                None,
+            )
             .await
             .unwrap();
         ids.push((title, t.id));
     }
     // 状态流转（E 到 resolved 必须带 resolution——CHECK 要求）
     svc.update(
-        ids[1].1, None, None, None, None, Some("confirmed"), None, None, None, None, None, None, None, None,
+        ids[1].1,
+        None,
+        None,
+        None,
+        None,
+        Some("confirmed"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     )
     .await
     .unwrap();
     svc.update(
-        ids[3].1, None, None, None, None, Some("in_progress"), None, None, None, None, None, None, None, None,
+        ids[3].1,
+        None,
+        None,
+        None,
+        None,
+        Some("in_progress"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     )
     .await
     .unwrap();
     svc.update(
-        ids[4].1, None, None, None, None, Some("resolved"), None, None, None, None, Some("修好了"), None, None,
+        ids[4].1,
+        None,
+        None,
+        None,
+        None,
+        Some("resolved"),
+        None,
+        None,
+        None,
+        None,
+        Some("修好了"),
+        None,
+        None,
         None,
     )
     .await
@@ -868,12 +1006,21 @@ async fn list_order_is_open_first_then_updated_at_desc() {
         seen.extend(page.iter().map(|r| r.id));
         let last = page.last().unwrap();
         let flag = if last.status == "open" { 1 } else { 0 };
-        cursor = Some(format!("{}|{}|{}", flag, last.updated_at.to_rfc3339(), last.id));
+        cursor = Some(format!(
+            "{}|{}|{}",
+            flag,
+            last.updated_at.to_rfc3339(),
+            last.id
+        ));
         if page.len() < 2 {
             break;
         }
     }
     seen.sort();
     seen.dedup();
-    assert_eq!(seen.len(), 5, "cursor 翻页应覆盖全部 5 条不丢不重: {seen:?}");
+    assert_eq!(
+        seen.len(),
+        5,
+        "cursor 翻页应覆盖全部 5 条不丢不重: {seen:?}"
+    );
 }

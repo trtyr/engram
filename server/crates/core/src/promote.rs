@@ -7,10 +7,9 @@
 //! 判定口径见《文档工作流》晋升节（三问：离开本项目还成立吗 / 别的项目用得上吗 /
 //! 是对世界的陈述还是项目历史）——判定由调用方 AI 在写作时执行，服务端不做 LLM 提炼。
 
-use engram_storage::repo::{project as project_repo, wiki_promotions as promo_repo};
 use engram_storage::PgPool;
+use engram_storage::repo::{project as project_repo, wiki_promotions as promo_repo};
 use uuid::Uuid;
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum PromoteError {
@@ -69,7 +68,8 @@ impl PromoteService {
     pub async fn promote(&self, req: PromoteRequest) -> Result<PromoteOutcome, PromoteError> {
         if req.title.trim().is_empty() || req.content.trim().is_empty() {
             return Err(PromoteError::BadRequest(
-                "title 与 content（提炼正文）都不能为空——提炼由调用方 AI 完成，服务端不做 LLM 提炼".into(),
+                "title 与 content（提炼正文）都不能为空——提炼由调用方 AI 完成，服务端不做 LLM 提炼"
+                    .into(),
             ));
         }
 
@@ -100,12 +100,11 @@ impl PromoteService {
             )));
         }
         let project_name = doc.title.clone(); // 回链展示用项目名优先，兜底文档标题
-        let project_name = match engram_storage::repo::project::get_project(&self.pool, project_id)
-            .await
-        {
-            Ok(Some(p)) => p.name,
-            _ => project_name,
-        };
+        let project_name =
+            match engram_storage::repo::project::get_project(&self.pool, project_id).await {
+                Ok(Some(p)) => p.name,
+                _ => project_name,
+            };
 
         // ② 目标库解析（缺省 main）
         let lib = engram_wiki_engine::libraries::resolve(&self.pool, req.library.as_deref())
@@ -114,16 +113,23 @@ impl PromoteService {
         let lib_slug = promo_repo::library_slug(&self.pool, lib).await?;
 
         // ③ 登记先行（幂等闸门：重复晋升在写页之前就友好报「已晋升」）
-        promo_repo::insert(&self.pool, lib, &req.slug, project_id, req.doc_id, &req.anchor)
-            .await
-            .map_err(|e| match e {
-                engram_storage::StoreError::Conflict(_) => PromoteError::Conflict(format!(
-                    "已晋升过：文档 {} 的「{}」已登记为 wiki:{}/{}——同一来源同一页只登记一次；\
+        promo_repo::insert(
+            &self.pool,
+            lib,
+            &req.slug,
+            project_id,
+            req.doc_id,
+            &req.anchor,
+        )
+        .await
+        .map_err(|e| match e {
+            engram_storage::StoreError::Conflict(_) => PromoteError::Conflict(format!(
+                "已晋升过：文档 {} 的「{}」已登记为 wiki:{}/{}——同一来源同一页只登记一次；\
                      若要更新提炼内容直接改目标页（write_page）",
-                    req.doc_id, req.anchor, lib_slug, req.slug
-                )),
-                other => PromoteError::from(other),
-            })?;
+                req.doc_id, req.anchor, lib_slug, req.slug
+            )),
+            other => PromoteError::from(other),
+        })?;
 
         // ④ 写 synthesis 页（wiki-engine 域内：版本快照 + wikilinks 重算同口径）
         let promoted_from = format!("project:{}/{}#{}", project_name, req.doc_id, req.anchor);
@@ -172,7 +178,9 @@ impl PromoteService {
                 Err(_) => project_repo::id_by_name(&self.pool, p)
                     .await?
                     .ok_or_else(|| {
-                        PromoteError::NotFound(format!("项目「{p}」不存在——先 projects 列表确认名字"))
+                        PromoteError::NotFound(format!(
+                            "项目「{p}」不存在——先 projects 列表确认名字"
+                        ))
                     })?,
             },
             None => return promo_repo::list_all(&self.pool).await.map_err(Into::into),

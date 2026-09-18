@@ -7,12 +7,13 @@ use engram_storage::repo::wiki_docs as repo;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-async fn setup() -> PgPool {
+async fn setup() -> (PgPool, support::TestPg) {
     let container = support::start_pgvector().await.expect("测试库");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
-    pool
+    // 守卫必须随返回值活到测试结束——提前 drop 会让后台 psql 中途 FORCE 删库
+    (pool, container)
 }
 
 async fn lib_id(pool: &PgPool, slug: &str) -> Uuid {
@@ -25,7 +26,7 @@ async fn lib_id(pool: &PgPool, slug: &str) -> Uuid {
 
 #[tokio::test]
 async fn wiki_docs_repo_scopes_by_library() {
-    let pool = setup().await;
+    let (pool, _pg) = setup().await;
     let main = lib_id(&pool, "main").await;
     let lib_b = Uuid::new_v4();
     sqlx::query("INSERT INTO wiki_libraries (id, slug, name) VALUES ($1, 'proj-a', 'A 库')")

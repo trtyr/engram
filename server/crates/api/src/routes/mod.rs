@@ -28,7 +28,7 @@ use utoipa::OpenApi;
         health::health, health::ready,
         auth_api::login_handler, auth_api::status, auth_api::init_account,
         auth_api::change_credentials, auth_api::list_sessions, auth_api::revoke_session,
-        auth_api::revoke_others, auth_api::username,
+        auth_api::revoke_others, auth_api::username, auth_api::logout,
         jobs_api::list_jobs, jobs_api::get_job, jobs_api::get_job_events, jobs_api::revive_job,
         llm_api::create_provider, llm_api::list_providers, llm_api::test_provider,
         llm_api::update_provider, llm_api::delete_provider, llm_api::reencrypt_providers,
@@ -70,6 +70,7 @@ use utoipa::OpenApi;
         codegraph_api::query, codegraph_api::status, codegraph_api::graph,
         codegraph_api::gc,
         migrate_api::export_bundle, migrate_api::import_bundle, migrate_api::pull,
+    migrate_api::migrate_sync,
         todos_api::list_todos, todos_api::create_todo, todos_api::get_todo,
         todos_api::update_todo, todos_api::delete_todo, todos_api::export_todos,
         project_api::list_types, project_api::create_project, project_api::list_projects,
@@ -98,22 +99,11 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::Extension(metrics_handle))
         .layer(axum::Extension(state.pool.clone()))
         .route("/openapi.json", get(openapi_json))
+        // /auth/username、/auth/account、/auth/sessions* 需 Principal（Bearer 注入）——
+        // 挂 authed 段（RJ-01 深层修复：误挂 public 时 Extension 提取失败整组 500）
         .route("/auth/login", post(auth_api::login_handler))
         .route("/auth/status", get(auth_api::status))
-        .route("/auth/username", get(auth_api::username))
-        .route("/auth/init", post(auth_api::init_account))
-        .route(
-            "/auth/account",
-            axum::routing::put(auth_api::change_credentials),
-        )
-        .route(
-            "/auth/sessions",
-            get(auth_api::list_sessions).post(auth_api::revoke_others),
-        )
-        .route(
-            "/auth/sessions/{id}",
-            axum::routing::delete(auth_api::revoke_session),
-        );
+        .route("/auth/init", post(auth_api::init_account));
 
     let authed = Router::new()
         // MCP（用户记忆域工具面）：nest 在 authed 内 → 复用 Bearer 中间件，
@@ -123,6 +113,25 @@ pub fn router(state: AppState) -> Router {
             Router::new()
                 .nest_service("/mcp", engram_mcp::service(state.clone()))
                 .route_layer(from_fn_with_state(state.clone(), engram_mcp::gate)),
+        )
+        // 账号面端点（RJ-01 深层修复 2026-09-18）：需 Principal 的会话/账号操作挂 authed
+        // —— 此前误挂 public 段（无 Bearer 注入 Principal），Extension 提取失败整组 500：
+        // 「吊销其他设备」「会话列表」「改密码」「用户名」在生产全部不可用。
+        // revoke-others 路径同步对齐文档口径（前端/OpenAPI 注解/报错文案三处一致）。
+        .route("/auth/username", get(auth_api::username))
+        .route(
+            "/auth/account",
+            axum::routing::put(auth_api::change_credentials),
+        )
+        .route("/auth/logout", post(auth_api::logout))
+        .route("/auth/sessions", get(auth_api::list_sessions))
+        .route(
+            "/auth/sessions/revoke-others",
+            post(auth_api::revoke_others),
+        )
+        .route(
+            "/auth/sessions/{id}",
+            axum::routing::delete(auth_api::revoke_session),
         )
         .route("/jobs", get(jobs_api::list_jobs))
         .route("/jobs/{id}", get(jobs_api::get_job))
@@ -242,10 +251,7 @@ pub fn router(state: AppState) -> Router {
             post(memory_api::rhythm_heartbeat),
         )
         .route("/memory/rhythm/status", get(memory_api::rhythm_status))
-        .route(
-            "/memory/kv",
-            get(memory_api::list_kv),
-        )
+        .route("/memory/kv", get(memory_api::list_kv))
         .route("/memory/kv/{key}", get(memory_api::get_kv))
         .route("/memory/timeline", get(memory_api::timeline))
         // 实体（记忆星系）：graph/search 路由先于 {id}，避免 "graph"/"search" 被当作 id
@@ -436,6 +442,7 @@ pub fn router(state: AppState) -> Router {
         .route("/migrate/export", get(migrate_api::export_bundle))
         .route("/migrate/import", post(migrate_api::import_bundle))
         .route("/migrate/pull", post(migrate_api::pull))
+        .route("/migrate/sync", post(migrate_api::migrate_sync))
         .route(
             "/skills",
             post(skills_api::create_skill).get(skills_api::list_skills),
@@ -455,6 +462,13 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(public)
         .merge(authed.layer(from_fn_with_state(state.clone(), crate::auth::bearer_auth)))
+        // 产物上传（P001-4）：codegraph db 经 MCP JSON-RPC base64 直传——
+        // 默认 2MB 不够（db 上限 256MB × base64 膨胀 1.33 ≈ 349MB body）
+        .layer(axum::extract::DefaultBodyLimit::max(384 * 1024 * 1024))
+        // 客户端 IP 注入（活跃会话归因）：XFF 首段优先，直连取对端地址（main 以 connect_info 启动）
+        .layer(axum::middleware::from_fn(
+            crate::client_ip::inject_client_ip,
+        ))
         // R10：HTTP 指标（请求计数 + 延迟直方图，按路由模板聚合）——放最外层，覆盖全部 API 路由
         .layer(axum::middleware::from_fn(http_metrics_mw))
         // SPA 静态资源兜底（API 路由未命中时 → web/dist）

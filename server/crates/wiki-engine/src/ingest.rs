@@ -43,7 +43,10 @@ fn resolve_data_root(env_val: Option<&str>, home: Option<&str>) -> (std::path::P
         return (std::path::PathBuf::from(d), false);
     }
     match home {
-        Some(h) => (std::path::PathBuf::from(h).join(".engram").join("app"), true),
+        Some(h) => (
+            std::path::PathBuf::from(h).join(".engram").join("app"),
+            true,
+        ),
         None => (std::path::PathBuf::from("./data"), true),
     }
 }

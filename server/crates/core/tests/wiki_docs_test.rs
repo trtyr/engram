@@ -230,8 +230,9 @@ async fn md_ingest_to_ready_and_chinese_fts_search() {
     assert!(deduped2);
     assert_eq!(id, id2);
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 #[tokio::test]
@@ -293,8 +294,9 @@ async fn html_ingest_and_corrupt_file_not_blocking() {
     let ok = wait_ready(&svc, lib, ok_id).await;
     assert_eq!(ok.status, "ready");
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 // ---------- K6：并发同 sha 提交（提交路径正确性） ----------
@@ -417,8 +419,9 @@ async fn failed_doc_resubmit_self_heals() {
     let chunks = svc.chunks(lib, doc_id, 500).await.unwrap();
     assert!(!chunks.is_empty(), "块应已生成");
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 #[tokio::test]
@@ -460,8 +463,9 @@ async fn ready_doc_resubmit_does_not_reingest() {
         .unwrap();
     assert_eq!(rid, id);
     assert!(deduped);
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 // ---------- K4/K8：嵌入链（只补缺失 + 短响应守卫 + re-embed 端点） ----------
@@ -582,8 +586,9 @@ async fn reembed_only_touches_missing_chunks() {
         "{err:?}"
     );
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 // ---------- K7：空 token 查询短路 ----------
@@ -675,8 +680,9 @@ async fn embed_short_response_marks_batch_failed_not_silent_null() {
         assert!(!has_vec, "不应写入任何向量（含 NULL+false 双静默的旧路径）");
     }
 
-    handle.shutdown();
-    handle.join().await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// R9：documents_search 命中带相邻块片段——中间块前后都有、首块无 prev、末块无 next。

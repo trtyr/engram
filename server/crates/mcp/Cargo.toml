@@ -23,4 +23,5 @@ chrono.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+base64 = "0.22"
 utoipa.workspace = true

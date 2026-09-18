@@ -333,7 +333,11 @@ impl TodoService {
         {
             let allowed = match kind {
                 Some("ticket") => TICKET_STATUSES.join("/"),
-                _ => format!("{}/{}", STATUSES.join("/"), "confirmed/in_progress/resolved/verified"),
+                _ => format!(
+                    "{}/{}",
+                    STATUSES.join("/"),
+                    "confirmed/in_progress/resolved/verified"
+                ),
             };
             return Err(TodoError::BadRequest(format!(
                 "status 仅接受 {}（收到 {s}）",

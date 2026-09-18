@@ -17,6 +17,12 @@ pub struct SessionDto {
     /// 会话元数据（source=import 标记批量导入的历史；蒸馏据此过滤对方观点）
     #[schema(value_type = Object)]
     pub metadata: serde_json::Value,
+    /// 归因：哪把 API key 写入（key 删除后置 NULL，不级联删会话）
+    pub api_key_id: Option<Uuid>,
+    /// key 名快照（key 改名/删除后历史归因仍可读）
+    pub key_name_snapshot: Option<String>,
+    /// 客户端幂等键（同 ref 重试返回原会话，防网络重试重复入库）
+    pub client_ref: Option<String>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]

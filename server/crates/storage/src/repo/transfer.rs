@@ -66,6 +66,15 @@ pub async fn export_wiki_pages(pool: &PgPool) -> StoreResult<Vec<Value>> {
     Ok(rows)
 }
 
+/// wiki 库行（2026-09-18 数据同步线：多库迁移补齐——页面保留原库归属的前提）。
+pub async fn export_wiki_libraries(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> =
+        sqlx::query_scalar("SELECT to_jsonb(l) FROM wiki_libraries l ORDER BY l.created_at")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows)
+}
+
 /// 项目域三表全量：(projects, locations, docs)。
 pub async fn export_projects(pool: &PgPool) -> StoreResult<(Vec<Value>, Vec<Value>, Vec<Value>)> {
     let projects: Vec<Value> =
@@ -101,8 +110,8 @@ pub async fn import_todos(pool: &PgPool, items: &[Value]) -> StoreResult<(usize,
     let mut skipped = 0usize;
     for v in items {
         let res = sqlx::query(
-            "INSERT INTO todos (id, title, body, status, priority, tags, due_at, project_hint, done_at, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10, $11) ON CONFLICT (id) DO NOTHING",
+            "INSERT INTO todos (id, title, body, status, priority, tags, due_at, project_hint, done_at, created_at, updated_at, kind, severity, symptom, reproduce, acceptance, resolution, resolved_at) \
+             VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) ON CONFLICT (id) DO NOTHING",
         )
         .bind(
             v.get("id")
@@ -137,6 +146,18 @@ pub async fn import_todos(pool: &PgPool, items: &[Value]) -> StoreResult<(usize,
         )
         .bind(
             v.get("updated_at")
+                .and_then(|x| x.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
+        )
+        // 工单结构化列（t9 往返演练补齐——缺失会令 kind 落默认 todo，ticket 状态违反 todos_status_check）
+        .bind(str_of(v, "kind", "todo"))
+        .bind(v.get("severity").and_then(|x| x.as_str()))
+        .bind(str_of(v, "symptom", ""))
+        .bind(str_of(v, "reproduce", ""))
+        .bind(str_of(v, "acceptance", ""))
+        .bind(str_of(v, "resolution", ""))
+        .bind(
+            v.get("resolved_at")
                 .and_then(|x| x.as_str())
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
         )
@@ -243,6 +264,20 @@ pub async fn import_atom(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     .execute(pool)
     .await?;
     Ok(res.rows_affected() > 0)
+}
+
+/// 回填 atoms 自引用 superseded_by（导入期置 NULL，全量入库后统一回填——t9 往返演练抓出）。
+pub async fn backfill_atom_superseded_by(
+    pool: &PgPool,
+    id: uuid::Uuid,
+    superseded_by: uuid::Uuid,
+) -> StoreResult<()> {
+    sqlx::query("UPDATE atoms SET superseded_by = $2 WHERE id = $1")
+        .bind(id)
+        .bind(superseded_by)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn import_scenario(pool: &PgPool, v: &Value) -> StoreResult<bool> {
@@ -400,12 +435,42 @@ pub async fn import_skill(pool: &PgPool, v: &Value, files: &[Value]) -> StoreRes
     Ok((true, imported_files))
 }
 
-pub async fn import_wiki_page(pool: &PgPool, v: &Value, tsv_text: &str) -> StoreResult<bool> {
-    let content = str_of(v, "content", "");
-    // 多库（2026-09-08）：迁移导入统一落主库（slug 冲突按库内判定）
-    let lib: Uuid = sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
+/// 导入 wiki 库行（按 slug 幂等），返回 (目标库 id, 是否新插入)——同名库已存在时映射到现有 id。
+pub async fn import_wiki_library(pool: &PgPool, v: &Value) -> StoreResult<(Uuid, bool)> {
+    let slug = str_of(v, "slug", "");
+    let res = sqlx::query(
+        "INSERT INTO wiki_libraries (id, slug, name) VALUES ($1, $2, $3) \
+         ON CONFLICT (slug) DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(&slug)
+    .bind(str_of(v, "name", ""))
+    .execute(pool)
+    .await?;
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = $1")
+        .bind(&slug)
         .fetch_one(pool)
         .await?;
+    Ok((id, res.rows_affected() > 0))
+}
+
+/// main 库 id（旧迁移包无 wiki_libraries 域时，页面 fallback 落主库用）。
+pub async fn main_library_id(pool: &PgPool) -> StoreResult<Uuid> {
+    let id: Uuid = sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
+        .fetch_one(pool)
+        .await?;
+    Ok(id)
+}
+
+pub async fn import_wiki_page(
+    pool: &PgPool,
+    v: &Value,
+    tsv_text: &str,
+    target_lib: Uuid,
+) -> StoreResult<bool> {
+    let content = str_of(v, "content", "");
+    // 多库迁移（2026-09-18 数据同步线补齐）：library 由调用方按 slug 映射传入，
+    // 页面保留原库归属；旧包无 wiki_libraries 域时调用方 fallback main（v1 兼容）。
     // tsv 由调用方按 wiki 口径（slug+title+content、wiki 分词变体）算好传入——storage 不依赖分词器；
     // 系统页（index/log/overview）写 NULL（结构页不参与 FTS，EN-63 audit 回归教训）
     let res = sqlx::query(
@@ -415,7 +480,7 @@ pub async fn import_wiki_page(pool: &PgPool, v: &Value, tsv_text: &str) -> Store
          ON CONFLICT (library_id, slug) DO NOTHING",
     )
     .bind(id_of(v, "id"))
-    .bind(lib)
+    .bind(target_lib)
     .bind(str_of(v, "slug", ""))
     .bind(str_of(v, "title", ""))
     .bind(str_of(v, "page_type", "concept"))
@@ -472,12 +537,13 @@ pub async fn import_project_location(pool: &PgPool, v: &Value) -> StoreResult<bo
 
 pub async fn import_project_doc(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     let res = sqlx::query(
-        "INSERT INTO project_docs (id, project_id, category, title, content) \
-         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO project_docs (id, project_id, category, folder, title, content) \
+         VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO NOTHING",
     )
     .bind(id_of(v, "id"))
     .bind(id_of(v, "project_id"))
     .bind(str_of(v, "category", "规划"))
+    .bind(str_of(v, "folder", ""))
     .bind(str_of(v, "title", ""))
     .bind(str_of(v, "content", ""))
     .execute(pool)
@@ -501,3 +567,97 @@ pub type TodoExportRow = (
     DateTime<Utc>,
     DateTime<Utc>,
 );
+
+// ---------- KV / wiki_promotions 域（公网加固 t9 往返演练补齐 v1 覆盖缺口） ----------
+
+/// KV 全量导出（0042；tsv 为生成列不迁移）。
+pub async fn export_kv_entries(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> =
+        sqlx::query_scalar("SELECT to_jsonb(k) FROM kv_entries k ORDER BY k.key")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows)
+}
+
+/// KV 导入（key 唯一冲突跳过；tsv 由生成列自算）。
+pub async fn import_kv_entries(pool: &PgPool, items: &[Value]) -> StoreResult<(usize, usize)> {
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    for v in items {
+        let tags: Vec<String> = v
+            .get("tags")
+            .and_then(|x| x.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|t| t.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let res = sqlx::query(
+            "INSERT INTO kv_entries (id, key, value, context, tags, source, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (key) DO NOTHING",
+        )
+        .bind(v.get("id").and_then(|x| x.as_str()).and_then(|s| Uuid::parse_str(s).ok()))
+        .bind(str_of(v, "key", ""))
+        .bind(str_of(v, "value", ""))
+        .bind(str_of(v, "context", ""))
+        .bind(tags)
+        .bind(str_of(v, "source", "user_stated"))
+        .bind(ts(v, "created_at"))
+        .bind(ts(v, "updated_at"))
+        .execute(pool)
+        .await?;
+        if res.rows_affected() > 0 {
+            imported += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+    Ok((imported, skipped))
+}
+
+/// wiki_promotions 全量导出（0047）。
+pub async fn export_wiki_promotions(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(w) FROM wiki_promotions w ORDER BY w.project_id, w.page_slug",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// promotions 导入（UNIQUE(project_id, doc_id, page_slug) 冲突跳过）。
+/// library_id 统一映射目标库 main 库——多库 promotions 随 wiki 多库缺口记欠账（t9）。
+pub async fn import_wiki_promotions(pool: &PgPool, items: &[Value]) -> StoreResult<(usize, usize)> {
+    let Some(target_library_id): Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
+            .fetch_optional(pool)
+            .await?
+    else {
+        return Ok((0, items.len())); // 无 main 库（不该发生，0046 幂等保证）
+    };
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    for v in items {
+        let res = sqlx::query(
+            "INSERT INTO wiki_promotions (id, library_id, page_slug, project_id, doc_id, anchor, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             ON CONFLICT (project_id, doc_id, page_slug) DO NOTHING",
+        )
+        .bind(v.get("id").and_then(|x| x.as_str()).and_then(|s| Uuid::parse_str(s).ok()))
+        .bind(target_library_id)
+        .bind(str_of(v, "page_slug", ""))
+        .bind(v.get("project_id").and_then(|x| x.as_str()).and_then(|s| Uuid::parse_str(s).ok()))
+        .bind(v.get("doc_id").and_then(|x| x.as_str()).and_then(|s| Uuid::parse_str(s).ok()))
+        .bind(str_of(v, "anchor", ""))
+        .bind(ts(v, "created_at"))
+        .execute(pool)
+        .await?;
+        if res.rows_affected() > 0 {
+            imported += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+    Ok((imported, skipped))
+}

@@ -97,7 +97,6 @@ pub fn has_query_tokens(text: &str) -> bool {
     !tokenize(text).is_empty()
 }
 
-
 // ---------- wiki 专用变体（EN-63）----------
 //
 // 全平台共用 `tokenize`/`tsv_text` 服务 memory 域 atoms 索引——其语义不能动。
@@ -158,7 +157,10 @@ mod wiki_variant_tests {
     fn cjk_subword_reachable_via_search_mode() {
         // cut_for_search：长复合词与子词都保留——「透传」可从「透传原则」达
         let toks = tokenize_wiki("机器产出原样透传原则");
-        assert!(toks.contains(&"透传".to_string()), "透传 应为独立 token：{toks:?}");
+        assert!(
+            toks.contains(&"透传".to_string()),
+            "透传 应为独立 token：{toks:?}"
+        );
         let q = tsv_query_smart_wiki("透传", 3);
         assert_eq!(q, "透传");
     }
@@ -171,7 +173,7 @@ mod wiki_variant_tests {
             tokenize("ai-passthrough-principle"),
             vec!["ai", "passthrough", "principle"]
         );
-                // 单独「透传原则」jieba 切两词（词典无此复合词）——EN-59 当时的「透传」未命中
+        // 单独「透传原则」jieba 切两词（词典无此复合词）——EN-59 当时的「透传」未命中
         // 即源于此：tsv 只有词粒度 token，子串匹配靠 cut_for_search 变体补齐
         assert_eq!(tokenize("透传原则"), vec!["透传", "原则"]);
     }

@@ -70,6 +70,8 @@ pub struct WriteSessionRequest {
     /// 会话级敏感标记：整段对话含隐私（医疗/感情/财务），蒸馏产物自动继承 sensitive
     #[serde(default)]
     pub sensitive: bool,
+    /// 客户端幂等键（可选）：同一 ref 重复调用返回原会话不新建——网络重试防重
+    pub client_ref: Option<String>,
 }
 fn default_distill() -> String {
     "auto".into()
@@ -86,8 +88,21 @@ pub async fn write_session(
 ) -> Result<(StatusCode, Json<SessionDto>), ApiError> {
     require_memory(&principal)?;
     let agent = req.agent.unwrap_or_else(|| "default".into());
+    // P001 身份归因：key 写入自动带 key_id + key 名快照（key 删除不丢归因）
+    let (api_key_id, key_name_snapshot) = match &principal.0 {
+        Principal::ApiKey { key_id, name, .. } => (Some(*key_id), Some(name.as_str())),
+        Principal::Admin => (None, None),
+    };
     let s = svc(&state)
-        .write_session(&agent, req.turns, &req.distill, req.sensitive)
+        .write_session_identity(
+            &agent,
+            req.turns,
+            &req.distill,
+            req.sensitive,
+            api_key_id,
+            key_name_snapshot,
+            req.client_ref.as_deref(),
+        )
         .await
         .map_err(me)?;
     Ok((StatusCode::CREATED, Json(s)))
@@ -131,6 +146,7 @@ pub struct ListSessionsParams {
 }
 
 #[utoipa::path(get, path = "/memory/sessions", params(ListSessionsParams),
+    operation_id = "list_memory_sessions",
     responses((status = 200, body = [SessionDto])))]
 pub async fn list_sessions(
     principal: axum::Extension<Principal>,
@@ -1403,6 +1419,10 @@ pub async fn get_kv(
         .kv_get(&key)
         .await
         .map_err(|e| ApiError::BadRequest(e.to_string()))?
-        .ok_or_else(|| ApiError::NotFound(format!("KV {key:?} 不存在——用 GET /memory/kv?q= 子串检索确认 key")))?;
+        .ok_or_else(|| {
+            ApiError::NotFound(format!(
+                "KV {key:?} 不存在——用 GET /memory/kv?q= 子串检索确认 key"
+            ))
+        })?;
     Ok(Json(row))
 }

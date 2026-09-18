@@ -738,6 +738,15 @@ function FilePane({ projectId, name, onChanged }: { projectId: string; name: str
               <Button
                 size="sm"
                 variant="outline"
+                onClick={() =>
+                  window.open(`/file-view?project=${projectId}&name=${encodeURIComponent(file.name)}`, '_blank')
+                }
+              >
+                全屏打开
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => {
                   setFileName(file.name)
                   setContent(file.content)

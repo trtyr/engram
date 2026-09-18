@@ -34,8 +34,12 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
     let (sessions, atoms, scenarios, persona, entities, relations) =
         repo::export_memory(pool).await?;
     let skills = repo::export_skills_with_files(pool).await?;
+    let wiki_libraries = repo::export_wiki_libraries(pool).await?;
     let wiki_pages = repo::export_wiki_pages(pool).await?;
     let (projects, locations, docs) = repo::export_projects(pool).await?;
+    let todos = repo::export_todos(pool).await?;
+    let kv_entries = repo::export_kv_entries(pool).await?;
+    let wiki_promotions = repo::export_wiki_promotions(pool).await?;
 
     let skills_json: Vec<Value> = skills
         .into_iter()
@@ -53,16 +57,22 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
             "sessions": sessions.len(), "atoms": atoms.len(),
             "scenarios": scenarios.len(), "persona": persona.len(),
             "entities": entities.len(), "relations": relations.len(),
-            "skills": skills_json.len(), "wiki_pages": wiki_pages.len(),
+            "skills": skills_json.len(), "wiki_libraries": wiki_libraries.len(),
+    "wiki_pages": wiki_pages.len(),
             "projects": projects.len(), "locations": locations.len(), "docs": docs.len(),
+            "todos": todos.len(), "kv_entries": kv_entries.len(),
+            "wiki_promotions": wiki_promotions.len(),
         },
         "memory": {
             "sessions": sessions, "atoms": atoms, "scenarios": scenarios,
             "persona": persona, "entities": entities, "relations": relations,
         },
         "skills": skills_json,
-        "wiki": { "pages": wiki_pages },
+        "wiki": { "libraries": wiki_libraries, "pages": wiki_pages },
         "projects": { "projects": projects, "locations": locations, "docs": docs },
+        "todos": todos,
+        "kv_entries": kv_entries,
+        "wiki_promotions": wiki_promotions,
     }))
 }
 
@@ -115,13 +125,37 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
     for it in each(data.get("memory"), "sessions") {
         c_session.merge(DomainCount::bump(repo::import_session(pool, &it).await?));
     }
-    let mut c_atom = DomainCount::default();
-    for it in each(data.get("memory"), "atoms") {
-        c_atom.merge(DomainCount::bump(repo::import_atom(pool, &it).await?));
-    }
+    // 外键序：scenarios 先于 atoms（atoms.scenario_id → scenarios）——顺序颠倒会在
+    // 干净库导入时违反 atoms_scenario_id_fkey（公网加固 t9 往返演练抓出并修复）
     let mut c_scenario = DomainCount::default();
     for it in each(data.get("memory"), "scenarios") {
         c_scenario.merge(DomainCount::bump(repo::import_scenario(pool, &it).await?));
+    }
+    // superseded_by 是表内自引用 FK（atoms → atoms.id）——行序随机，插入期置 NULL，
+    // 全量入库后统一回填（公网加固 t9 往返演练抓出）
+    let mut c_atom = DomainCount::default();
+    for it in each(data.get("memory"), "atoms") {
+        let mut row = it.clone();
+        if let Some(obj) = row.as_object_mut() {
+            obj.insert("superseded_by".into(), serde_json::Value::Null);
+        }
+        c_atom.merge(DomainCount::bump(repo::import_atom(pool, &row).await?));
+    }
+    for it in each(data.get("memory"), "atoms") {
+        let superseded_by = it
+            .get("superseded_by")
+            .and_then(|x| x.as_str())
+            .unwrap_or("");
+        if superseded_by.is_empty() {
+            continue;
+        }
+        let (Ok(id), Ok(target)) = (
+            uuid::Uuid::parse_str(it.get("id").and_then(|x| x.as_str()).unwrap_or("")),
+            uuid::Uuid::parse_str(superseded_by),
+        ) else {
+            continue;
+        };
+        repo::backfill_atom_superseded_by(pool, id, target).await?;
     }
     let mut c_persona = DomainCount::default();
     for it in each(data.get("memory"), "persona") {
@@ -151,6 +185,25 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
         files_imported += files_n;
     }
 
+    // wiki 多库迁移（2026-09-18 数据同步线补齐）：先导库行建「包内 library_id → 目标库 id」
+    // 映射，页面按映射挂原库；旧包无 libraries 字段时页面 fallback main（v1 包兼容）。
+    let mut lib_map: std::collections::HashMap<String, uuid::Uuid> =
+        std::collections::HashMap::new();
+    let mut c_wikilib = DomainCount::default();
+    for it in each(data.get("wiki"), "libraries") {
+        let src_id = it
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        if src_id.is_empty() {
+            continue;
+        }
+        let (mapped, imported) = repo::import_wiki_library(pool, &it).await?;
+        lib_map.insert(src_id, mapped);
+        c_wikilib.merge(DomainCount::bump(imported));
+    }
+    let main_lib = repo::main_library_id(pool).await?;
     let mut c_wiki = DomainCount::default();
     for it in each(data.get("wiki"), "pages") {
         // EN-63：导入页 tsv 按 wiki 口径现算（slug+title+content、wiki 分词变体）
@@ -160,7 +213,14 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
             it.get("title").and_then(|x| x.as_str()).unwrap_or(""),
             it.get("content").and_then(|x| x.as_str()).unwrap_or(""),
         ));
-        c_wiki.merge(DomainCount::bump(repo::import_wiki_page(pool, &it, &tsv_text).await?));
+        let target_lib = it
+            .get("library_id")
+            .and_then(|x| x.as_str())
+            .and_then(|s| lib_map.get(s).copied())
+            .unwrap_or(main_lib);
+        c_wiki.merge(DomainCount::bump(
+            repo::import_wiki_page(pool, &it, &tsv_text, target_lib).await?,
+        ));
     }
 
     let mut c_project = DomainCount::default();
@@ -180,6 +240,28 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
         ));
     }
 
+    // todos / kv / promotions 域（t9 补齐 v1 覆盖缺口；promotions 的 library 映射目标 main 库）
+    let todo_items = data
+        .get("todos")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let (t_imp, t_skip) = repo::import_todos(pool, &todo_items).await?;
+
+    let kv_items = data
+        .get("kv_entries")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let (kv_imp, kv_skip) = repo::import_kv_entries(pool, &kv_items).await?;
+
+    let promo_items = data
+        .get("wiki_promotions")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let (p_imp, p_skip) = repo::import_wiki_promotions(pool, &promo_items).await?;
+
     Ok(json!({
         "format": "engram-transfer",
         "memory": {
@@ -188,11 +270,14 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
             "entities": c_entity.to_json(), "relations": c_relation.to_json(),
         },
         "skills": { "skills": c_skill.to_json(), "files": { "imported": files_imported } },
-        "wiki": { "pages": c_wiki.to_json() },
+        "wiki": { "libraries": c_wikilib.to_json(), "pages": c_wiki.to_json() },
         "projects": {
             "projects": c_project.to_json(), "locations": c_location.to_json(),
             "docs": c_doc.to_json(),
         },
+        "todos": { "imported": t_imp, "skipped": t_skip },
+        "kv_entries": { "imported": kv_imp, "skipped": kv_skip },
+        "wiki_promotions": { "imported": p_imp, "skipped": p_skip },
         "note": "冲突（id/slug/name 已存在）按跳过处理；embedding 未迁移——\
                  memory 用 POST /memory/reembed、wiki 用文档域 re-embed 补齐",
     }))
@@ -300,4 +385,129 @@ pub async fn pull_from(
         "bundle_counts": counts,
         "imported": report,
     }))
+}
+
+// ---------- 双向同步转发（2026-09-18 数据同步线：CLI sync 的服务端形态） ----------
+//
+// 浏览器跨域无法直调目标实例，由本机服务端转发：push = 本地 export → POST 目标 import；
+// pull = GET 目标 export → 灌本地 import。目标凭证用 migrate scope key（Bearer 直连），
+// admin 密码不过目标网络。目标非 loopback 强制 https（allow_insecure 逃生）。
+
+/// 校验并归一目标地址：非 loopback 且非 https 时拒绝（allow_insecure 逃生）。返回去尾斜杠地址。
+pub fn check_sync_target(
+    target: &str,
+    allow_insecure: bool,
+) -> std::result::Result<String, String> {
+    let raw = target.trim().trim_end_matches('/');
+    let (scheme, rest) = match raw.split_once("://") {
+        Some((s, r)) => (s.to_ascii_lowercase(), r),
+        None => return Err("target_url 必须含 scheme（http(s)://）".into()),
+    };
+    let host_end = rest.find(['/', ':']).unwrap_or(rest.len());
+    let host = &rest[..host_end];
+    let loopback = matches!(host, "127.0.0.1" | "localhost" | "::1");
+    if scheme != "https" && !loopback && !allow_insecure {
+        return Err(format!(
+            "目标 {raw} 非 loopback 且为 http 明文——公网同步必须走 TLS；ssh 隧道后可用 http://127.0.0.1:<port>；确要明文请传 allow_insecure=true"
+        ));
+    }
+    Ok(raw.to_string())
+}
+
+/// 双向同步转发结果：源包分域计数 +（非 dry_run 时）目标导入报告。
+pub struct SyncOutcome {
+    pub direction: &'static str,
+    pub source_counts: Value,
+    pub dry_run: bool,
+    pub import_report: Option<Value>,
+}
+
+/// 双向同步转发。dry_run=true 时 push 不连目标（仅本地导出对比）、pull 只拉不写。
+pub async fn sync_transfer(
+    pool: &PgPool,
+    direction: &str,
+    target_base: &str,
+    token: &str,
+    allow_insecure: bool,
+    dry_run: bool,
+) -> Result<SyncOutcome> {
+    if direction != "push" && direction != "pull" {
+        return Err(TransferError::BadRequest(
+            "direction 只支持 push/pull".into(),
+        ));
+    }
+    let base = check_sync_target(target_base, allow_insecure).map_err(TransferError::BadRequest)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| TransferError::Storage(format!("HTTP 客户端构建失败: {e}")))?;
+
+    match direction {
+        "push" => {
+            let bundle = export_bundle(pool).await?;
+            let source_counts = bundle.get("counts").cloned().unwrap_or(Value::Null);
+            if dry_run {
+                return Ok(SyncOutcome {
+                    direction: "push",
+                    source_counts,
+                    dry_run: true,
+                    import_report: None,
+                });
+            }
+            let resp = client
+                .post(format!("{base}/migrate/import"))
+                .bearer_auth(token)
+                .json(&bundle)
+                .send()
+                .await
+                .map_err(|e| TransferError::Storage(format!("目标不可达: {e}")))?;
+            let status = resp.status();
+            let body: Value = resp.json().await.unwrap_or(Value::Null);
+            if !status.is_success() {
+                return Err(TransferError::Storage(format!(
+                    "目标导入失败（HTTP {status}）: {}",
+                    serde_json::to_string(&body).unwrap_or_default()
+                )));
+            }
+            Ok(SyncOutcome {
+                direction: "push",
+                source_counts,
+                dry_run: false,
+                import_report: Some(body),
+            })
+        }
+        "pull" => {
+            let resp = client
+                .get(format!("{base}/migrate/export"))
+                .bearer_auth(token)
+                .send()
+                .await
+                .map_err(|e| TransferError::Storage(format!("目标不可达: {e}")))?;
+            let status = resp.status();
+            let bundle: Value = resp.json().await.unwrap_or(Value::Null);
+            if !status.is_success() {
+                return Err(TransferError::Storage(format!(
+                    "目标导出失败（HTTP {status}）: {}",
+                    serde_json::to_string(&bundle).unwrap_or_default()
+                )));
+            }
+            let source_counts = bundle.get("counts").cloned().unwrap_or(Value::Null);
+            if dry_run {
+                return Ok(SyncOutcome {
+                    direction: "pull",
+                    source_counts,
+                    dry_run: true,
+                    import_report: None,
+                });
+            }
+            let report = import_bundle(pool, &bundle).await?;
+            Ok(SyncOutcome {
+                direction: "pull",
+                source_counts,
+                dry_run: false,
+                import_report: Some(report),
+            })
+        }
+        _ => unreachable!("direction 已在入口校验"),
+    }
 }

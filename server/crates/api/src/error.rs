@@ -46,6 +46,9 @@ pub enum ApiError {
     /// 已认证但权限不足（403）
     #[error("{0}")]
     Forbidden(String),
+    /// 触发速率限制（429；可重试——等冷却窗口）
+    #[error("尝试过于频繁，请稍后再试")]
+    TooManyRequests,
     /// 数据库故障（可重试）
     #[error("存储层暂时不可用")]
     Database(#[source] engram_storage::StoreError),
@@ -65,6 +68,7 @@ impl ApiError {
             ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict", false),
             ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized", false),
             ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden", false),
+            ApiError::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests", true),
             ApiError::Database(_) => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", true),
             ApiError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", true),
             ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", false),

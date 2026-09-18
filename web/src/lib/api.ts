@@ -27,6 +27,16 @@ export function clearToken() {
   localStorage.removeItem('am_token')
 }
 
+/** 登出：删掉当前后端会话（失败不阻塞本地登出——token 照旧清除）。 */
+export function logoutSession(): void {
+  const t = getToken()
+  if (!t) return
+  fetch(`${BASE}/auth/logout`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${t}` },
+  }).catch(() => {})
+}
+
 async function req<T>(method: string, path: string, body?: unknown, raw = false): Promise<T> {
   const headers: Record<string, string> = {}
   if (getToken()) headers.authorization = `Bearer ${getToken()}`
@@ -354,6 +364,8 @@ export interface AdminSessionDto {
   created_at: string
   expires_at: string
   last_used_at: string | null
+  ip: string | null
+  user_agent: string | null
   current: boolean
 }
 /** 调用图归一结果（GET /codegraph/projects/{id}/graph）。mode: symbol=符号子图 / files=文件级全图 */

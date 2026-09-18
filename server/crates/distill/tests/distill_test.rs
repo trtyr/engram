@@ -170,8 +170,9 @@ async fn extract_with_retry_and_full_refs() {
     );
     assert!(dark.2, "confidence 0.5 应标 needs_review");
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 仲裁三分支（真实 id）+ organize 归组 + persona 版本化：一条龙。
@@ -344,8 +345,9 @@ async fn arbitrate_branches_organize_and_persona_history() {
         "evidence 指向场景: {evidence}"
     );
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 防抖：同窗口两次触发复用同一任务；到期执行取走全部 pending 会话。
@@ -375,8 +377,9 @@ async fn debounce_bucket_shares_job() {
         .unwrap();
     assert_ne!(j1.id, j3.id);
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// B3：分面级证据链——不同分面 evidence_refs 只含各自依据的场景，并打通到 L0 会话。
@@ -492,8 +495,9 @@ async fn persona_evidence_per_aspect() {
             .unwrap();
     assert_eq!(pv, "2", "persona prompt 升版 v2");
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 #[tokio::test]
 async fn arbitrate_null_embedding_falls_back_to_fts() {
@@ -562,8 +566,9 @@ async fn arbitrate_null_embedding_falls_back_to_fts() {
         .unwrap();
     assert_eq!(hits, 2, "靶子 hit_count 1→2");
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 实体档案自动生成：consolidate 对高密度滞后实体 LLM 聚合摘要；
@@ -689,8 +694,9 @@ async fn consolidate_generates_entity_portraits() {
         .unwrap();
     assert_eq!(wang_summary, "已有新鲜档案", "摘要新鲜应跳过");
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 实体抽取挂链（社交记忆）：atoms 带 entities 字段 → 原子、实体、关联三表齐落；
@@ -769,8 +775,9 @@ async fn extract_creates_and_links_entities() {
     .unwrap();
     assert_eq!(zhang_density, 2);
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 会话级敏感标记：session sensitive=true → 蒸馏产物自动继承 sensitive。
@@ -814,8 +821,9 @@ async fn extract_inherits_session_sensitive() {
         .unwrap();
     assert_eq!(sensitive_n, 1, "敏感会话的产物应自动 sensitive");
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 圈子强化 P3：extract 抽取类型化关系（顶层 relations → entity_relations）。
@@ -862,8 +870,9 @@ async fn extract_creates_relations() {
     .unwrap();
     assert_eq!(rel_n, 1, "extract 应抽出并落库 1 条 member_of 关系");
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 关系回溯：存量实体（无 session 可重放）由 consolidate 直接抽关系。
@@ -935,8 +944,9 @@ async fn consolidate_backfills_relations_for_stale_entities() {
     .unwrap();
     assert_eq!(rel_n, 1, "关系回溯应抽出并落库 1 条 member_of 关系");
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 记忆域重嵌：NULL 向量的原子（active）与场景批量补嵌；archived 原子不动。
@@ -994,8 +1004,9 @@ async fn reembed_memory_fills_missing_vectors() {
     .unwrap();
     assert_eq!(after, (1, 0), "archived 原子应保持无向量，其余补齐");
 
-    env.handle.shutdown();
-    env.handle.join().await;
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// 议题二：extract 把 LLM 解析出的相对时间（以 prompt 日期锚换算）落入 occurred_at/valid_until。
