@@ -174,9 +174,9 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         {
             Ok(out) => {
                 if let Some(rels) = out.get("relations").and_then(|r| r.as_array()) {
-                    let name_id: std::collections::HashMap<&str, Uuid> = rel_entities
+                    let mut name_id: std::collections::HashMap<String, Uuid> = rel_entities
                         .iter()
-                        .map(|(id, name, _)| (name.as_str(), *id))
+                        .map(|(id, name, _)| (name.clone(), *id))
                         .collect();
                     for r in rels {
                         let from = r.get("from").and_then(|v| v.as_str()).map(|s| s.trim());
@@ -185,6 +185,12 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                             .get("rel_type")
                             .and_then(|v| v.as_str())
                             .unwrap_or("related_to");
+                        // 常识边层级模型（收录哲学线 task-8）：source_hint 区分
+                        // 记忆明示（distill）与世界常识（world_knowledge，第 2 层语境边）
+                        let source = match r.get("source_hint").and_then(|v| v.as_str()) {
+                            Some("world_knowledge") => "world_knowledge",
+                            _ => "distill",
+                        };
                         if let (Some(f), Some(t)) = (from, to)
                             && !f.is_empty()
                             && !t.is_empty()
@@ -192,18 +198,78 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                                 rel_type,
                                 "member_of" | "located_in" | "works_on" | "part_of" | "related_to"
                             )
-                            && let (Some(&fid), Some(&tid)) = (name_id.get(f), name_id.get(t))
-                            && fid != tid
+                            && let Some(&fid) = name_id.get(f)
                         {
+                            // to 解析：列表内实体直取；列表外 → 第 2 层新实体（常识边拉入语境，
+                            // 一跳为止——它没有记忆挂链，图上仅通过常识边可见，永不升级为记忆）
+                            let tid = match name_id.get(t) {
+                                Some(&id) => id,
+                                None => {
+                                    let to_kind = r
+                                        .get("to_kind")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("topic");
+                                    if !matches!(
+                                        to_kind,
+                                        "person" | "project" | "topic" | "group" | "place"
+                                    ) {
+                                        continue;
+                                    }
+                                    let existing: Option<Uuid> = sqlx::query_scalar(
+                                        "SELECT id FROM entities \
+                                         WHERE name = $1 AND kind = $2 AND merged_into IS NULL LIMIT 1",
+                                    )
+                                    .bind(t)
+                                    .bind(to_kind)
+                                    .fetch_optional(pool)
+                                    .await
+                                    .unwrap_or(None);
+                                    match existing {
+                                        Some(id) => {
+                                            name_id.insert(t.to_string(), id);
+                                            id
+                                        }
+                                        None => {
+                                            let new_id = Uuid::now_v7();
+                                            match sqlx::query(
+                                                "INSERT INTO entities (id, name, kind) \
+                                                 VALUES ($1, $2, $3)",
+                                            )
+                                            .bind(new_id)
+                                            .bind(t)
+                                            .bind(to_kind)
+                                            .execute(pool)
+                                            .await
+                                            {
+                                                Ok(_) => {
+                                                    name_id.insert(t.to_string(), new_id);
+                                                    new_id
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        error = %e,
+                                                        "第 2 层实体落库失败（跳过该关系）"
+                                                    );
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            };
+                            if fid == tid {
+                                continue;
+                            }
                             match sqlx::query(
                                 "INSERT INTO entity_relations (id, from_id, to_id, rel_type, weight, source) \
-                                 VALUES ($1, $2, $3, $4, 1, 'distill') \
+                                 VALUES ($1, $2, $3, $4, 1, $5) \
                                  ON CONFLICT (from_id, to_id, rel_type) DO UPDATE SET weight = entity_relations.weight + 1, updated_at = now()",
                             )
                             .bind(Uuid::now_v7())
                             .bind(fid)
                             .bind(tid)
                             .bind(rel_type)
+                            .bind(source)
                             .execute(pool)
                             .await
                             {

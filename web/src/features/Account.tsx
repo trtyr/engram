@@ -284,7 +284,7 @@ function uaLabel(ua: string | null): string {
   return os ? `${browser} · ${os}` : browser
 }
 
-/** scope 中文标签（与后端 SCOPES 十项对齐）。 */
+/** scope 中文标签（与后端 SCOPES 十一项对齐）。 */
 const SCOPE_LABELS: Record<string, string> = {
   memory: '记忆',
   wiki: 'Wiki',
@@ -296,6 +296,7 @@ const SCOPE_LABELS: Record<string, string> = {
   erase: '擦除（不可逆删除）',
   cron: '节律心跳',
   migrate: '迁移同步',
+  original: '原件（精确值读写）',
 }
 
 function Keys() {

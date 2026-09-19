@@ -122,15 +122,23 @@ export default function EntityGalaxy({
     // 边：无向细线、柔和色；同一对只画一条（graphology single-graph 同对 addEdge 会抛错）
     const edgeKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
     const seen = new Set<string>()
-    const addEdge = (a: string, b: string, weight: number) => {
+    const addEdge = (a: string, b: string, weight: number, source?: string) => {
       if (!g.hasNode(a) || !g.hasNode(b)) return
       const k = edgeKey(a, b)
       if (seen.has(k)) return
       seen.add(k)
-      g.addEdge(a, b, { size: Math.min(0.5 + weight * 0.4, 2), color: theme.current.border, weight })
+      // 常识边（world_knowledge，收录哲学线层级模型）：LLM 世界知识补的语境边——
+      // 半透明细线与记忆边视觉分层；第 2 层实体（backfill 拉入、无记忆挂链）天然止步，
+      // BFS≤2 剪枝由数据流性质保证（常识边永不上升级为记忆边）
+      const isKnowledge = source === 'world_knowledge'
+      g.addEdge(a, b, {
+        size: isKnowledge ? Math.min(0.3 + weight * 0.2, 1) : Math.min(0.5 + weight * 0.4, 2),
+        color: isKnowledge ? `${theme.current.border}55` : theme.current.border,
+        weight,
+      })
     }
     for (const e of graph.edges) addEdge(e.a, e.b, e.weight)
-    for (const r of graph.relations) addEdge(r.from_id, r.to_id, r.weight)
+    for (const r of graph.relations) addEdge(r.from_id, r.to_id, r.weight, r.source)
 
     // hover/drag 状态：邻居高亮 + 非邻淡化（Obsidian 标志性交互）
     const state = { hover: null as string | null, drag: null as string | null }

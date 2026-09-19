@@ -79,6 +79,18 @@ fn require_memory(principal: &Principal) -> Result<(), rmcp::ErrorData> {
     }
 }
 
+/// 原件（精确值：凭据/序列号/IP:端口/账号 ID）读写权——从 memory 独立的 scope。
+/// 签 key 时「给不给原件」是显式决策：memory scope 不再顺手可读凭据（收录哲学线）。
+fn require_original(principal: &Principal) -> Result<(), rmcp::ErrorData> {
+    match principal.domain_access("original") {
+        DomainAccess::None => Err(mcp_err(
+            ErrorCode::INVALID_REQUEST,
+            "缺少 original scope（原件：凭据/序列号等精确值读写）——请用带 original scope 的 amk_ key 连接 MCP",
+        )),
+        _ => Ok(()),
+    }
+}
+
 fn require_project(principal: &Principal) -> Result<(), rmcp::ErrorData> {
     match principal.domain_access("project") {
         DomainAccess::None => Err(mcp_err(
@@ -786,6 +798,61 @@ pub struct RememberParams {
         description = "可选：仅支持 fact——用户亲口明示的事实直写落库（不走蒸馏，原话保真）。缺省走蒸馏（默认 inference）。"
     )]
     pub strength: Option<String>,
+}
+
+/// 更正记忆（快路径取代链）：AI 记忆管家——用户说「你记错了」时使用。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CorrectParams {
+    /// 目标原子 id（先 search 定位；仅 active 且非敏感原子可被取代）
+    #[schemars(
+        description = "要更正的旧原子 id——先 search 定位。仅 active 且非敏感原子可被取代；更正后旧原子标记 superseded 并指向本条新事实（取代链留痕）。"
+    )]
+    pub target_id: String,
+    /// 更正后的新事实（一句话，≤120 字）
+    #[schemars(
+        description = "更正后的新事实，一句话 ≤120 字（如「用户现居杭州」）。新原子 active，旧原子自动 superseded。"
+    )]
+    pub text: String,
+}
+
+/// 待审复核处置（AI 代管复核）：confirm 摘标记 / discard 归档。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ReviewActionParams {
+    /// 待审原子 id（仅 needs_review=true 的条目可处置）
+    #[schemars(
+        description = "要处置的待审原子 id。仅 needs_review=true 的条目可处置——正常记忆对 AI 只读。"
+    )]
+    pub atom_id: String,
+}
+
+/// 编辑画像分面（AI 记忆管家）：version+1 落钉，蒸馏不再覆盖该分面。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct PersonaEditParams {
+    /// 分面名（七值之一）
+    #[schemars(
+        description = "画像分面：identity | preferences | skills | constraints | communication_style | goals | routines。"
+    )]
+    pub aspect: String,
+    /// 分面的完整新内容（1~4000 字，自包含描述——落库后蒸馏不再覆盖）
+    #[schemars(
+        description = "该分面的完整新版本内容（1~4000 字，中文自包含描述）。落库即钉住（manually_edited）——蒸馏产出对该分面不再生效。"
+    )]
+    pub content: String,
+}
+
+/// 手动触发蒸馏链（AI 记忆管家）：撞车守卫——正在蒸馏时只提示不重复投递。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct DistillParams {
+    /// true 时附带 consolidate 全量整理
+    #[schemars(
+        description = "可选：true 时在蒸馏链外附带 consolidate 全量整理（近重复合并）。缺省 false。"
+    )]
+    pub full: Option<bool>,
+    /// 动作模式：distill（默认）| rebuild（画像全量重建）| sleep（预留——内置节律上线后开放）
+    #[schemars(
+        description = "可选动作模式：\"distill\"（默认，触发蒸馏链）/ \"rebuild\"（画像全量重建——以全部场景重算所有非钉住分面，记忆清理/修订后用）/ \"sleep\"（记忆巩固——内置节律上线后开放，当前返回未上线提示）。"
+    )]
+    pub mode: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -1569,7 +1636,15 @@ impl EngramMcpServer {
         params: Parameters<MemoryKvPutParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
-        require_memory(&p)?;
+        require_original(&p)?;
+        // :ro 变体只读——kv_put 是写动作，original 域的写拒绝在 handler 内做
+        //（check_action_access 对 memory 域查的是 memory 的域状态，看不到 original:ro）
+        if p.domain_access("original") == DomainAccess::ReadOnly {
+            return Err(mcp_err(
+                ErrorCode::INVALID_REQUEST,
+                "权限不足：key 的 original scope 是只读变体（:ro）——原件写操作（kv_put）需要完整 original scope",
+            ));
+        }
         let kp = params.0;
         let row = self
             .svc()
@@ -1610,7 +1685,7 @@ impl EngramMcpServer {
         params: Parameters<MemoryKvGetParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
-        require_memory(&p)?;
+        require_original(&p)?;
         let row = self
             .svc()
             .kv_get(&params.0.key)
@@ -1632,7 +1707,7 @@ impl EngramMcpServer {
         params: Parameters<MemoryKvListParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
-        require_memory(&p)?;
+        require_original(&p)?;
         let rows = self
             .svc()
             .kv_list(params.0.limit.unwrap_or(50))
@@ -1648,7 +1723,7 @@ impl EngramMcpServer {
         params: Parameters<MemoryKvSearchParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
-        require_memory(&p)?;
+        require_original(&p)?;
         let rows = self
             .svc()
             .kv_search(&params.0.query, params.0.limit.unwrap_or(20))
@@ -1890,6 +1965,145 @@ impl EngramMcpServer {
                 format!("mode 只支持 void / erase / restore，收到 {other:?}"),
             )),
         }
+    }
+
+    /// 更正记忆（快路径取代链）：用户说「你记错了，是 B 不是 A」时使用。
+    ///
+    /// 先 search 定位旧原子，再 correct(target_id, text)。单事务取代链：
+    /// 新原子 active（继承旧条目的 kind，confidence 0.95/fact/user_stated），
+    /// 旧原子 superseded 并指向新条目——历史可溯，检索立即生效。
+    /// 治理：仅 active 且非敏感原子可被取代；更正对话照常写会话（蒸馏重抽会被仲裁判重复）。
+    async fn memory_correct(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<CorrectParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let cp = params.0;
+        let target_id = Uuid::parse_str(&cp.target_id).map_err(|_| {
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "target_id 不是合法 UUID——先 search 拿原子 id",
+            )
+        })?;
+        let a = self
+            .svc()
+            .correct_atom(target_id, &cp.text)
+            .await
+            .map_err(from_memory)?;
+        let mut v = serde_json::to_value(&a).unwrap_or(serde_json::json!({}));
+        v["hint"] = json!("已更正（取代链留痕）——旧原子 superseded 指向本条，检索立即生效");
+        ok_json(v)
+    }
+
+    /// 待审复核通过：摘掉 needs_review 标记（AI 代管复核）。
+    ///
+    /// 仅可处置 needs_review=true 的条目；处置留痕。批量复核场景：
+    /// 用户说「把待审的过一遍」→ list_atoms(needs_review=true) 逐条判断后 confirm。
+    async fn memory_confirm(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<ReviewActionParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let rp = params.0;
+        let id = Uuid::parse_str(&rp.atom_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "atom_id 不是合法 UUID"))?;
+        let a = self.svc().confirm_review(id).await.map_err(from_memory)?;
+        let mut v = serde_json::to_value(&a).unwrap_or(serde_json::json!({}));
+        v["hint"] = json!("已复核通过——待审标记已摘除");
+        ok_json(v)
+    }
+
+    /// 待审复核丢弃：归档该条（AI 代管复核）。
+    ///
+    /// 仅可处置 needs_review=true 的条目。归档后检索/上下文不再返回（留痕可溯）。
+    async fn memory_discard(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<ReviewActionParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let rp = params.0;
+        let id = Uuid::parse_str(&rp.atom_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "atom_id 不是合法 UUID"))?;
+        let a = self.svc().discard_review(id).await.map_err(from_memory)?;
+        let mut v = serde_json::to_value(&a).unwrap_or(serde_json::json!({}));
+        v["hint"] = json!("已丢弃（archived）——检索与上下文不再返回，留痕可溯");
+        ok_json(v)
+    }
+
+    /// 编辑画像分面（AI 记忆管家）：用户说「画像里加上/改掉 XXX」时使用。
+    ///
+    /// version+1 落钉（manually_edited=true）——蒸馏产出对该分面落库前被守卫丢弃，
+    /// 即编辑后蒸馏不会再覆盖。分面仅限七值之一；解冻走 Web 解钉（persona_unpin）。
+    async fn memory_persona_edit(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<PersonaEditParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let ep = params.0;
+        const ASPECTS: [&str; 7] = [
+            "identity",
+            "preferences",
+            "skills",
+            "constraints",
+            "communication_style",
+            "goals",
+            "routines",
+        ];
+        if !ASPECTS.contains(&ep.aspect.as_str()) {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("aspect 仅限 {}（收到 {}）", ASPECTS.join("/"), ep.aspect),
+            ));
+        }
+        let actor = match &p {
+            engram_core::auth::Principal::Admin => "admin".to_string(),
+            engram_core::auth::Principal::ApiKey { name, .. } => format!("key:{name}"),
+        };
+        let v = self
+            .svc()
+            .persona_edit(&ep.aspect, &ep.content, &actor)
+            .await
+            .map_err(from_memory)?;
+        let mut out = serde_json::to_value(&v).unwrap_or(serde_json::json!({}));
+        out["hint"] =
+            json!("分面已编辑并钉住（manually_edited）——蒸馏产出对该分面不再生效；解冻走 Web 解钉");
+        ok_json(out)
+    }
+
+    /// 手动触发蒸馏链（AI 记忆管家）：撞车守卫——正在蒸馏时只提示不重复投递。
+    ///
+    /// 用户说「触发一下蒸馏」「把积压的蒸馏了」时使用。running 的 extract_atoms
+    /// 存在时返回 already_running（不重复入队）；mode=sleep 为睡眠巩固预留位。
+    async fn memory_distill(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<DistillParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let dp = params.0;
+        let actor = match &p {
+            engram_core::auth::Principal::Admin => "admin".to_string(),
+            engram_core::auth::Principal::ApiKey { name, .. } => format!("key:{name}"),
+        };
+        let v = self
+            .svc()
+            .trigger_distill_manual(
+                dp.full.unwrap_or(false),
+                dp.mode.as_deref().unwrap_or("distill"),
+                &actor,
+            )
+            .await
+            .map_err(from_memory)?;
+        ok_json(v)
     }
 
     /// 检索实体（用户记忆的横向透镜：人物/项目/主题/群组/地点）。
@@ -2262,10 +2476,10 @@ impl EngramMcpServer {
             .map_err(from_project)?;
         let mut v = serde_json::to_value(&f).unwrap_or(serde_json::json!({}));
         // EN-68②：bytes = UTF-8 字节数（content_chars 是字符数，中文 1:3 差异大）
-        if let Some(obj) = v.as_object_mut() {
-            if let Some(c) = obj.get("content").and_then(|x| x.as_str()) {
-                obj.insert("bytes".into(), serde_json::json!(c.len()));
-            }
+        if let Some(obj) = v.as_object_mut()
+            && let Some(c) = obj.get("content").and_then(|x| x.as_str())
+        {
+            obj.insert("bytes".into(), serde_json::json!(c.len()));
         }
         ok_json(v)
     }
@@ -4638,7 +4852,15 @@ impl EngramMcpServer {
         Parameters(call): Parameters<dispatch::DomainCall>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
-        require_memory(&p)?;
+        // 工具级 gate 按 action 分流（收录哲学线：原件独立）——
+        // kv_* 要求 original scope（凭据/精确值读写权，memory 不再顺手携带）；
+        // 其余动作要求 memory scope。各 handler 内部还有二次校验（防御性）。
+        const KV_ACTIONS: [&str; 4] = ["kv_put", "kv_get", "kv_list", "kv_search"];
+        if KV_ACTIONS.contains(&call.action.as_str()) {
+            require_original(&p)?;
+        } else {
+            require_memory(&p)?;
+        }
         if call.action == "help" {
             let cfg = load_config(&self.state.pool).await;
             return ok_json(dispatch::render_manual("memory", &cfg.disabled_tools));
@@ -4662,6 +4884,41 @@ impl EngramMcpServer {
                 self.memory_remember(
                     ctx,
                     Parameters(dispatch::from_args("memory", "remember", call.args)?),
+                )
+                .await
+            }
+            "correct" => {
+                self.memory_correct(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "correct", call.args)?),
+                )
+                .await
+            }
+            "confirm" => {
+                self.memory_confirm(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "confirm", call.args)?),
+                )
+                .await
+            }
+            "discard" => {
+                self.memory_discard(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "discard", call.args)?),
+                )
+                .await
+            }
+            "persona_edit" => {
+                self.memory_persona_edit(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "persona_edit", call.args)?),
+                )
+                .await
+            }
+            "distill" => {
+                self.memory_distill(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "distill", call.args)?),
                 )
                 .await
             }
@@ -5653,7 +5910,11 @@ impl ServerHandler for EngramMcpServer {
                         .any(|s| p.domain_access(s) != DomainAccess::None),
                     // jobs 无域 scope（对齐 HTTP：任何合法凭证可读任务——AI 轮询自己触发的任务）
                     "jobs" => true,
-                    name => p.domain_access(tool_scope(name)) != DomainAccess::None,
+                    name => {
+                        p.domain_access(tool_scope(name)) != DomainAccess::None
+                            || (name == "memory"
+                                && p.domain_access("original") != DomainAccess::None)
+                    }
                 })
             })
             .collect();

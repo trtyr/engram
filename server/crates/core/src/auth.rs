@@ -6,7 +6,7 @@
 use uuid::Uuid;
 
 /// 资产域 scope。
-pub const SCOPES: [&str; 10] = [
+pub const SCOPES: [&str; 11] = [
     "memory",
     "wiki",
     "codegraph",
@@ -17,6 +17,7 @@ pub const SCOPES: [&str; 10] = [
     "erase",
     "cron",
     "migrate",
+    "original",
 ];
 
 /// 常见误写 → 合法 scope（签发/更新入口规范化；存量 key 值不受影响）。

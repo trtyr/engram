@@ -370,6 +370,92 @@ pub async fn insert_atom(
     Ok(row)
 }
 
+/// correct 快路径（收录哲学线）：单事务「新原子 active + 旧原子 superseded+指针」。
+/// 治理守卫：target 必须 active 且非 sensitive（SQL WHERE 再守一道，core 层已前置校验）。
+/// target 不满足守卫时回滚并返回 None（core 层转译为可行动报错）。
+pub async fn correct_atom(
+    pool: &PgPool,
+    new_id: Uuid,
+    target_id: Uuid,
+    kind: &str,
+    text: &str,
+    embedding: Option<Vec<f32>>,
+    tsv: &str,
+) -> StoreResult<Option<AtomDto>> {
+    let mut tx = pool.begin().await?;
+    let new_row = sqlx::query_as::<_, AtomDto>(
+        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, source_refs, embedding, tsv, strength, source_kind) \
+         VALUES ($1, $2, $3, 0.95, 'active', false, '[]'::jsonb, $4, to_tsvector('simple', $5), 'fact', 'user_stated') RETURNING *",
+    )
+    .bind(new_id)
+    .bind(kind)
+    .bind(text)
+    .bind(embedding.map(pgvector::Vector::from))
+    .bind(tsv)
+    .fetch_one(&mut *tx)
+    .await?;
+    let updated = sqlx::query(
+        "UPDATE atoms SET status = 'superseded', superseded_by = $2, updated_at = now() \
+         WHERE id = $1 AND status = 'active' AND NOT sensitive",
+    )
+    .bind(target_id)
+    .bind(new_id)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() != 1 {
+        tx.rollback().await?;
+        return Ok(None);
+    }
+    tx.commit().await?;
+    Ok(Some(new_row))
+}
+
+/// 待审 AI 复核：confirm——摘 needs_review 标记（仅 needs_review=true 且 active 可处置）。
+pub async fn review_confirm(pool: &PgPool, id: Uuid) -> StoreResult<Option<AtomDto>> {
+    let row = sqlx::query_as::<_, AtomDto>(
+        "UPDATE atoms SET needs_review = false, updated_at = now() \
+         WHERE id = $1 AND needs_review = true AND status = 'active' RETURNING *",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// 待审 AI 复核：discard——归档（仅 needs_review=true 且 active 可处置）。
+pub async fn review_discard(pool: &PgPool, id: Uuid) -> StoreResult<Option<AtomDto>> {
+    let row = sqlx::query_as::<_, AtomDto>(
+        "UPDATE atoms SET status = 'archived', needs_review = false, updated_at = now() \
+         WHERE id = $1 AND needs_review = true AND status = 'active' RETURNING *",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// distill 触发撞车检测：是否存在 running 的 extract_atoms（手动触发防重复投递——
+/// 收录哲学线：撞车时只提示不投递，任务列表不留空跑记录）。
+pub async fn count_running_extract(pool: &PgPool) -> StoreResult<i64> {
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'extract_atoms' AND status = 'running'",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(n)
+}
+
+/// 画像全量重建撞车检测：是否存在 running 的 distill_persona（重建撞重建只提示不投递——
+/// 收录哲学线 task-10，与 count_running_extract 同模）。
+pub async fn count_running_persona(pool: &PgPool) -> StoreResult<i64> {
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'distill_persona' AND status = 'running'",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(n)
+}
+
 // ---------- KV 值保值通道（蒸馏零介入——value 逐字保存） ----------
 
 /// UPSERT：同 key 就地覆盖更新（可变状态不走取代链）。返回更新后的行。
@@ -685,7 +771,7 @@ pub async fn recent_active_atoms(pool: &PgPool, limit: i64) -> StoreResult<Vec<A
     Ok(rows)
 }
 
-/// 人审代问（议题三）：队列里的低置信项带给 AI。
+/// 待审代问（议题三）：队列里的低置信项带给 AI。
 pub async fn pending_review_atoms(pool: &PgPool) -> StoreResult<Vec<AtomDto>> {
     let rows = sqlx::query_as(
         "SELECT * FROM atoms WHERE needs_review AND status = 'active' ORDER BY created_at DESC LIMIT 5",

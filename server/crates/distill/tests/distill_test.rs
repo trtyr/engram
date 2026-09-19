@@ -161,7 +161,7 @@ async fn extract_with_retry_and_full_refs() {
     assert_eq!(rows.len(), 2);
     let (mac, dark) = (&rows[0], &rows[1]);
     assert_eq!(mac.1, "active");
-    assert!(!mac.2, "高置信不需人审");
+    assert!(!mac.2, "高置信不需待审");
     assert!(mac.3 && mac.4, "embedding 与 tsv 都应生成");
     assert!(
         mac.5.to_string().contains(&sid.to_string()),
@@ -1318,6 +1318,72 @@ async fn persona_skips_pinned_facet_on_write() {
     .await
     .unwrap_or(None);
     assert!(pref.is_some(), "未钉分面正常落库");
+}
+
+// 全量重建（收录哲学线 task-10）：payload.full_rebuild=true → 素材 = 全部场景（非增量），
+// 所有非钉住分面视为 stale 强制重写；钉住分面（manually_edited）豁免。
+#[tokio::test]
+async fn persona_full_rebuild_uses_all_scenarios_and_skips_pinned() {
+    let env = setup(vec![json!({"aspects": [
+        {"aspect": "identity", "content": "重建后的身份", "evidence_scenarios": ["S1", "S2"]},
+        {"aspect": "constraints", "content": "重建想覆盖的手编约束", "evidence_scenarios": ["S1"]}
+    ]})])
+    .await;
+
+    // constraints 钉住；identity 未钉；两个场景（full_rebuild 素材应为全部场景）
+    sqlx::query("INSERT INTO persona_aspects (id, aspect, content, version, manually_edited, created_at, updated_at) \
+                 VALUES ($1, 'constraints', '用户手编的约束', 1, true, now() - interval '8 days', now() - interval '8 days')")
+        .bind(Uuid::now_v7())
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    for (topic, summary) in [("骑行", "周末骑行"), ("读书", "技术阅读")] {
+        sqlx::query(
+            "INSERT INTO scenarios (id, topic, summary, body, atom_refs) \
+                     VALUES ($1, $2, $3, '正文', '[]'::jsonb)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(topic)
+        .bind(summary)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
+
+    env.queue
+        .enqueue(JobTemplate::new("distill_persona").with_payload(json!({
+            "full_rebuild": true,
+        })))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "distill_persona").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "{}",
+        j.error.unwrap_or_default()
+    );
+
+    // 全量素材：LLM 收到的 prompt 应含全部场景（不带 scenario_ids 也全量）
+    let sent = env.llm.sent_user.lock().unwrap().join("\n");
+    assert!(sent.contains("骑行"), "素材应含场景1");
+    assert!(sent.contains("读书"), "素材应含场景2");
+
+    // 非钉住分面重写落库；钉住分面豁免（无新非手编版本）
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM persona_aspects WHERE aspect = 'identity' AND content = '重建后的身份'",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 1, "全量重建应重写非钉住分面");
+    let pinned_new: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM persona_aspects WHERE aspect = 'constraints' AND manually_edited = false",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(pinned_new, 0, "钉住分面不得产生非手编新版本");
 }
 
 // 编辑能力：手编实体档案（manually_edited）——consolidate 档案重生成绕开。

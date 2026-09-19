@@ -37,6 +37,45 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
                 .collect()
         })
         .unwrap_or_default();
+    // 全量重建（收录哲学线 task-10）：记忆清理/结构修订后从全量场景重算所有分面——
+    // 素材 = 全部场景（非增量），所有非钉住分面视为 stale（强制重写提示生效）。
+    let full_rebuild = ctx
+        .job
+        .payload
+        .0
+        .get("full_rebuild")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if full_rebuild {
+        let pinned_now: std::collections::HashSet<String> = sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT aspect FROM ( \
+                SELECT aspect, manually_edited, \
+                       row_number() OVER (PARTITION BY aspect ORDER BY version DESC) AS rn \
+                FROM persona_aspects) t \
+             WHERE rn = 1 AND manually_edited",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+        .into_iter()
+        .collect();
+        scenario_ids = sqlx::query_scalar("SELECT id FROM scenarios ORDER BY updated_at DESC")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+        if scenario_ids.is_empty() {
+            return Ok(json!({"updated": [], "note": "全量重建：无场景素材"}));
+        }
+        stale_refresh = ASPECTS
+            .iter()
+            .map(|s| s.to_string())
+            .filter(|a| !pinned_now.contains(a))
+            .collect();
+        tracing::info!(
+            n = scenario_ids.len(),
+            "画像全量重建：全部场景重算所有非钉住分面"
+        );
+    }
     if scenario_ids.is_empty() {
         // R3 画像退休：无新素材时检查分面年龄——超 7 天未更新的分面用近期场景
         // 强制重写一次（剔除过期内容：过期的相对时间/失效计划/不再成立的习惯）。
@@ -197,7 +236,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     if !stale_refresh.is_empty() {
         writeln!(
             user,
-            "\n**注意：以下分面已超 7 天未更新，其旧版本可能含过期内容（过期的相对时间/已失效的计划/不再成立的习惯/已清除的测试数据）。必须重写这些分面：只保留能被上方场景素材直接支撑的表述，旧版本中未被素材支撑的一律删除，宁缺毋滥：{}**",
+            "\n**以下分面必须重写（基于上方素材全量重算——旧版本中未被素材支撑的表述一律删除，宁缺毋滥）：{}**",
             stale_refresh.join(", ")
         )
         .ok();

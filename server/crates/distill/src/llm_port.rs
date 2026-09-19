@@ -121,6 +121,13 @@ fn repair_trailing_commas(s: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
+/// 重试提示词（收录哲学线 task-7）：携带解析错误详情——让 LLM 一次修中而不是盲改。
+fn retry_user_prompt(user: &str, first_error: &str) -> String {
+    format!(
+        "{user}\n\n注意：你的上一个回答不是合法 JSON（解析错误：{first_error}）。请修复该问题后只输出合法 JSON，不要任何其他文字。"
+    )
+}
+
 /// 统一入口：chat 一次 → 解析失败带追加指令重试一次（所有实现共用）。
 /// 每次调用（含重试）的完整 I/O 记入 job_events，可归因可回放。
 pub async fn chat_json_retrying(
@@ -157,10 +164,8 @@ pub async fn chat_json_retrying(
             Ok(v)
         }
         Err(first) => {
-            tracing::warn!(%first, %job_id, "LLM 输出解析失败，追加指令重试");
-            let strict = format!(
-                "{user}\n\n注意：你的上一个回答不合法。请只输出合法 JSON，不要任何其他文字。"
-            );
+            tracing::warn!(%first, %job_id, "LLM 输出解析失败，追加错误详情重试");
+            let strict = retry_user_prompt(user, &first.to_string());
             match llm.chat_json(purpose, system, &strict, job_id).await {
                 Ok(v) => {
                     ctx.emit(
@@ -427,6 +432,20 @@ pub type LlmRef = Arc<dyn DistillLlm>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_prompt_carries_error_detail() {
+        let p = retry_user_prompt(
+            "原始指令",
+            "LLM 输出非法 JSON: expected `,` at line 3 column 5",
+        );
+        assert!(p.starts_with("原始指令"), "重试 prompt 应保留原指令");
+        assert!(
+            p.contains("expected `,` at line 3 column 5"),
+            "重试 prompt 应携带解析错误详情：{p}"
+        );
+        assert!(p.contains("只输出合法 JSON"));
+    }
 
     #[test]
     fn lenient_plain_json() {

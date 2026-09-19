@@ -448,8 +448,8 @@ async fn mcp_admin_info_endpoint() {
     let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();
     assert_eq!(
         memory["actions"].as_array().unwrap().len(),
-        15,
-        "memory 域应展示 15 个操作（KV 四动作 + distill_result + 回执）：{memory}"
+        20,
+        "memory 域应展示 20 个操作（KV 四动作 + 管家五动作 correct/confirm/discard/persona_edit/distill + 回执）：{memory}"
     );
 
     // 非 admin 拒绝
@@ -607,8 +607,8 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .collect();
     assert_eq!(
         actions.len(),
-        14,
-        "停用操作应从手册隐身（15 含 remember，停 1 剩 14）：{actions:?}"
+        19,
+        "停用操作应从手册隐身（20 含 remember，停 1 剩 19）：{actions:?}"
     );
     assert!(!actions.contains(&"write_session"));
 

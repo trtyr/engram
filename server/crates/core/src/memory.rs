@@ -51,7 +51,7 @@ pub struct ContextPack {
     pub atoms: Vec<AtomDto>,
     /// 实体透镜：用户世界里的人/项目/主题（有 query 按相关，无 query 按密度头部）
     pub entities: Vec<EntityDto>,
-    /// 待人审项（≤5 条）——AI 在对话中顺口确认后 atom-patch 回写
+    /// 待审项（≤5 条）——AI 在对话中顺口确认后 atom-patch 回写
     pub pending_review: Vec<AtomDto>,
     pub meta: ContextMeta,
 }
@@ -558,6 +558,78 @@ impl MemoryService {
             .map_err(|e| MemoryError::Storage(e.to_string()))
     }
 
+    /// 手动触发蒸馏（AI 记忆管家）：撞车守卫——running extract_atoms 存在时只提示不投递
+    /// （任务列表不留空跑记录）。mode："distill"（默认）/ "rebuild"（画像全量重建）/
+    /// "sleep"（预留——内置节律线后开放）。
+    pub async fn trigger_distill_manual(
+        &self,
+        full: bool,
+        mode: &str,
+        by: &str,
+    ) -> Result<serde_json::Value, MemoryError> {
+        if mode == "sleep" {
+            return Err(MemoryError::BadRequest(
+                "睡眠（记忆巩固）尚未上线——依赖内置节律线，敬请期待".into(),
+            ));
+        }
+        if mode == "rebuild" {
+            // 画像全量重建（收录哲学线 task-10）：不入蒸馏链，直接投递 distill_persona
+            // 全量重建任务（payload.full_rebuild → persona.rs 以全部场景重算所有非钉住分面）。
+            // 撞车守卫：running 的 distill_persona 存在时只提示不投递（与 extract 同模）。
+            let running = repo::count_running_persona(&self.pool).await?;
+            if running > 0 {
+                return Ok(serde_json::json!({
+                    "already_running": true,
+                    "hint": "画像全量重建进行中——等它完成看效果，再决定是否重来",
+                }));
+            }
+            let job = self
+                .queue
+                .enqueue(
+                    engram_jobs::JobTemplate::new("distill_persona")
+                        .with_payload(serde_json::json!({"full_rebuild": true}))
+                        .with_idempotency_key(format!(
+                            "persona-rebuild-{}",
+                            chrono::Utc::now().format("%Y%m%d%H%M")
+                        )),
+                )
+                .await
+                .map_err(|e| MemoryError::Storage(e.to_string()))?;
+            return Ok(serde_json::json!({
+                "already_running": false,
+                "hint": "画像全量重建已触发：以全部场景重算所有非钉住分面（manually_edited 豁免）",
+                "jobs": [{ "id": job.id.to_string(), "kind": job.kind }],
+            }));
+        }
+        if mode != "distill" {
+            return Err(MemoryError::BadRequest(format!(
+                "mode 仅支持 distill / sleep（收到 {mode}）"
+            )));
+        }
+        let running = repo::count_running_extract(&self.pool).await?;
+        if running > 0 {
+            return Ok(serde_json::json!({
+                "already_running": true,
+                "running": running,
+                "hint": "当前正在蒸馏中——等它完成看看效果，再决定是否手动触发",
+            }));
+        }
+        let jobs = self.trigger_distill(full, "manual", by).await?;
+        let list: Vec<serde_json::Value> = jobs
+            .iter()
+            .map(|j| serde_json::json!({ "id": j.id.to_string(), "kind": j.kind }))
+            .collect();
+        Ok(serde_json::json!({
+            "already_running": false,
+            "hint": if full {
+                "已触发蒸馏 + 全量整理（consolidate）"
+            } else {
+                "已触发蒸馏链（抽取→仲裁→归组→画像）"
+            },
+            "jobs": list,
+        }))
+    }
+
     /// 节律状态（memory-rhythm）：外部 cron 的心跳与积压年龄，供设置页判定逾期。
     /// last_heartbeat 复用 jobs 审计行（kind=rhythm_heartbeat）；pending 统计扫
     /// raw_sessions 积压（cron 兜底蒸馏的对象）。
@@ -599,7 +671,7 @@ impl MemoryService {
         .await?)
     }
 
-    /// 手工新增（人审补充；active 直接入库）。
+    /// 手工新增（待审补充；active 直接入库）。
     #[allow(clippy::too_many_arguments)]
     pub async fn create_atom(
         &self,
@@ -646,7 +718,7 @@ impl MemoryService {
             tracing::info!(atom_id = %existing.id, "直写命中已有同内容原子，幂等返回");
             return Ok(existing);
         }
-        // A1：与蒸馏链同规则——置信 <0.55 自动进人审，不直接生效污染记忆库
+        // A1：与蒸馏链同规则——置信 <0.55 自动进待审，不直接生效污染记忆库
         // （此前直写硬编码 needs_review=false，文档/CLI 提示/实现三方打架）。
         let needs_review = confidence < 0.55;
         let id = Uuid::now_v7();
@@ -667,6 +739,108 @@ impl MemoryService {
             source_kind.unwrap_or("user_stated"),
         )
         .await?;
+        Ok(row)
+    }
+
+    /// correct 快路径（AI 记忆管家，收录哲学线）：单事务取代链——
+    /// 新原子 active（继承 target 的 kind，confidence 0.95/fact/user_stated），
+    /// 旧原子 superseded + superseded_by 指针。治理：仅 active 且非 sensitive 的目标。
+    pub async fn correct_atom(&self, target_id: Uuid, text: &str) -> Result<AtomDto, MemoryError> {
+        let cur = repo::find_atom(&self.pool, target_id)
+            .await?
+            .ok_or_else(|| {
+                MemoryError::NotFound(format!("目标原子 {target_id} 不存在——先 search 定位再更正"))
+            })?;
+        if cur.status != "active" {
+            return Err(MemoryError::BadRequest(format!(
+                "目标原子已是 {} 状态，仅 active 原子可被取代——先 search 找最新条目",
+                cur.status
+            )));
+        }
+        if cur.sensitive {
+            return Err(MemoryError::BadRequest(
+                "敏感原子禁走 correct 快路径——相关更正走会话蒸馏通道".into(),
+            ));
+        }
+        let t = text.trim();
+        if t.is_empty() {
+            return Err(MemoryError::BadRequest("更正内容不能为空".into()));
+        }
+        if t.chars().count() > 120 {
+            return Err(MemoryError::BadRequest(format!(
+                "更正内容超长：最多 120 字，当前 {} 字",
+                t.chars().count()
+            )));
+        }
+        let new_id = Uuid::now_v7();
+        let emb = self.try_embed(&[t.to_string()]).await;
+        let row = repo::correct_atom(
+            &self.pool,
+            new_id,
+            target_id,
+            &cur.kind,
+            t,
+            emb.and_then(|v| v.into_iter().next()),
+            &engram_search::tokenize::tsv_text(t),
+        )
+        .await?
+        .ok_or_else(|| {
+            MemoryError::BadRequest(
+                "目标原子已被并发变更（非 active 或敏感）——重新 search 后再试".into(),
+            )
+        })?;
+        self.audit(
+            "correct_atom",
+            json!({
+                "target": target_id.to_string(),
+                "new": row.id.to_string(),
+                "old_content": cur.content,
+                "new_content": t,
+            }),
+        )
+        .await;
+        Ok(row)
+    }
+
+    /// 待审复核 confirm：摘 needs_review 标记（AI 代管复核，仅 needs_review=true 可处置）。
+    pub async fn confirm_review(&self, id: Uuid) -> Result<AtomDto, MemoryError> {
+        let row = repo::review_confirm(&self.pool, id).await?.ok_or_else(|| {
+            MemoryError::NotFound(format!(
+                "原子 {id} 不存在或不在待审状态——confirm 仅可处置 needs_review=true 的条目"
+            ))
+        })?;
+        self.audit(
+            "review_confirm",
+            json!({ "atom_id": id.to_string(), "content": row.content }),
+        )
+        .await;
+        Ok(row)
+    }
+
+    /// 待审复核 discard：归档（仅 needs_review=true 且 active）；归档触发场景快照收敛。
+    pub async fn discard_review(&self, id: Uuid) -> Result<AtomDto, MemoryError> {
+        let row = repo::review_discard(&self.pool, id).await?.ok_or_else(|| {
+            MemoryError::NotFound(format!(
+                "原子 {id} 不存在或不在待审状态——discard 仅可处置 needs_review=true 的条目"
+            ))
+        })?;
+        self.audit(
+            "review_discard",
+            json!({ "atom_id": id.to_string(), "content": row.content }),
+        )
+        .await;
+        let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
+        let _ = self
+            .queue
+            .enqueue(
+                JobTemplate::new("organize_scenarios")
+                    .with_idempotency_key(format!("snapshot-refresh-{bucket}"))
+                    .with_payload(
+                        serde_json::json!({"converge_only": true, "atom_id": id.to_string()}),
+                    )
+                    .with_due(chrono::Utc::now() + chrono::Duration::seconds(self.debounce_secs)),
+            )
+            .await;
         Ok(row)
     }
 
@@ -908,7 +1082,9 @@ impl MemoryService {
     }
 
     /// 回滚分面到历史版本（以新版本号落地当前内容——历史不可变）。
-    /// 编辑能力：用户直接改画像分面（仅用户会话；AI 禁入）。钉住 = 蒸馏绕开。
+    /// 编辑分面（version+1 落钉：manually_edited=true，蒸馏产出对该分面落库前被守卫丢弃）。
+    /// 编辑能力：用户 Web 编辑与 AI persona_edit（收录哲学线授权的执行器）共用此路；
+    /// 钉住 = 蒸馏绕开，解冻 = persona_unpin。
     pub async fn persona_edit(
         &self,
         aspect: &str,
@@ -1183,7 +1359,7 @@ impl MemoryService {
     }
 
     /// 实体级遗忘（「把小王忘了」）：级联归档挂链 active 原子 → 摘链 → 删实体+墓碑。
-    /// archived/superseded 等非 active 原子不动（本来就是历史）；人审候选一并归档。
+    /// archived/superseded 等非 active 原子不动（本来就是历史）；待审候选一并归档。
     pub async fn forget_entity(&self, id: Uuid) -> Result<usize, MemoryError> {
         let cur = repo::live_entity_id(&self.pool, id).await?;
         if cur.is_none() {
@@ -1843,8 +2019,8 @@ impl MemoryService {
             self.fire_hit_feedback("scenarios", out_scenarios.iter().map(|s| s.id).collect());
         }
 
-        // 人审代问（议题三）：队列里的低置信项带给 AI——下次对话顺口确认一句，
-        // atom-patch 回写，人审从「翻网页」变「一句话」。不计热度。
+        // 待审代问（议题三）：队列里的低置信项带给 AI——下次对话顺口确认一句，
+        // atom-patch 回写，待审从「翻网页」变「一句话」。不计热度。
         let pending_review = repo::pending_review_atoms(&self.pool).await?;
 
         Ok(ContextPack {

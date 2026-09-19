@@ -66,6 +66,11 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "kv_list", false, "列出全部 KV 值（按 updated_at 倒序）" => crate::MemoryKvListParams;
             "kv_search", false, "字面量直查 KV（key/value/context ILIKE——精确值不依赖分词）" => crate::MemoryKvSearchParams;
             "remember", false, "一句话记忆（正文字段 text；strength=fact 直写限 120 字；缺省走 auto 蒸馏，产物默认 inference；strength=fact 显式声明用户明示事实则直写落库原话保真）" => crate::RememberParams;
+            "correct", false, "更正记忆（快路径取代链）：用户说「你记错了」时用——先 search 定位旧原子，再 correct(target_id, text)；旧原子 superseded 指向新条目，仅 active 非敏感可更正" => crate::CorrectParams;
+            "confirm", false, "待审复核通过：摘掉 needs_review 标记（仅 needs_review=true 可处置；AI 代管复核）" => crate::ReviewActionParams;
+            "discard", false, "待审复核丢弃：归档该条（仅 needs_review=true 可处置；AI 代管复核）" => crate::ReviewActionParams;
+            "persona_edit", false, "编辑画像分面（AI 记忆管家）：version+1 落钉（manually_edited=true），蒸馏对该分面不再覆盖；aspect 七值之一，内容 1~4000 字" => crate::PersonaEditParams;
+            "distill", false, "手动触发蒸馏链（撞车守卫：正在蒸馏时只提示不投递）；full=true 附带 consolidate 全量整理；mode=sleep 为记忆巩固预留位" => crate::DistillParams;
             "write_session", false, "写入一段对话到 L0 会话（收尾用；蒸馏自动抽取记忆）" => crate::WriteSessionParams;
             "append_session", false, "向未蒸馏的会话追加轮次（长对话分段落库）" => crate::AppendSessionParams;
             "list_sessions", false, "列出 L0 会话（keyset 分页，可按 agent 过滤）" => crate::ListSessionsParams;
@@ -238,7 +243,16 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
         (domain, action),
         (
             "memory",
-            "kv_put" | "remember" | "write_session" | "append_session" | "forget"
+            "kv_put"
+                | "remember"
+                | "correct"
+                | "confirm"
+                | "discard"
+                | "persona_edit"
+                | "distill"
+                | "write_session"
+                | "append_session"
+                | "forget"
         ) | (
             "projects",
             "create"

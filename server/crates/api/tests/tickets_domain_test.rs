@@ -3,11 +3,8 @@
 
 mod support;
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use serde_json::{Value, json};
+use serde_json::json;
 use support::{app, login_token, mcp_call_json, mcp_rpc, rpc};
-use tower::util::ServiceExt;
 
 struct Ctx {
     app: axum::Router,
@@ -21,29 +18,6 @@ impl Ctx {
         let (app, _pg) = app().await;
         let token = login_token(&app).await;
         Self { app, token, _pg }
-    }
-
-    async fn req(&self, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
-        let builder = Request::builder()
-            .method(method)
-            .uri(path)
-            .header("authorization", format!("Bearer {}", self.token))
-            .header("content-type", "application/json");
-        let req = match body {
-            Some(b) => builder.body(Body::from(b.to_string())).unwrap(),
-            None => builder.body(Body::empty()).unwrap(),
-        };
-        let resp = self.app.clone().oneshot(req).await.unwrap();
-        let status = resp.status();
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let v: Value = if bytes.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&bytes).unwrap_or(Value::Null)
-        };
-        (status, v)
     }
 }
 

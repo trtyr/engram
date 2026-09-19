@@ -69,6 +69,7 @@ function MemoryPage() {
   })
   // 原子筛选状态提升——筛选器挂在 tab 行右侧（与蒸馏条同款布局，省一整行）
   const [atomKind, setAtomKind] = useState('')
+  const [atomStatus, setAtomStatus] = useState('active')
   const [atomReview, setAtomReview] = useState(false)
   // tab 计数（原管线条带的职责）：挂载时取一次；蒸馏脉冲只表「正在炼」（processing）
   const [counts, setCounts] = useState<{ l0: number; l1: number; l2: number; l3: number; review: number; kv: number } | null>(null)
@@ -95,7 +96,7 @@ function MemoryPage() {
   const tabs = [
     { value: 'sessions' as Tab, label: '会话', count: counts?.l0, pulse: distilling > 0 },
     { value: 'atoms' as Tab, label: '原子', count: counts?.l1 },
-    { value: 'review' as Tab, label: '人审', count: counts?.review },
+    { value: 'review' as Tab, label: '待审', count: counts?.review },
     { value: 'scenarios' as Tab, label: '场景', count: counts?.l2 },
     { value: 'persona' as Tab, label: '画像', count: counts?.l3 },
     { value: 'kv' as Tab, label: 'KV', count: counts?.kv },
@@ -113,6 +114,17 @@ function MemoryPage() {
             <>
               <select
                 className={selectCls}
+                value={atomStatus}
+                onChange={(e) => setAtomStatus(e.target.value)}
+                aria-label="状态筛选"
+              >
+                <option value="active">生效</option>
+                <option value="superseded">被取代</option>
+                <option value="archived">归档</option>
+                <option value="all">全部状态</option>
+              </select>
+              <select
+                className={selectCls}
                 value={atomKind}
                 onChange={(e) => setAtomKind(e.target.value)}
                 aria-label="kind 筛选"
@@ -125,14 +137,14 @@ function MemoryPage() {
                 ))}
               </select>
               <Checkbox checked={atomReview} onChange={setAtomReview}>
-                仅人审
+                仅待审
               </Checkbox>
             </>
           )}
         </div>
       </div>
       {tab === 'sessions' && <Sessions />}
-      {tab === 'atoms' && <Atoms kind={atomKind} review={atomReview} />}
+      {tab === 'atoms' && <Atoms kind={atomKind} review={atomReview} status={atomStatus} />}
 
       {tab === 'review' && <ReviewQueue onGoAtoms={() => setTab('atoms')} />}
       {tab === 'scenarios' && <Scenarios />}
@@ -418,7 +430,7 @@ function DistillBar() {
   )
 }
 
-function Atoms({ kind, review }: { kind: string; review: boolean }) {
+function Atoms({ kind, review, status }: { kind: string; review: boolean; status: string }) {
   const [rows, setRows] = useState<Atom[] | null>(null)
   const [err, setErr] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
@@ -441,6 +453,7 @@ function Atoms({ kind, review }: { kind: string; review: boolean }) {
   }, [])
   const params = () => {
     const p = new URLSearchParams({ limit: '200' })
+    if (status && status !== 'all') p.set('status', status)
     if (kind) p.set('kind', kind)
     if (review) p.set('needs_review', 'true')
     return p
@@ -452,7 +465,7 @@ function Atoms({ kind, review }: { kind: string; review: boolean }) {
     load()
     setPage(1) // 筛选变化回到第一页
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, review])
+  }, [kind, review, status])
   useEffect(() => {
     if (!distilling) return
     const t = setInterval(load, 5000)
@@ -586,7 +599,7 @@ function Atoms({ kind, review }: { kind: string; review: boolean }) {
                           >
                             {a.needs_review && (
                               <span className="mr-1.5 rounded bg-warning/15 px-1.5 py-0.5 font-mono text-xs text-warning">
-                                人审
+                                待审
                               </span>
                             )}
                             {a.content}
@@ -864,13 +877,17 @@ interface EntityHit {
   kind: string | null
 }
 
-/** 人审队列：低置信原子（needs_review）集中审核——通过 / 取代 / 丢弃，支持批量。 */
+/** 待审队列：低置信原子（needs_review）集中复核——通过 / 取代 / 丢弃，支持批量。 */
 function ReviewQueue({ onGoAtoms }: { onGoAtoms: () => void }) {
   const [rows, setRows] = useState<Atom[] | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [superseding, setSuperseding] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [err, setErr] = useState('')
+  /** AI 处置留痕（jobs 表 review_confirm/review_discard）——透明窗：谁处置的、处置了什么 */
+  const [disposals, setDisposals] = useState<
+    Array<{ kind: string; payload: { atom_id?: string; content?: string }; created_at: string }>
+  >([])
 
   const load = () =>
     api
@@ -879,6 +896,18 @@ function ReviewQueue({ onGoAtoms }: { onGoAtoms: () => void }) {
       .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
   useEffect(() => {
     load()
+    api
+      .get<
+        Array<{ kind: string; payload: { atom_id?: string; content?: string }; created_at: string }>
+      >('/jobs?limit=100')
+      .then((js) =>
+        setDisposals(
+          (js ?? [])
+            .filter((j) => j.kind === 'review_confirm' || j.kind === 'review_discard')
+            .slice(0, 10),
+        ),
+      )
+      .catch(() => {})
   }, [])
 
   const act = async (id: string, patch: Record<string, unknown>) => {
@@ -998,6 +1027,31 @@ function ReviewQueue({ onGoAtoms }: { onGoAtoms: () => void }) {
             ))}
           </Card>
         </>
+      )}
+
+      {disposals.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-3">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">
+            AI 处置记录（最近 {disposals.length} 条）
+          </p>
+          <div className="space-y-1">
+            {disposals.map((d, i) => (
+              <p key={i} className="text-xs text-muted-foreground">
+                <span
+                  className={
+                    d.kind === 'review_confirm' ? 'text-success' : 'text-destructive'
+                  }
+                >
+                  {d.kind === 'review_confirm' ? '通过' : '丢弃'}
+                </span>
+                {' · '}
+                {d.payload?.content ?? d.payload?.atom_id}
+                {' · '}
+                {new Date(d.created_at).toLocaleString()}
+              </p>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )
