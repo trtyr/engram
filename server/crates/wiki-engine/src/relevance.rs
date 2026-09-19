@@ -184,6 +184,55 @@ pub async fn rebuild_weights(pool: &PgPool, lib: uuid::Uuid) -> Result<usize, Jo
     Ok(updated)
 }
 
+/// 图扩展检索阶段（批次⑤，wiki 大库化 2026-09-19）：
+/// RRF/FTS 初召回后沿双链 2-hop 带衰减传播——捞回语义检索漏掉的强关联页（llm_wiki 先例）。
+///
+/// - 边权归一：`min(weight/6, 1)`（对齐 WikiGraph 的 weight≥6 视觉饱和点）
+/// - 衰减：每跳 ×0.5——1-hop bonus = seed × edge_norm × 0.5，2-hop ×0.25
+/// - seed 自身不收扩展分（seed 分就是初召回分）
+pub const GRAPH_DECAY: f64 = 0.5;
+pub const GRAPH_EDGE_NORM_DENOM: f64 = 6.0;
+
+pub fn graph_expand_scores(
+    seeds: &[(String, f64)],
+    adjacency: &std::collections::HashMap<String, Vec<(String, f64)>>,
+) -> Vec<(String, f64)> {
+    let edge_norm = |w: f64| (w / GRAPH_EDGE_NORM_DENOM).min(1.0);
+    let mut acc: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    // 1-hop
+    let mut hop1: Vec<(String, f64)> = Vec::new();
+    for (seed, score) in seeds {
+        if let Some(neighs) = adjacency.get(seed.as_str()) {
+            for (n, w) in neighs {
+                let bonus = score * edge_norm(*w) * GRAPH_DECAY;
+                if bonus <= 0.0 {
+                    continue;
+                }
+                hop1.push((n.clone(), bonus));
+                *acc.entry(n.clone()).or_default() += bonus;
+            }
+        }
+    }
+    // 2-hop（从 1-hop 层继续扩散；可能传回 seed——最后统一移除）
+    for (mid, mid_bonus) in &hop1 {
+        if let Some(neighs) = adjacency.get(mid.as_str()) {
+            for (n, w) in neighs {
+                let bonus = mid_bonus * edge_norm(*w) * GRAPH_DECAY;
+                if bonus <= 0.0 {
+                    continue;
+                }
+                *acc.entry(n.clone()).or_default() += bonus;
+            }
+        }
+    }
+    for (seed, _) in seeds {
+        acc.remove(seed);
+    }
+    let mut out: Vec<(String, f64)> = acc.into_iter().collect();
+    out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +263,39 @@ mod tests {
         assert!((aa - 1.0 / 3.0_f64.ln()).abs() < 1e-9);
         // 无共同邻居
         assert!(adamic_adar(&a, &["z".to_string()], deg) == 0.0);
+    }
+
+    #[test]
+    fn graph_expand_two_hop_decay() {
+        // 图：seed s → a (w=6) → b (w=3)；s → c (w=3)
+        let mut adj = std::collections::HashMap::new();
+        adj.insert(
+            "s".to_string(),
+            vec![("a".to_string(), 6.0), ("c".to_string(), 3.0)],
+        );
+        adj.insert(
+            "a".to_string(),
+            vec![("s".to_string(), 6.0), ("b".to_string(), 3.0)],
+        );
+        adj.insert("b".to_string(), vec![("a".to_string(), 3.0)]);
+        adj.insert("c".to_string(), vec![("s".to_string(), 3.0)]);
+        let seeds = vec![("s".to_string(), 0.03)];
+        let out = graph_expand_scores(&seeds, &adj);
+        let get = |slug: &str| {
+            out.iter()
+                .find(|(s, _)| s == slug)
+                .map(|(_, v)| *v)
+                .unwrap_or(0.0)
+        };
+        // a：1-hop，edge_norm(6)=1 → 0.03×0.5 = 0.015
+        assert!((get("a") - 0.03 * 0.5).abs() < 1e-9);
+        // c：1-hop，edge_norm(3)=0.5 → 0.03×0.5×0.5 = 0.0075
+        assert!((get("c") - 0.03 * 0.5 * 0.5).abs() < 1e-9);
+        // b：2-hop 经 a：0.015×edge_norm(3)=0.5×0.5 = 0.00375
+        assert!((get("b") - 0.015 * 0.5 * 0.5).abs() < 1e-9);
+        // seed 自身不收扩展分
+        assert!(get("s") == 0.0);
+        // 强边优先排序：a > c > b
+        assert!(get("a") > get("c") && get("c") > get("b"));
     }
 }

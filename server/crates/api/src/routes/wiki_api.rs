@@ -43,7 +43,7 @@ fn pe(e: engram_core::promote::PromoteError) -> ApiError {
 }
 
 fn svc(state: &AppState) -> WikiService {
-    WikiService::new(state.pool.clone(), state.registry())
+    WikiService::new(state.pool.clone(), state.registry()).with_llm(state.llm())
 }
 
 /// `?lib=<库slug>` 提取 + 解析成库 id（缺省 main）。
@@ -301,6 +301,24 @@ pub async fn lint(
     Ok(Json(svc(&state).lint(lib).await.map_err(we)?))
 }
 
+/// 查询缺口清单（批次② 查询日志飞轮，wiki 大库化）——零命中/低分查询即内容缺口，
+/// 织入方向与 Deep Research 的输入。每次检索 UPSERT wiki_query_log（飞轮原料）。
+#[utoipa::path(get, path = "/wiki/query-gaps", params(LibOnlyParams), operation_id = "wiki_query_gaps",
+    responses((status = 200)))]
+pub async fn query_gaps(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<LibOnlyParams>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_wiki(&principal)?;
+    let lib = resolve_lib(&state, p.lib.as_deref()).await?;
+    let gaps = svc(&state).query_gaps(lib, 50).await.map_err(we)?;
+    Ok(Json(serde_json::json!({
+        "gaps": gaps,
+        "note": "零命中=内容缺口；低分=召回质量存疑——织入方向与 Deep Research 的输入",
+    })))
+}
+
 /// Repair：lint 修而不只报（wiki 收录哲学线工单③）——确定性修复：
 /// 变体死链改写 / 死链去链接化 / ≥3 页引用建 stub / 孤页沿出链回挂 / 同标题重复合并（快照兜底）。
 #[utoipa::path(post, path = "/wiki/repair", params(LibOnlyParams),
@@ -313,6 +331,25 @@ pub async fn repair(
     require_wiki(&principal)?;
     let lib = resolve_lib(&state, p.lib.as_deref()).await?;
     Ok(Json(svc(&state).repair(lib).await.map_err(we)?))
+}
+
+/// Repair 异步入队（批次⑦ job 化，wiki 大库化）——确定性修复走 jobs 基建，任务页可查历史。
+#[utoipa::path(post, path = "/wiki/repair/async", params(LibOnlyParams), operation_id = "wiki_repair_async",
+    responses((status = 202)))]
+pub async fn repair_async(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<LibOnlyParams>,
+) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
+    require_wiki(&principal)?;
+    let lib = resolve_lib(&state, p.lib.as_deref()).await?;
+    let job_id = engram_wiki_engine::repair::enqueue(&state.pool, lib)
+        .await
+        .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+    Ok((
+        axum::http::StatusCode::ACCEPTED,
+        Json(serde_json::json!({"job_id": job_id, "note": "修复已入队——任务页可查进度与历史"})),
+    ))
 }
 
 /// Merge：新陈代谢合并原语（工单④）——duplicate 并入 primary（冗余丢弃或内容并入），
@@ -392,6 +429,9 @@ pub struct WikiSearchRequest {
     /// 库 slug（缺省 main）
     #[serde(default)]
     pub library: Option<String>,
+    /// 批次④：LLM rerank 精排（默认关——检索框速度优先；开启后 top-20 交模型重排，延迟 +2~8s）
+    #[serde(default)]
+    pub rerank: Option<bool>,
 }
 
 /// Wiki 页面检索。
@@ -407,7 +447,12 @@ pub async fn search(
     let lib = resolve_lib(&state, req.library.as_deref()).await?;
     Ok(Json(
         svc(&state)
-            .search_with_purpose(lib, &req.query, req.max_items.unwrap_or(20))
+            .search_with_purpose(
+                lib,
+                &req.query,
+                req.max_items.unwrap_or(20),
+                req.rerank.unwrap_or(false),
+            )
             .await
             .map_err(we)?,
     ))

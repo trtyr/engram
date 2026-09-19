@@ -731,6 +731,38 @@ pub async fn generate_job(
             .ok();
     }
 
+    // 批次③ 社区摘要层（wiki 大库化）：Louvain 社区 → synthesis 综述页参与召回。
+    // hash 守卫增量（成员不变不重调 LLM）；失败只告警不阻塞织入主流程。
+    if created + updated > 0 {
+        match crate::community_summaries::refresh_community_summaries(pool, &llm, lib, &ctx).await {
+            Ok(stats) => {
+                let c = stats.get("created").and_then(|v| v.as_i64()).unwrap_or(0);
+                let d = stats.get("deleted").and_then(|v| v.as_i64()).unwrap_or(0);
+                if c + d > 0 {
+                    ctx.emit(&format!("社区摘要层更新：新建 {c} / 清理 {d}"), Some(stats))
+                        .await
+                        .ok();
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "社区摘要刷新失败（织入主流程不受影响）");
+                ctx.emit("社区摘要刷新失败", Some(json!({"error": e.to_string()})))
+                    .await
+                    .ok();
+            }
+        }
+        // 审计缺陷④自愈：存量页向量回填（cap 50/次）——嵌入失败丢失的页在后续织入中自动补全
+        match crate::service::backfill_page_embeddings(pool, Some(&llm), lib).await {
+            Ok(n) if n > 0 => {
+                ctx.emit(&format!("存量页向量回填 {n} 页"), None).await.ok();
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, "存量页向量回填失败（织入主流程不受影响）");
+            }
+        }
+    }
+
     let thin_hint = if created + updated + proposals == 0 {
         "（0 产物：内容较薄，LLM 未产出页面——status=ready 仅代表处理完成，不代表有产物）"
     } else {
@@ -1001,6 +1033,7 @@ async fn mark_source_failed(pool: &sqlx::PgPool, ctx_job: &engram_jobs::types::J
 pub fn register_handlers(
     runner: engram_jobs::Runner,
     llm: crate::service::LlmRef,
+    wiki: crate::service::WikiService,
 ) -> engram_jobs::Runner {
     let l1 = llm.clone();
     let l2 = llm.clone();
@@ -1033,6 +1066,35 @@ pub fn register_handlers(
         .register("wiki_lint_deep", move |ctx| {
             let llm = l3.clone();
             async move { crate::lint_deep::lint_deep_job(&ctx, &llm).await }
+        })
+        .register("wiki_repair", move |ctx| {
+            let wiki = wiki.clone();
+            async move {
+                let payload = &ctx.job.payload.0;
+                let lib: Uuid = payload
+                    .get("library_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| Uuid::parse_str(s).ok())
+                    .ok_or_else(|| JobError::Permanent("payload 缺 library_id".into()))?;
+                let report = wiki
+                    .repair(lib)
+                    .await
+                    .map_err(|e| JobError::Permanent(e.to_string()))?;
+                // 审计缺陷④：repair 顺带补嵌入（自愈入口——存量缺向量页 cap 50/次）
+                let backfilled = wiki.backfill_embeddings(lib).await.unwrap_or(0);
+                ctx.emit(
+                    &format!(
+                        "确定性修复完成：检查 {} 页，{} 项动作；向量回填 {} 页",
+                        report.checked_pages,
+                        report.actions.len(),
+                        backfilled
+                    ),
+                    Some(serde_json::to_value(&report).unwrap_or_default()),
+                )
+                .await
+                .ok();
+                Ok(serde_json::to_value(&report).unwrap_or_default())
+            }
         })
 }
 

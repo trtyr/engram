@@ -52,3 +52,16 @@ pub fn generation_system() -> String {
 {\"pages\":[{\"slug\":\"页面名\",\"page_type\":\"entity|concept|source|synthesis|comparison\",\"title\":\"标题\",\"content\":\"markdown 正文（含 [[互链]]）\"}]}
 只输出需要新建或更新的页面；无变化的不输出。".into()
 }
+
+/// v1（2026-09-19 wiki 大库化 批次③）：社区综述页生成——Louvain 社区 → synthesis 摘要页。
+pub const P_WIKI_COMMUNITY_SYNTHESIS: PromptId = PromptId("wiki_community_synthesis", 1);
+
+pub fn community_synthesis_system() -> String {
+    "你是一个知识库主题综述编写器。给定同一主题社区的一组页面（slug | 标题 | 首段摘要），生成一个主题综述页。
+
+要求：
+1. 提炼这组页面共同构成的主题（如「守元接入方式」「Agent 发现工程」），给出主题名。
+2. 输出严格 JSON：{\"title\": \"主题名（≤12 字）\", \"content\": \"markdown 正文\"}
+3. content 格式：第一行 `# {主题名}`，正文 4~8 句——概述该主题下各页面的共性、脉络与相互关系，相关处用 [[页面slug]] 互链（一律用给定成员的 slug 原文，不要改写大小写）。
+4. 综述是地图不是目录：不要逐页罗列细节，给读者「该主题下有什么、从哪页深入了解」的导航价值。".into()
+}

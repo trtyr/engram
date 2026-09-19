@@ -100,15 +100,29 @@ async fn main() -> anyhow::Result<()> {
             .expect("主密钥格式恒合法"),
         ),
     );
+    let wiki_llm = engram_distill::gateway_llm(
+        pool.clone(),
+        engram_llm::KeyCipher::from_hex_master(
+            &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
+        )
+        .expect("主密钥格式恒合法"),
+    );
     let runner = engram_core::wiki::ingest::register_handlers(
         runner,
-        engram_distill::gateway_llm(
+        wiki_llm.clone(),
+        engram_core::wiki::WikiService::new(
             pool.clone(),
-            engram_llm::KeyCipher::from_hex_master(
-                &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
-            )
-            .expect("主密钥格式恒合法"),
-        ),
+            engram_llm::ProviderRegistry::new(
+                pool.clone(),
+                engram_llm::KeyCipher::from_hex_master(
+                    &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
+                )
+                .expect("主密钥格式恒合法"),
+            ),
+        )
+        // 审计缺陷④：wiki 服务必须持有 LLM 通道——backfill_embeddings（repair job 与
+        // 织入尾部的自愈入口）依赖它；此前缺失导致补嵌静默跳过（Ok(0)）
+        .with_llm(wiki_llm),
     );
     let runner_handle = runner.start();
 

@@ -7,6 +7,7 @@
 
 pub mod cascade;
 pub mod community;
+pub mod community_summaries;
 pub mod cross_links;
 pub mod ingest;
 pub mod insights;

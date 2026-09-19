@@ -51,6 +51,11 @@ async fn setup_llm(
         .expect("main 主库应存在");
 
     let l1 = llm.clone();
+    let registry = engram_llm::ProviderRegistry::new(
+        pool.clone(),
+        engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+    );
+    let wiki = WikiService::new(pool.clone(), registry);
     let runner = engram_wiki_engine::ingest::register_handlers(
         Runner::new(
             pool.clone(),
@@ -64,20 +69,10 @@ async fn setup_llm(
             },
         ),
         l1,
+        wiki.clone(),
     );
-    // embed 也需要 handler 之外的 Llm —— WikiService 不直接调 LLM（嵌入在 job 内）
     let handle = runner.start();
-    let registry = engram_llm::ProviderRegistry::new(
-        pool.clone(),
-        engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
-    );
-    (
-        pool.clone(),
-        WikiService::new(pool, registry),
-        handle,
-        container,
-        lib,
-    )
+    (pool.clone(), wiki, handle, container, lib)
 }
 
 async fn wait_jobs(pool: &sqlx::PgPool, kinds: &[&str]) {

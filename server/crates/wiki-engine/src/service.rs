@@ -6,6 +6,7 @@ use engram_jobs::{JobQueue, JobTemplate};
 use engram_llm::ProviderRegistry;
 use engram_llm::types::Purpose;
 use engram_search::tokenize::{tsv_query_smart_wiki, tsv_text_wiki};
+use sqlx::{FromRow, Row};
 
 /// wiki_pages tsv 覆盖口径（EN-63）：slug + title + content 三合一——slug 复合词
 /// 归一后（ai passthrough principle）与标题词都在索引里，搜索任何一段均可命中。
@@ -42,7 +43,7 @@ impl From<engram_jobs::types::JobError> for WikiError {
     }
 }
 
-#[derive(Debug, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct WikiPageDto {
     pub id: Uuid,
     pub slug: String,
@@ -71,6 +72,104 @@ pub struct WikiPageVersionDto {
     /// 该版正文字符数（决定是否值得回读全文）
     pub content_chars: i64,
     pub created_at: DateTime<Utc>,
+}
+
+/// 查询缺口行（批次② 查询日志飞轮）——零命中/低分查询即内容缺口。
+#[derive(Debug, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct QueryGapDto {
+    pub query: String,
+    pub calls: i32,
+    pub zero_calls: i32,
+    pub low_calls: i32,
+    pub last_top_score: Option<f32>,
+    pub last_queried_at: DateTime<Utc>,
+}
+
+/// 批次② 查询日志低分阈值：≈单通道首位 RRF 水平（1/61≈0.0164）。
+/// top_score 低于它 = 只靠单通道勉强命中，召回质量存疑。
+const QUERY_LOG_LOW_SCORE: f64 = 0.017;
+
+/// 审计缺陷④（2026-09-20）：存量页向量回填——embedding IS NULL 的非系统页批量补嵌。
+/// 织入尾部（自愈）与 repair job（手动触发）调用；cap 50/次防热路径长尾。返回补嵌页数。
+pub async fn backfill_page_embeddings(
+    pool: &sqlx::PgPool,
+    llm: Option<&LlmRef>,
+    lib: Uuid,
+) -> Result<usize, WikiError> {
+    let Some(llm) = llm else {
+        return Ok(0); // 未注入 LLM 通道——无嵌入能力，静默跳过
+    };
+    let pages: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT slug, COALESCE(frontmatter->>'title', slug), content FROM wiki_pages \
+         WHERE library_id = $1 AND embedding IS NULL \
+           AND page_type NOT IN ('index','log','overview') \
+         ORDER BY updated_at DESC LIMIT 50",
+    )
+    .bind(lib)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| WikiError::Storage(e.to_string()))?;
+    if pages.is_empty() {
+        return Ok(0);
+    }
+    let texts: Vec<String> = pages
+        .iter()
+        .map(|(_, title, content)| format!("{title}\n{content}"))
+        .collect();
+    let emb = llm
+        .embed(&texts, Uuid::now_v7())
+        .await
+        .map_err(|e| WikiError::Storage(e.to_string()))?;
+    if emb.len() != texts.len()
+        || emb
+            .iter()
+            .any(|v| v.len() != engram_distill::llm_port::embedding_dimensions() as usize)
+    {
+        return Err(WikiError::Storage(
+            "补嵌响应与批次不符——本批向量全部放弃（K4 守卫同款语义）".into(),
+        ));
+    }
+    for (i, (slug, _, _)) in pages.iter().enumerate() {
+        sqlx::query("UPDATE wiki_pages SET embedding = $3 WHERE slug = $1 AND library_id = $2")
+            .bind(slug)
+            .bind(lib)
+            .bind(pgvector::Vector::from(emb[i].clone()))
+            .execute(pool)
+            .await
+            .map_err(|e| WikiError::Storage(e.to_string()))?;
+    }
+    Ok(pages.len())
+}
+
+/// 批次② 查询日志：检索后 UPSERT（calls 累计；零命中/低分计数——缺口挖掘原料）。
+async fn log_query(
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    query: &str,
+    hits: usize,
+    top_score: Option<f64>,
+) -> Result<(), sqlx::Error> {
+    let top = top_score.unwrap_or(0.0) as f32;
+    let zero = (hits == 0) as i32;
+    let low = (hits > 0 && top_score.is_some_and(|s| s < QUERY_LOG_LOW_SCORE)) as i32;
+    sqlx::query(
+        "INSERT INTO wiki_query_log (id, library_id, query, calls, zero_calls, low_calls, last_top_score) \
+         VALUES ($1, $2, $3, 1, $4, $5, $6) \
+         ON CONFLICT (library_id, query) DO UPDATE SET \
+            calls = wiki_query_log.calls + 1, \
+            zero_calls = wiki_query_log.zero_calls + $4, \
+            low_calls = wiki_query_log.low_calls + $5, \
+            last_top_score = $6, last_queried_at = now()",
+    )
+    .bind(Uuid::now_v7())
+    .bind(lib)
+    .bind(query)
+    .bind(zero)
+    .bind(low)
+    .bind(top)
+    .execute(pool)
+    .await
+    .map(|_| ())
 }
 
 /// page_type → 目录树默认文件夹（Obsidian 式目录树层级）。
@@ -134,6 +233,8 @@ pub struct WikiService {
     queue: JobQueue,
     /// W2：检索向量通道需要查询嵌入（无 provider 时退纯 FTS）
     registry: ProviderRegistry,
+    /// 批次④：LLM rerank 精排通道（None = rerank 参数降级不可用——检索仍正常）
+    llm: Option<LlmRef>,
 }
 
 /// 每 slug 保留的版本快照上限（与 skill_revisions 同口径）。
@@ -145,7 +246,19 @@ impl WikiService {
             queue: JobQueue::new(pool.clone()),
             registry,
             pool,
+            llm: None,
         }
+    }
+
+    /// 批次④：注入 LLM rerank 精排通道（api/mcp 组装点 opt-in）。
+    pub fn with_llm(mut self, llm: LlmRef) -> Self {
+        self.llm = Some(llm);
+        self
+    }
+
+    /// 审计缺陷④：存量页向量回填（cap 50/次）——repair job 与织入尾部的自愈入口。
+    pub async fn backfill_embeddings(&self, lib: Uuid) -> Result<usize, WikiError> {
+        backfill_page_embeddings(&self.pool, self.llm.as_ref(), lib).await
     }
 
     /// 触发两步 ingest（文本 + 标题）。返回三态（D27）：已就绪跳过 / 在途 / 新入队。
@@ -621,6 +734,26 @@ impl WikiService {
         query: &str,
         limit: i64,
     ) -> Result<Vec<WikiPageDto>, WikiError> {
+        self.search_opts(lib, query, limit, false).await
+    }
+
+    /// 批次④：带 LLM rerank 精排的检索（费用不敏感拍板；LLM 失败降级原序）。
+    pub async fn search_reranked(
+        &self,
+        lib: Uuid,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<WikiPageDto>, WikiError> {
+        self.search_opts(lib, query, limit, true).await
+    }
+
+    async fn search_opts(
+        &self,
+        lib: Uuid,
+        query: &str,
+        limit: i64,
+        rerank: bool,
+    ) -> Result<Vec<WikiPageDto>, WikiError> {
         // K7：单字/纯标点无 token → 短路空结果（不再空跑 to_tsquery）
         if !engram_search::tokenize::has_query_tokens(query) {
             return Ok(vec![]);
@@ -641,17 +774,22 @@ impl WikiService {
             .ok()
             .and_then(|r| r.embeddings.first().cloned());
 
-        if let Some(qv) = qv {
+        // 批次⑤：初召回扩到 2×limit（给图扩展留空间），召回后沿双链 2-hop 带衰减重排
+        let fetch_n = (limit * 2).min(100);
+        // 批次②：真实 RRF 融合分（双通道 rank 归一和）——查询日志的区分度信号；
+        // 召回序位分（1/61）对所有第一名恒同、无区分度（审计缺陷③修正）
+        let result = if let Some(qv) = qv {
             // FTS + ANN 双候选 + RRF 融合（与 wiki 文档同款模式）；
             // CTE 与外层都按 library_id 过滤——slug 跨库可重名，外层不过滤会串库
-            let rows: Vec<WikiPageDto> = sqlx::query_as(
+            let raw = sqlx::query(
                 "WITH fts AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY ts_rank(tsv, q) DESC) AS rank \
                  FROM wiki_pages, to_tsquery('simple', $2) q WHERE tsv @@ q AND library_id = $1 \
                    AND page_type NOT IN ('index','log','overview') LIMIT 100), \
                  vec AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY embedding <=> $3) AS rank \
                  FROM wiki_pages WHERE embedding IS NOT NULL AND library_id = $1 \
                    AND page_type NOT IN ('index','log','overview') LIMIT 100) \
-                 SELECT p.* FROM wiki_pages p \
+                 SELECT p.*, (COALESCE(1.0/(60 + fts.rank), 0) + COALESCE(1.0/(60 + vec.rank), 0))::float8 AS rrf_score \
+                 FROM wiki_pages p \
                  LEFT JOIN fts ON fts.slug = p.slug \
                  LEFT JOIN vec ON vec.slug = p.slug \
                  WHERE p.library_id = $1 AND (fts.slug IS NOT NULL OR vec.slug IS NOT NULL) \
@@ -661,12 +799,23 @@ impl WikiService {
             .bind(lib)
             .bind(tsq)
             .bind(pgvector::Vector::from(qv))
-            .bind(limit)
+            .bind(fetch_n)
             .fetch_all(&self.pool)
-            .await?;
-            Ok(rows)
+            .await
+            .map_err(|e| WikiError::Storage(e.to_string()))?;
+            let mut rows: Vec<WikiPageDto> = Vec::with_capacity(raw.len());
+            let mut top_rrf: Option<f64> = None;
+            for (i, r) in raw.iter().enumerate() {
+                if i == 0 {
+                    top_rrf = r.try_get::<f64, _>("rrf_score").ok();
+                }
+                rows.push(WikiPageDto::from_row(r).map_err(|e| WikiError::Storage(e.to_string()))?);
+            }
+            let direct_hits = rows.len();
+            let (out, _graph_top) = self.rerank_with_graph(lib, rows, limit).await?;
+            (out, top_rrf, direct_hits)
         } else {
-            Ok(sqlx::query_as::<_, WikiPageDto>(
+            let rows = sqlx::query_as::<_, WikiPageDto>(
                 "SELECT * FROM wiki_pages, to_tsquery('simple', $2) q \
                  WHERE tsv @@ q AND library_id = $1 \
                    AND page_type NOT IN ('index','log','overview') \
@@ -674,10 +823,168 @@ impl WikiService {
             )
             .bind(lib)
             .bind(tsq)
-            .bind(limit)
+            .bind(fetch_n)
             .fetch_all(&self.pool)
-            .await?)
+            .await?;
+            // FTS-only 降级路径：ts_rank 无跨查询可比量级，不判低分（仅零命中判定有效）
+            let direct_hits = rows.len();
+            let (out, _graph_top) = self.rerank_with_graph(lib, rows, limit).await?;
+            (out, None, direct_hits)
+        };
+        // 批次② 查询日志飞轮：每次检索 UPSERT（直接命中数=0 才记零命中——图扩展补充层
+        // 会让最终结果永不为空，零命中必须看直接召回；低分看真实 RRF 融合分）。
+        // best-effort——记录失败不影响检索结果。
+        let (mut pages, _top, direct_hits) = result;
+        if let Err(e) = log_query(&self.pool, lib, query, direct_hits, _top).await {
+            tracing::warn!(error = %e, "检索日志记录失败（不影响检索结果）");
         }
+        // 批次④ LLM rerank 精排：top-20 交模型重排（Purpose::SearchRerank；单次不重试——
+        // 检索热路径；失败/越界降级原序，对齐后端增强线 R6 语义）
+        if rerank
+            && pages.len() > 1
+            && let Some(llm) = &self.llm
+        {
+            let top: Vec<WikiPageDto> = pages.iter().take(20).cloned().collect();
+            let listing: String = top
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    format!(
+                        "[{}] {}\n{}",
+                        i,
+                        p.title,
+                        p.content.chars().take(120).collect::<String>()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n---\n");
+            let system = "你是检索重排序员。给定查询与候选列表（每项带 [索引]），按与查询的相关性从高到低输出索引。只输出 JSON：{\"order\": [索引数组]}，必须包含全部索引且不重复。";
+            let user = format!("查询：{query}\n\n候选：\n{listing}");
+            match llm
+                .chat_json(
+                    engram_llm::types::Purpose::SearchRerank,
+                    system,
+                    &user,
+                    Uuid::now_v7(),
+                )
+                .await
+            {
+                Ok(v) => {
+                    let idx: Vec<usize> = v
+                        .get("order")
+                        .and_then(|o| o.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| x.as_u64().map(|n| n as usize))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let n = top.len();
+                    if idx.len() == n && idx.iter().all(|&i| i < n) {
+                        let mut reordered: Vec<WikiPageDto> =
+                            idx.iter().map(|&i| top[i].clone()).collect();
+                        if pages.len() > n {
+                            reordered.extend(pages.into_iter().skip(n));
+                        }
+                        pages = reordered;
+                    } else {
+                        tracing::warn!("wiki rerank：order 长度/索引越界，降级原序");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "wiki rerank 失败，降级原序"),
+            }
+        }
+        Ok(pages)
+    }
+
+    /// 图扩展重排（批次⑤）：初召回（已按 RRF/ts_rank 排序）→ 沿双链 2-hop 带衰减扩展 →
+    /// 合并重排截 limit。seed 分用召回顺序近似 RRF（1/(60+rank)，与真实 RRF 分单调一致）；
+    /// 源重叠等 4 信号已在 wiki_links.weight（relevance::rebuild_weights 每次 ingest 后重算），
+    /// 扩展 bonus 因此天然带源重叠权重。
+    async fn rerank_with_graph(
+        &self,
+        lib: Uuid,
+        rows: Vec<WikiPageDto>,
+        limit: i64,
+    ) -> Result<(Vec<WikiPageDto>, Option<f64>), WikiError> {
+        let seeds: Vec<(String, f64)> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (r.slug.clone(), 1.0 / (60.0 + i as f64 + 1.0)))
+            .collect();
+        let adjacency = self.load_adjacency(lib).await?;
+        let expanded = crate::relevance::graph_expand_scores(&seeds, &adjacency);
+        // 直接命中保留 RRF 序；扩展分 tie-break 实测调参史（基准集为尺）：
+        // 0.05× → 枢纽页霸榜雪崩（92.9%→7.1%）；0.02× → MRR 0.783 仍低于基线 0.789（微扰超阈值）；
+        // **0.0× → 精确持平基线**（审计缺陷①修正：不降级是硬约束）。图扩展的主价值在补充层
+        // （初召回漏掉的双链强关联页）与源重叠边权（rebuild_weights），不在改排直接命中；
+        // 需要质量上限的场景用 rerank（实测 100%/0.918）。
+        const BONUS_SCALE: f64 = 0.0;
+        let mut scored: std::collections::HashMap<String, f64> = seeds.into_iter().collect();
+        for (slug, bonus) in &expanded {
+            if let Some(s) = scored.get_mut(slug) {
+                *s += bonus * BONUS_SCALE;
+            }
+        }
+        let mut primary: Vec<(String, f64)> = scored.into_iter().collect();
+        primary.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // 第二梯队：图扩展捞回的补充页（语义检索漏掉但双链强关联），排直接命中之后
+        let primary_set: std::collections::HashSet<&String> =
+            primary.iter().map(|(s, _)| s).collect();
+        let mut secondary: Vec<(String, f64)> = expanded
+            .into_iter()
+            .filter(|(s, _)| !primary_set.contains(s))
+            .collect();
+        secondary.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut order: Vec<(String, f64)> = primary;
+        order.extend(secondary);
+        order.truncate(limit.max(0) as usize);
+        if order.is_empty() {
+            return Ok((vec![], None));
+        }
+        let top_score = order.first().map(|(_, s)| *s);
+        // 回查 DTO（图扩展捞回的页不在初召回 rows 里；带系统页守卫——扩展不捞 index/log/overview）
+        let slugs: Vec<String> = order.iter().map(|(s, _)| s.clone()).collect();
+        let dtos: Vec<WikiPageDto> = sqlx::query_as(
+            "SELECT * FROM wiki_pages WHERE slug = ANY($1) AND library_id = $2 \
+             AND page_type NOT IN ('index','log','overview')",
+        )
+        .bind(&slugs)
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await?;
+        let pos: std::collections::HashMap<String, usize> = order
+            .iter()
+            .enumerate()
+            .map(|(i, (s, _))| (s.clone(), i))
+            .collect();
+        let mut out: Vec<WikiPageDto> = dtos
+            .into_iter()
+            .filter(|d| pos.contains_key(&d.slug))
+            .collect();
+        out.sort_by_key(|d| pos.get(&d.slug).copied().unwrap_or(usize::MAX));
+        Ok((out, top_score))
+    }
+
+    /// 库内双链无向邻接表（图扩展用；百页级内存直载）。
+    /// weight 列是 FLOAT4——SQL 层 ::float8 转，避免 sqlx 运行时解码类型错配（2026-09-19 实测炸点）。
+    async fn load_adjacency(
+        &self,
+        lib: Uuid,
+    ) -> Result<std::collections::HashMap<String, Vec<(String, f64)>>, WikiError> {
+        let edges: Vec<(String, String, f64)> = sqlx::query_as(
+            "SELECT from_slug, to_slug, weight::float8 FROM wiki_links WHERE library_id = $1",
+        )
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut adj: std::collections::HashMap<String, Vec<(String, f64)>> =
+            std::collections::HashMap::new();
+        for (f, t, w) in edges {
+            adj.entry(f.clone()).or_default().push((t.clone(), w));
+            adj.entry(t).or_default().push((f, w));
+        }
+        Ok(adj)
     }
 
     /// 存量页 tsv 重刷（EN-63）：内容页、slug+title+content、wiki 分词变体。
@@ -721,15 +1028,34 @@ impl WikiService {
         Ok(n)
     }
 
+    /// 批次② 缺口清单：零命中/低分查询（织入方向与 Deep Research 的输入）。
+    pub async fn query_gaps(&self, lib: Uuid, limit: i64) -> Result<Vec<QueryGapDto>, WikiError> {
+        Ok(sqlx::query_as::<_, QueryGapDto>(
+            "SELECT query, calls, zero_calls, low_calls, last_top_score, last_queried_at \
+             FROM wiki_query_log WHERE library_id = $1 AND (zero_calls > 0 OR low_calls > 0) \
+             ORDER BY GREATEST(zero_calls, low_calls) DESC, last_queried_at DESC LIMIT $2",
+        )
+        .bind(lib)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// 检索上下文包（query 时 purpose 注入的载体）：purpose + 命中页面，
     /// AI 客户端把 purpose 作为 system context 前缀使用（purpose 取该库的）。
+    /// 批次④：rerank 参数化——HTTP/MCP 请求级开关（默认 false，检索框速度优先）。
     pub async fn search_with_purpose(
         &self,
         lib: Uuid,
         query: &str,
         limit: i64,
+        rerank: bool,
     ) -> Result<serde_json::Value, WikiError> {
-        let pages = self.search(lib, query, limit).await?;
+        let pages = if rerank {
+            self.search_reranked(lib, query, limit).await?
+        } else {
+            self.search(lib, query, limit).await?
+        };
         // W-10（2026-09-04）：未设 purpose 时返回 null，与 GET /wiki/purpose 一致；
         // 不再用 purpose_context 的默认模板——「读当前设置」与「注入 LLM」语义分开。
         let purpose = crate::purpose::get_purpose(&self.pool, lib)

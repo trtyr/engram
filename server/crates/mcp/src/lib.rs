@@ -3476,7 +3476,12 @@ impl EngramMcpServer {
         let wp = params.0;
         let lib = self.resolve_wiki_lib(wp.library.as_deref()).await?;
         let result = wiki::svc(&self.state)
-            .search_with_purpose(lib, &wp.query, wp.max_items.unwrap_or(20))
+            .search_with_purpose(
+                lib,
+                &wp.query,
+                wp.max_items.unwrap_or(20),
+                wp.rerank.unwrap_or(false),
+            )
             .await
             .map_err(wiki::from_wiki)?;
         let mut v = result;

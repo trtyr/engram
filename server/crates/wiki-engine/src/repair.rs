@@ -75,3 +75,17 @@ pub fn rewrite_links(content: &str, target: &str, real: Option<&str>) -> (String
     }
     (out, count)
 }
+
+/// 入队 repair 任务（批次⑦ job 化，wiki 大库化 2026-09-19）——返回 job_id；任务页可查历史。
+/// 幂等安全：修复是确定性的（不调 LLM），重复跑无害。
+pub async fn enqueue(
+    pool: &sqlx::PgPool,
+    lib: uuid::Uuid,
+) -> Result<uuid::Uuid, engram_jobs::types::JobError> {
+    let tpl = engram_jobs::types::JobTemplate::new("wiki_repair")
+        .with_payload(serde_json::json!({ "library_id": lib }));
+    let queued = engram_jobs::queue::JobQueue::new(pool.clone())
+        .enqueue(tpl)
+        .await?;
+    Ok(queued.id)
+}

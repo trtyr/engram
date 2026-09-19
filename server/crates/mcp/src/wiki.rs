@@ -31,7 +31,7 @@ pub fn require_wiki(principal: &Principal) -> Result<(), rmcp::ErrorData> {
 }
 
 pub fn svc(state: &engram_core::state::AppState) -> engram_core::wiki::WikiService {
-    engram_core::wiki::WikiService::new(state.pool.clone(), state.registry())
+    engram_core::wiki::WikiService::new(state.pool.clone(), state.registry()).with_llm(state.llm())
 }
 
 /// wiki_list_pages 的瘦身输出：列表不带正文（正文可能很大），全文走 wiki_get_page。
@@ -103,6 +103,11 @@ pub struct WikiSearchParams {
     /// 可选：库 slug（缺省 main 主库）
     #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
     pub library: Option<String>,
+    /// 批次④：LLM rerank 精排（默认关；开启后 top-20 交模型重排，延迟 +2~8s，质量优先场景开）
+    #[schemars(
+        description = "可选：LLM rerank 精排（默认关）。开启后 top-20 交 LLM 重排，延迟 +2~8s；追求排序质量的场景开。"
+    )]
+    pub rerank: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

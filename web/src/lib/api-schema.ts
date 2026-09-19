@@ -2217,6 +2217,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/wiki/query-gaps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询缺口清单（批次② 查询日志飞轮，wiki 大库化）——零命中/低分查询即内容缺口，
+         *     织入方向与 Deep Research 的输入。每次检索 UPSERT wiki_query_log（飞轮原料）。
+         */
+        get: operations["wiki_query_gaps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wiki/repair": {
         parameters: {
             query?: never;
@@ -2231,6 +2251,23 @@ export interface paths {
          *     变体死链改写 / 死链去链接化 / ≥3 页引用建 stub / 孤页沿出链回挂 / 同标题重复合并（快照兜底）。
          */
         post: operations["repair"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/repair/async": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Repair 异步入队（批次⑦ job 化，wiki 大库化）——确定性修复走 jobs 基建，任务页可查历史。 */
+        post: operations["wiki_repair_async"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3776,6 +3813,8 @@ export interface components {
             /** Format: int64 */
             max_items?: number | null;
             query: string;
+            /** @description 批次④：LLM rerank 精排（默认关——检索框速度优先；开启后 top-20 交模型重排，延迟 +2~8s） */
+            rerank?: boolean | null;
         };
         WikiSourceDto: {
             /** Format: uuid */
@@ -7684,6 +7723,26 @@ export interface operations {
             };
         };
     };
+    wiki_query_gaps: {
+        parameters: {
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     repair: {
         parameters: {
             query?: {
@@ -7703,6 +7762,26 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RepairReport"];
                 };
+            };
+        };
+    };
+    wiki_repair_async: {
+        parameters: {
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
