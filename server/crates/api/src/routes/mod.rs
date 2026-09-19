@@ -61,6 +61,8 @@ use utoipa::OpenApi;
         wiki_api::list_proposals,
         wiki_api::get_purpose, wiki_api::set_purpose,
         wiki_api::list_reviews, wiki_api::resolve_review,
+        wiki_api::repair,
+        wiki_api::merge_pages,
         wiki_api::archive_query, wiki_api::list_sources, wiki_api::delete_source,
         wiki_api::promote, wiki_api::promotions, wiki_api::rebuild_tsv,
         wiki_api::insights, wiki_api::dismiss_insight, wiki_api::reset_insights,
@@ -326,6 +328,7 @@ pub fn router(state: AppState) -> Router {
                 .put(wiki_api::put_page)
                 .delete(wiki_api::delete_page),
         )
+        .route("/wiki/pages/merge", post(wiki_api::merge_pages))
         .route("/wiki/graph", get(wiki_api::graph))
         .route("/wiki/lint", post(wiki_api::lint))
         .route("/wiki/links/rebuild", post(wiki_api::rebuild_links))
@@ -341,6 +344,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/wiki/reviews", get(wiki_api::list_reviews))
         .route("/wiki/reviews/{id}/resolve", post(wiki_api::resolve_review))
+        .route("/wiki/repair", post(wiki_api::repair))
         .route("/wiki/queries/archive", post(wiki_api::archive_query))
         .route("/wiki/sources", get(wiki_api::list_sources))
         .route(

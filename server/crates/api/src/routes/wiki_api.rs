@@ -301,6 +301,46 @@ pub async fn lint(
     Ok(Json(svc(&state).lint(lib).await.map_err(we)?))
 }
 
+/// Repair：lint 修而不只报（wiki 收录哲学线工单③）——确定性修复：
+/// 变体死链改写 / 死链去链接化 / ≥3 页引用建 stub / 孤页沿出链回挂 / 同标题重复合并（快照兜底）。
+#[utoipa::path(post, path = "/wiki/repair", params(LibOnlyParams),
+    responses((status = 200, body = engram_wiki_engine::repair::RepairReport)))]
+pub async fn repair(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<LibOnlyParams>,
+) -> Result<Json<engram_wiki_engine::repair::RepairReport>, ApiError> {
+    require_wiki(&principal)?;
+    let lib = resolve_lib(&state, p.lib.as_deref()).await?;
+    Ok(Json(svc(&state).repair(lib).await.map_err(we)?))
+}
+
+/// Merge：新陈代谢合并原语（工单④）——duplicate 并入 primary（冗余丢弃或内容并入），
+/// 全库链接改指，delete_page 快照兜底（下架不烧书）。AI 处置重复 flag 与人工逃生门共用。
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct MergePagesRequest {
+    pub primary: String,
+    pub duplicate: String,
+}
+
+#[utoipa::path(post, path = "/wiki/pages/merge", params(LibOnlyParams),
+    request_body = MergePagesRequest,
+    responses((status = 200)))]
+pub async fn merge_pages(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<LibOnlyParams>,
+    Json(req): Json<MergePagesRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_wiki(&principal)?;
+    let lib = resolve_lib(&state, p.lib.as_deref()).await?;
+    let detail = svc(&state)
+        .merge_pages(lib, &req.primary, &req.duplicate)
+        .await
+        .map_err(we)?;
+    Ok(Json(serde_json::json!({ "detail": detail })))
+}
+
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct ApplyProposalRequest {
     pub slug: String,

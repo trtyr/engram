@@ -241,6 +241,19 @@ pub struct WikiReviewResolveParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiMergeParams {
+    /// 保留的主页 slug（并入目标）。
+    #[schemars(description = "保留的主页 slug（并入目标）。")]
+    pub primary: String,
+    /// 被合并页 slug（内容并入 primary 后删除，留版本快照——下架不烧书）。
+    #[schemars(description = "被合并页 slug（内容并入 primary 后删除，留版本快照——下架不烧书）。")]
+    pub duplicate: String,
+    /// 可选：库 slug（缺省 main 主库）。
+    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
+    pub library: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiLintDeepParams {
     /// 可选：限定检查的页面 slug 集合（缺省全库非系统页）——控制 LLM 成本
     #[schemars(

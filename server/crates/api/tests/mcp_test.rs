@@ -1073,8 +1073,8 @@ async fn wiki_mcp_tools_listed() {
     assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
     assert_eq!(
         wiki_tools[0]["actions"].as_array().unwrap().len(),
-        27,
-        "wiki 域应展示 27 个操作（文档 RAG 三动作 + EN-59 晋升两 action + EN-61 purpose/insights）"
+        28,
+        "wiki 域应展示 28 个操作（文档 RAG 三动作 + EN-59 晋升两 action + EN-61 purpose/insights + 收录哲学线 merge）"
     );
 
     // instructions 应覆盖 wiki 域
@@ -1273,7 +1273,7 @@ async fn wiki_mcp_journey_write_read_search_archive() {
             11,
             "wiki",
             "ingest",
-            json!({"title": "一份新文档", "text": "# 新文档\n\n正文内容供 LLM 织入。"}),
+            json!({"title": "一份新文档", "text": "# 新文档\n\n正文内容供 LLM 织入。这里补足一段有实质内容的知识正文：织入流水线会先分析源文档的实体与概念，再按页型生成或更新页面，收录判据要求原料具备足够的实质内容才允许进入织入流程。"}),
         ),
     )
     .await;

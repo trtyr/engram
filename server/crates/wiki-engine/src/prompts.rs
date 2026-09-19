@@ -3,7 +3,9 @@
 /// 提示词标识。
 pub struct PromptId(pub &'static str, pub u32);
 
-pub const P_WIKI_ANALYSIS: PromptId = PromptId("wiki_analysis", 1);
+/// v2（2026-09-19 wiki 收录哲学线）：收录判据四条——事实性/通用性/语境关联/宁缺毋滥，
+/// 对齐《wiki 收录哲学》工单①判据成文（用户拍板）。
+pub const P_WIKI_ANALYSIS: PromptId = PromptId("wiki_analysis", 2);
 /// v2（2026-09-03 W-1）：互链 slug 规范约束——防 [[Engram]] 大小写变体死链。
 pub const P_WIKI_GENERATION: PromptId = PromptId("wiki_generation", 2);
 
@@ -18,7 +20,12 @@ pub fn analysis_system() -> String {
 4. conflicts：与既有页面描述矛盾或需要更新的点（没有则空数组）。
 5. 结构建议：source 页本身应该如何组织。
 
-实体/概念名用中文（保留英文专有名词），≤12 字。宁缺毋滥：只在文中**反复出现或为核心主题**时列出。
+实体/概念名用中文（保留英文专有名词），≤12 字。
+收录判据（每个建页候选 entities/concepts 必须逐条过）：
+- 事实性：只收**既有的事实性知识**——方法论、指导、说明书、开发文档皆可，不设深浅门槛；不收一次性事件流水或现场读数。
+- 通用性：知识须脱离产生它的单一项目仍成立；只针对某一项目内部的事实（部署细节/内部编号/项目私有约定/项目过程记录）不建页——那属于项目档案，不属于知识库。
+- 语境关联：不收与知识库领域无关的公共教科书通识（如泛用的架构模式名词解释——混沌工程/限流算法这类随处可查的概念）；只收与库方向（purpose）有语境关联的知识。
+- 宁缺毋滥：只在文中**反复出现或为核心主题**时列出。
 
 输出严格 JSON：
 {\"entities\":[\"...\"],\"concepts\":[\"...\"],\"links\":[{\"slug\":\"既有页\",\"reason\":\"为何相关\"}],\"conflicts\":[{\"slug\":\"既有页\",\"issue\":\"矛盾点\"}],\"source_title\":\"建议的源摘要页标题\",\"reviews\":[{\"kind\":\"create_page|deep_research|skip|flag\",\"title\":\"...\",\"reason\":\"为何需要人审\",\"suggested_slug\":\"建议页名（可空）\",\"search_queries\":[\"预生成检索词\"]}]}

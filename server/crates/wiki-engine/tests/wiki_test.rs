@@ -135,7 +135,7 @@ async fn two_docs_interlinked_no_duplicate() {
         .ingest(
             lib,
             "文档一",
-            "张三研究向量检索。向量检索是一种在高维空间寻找近邻的技术。",
+            "张三研究向量检索。向量检索是一种在高维空间寻找近邻的技术，广泛用于搜索引擎与数据库系统，其核心思想是用近似计算换取查询速度的大幅提升。工程实践中常用 HNSW 等图索引结构，在召回率与内存占用之间做权衡。",
         )
         .await
         .unwrap();
@@ -162,7 +162,7 @@ async fn two_docs_interlinked_no_duplicate() {
 
     // 文档 2（相关内容）
     let skipped2 = wiki
-        .ingest(lib, "文档二", "近似搜索是向量检索的加速子方向，如 HNSW。")
+        .ingest(lib, "文档二", "近似搜索是向量检索的加速子方向，如 HNSW 这类图索引。它通过牺牲少量精度换取数量级的速度提升，是现代大规模检索系统的标配技术，在图像检索、推荐系统与语义搜索中都有广泛应用。")
         .await
         .unwrap();
     assert!(matches!(
@@ -208,7 +208,7 @@ async fn two_docs_interlinked_no_duplicate() {
         .ingest(
             lib,
             "文档一",
-            "张三研究向量检索。向量检索是一种在高维空间寻找近邻的技术。",
+            "张三研究向量检索。向量检索是一种在高维空间寻找近邻的技术，广泛用于搜索引擎与数据库系统，其核心思想是用近似计算换取查询速度的大幅提升。工程实践中常用 HNSW 等图索引结构，在召回率与内存占用之间做权衡。",
         )
         .await
         .unwrap();
@@ -270,7 +270,7 @@ async fn human_page_produces_proposal_not_overwrite() {
     assert_eq!(before.origin, "human");
     assert_eq!(before.version, 1);
 
-    wiki.ingest(lib, "文档", "张三的信息。").await.unwrap();
+    wiki.ingest(lib, "文档", "张三的信息补充：他长期研究向量检索方向，最近发表了关于近似最近邻搜索的综述文章，并在开源社区维护着相关的索引库实现，研究兴趣覆盖信息检索与数据库系统两个领域，近年也关注向量数据库与LLM 结合的新方向。").await.unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -337,8 +337,14 @@ async fn ingest_document_url_fallback_uses_chunks() {
     .await
     .unwrap();
     for (seq, content) in [
-        (1, "第一段：异步运行时的选型考量。"),
-        (2, "第二段：tokio 与 async-std 的取舍。"),
+        (
+            1,
+            "第一段：异步运行时的选型考量，重点讨论 tokio 与 async-std 在调度器实现、生态成熟度与团队熟悉度上的差异。",
+        ),
+        (
+            2,
+            "第二段：tokio 与 async-std 的取舍结论——tokio 拥有更庞大的中间件生态与更多的生产验证案例，最终成为默认选择。",
+        ),
     ] {
         sqlx::query(
             "INSERT INTO wiki_chunks (id, library_id, document_id, seq, content) VALUES ($1, $2, $3, $4, $5)",
@@ -600,7 +606,7 @@ async fn w1_generate_failure_resubmit_recovers() {
     ])
     .await;
 
-    let text = "# W1 死锁恢复测试\n这是独一无二的内容 w1-unique-123。";
+    let text = "# W1 死锁恢复测试\n这是独一无二的内容 w1-unique-123。死锁恢复是分布式系统的经典难题：当任务在执行中途失败时，系统需要能够从失败点恢复继续执行，而不是从头再来浪费已完成的工作量，这是任务队列可靠性的底线要求。";
     let skipped = wiki.ingest(lib, "W1文档", text).await.unwrap();
     assert!(matches!(
         skipped,
@@ -678,7 +684,7 @@ async fn w2_content_word_search_hits_llm_pages() {
     ]});
     let (pool, wiki, handle, _pg, lib) = setup(vec![analysis, pages]).await;
 
-    wiki.ingest(lib, "W2文档", "# W2 测试内容\n独一无二 w2-unique。")
+    wiki.ingest(lib, "W2文档", "# W2 测试内容\n独一无二 w2-unique。这里补充一段关于分布式系统一致性哈希与数据分片策略的详细说明，以便内容词检索测试能够在 slug 完全不匹配的情况下依然通过正文 token 命中 LLM 生成的页面。")
         .await
         .unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
@@ -716,7 +722,7 @@ async fn w3_embed_failure_keeps_fts_searchable() {
     mock.embed_fail = true;
     let (pool, wiki, handle, _pg, lib) = setup_llm(Arc::new(mock)).await;
 
-    wiki.ingest(lib, "W3文档", "# W3 嵌入失败\nw3-unique-777。")
+    wiki.ingest(lib, "W3文档", "# W3 嵌入失败\nw3-unique-777。嵌入服务不可用时页面依然应该入库并可被全文检索命中，这是检索系统韧性的基本要求，故障恢复与降级策略需要覆盖这一场景而不是让页面从检索结果中消失。")
         .await
         .unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
@@ -776,7 +782,7 @@ async fn w4_permanent_failure_marks_source_failed() {
     ])
     .await;
 
-    let text = "# W4 失败标记测试\nw4-unique-42。";
+    let text = "# W4 失败标记测试\nw4-unique-42。当生成阶段发生不可恢复的错误时，来源记录应被标记为失败状态并携带错误信息，后续重新提交相同内容时应能走自愈路径并最终完成，这是任务状态机的闭环要求。";
     wiki.ingest(lib, "W4文档", text).await.unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
@@ -826,7 +832,7 @@ async fn w6_upsert_protects_human_and_concurrent_safe() {
         {"slug": "w6-page", "page_type": "concept", "title": "W6页", "content": "# W6页\n\nLLM 生成的原始内容。"}
     ]});
     let (pool, wiki, handle, _pg, lib) = setup(vec![analysis, pages]).await;
-    wiki.ingest(lib, "W6文档", "# W6 首轮\nw6-unique-a")
+    wiki.ingest(lib, "W6文档", "# W6 首轮\nw6-unique-a。首轮织入完成后人工接管该页，后续 LLM 织入不应覆盖人工编辑的内容，这是人写优先原则在并发场景下的保护语义，也是 upsert 幂等性的关键验证点。")
         .await
         .unwrap();
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
@@ -1034,7 +1040,7 @@ async fn generate_page_cap_truncates_and_warns() {
     .await;
 
     let skipped = wiki
-        .ingest(lib, "批量源", "一篇覆盖大量主题的文档。")
+        .ingest(lib, "批量源", "一篇覆盖大量主题的文档，包含数十个彼此独立、互不重叠的页面主题，用于测试批量生成场景下的分页写入、嵌入调用与检索行为，并验证在大页面量下分页游标与列表口径的稳定性表现。")
         .await
         .unwrap();
     assert!(matches!(
@@ -1150,6 +1156,216 @@ async fn log_page_excluded_from_graph_and_lint_and_empty_ingest_rejected() {
             "({title:?}, {text:?}) 应报不能为空：{err}"
         );
     }
+}
+
+/// 收录判据③（wiki 收录哲学线）：薄原料（种子日志级）在门口拒收——不入队、不产 source 记录。
+#[tokio::test]
+async fn thin_source_rejected_at_ingest() {
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
+    let seed = "2026-09-15 宿主直跑形态首写验证";
+    let err = wiki
+        .ingest(lib, "种子日志", seed)
+        .await
+        .expect_err("薄原料应被拒");
+    assert!(
+        err.to_string().contains("低于织入门槛"),
+        "应报织入门槛：{err}"
+    );
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM wiki_sources")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "薄原料不应产生 source 记录");
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
+
+/// Repair（wiki 收录哲学线工单③）：死链变体改写 / 低引用死链去链接化 / 孤页回挂 / 重复合并留快照。
+#[tokio::test]
+async fn repair_fixes_dead_links_orphans_and_duplicates() {
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
+
+    // 直接造页（repair 是确定性修复，与 LLM 无关）
+    for (slug, title, ptype, content) in [
+        (
+            "extension-api",
+            "extension-api",
+            "concept",
+            "# ExtensionAPI\n\n主接口页。",
+        ),
+        (
+            "ref-page",
+            "ref-page",
+            "concept",
+            "# 引用页\n\n见 [[ExtensionAPI]] 与 [[extensionapi]]，另见 [[不存在的页面]]。",
+        ),
+        (
+            "orphan-page",
+            "orphan-page",
+            "concept",
+            "# 孤页\n\n我引用了 [[extension-api]] 但没人引用我。",
+        ),
+        (
+            "dup-a",
+            "重复主题",
+            "entity",
+            "# 重复主题\n\n这是内容最全的主页版本，包含完整的方法列表与示例说明。",
+        ),
+        (
+            "dup-b",
+            "重复主题",
+            "entity",
+            "# 重复主题\n\n这是内容最全的主页版本，包含完整的方法列表与示例说明。",
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, tsv) \
+             VALUES ($1, $2, $3, $4, $5, $6, jsonb_build_object('title', $4::text, 'sources', '[]'::jsonb), 'llm', 1, to_tsvector('simple', $6))",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(lib)
+        .bind(slug)
+        .bind(title)
+        .bind(ptype)
+        .bind(content)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    wiki.rebuild_all_links(lib).await.unwrap();
+
+    let report = wiki.repair(lib).await.unwrap();
+
+    // 1) 变体死链改写：[[ExtensionAPI]] / [[extensionapi]] → [[extension-api]]
+    let ref_page = wiki.get_page(lib, "ref-page").await.unwrap();
+    assert!(
+        ref_page.content.contains("[[extension-api]]")
+            && !ref_page.content.contains("[[ExtensionAPI]]")
+            && !ref_page.content.contains("[[extensionapi]]"),
+        "变体死链应改写：{}",
+        ref_page.content
+    );
+    // 2) 低引用死链去链接化：「不存在的页面」仅 1 页引用 → 摘链留文本
+    assert!(
+        ref_page.content.contains("不存在的页面") && !ref_page.content.contains("[[不存在的页面]]"),
+        "低引用死链应去链接化：{}",
+        ref_page.content
+    );
+    // 3) 孤页回挂：出链目标页尾部出现 相关：[[orphan-page]]
+    let a = wiki.get_page(lib, "extension-api").await.unwrap();
+    assert!(
+        a.content.contains("相关：[[orphan-page]]"),
+        "孤页应回挂到出链目标：{}",
+        a.content
+    );
+    // 4) 重复合并：dup-b 内容为 dup-a 子串 → 冗余丢弃（删除留快照——下架不烧书）
+    assert!(wiki.get_page(lib, "dup-a").await.is_ok());
+    assert!(
+        wiki.get_page(lib, "dup-b").await.is_err(),
+        "冗余重复页应被删除"
+    );
+    let snaps: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wiki_page_versions WHERE slug = 'dup-b'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(snaps >= 1, "删除应留版本快照");
+    // 报告含四类动作
+    let kinds: Vec<&str> = report.actions.iter().map(|x| x.action.as_str()).collect();
+    assert!(kinds.contains(&"rewrite_variant_link"), "{report:?}");
+    assert!(kinds.contains(&"delink"), "{report:?}");
+    assert!(kinds.contains(&"attach_orphan"), "{report:?}");
+    assert!(kinds.contains(&"merge_duplicate"), "{report:?}");
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
+
+/// Merge（wiki 收录哲学线工单④）：新陈代谢合并原语——非子串内容并入「合并自」章节、
+/// 全库链接改指、dup 删除留快照（下架不烧书）；primary 自身引用 dup → 去链接化防自链。
+#[tokio::test]
+async fn merge_pages_appends_rewrites_links_and_snapshots() {
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
+    for (slug, title, content) in [
+        (
+            "main-page",
+            "主页面",
+            "# 主页面\n\n主页正文，另见 [[side-page]] 的补充。",
+        ),
+        (
+            "side-page",
+            "侧页面",
+            "# 侧页面\n\n侧页的独立内容，值得保留的细节。",
+        ),
+        ("third", "第三页", "# 第三页\n\n更多背景见 [[side-page]]。"),
+    ] {
+        sqlx::query(
+            "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, tsv) \
+             VALUES ($1, $2, $3, $4, 'concept', $5, jsonb_build_object('title', $4::text, 'sources', '[]'::jsonb), 'llm', 1, to_tsvector('simple', $5))",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(lib)
+        .bind(slug)
+        .bind(title)
+        .bind(content)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    wiki.rebuild_all_links(lib).await.unwrap();
+
+    let detail = wiki
+        .merge_pages(lib, "main-page", "side-page")
+        .await
+        .unwrap();
+    assert!(
+        detail.contains("内容并入") && detail.contains("链接改写 1 处"),
+        "{detail}"
+    );
+
+    // 主页：dup 内容并入「合并自」章节 + 自身引用 [[side-page]] 去链接化（防自链）
+    let main = wiki.get_page(lib, "main-page").await.unwrap();
+    assert!(
+        main.content.contains("## 合并自〈侧页面〉（side-page）"),
+        "{}",
+        main.content
+    );
+    assert!(main.content.contains("侧页的独立内容"), "dup 正文应并入");
+    assert!(
+        !main.content.contains("[[side-page]]"),
+        "primary 自身引用 dup 应去链接化：{}",
+        main.content
+    );
+
+    // 第三页：[[side-page]] 改指 main-page
+    let third = wiki.get_page(lib, "third").await.unwrap();
+    assert!(
+        third.content.contains("[[main-page]]") && !third.content.contains("[[side-page]]"),
+        "{}",
+        third.content
+    );
+
+    // dup 删除 + 快照留存（下架不烧书）
+    assert!(wiki.get_page(lib, "side-page").await.is_err());
+    let snaps: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wiki_page_versions WHERE slug = 'side-page'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(snaps >= 1, "合并删除应留版本快照");
+
+    // 同页合并应被拒
+    let err = wiki
+        .merge_pages(lib, "main-page", "main-page")
+        .await
+        .expect_err("同页应拒");
+    assert!(err.to_string().contains("不能是同一页"));
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 }
 
 /// ── 语义 lint / index / archive（karpathy LLM Wiki 三增量）──

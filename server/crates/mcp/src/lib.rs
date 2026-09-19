@@ -3702,6 +3702,26 @@ impl EngramMcpServer {
         ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
     }
 
+    /// Merge：合并页面（新陈代谢原语，wiki 收录哲学线工单④）。
+    ///
+    /// 何时用：处置「重复合并」类 review flag 或你确认的两页重复——
+    /// duplicate 并入 primary（冗余丢弃或「合并自」章节），全库指向 duplicate 的链接自动改指，
+    /// duplicate 删除但留版本快照（下架不烧书）。
+    async fn wiki_merge(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(p): Parameters<crate::wiki::WikiMergeParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let principal = principal_of(&ctx)?;
+        wiki::require_wiki(&principal)?;
+        let lib = self.resolve_wiki_lib(p.library.as_deref()).await?;
+        let detail = wiki::svc(&self.state)
+            .merge_pages(lib, &p.primary, &p.duplicate)
+            .await
+            .map_err(wiki::from_wiki)?;
+        ok_json(serde_json::json!({ "detail": detail }))
+    }
+
     /// 语义 lint（LLM 深度检查：页面间矛盾 / 过时声明 / 重要概念缺页）。
     ///
     /// 何时用：结构 lint（lint action）干净后的进阶健康检查——语义维度只有 LLM 能做。
@@ -5414,6 +5434,13 @@ impl EngramMcpServer {
                 self.wiki_lint_deep(
                     ctx,
                     Parameters(dispatch::from_args("wiki", "lint_deep", call.args)?),
+                )
+                .await
+            }
+            "merge" => {
+                self.wiki_merge(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "merge", call.args)?),
                 )
                 .await
             }

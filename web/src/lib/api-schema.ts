@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 登出：删除当前会话（后端行当场删掉，不等 7 天 TTL）。 */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/sessions": {
         parameters: {
             query?: never;
@@ -1108,6 +1125,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/migrate/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 双向同步转发：push = 本地 export → POST 目标 import；pull = GET 目标 export → 灌本地。
+         *     目标凭证用 migrate scope key（admin 密码不过目标网络）；目标非 loopback 强制 https。
+         */
+        post: operations["migrate_sync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects": {
         parameters: {
             query?: never;
@@ -2038,6 +2075,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/wiki/pages/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["merge_pages"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wiki/pages/{slug}": {
         parameters: {
             query?: never;
@@ -2158,6 +2211,26 @@ export interface paths {
         put?: never;
         /** 检索结果/问答存档为 queries 页并自动再摄取。 */
         post: operations["archive_query"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/wiki/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair：lint 修而不只报（wiki 收录哲学线工单③）——确定性修复：
+         *     变体死链改写 / 死链去链接化 / ≥3 页引用建 stub / 孤页沿出链回挂 / 同标题重复合并（快照兜底）。
+         */
+        post: operations["repair"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2297,8 +2370,12 @@ export interface components {
             expires_at: string;
             /** @description 会话标识（token hash 前 12 位） */
             id: string;
+            /** @description 登录 IP（X-Forwarded-For 首段；直连无反代时为空） */
+            ip?: string | null;
             /** Format: date-time */
             last_used_at?: string | null;
+            /** @description 登录浏览器 User-Agent（原样） */
+            user_agent?: string | null;
         };
         ApiKeyCreated: {
             /**
@@ -2532,7 +2609,7 @@ export interface components {
             /** @description 实体透镜：用户世界里的人/项目/主题（有 query 按相关，无 query 按密度头部） */
             entities: components["schemas"]["EntityDto"][];
             meta: components["schemas"]["ContextMeta"];
-            /** @description 待人审项（≤5 条）——AI 在对话中顺口确认后 atom-patch 回写 */
+            /** @description 待审项（≤5 条）——AI 在对话中顺口确认后 atom-patch 回写 */
             pending_review: components["schemas"]["AtomDto"][];
             /** @description L3：画像分面（当前版本，全量） */
             persona: components["schemas"]["PersonaVersion"][];
@@ -3014,6 +3091,14 @@ export interface components {
              */
             into: string;
         };
+        /**
+         * @description Merge：新陈代谢合并原语（工单④）——duplicate 并入 primary（冗余丢弃或内容并入），
+         *     全库链接改指，delete_page 快照兜底（下架不烧书）。AI 处置重复 flag 与人工逃生门共用。
+         */
+        MergePagesRequest: {
+            duplicate: string;
+            primary: string;
+        };
         PersonaEditRequest: {
             /** @description 分面（identity/preferences/skills/constraints/communication_style/goals/routines） */
             aspect: string;
@@ -3224,6 +3309,19 @@ export interface components {
             /** @description 本地绝对路径或 git URL */
             source_uri: string;
         };
+        /** @description 单条修复动作（人话明细，供报告与汇报）。 */
+        RepairAction: {
+            /** @description rewrite_variant_link | delink | create_stub | attach_orphan | merge_duplicate */
+            action: string;
+            detail: string;
+            /** @description 主作用页 slug */
+            slug: string;
+        };
+        /** @description 修复报告。 */
+        RepairReport: {
+            actions: components["schemas"]["RepairAction"][];
+            checked_pages: number;
+        };
         ResolveReviewRequest: {
             action?: string | null;
             dismiss?: boolean;
@@ -3430,6 +3528,26 @@ export interface components {
         };
         SubmitUrlRequest: {
             url: string;
+        };
+        /** @description 双向同步转发报告：源包分域计数 +（非 dry_run 时）目标导入报告。 */
+        SyncReport: {
+            direction: string;
+            dry_run: boolean;
+            import_report?: unknown;
+            source_counts: unknown;
+        };
+        /** @description 双向同步转发请求（CLI sync 的服务端形态）。 */
+        SyncRequest: {
+            /** @description 逃生口：目标非 loopback 时允许 http 明文 */
+            allow_insecure?: boolean;
+            /** @description 方向：push（本地→目标）或 pull（目标→本地） */
+            direction: string;
+            /** @description 只导出对比不写入 */
+            dry_run?: boolean;
+            /** @description 目标 engram 基地址（如 https://cloud.example.com） */
+            target_url: string;
+            /** @description 目标侧 migrate scope 的 API key（Bearer 直连目标） */
+            token: string;
         };
         TestResult: {
             message: string;
@@ -3775,6 +3893,23 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
+            };
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5440,6 +5575,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    migrate_sync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SyncRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncReport"];
                 };
             };
         };
@@ -7276,6 +7434,30 @@ export interface operations {
             };
         };
     };
+    merge_pages: {
+        parameters: {
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergePagesRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_page: {
         parameters: {
             query?: {
@@ -7498,6 +7680,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IngestAccepted"];
+                };
+            };
+        };
+    };
+    repair: {
+        parameters: {
+            query?: {
+                /** @description 库 slug（缺省 main） */
+                lib?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairReport"];
                 };
             };
         };

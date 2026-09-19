@@ -167,6 +167,16 @@ impl WikiService {
                 "text 不能为空——空文本织入只会浪费 LLM 调用".into(),
             ));
         }
+        // 收录判据③（2026-09-19 wiki 收录哲学线，用户拍板）：原料须有实质内容才进织入。
+        // 种子日志/单行注记（一行日期+短语）织入只会产出无根页面并污染复核队列。
+        const MIN_INGEST_CHARS: usize = 80;
+        let trimmed = text.trim();
+        if trimmed.chars().count() < MIN_INGEST_CHARS {
+            return Err(WikiError::BadRequest(format!(
+                "原料正文仅 {} 字，低于织入门槛 {MIN_INGEST_CHARS} 字——种子日志/单行注记不属于知识原料（收录判据③：原料须有实质内容）。如是真实知识请补全正文后再织入",
+                trimmed.chars().count()
+            )));
+        }
         Ok(ingest::enqueue_ingest(&self.queue, lib, title, text).await?)
     }
 
@@ -950,6 +960,338 @@ impl WikiService {
         // 腐烂治理（工单「人审队列腐烂」）：指向该页的 open 提案自动 dismissed（可审计不删数据）
         let _ = crate::review::cascade_dismiss(&self.pool, lib, Some(&slug), None).await;
         Ok(true)
+    }
+
+    /// Repair：lint 修而不只报（wiki 收录哲学线工单③）。
+    /// 边界三级（roadmap v6）：自动做（变体死链改写 / 去链接化 / ≥3 页引用建 stub / 孤页沿出链回挂）、
+    /// 留痕做（同标题重复合并——冗余丢弃或内容并入；delete_page 快照兜底 + 全库链接改指）、
+    /// 不做（物理删除有内容的独立页——问用户；语义级重复发现留给 lint_deep + AI 处置）。
+    /// 全程确定性（不调 LLM）；页面修改一律走 put_page 语义（版本快照 + frontmatter.via="ai"）。
+    pub async fn repair(&self, lib: Uuid) -> Result<crate::repair::RepairReport, WikiError> {
+        use crate::repair::{RepairAction, RepairReport, rewrite_links};
+        use std::collections::{HashMap, HashSet};
+        let mut actions: Vec<RepairAction> = Vec::new();
+
+        // 全库页快照（非 log；slug/title/content 三张 map 是本函数的工作状态）
+        let pages: Vec<(String, String, String, String)> = sqlx::query_as(
+            "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type, content FROM wiki_pages \
+             WHERE page_type <> 'log' AND library_id = $1 ORDER BY slug",
+        )
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await?;
+        let checked = pages.len();
+        let mut contents: HashMap<String, String> = pages
+            .iter()
+            .map(|(s, .., c)| (s.clone(), c.clone()))
+            .collect();
+
+        // ── 1. 同标题重复合并（留痕做，复用 merge_pages 原语）──
+        // primary = 入链最多 → 正文最长（信息最全者为主）。
+        let inlinks: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT to_slug, count(*) FROM wiki_links WHERE library_id = $1 GROUP BY to_slug",
+        )
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await?;
+        let inlink_map: HashMap<String, i64> = inlinks.into_iter().collect();
+        let mut by_title: HashMap<String, Vec<String>> = HashMap::new();
+        for (s, t, ..) in &pages {
+            by_title.entry(t.clone()).or_default().push(s.clone());
+        }
+        for (title, mut group) in by_title {
+            if group.len() < 2 {
+                continue;
+            }
+            group.sort_by_key(|s| {
+                std::cmp::Reverse((
+                    inlink_map.get(s).copied().unwrap_or(0),
+                    contents.get(s).map(|c| c.chars().count()).unwrap_or(0),
+                ))
+            });
+            let primary = group[0].clone();
+            for dup in group.drain(1..) {
+                let detail = self.merge_pages(lib, &primary, &dup).await?;
+                actions.push(RepairAction {
+                    action: "merge_duplicate".into(),
+                    slug: primary.clone(),
+                    detail: format!("同标题「{title}」重复合并：{detail}"),
+                });
+            }
+        }
+        // merge_pages 直接落库——从库重载工作状态再进死链段
+        let pages: Vec<(String, String, String, String)> = sqlx::query_as(
+            "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type, content FROM wiki_pages \
+             WHERE page_type <> 'log' AND library_id = $1 ORDER BY slug",
+        )
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await?;
+        contents = pages
+            .iter()
+            .map(|(s, .., c)| (s.clone(), c.clone()))
+            .collect();
+        let mut titles: HashMap<String, String> = pages
+            .iter()
+            .map(|(s, t, ..)| (s.clone(), t.clone()))
+            .collect();
+        let mut slugs: HashSet<String> = contents.keys().cloned().collect();
+
+        // ── 2. 死链处理（自动做）──
+        let mut refs: HashMap<String, Vec<String>> = HashMap::new();
+        for (s, c) in &contents {
+            for link in crate::markup::extract_wikilinks(c) {
+                let (t, _) = crate::repair::split_link(&link);
+                if t != *s {
+                    refs.entry(t).or_default().push(s.clone());
+                }
+            }
+        }
+        let mut squash_map: HashMap<String, String> = HashMap::new();
+        for s in &slugs {
+            squash_map
+                .entry(crate::repair::squash(s))
+                .or_insert_with(|| s.clone());
+        }
+        let mut dead: Vec<String> = refs
+            .keys()
+            .filter(|t| !slugs.contains(*t) && !t.contains('/'))
+            .cloned()
+            .collect();
+        dead.sort();
+        for target in dead {
+            let ref_pages: Vec<String> = refs[&target]
+                .iter()
+                .filter(|p| contents.contains_key(*p))
+                .cloned()
+                .collect();
+            let n_ref = ref_pages.len();
+            // a) slug 变体唯一命中 → 全部改写为真实 slug
+            let sq = crate::repair::squash(&target);
+            let variant_matches: Vec<String> = slugs
+                .iter()
+                .filter(|s| crate::repair::squash(s) == sq)
+                .cloned()
+                .collect();
+            if let [real] = &variant_matches[..] {
+                let real = real.clone();
+                let mut n_total = 0usize;
+                for p in &ref_pages {
+                    if let Some(c) = contents.get_mut(p) {
+                        let (nc, n) = rewrite_links(c, &target, Some(&real));
+                        if n > 0 {
+                            *c = nc;
+                            n_total += n;
+                            if let Some(t) = titles.get(p) {
+                                self.put_page(lib, p, t, c, None, Some("ai")).await?;
+                            }
+                        }
+                    }
+                }
+                actions.push(RepairAction {
+                    action: "rewrite_variant_link".into(),
+                    slug: real.clone(),
+                    detail: format!(
+                        "[[{target}]] 为 slug 变体，{n_ref} 页共 {n_total} 处改写为 [[{real}]]"
+                    ),
+                });
+                continue;
+            }
+            // b) ≥3 页引用 → 建 stub（「下架不烧书」的补全起点；slug 不合法则退化为去链）
+            if n_ref >= 3 {
+                let stub_slug = target.to_lowercase().replace(' ', "-");
+                if crate::markup::is_valid_slug(&stub_slug) {
+                    let content = format!(
+                        "# {target}\n\n（stub：repair 自动创建——{n_ref} 个页面引用指向本页但原文缺失，待补全。）"
+                    );
+                    self.put_page(lib, &stub_slug, &target, &content, None, Some("ai"))
+                        .await?;
+                    slugs.insert(stub_slug.clone());
+                    contents.insert(stub_slug.clone(), content);
+                    titles.insert(stub_slug.clone(), target.clone());
+                    actions.push(RepairAction {
+                        action: "create_stub".into(),
+                        slug: stub_slug,
+                        detail: format!(
+                            "{n_ref} 个页面引用「{target}」但页面缺失——已建 stub 待补全"
+                        ),
+                    });
+                    continue;
+                }
+            }
+            // c) 去链接化（保留文本，摘掉链）
+            let mut n_total = 0usize;
+            for p in &ref_pages {
+                if let Some(c) = contents.get_mut(p) {
+                    let (nc, n) = rewrite_links(c, &target, None);
+                    if n > 0 {
+                        *c = nc;
+                        n_total += n;
+                        if let Some(t) = titles.get(p) {
+                            self.put_page(lib, p, t, c, None, Some("ai")).await?;
+                        }
+                    }
+                }
+            }
+            actions.push(RepairAction {
+                action: "delink".into(),
+                slug: target.clone(),
+                detail: format!(
+                    "[[{target}]] 无匹配页面且仅 {n_ref} 页引用——已去链接化（{n_total} 处）"
+                ),
+            });
+        }
+
+        // ── 3. 孤页沿出链回挂（自动做）──
+        // 先统一重建 wiki_links（合并/改写后的真实出链），再找 0 入链页，
+        // 把孤页回挂到它第一个「目标存在的库内出链」页的相关区（纯增益：不改不删只加一行）。
+        self.rebuild_all_links(lib).await?;
+        let system = ["index", "log", "overview"];
+        let orphans: Vec<(String, String)> = sqlx::query_as(
+            "SELECT p.slug, p.content FROM wiki_pages p \
+             WHERE p.page_type <> 'log' AND p.library_id = $1 \
+             AND NOT EXISTS (SELECT 1 FROM wiki_links l WHERE l.library_id = $1 AND l.to_slug = p.slug)",
+        )
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await?;
+        for (oslug, ocontent) in orphans {
+            if system.contains(&oslug.as_str()) || !slugs.contains(&oslug) {
+                continue;
+            }
+            let mut target: Option<String> = None;
+            for link in crate::markup::extract_wikilinks(&ocontent) {
+                let (t, _) = crate::repair::split_link(&link);
+                if t == oslug || !slugs.contains(&t) {
+                    continue;
+                }
+                let exists: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM wiki_pages WHERE slug = $1 AND library_id = $2",
+                )
+                .bind(&t)
+                .bind(lib)
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
+                if exists > 0 {
+                    target = Some(t);
+                    break;
+                }
+            }
+            let Some(target) = target else {
+                continue;
+            };
+            let Some(tc) = contents.get_mut(&target) else {
+                continue;
+            };
+            if tc.contains(&format!("[[{oslug}]]")) {
+                continue; // 已有链接，不重复挂
+            }
+            tc.push_str(&format!("\n\n相关：[[{oslug}]]"));
+            if let Some(t) = titles.get(&target) {
+                self.put_page(lib, &target, t, tc, None, Some("ai")).await?;
+            }
+            actions.push(RepairAction {
+                action: "attach_orphan".into(),
+                slug: oslug.clone(),
+                detail: format!("孤页无入链——已回挂到其出链目标「{target}」的相关区"),
+            });
+        }
+
+        self.rebuild_all_links(lib).await?;
+        Ok(RepairReport {
+            actions,
+            checked_pages: checked,
+        })
+    }
+
+    /// Merge：新陈代谢的合并原语（wiki 收录哲学线工单④，AI 处置重复 flag 与 repair 共用）。
+    /// duplicate 并入 primary：正文为空或为 primary 子串 → 冗余丢弃；否则整段并入「合并自」章节；
+    /// primary 自身引用 dup 的链接去链接化（改指会变自链）；全库其他页指向 dup 的链接改指 primary；
+    /// delete_page(dup)（版本快照兜底——下架不烧书）。返回人话明细。
+    pub async fn merge_pages(
+        &self,
+        lib: Uuid,
+        primary_slug: &str,
+        duplicate_slug: &str,
+    ) -> Result<String, WikiError> {
+        if primary_slug == duplicate_slug {
+            return Err(WikiError::BadRequest(
+                "primary 与 duplicate 不能是同一页".into(),
+            ));
+        }
+        let primary = self.resolve_slug(lib, primary_slug).await?;
+        let dup = self.resolve_slug(lib, duplicate_slug).await?;
+        let dup_page = self.get_page(lib, &dup).await?;
+        let pri_page = self.get_page(lib, &primary).await?;
+
+        // 1) 内容并入（冗余丢弃 / append 章节）；primary 自身引用 dup → 去链接化
+        let dup_c = dup_page.content.trim();
+        let discarded = dup_c.is_empty() || pri_page.content.contains(dup_c);
+        let mut new_primary = if discarded {
+            pri_page.content.clone()
+        } else {
+            format!(
+                "{}\n\n## 合并自〈{}〉（{dup}）\n\n{}",
+                pri_page.content, dup_page.title, dup_c
+            )
+        };
+        let (_, n_self) = crate::repair::rewrite_links(&new_primary, &dup, None);
+        if n_self > 0 {
+            let (nc, _) = crate::repair::rewrite_links(&new_primary, &dup, None);
+            new_primary = nc;
+        }
+
+        // 2) 全库其他页指向 dup 的链接改指 primary（防合并后新增死链）
+        let mut rewrite_total = 0usize;
+        let others: Vec<(String, String)> = sqlx::query_as(
+            "SELECT slug, content FROM wiki_pages WHERE library_id = $1 AND slug <> $2 AND slug <> $3",
+        )
+        .bind(lib)
+        .bind(&dup)
+        .bind(&primary)
+        .fetch_all(&self.pool)
+        .await?;
+        for (slug, content) in &others {
+            let (nc, n) = crate::repair::rewrite_links(content, &dup, Some(&primary));
+            if n > 0 {
+                rewrite_total += n;
+                let title: String = sqlx::query_scalar(
+                    "SELECT COALESCE(frontmatter->>'title', slug) FROM wiki_pages WHERE slug = $1 AND library_id = $2",
+                )
+                .bind(slug)
+                .bind(lib)
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or_else(|_| slug.clone());
+                self.put_page(lib, slug, &title, &nc, None, Some("ai"))
+                    .await?;
+            }
+        }
+
+        // 3) primary 落合并内容（内容有变才写）
+        if new_primary != pri_page.content {
+            self.put_page(
+                lib,
+                &primary,
+                &pri_page.title,
+                &new_primary,
+                None,
+                Some("ai"),
+            )
+            .await?;
+        }
+        // 4) 删 dup（快照兜底 + 双向链清理 + 提案级联 dismiss）
+        self.delete_page(lib, &dup).await?;
+        self.rebuild_all_links(lib).await?;
+        Ok(format!(
+            "{dup} → {primary}（{}，链接改写 {rewrite_total} 处）",
+            if discarded {
+                "冗余丢弃"
+            } else {
+                "内容并入"
+            }
+        ))
     }
 
     // ---------- 版本历史（R 报告建议 #5：列表 + 回滚；快照按 (library_id, slug) 隔离） ----------
