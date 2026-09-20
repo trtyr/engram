@@ -14,6 +14,78 @@ pub async fn generate_job(
     llm: crate::service::LlmRef,
 ) -> Result<serde_json::Value, JobError> {
     let pool = ctx.pool();
+    let (source_id, analysis, source_title) = generate_payload(&ctx)?;
+
+    // 多库（0037）：取源所属库，全流程只在库内读写（源不存在此处即报错）
+    let lib: Uuid = sqlx::query_scalar("SELECT library_id FROM wiki_sources WHERE id = $1")
+        .bind(source_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    let text = read_source(pool, source_id).await?;
+    let existing_pages = read_index(pool, lib).await?;
+    let purpose = crate::purpose::purpose_context(pool, lib).await;
+
+    // 候选页产出（分片 + 聚合去重 + 建页量软上限）
+    let candidates = generate_candidates(
+        &ctx,
+        &llm,
+        pool,
+        lib,
+        &analysis,
+        &text,
+        &existing_pages,
+        &purpose,
+    )
+    .await?;
+    // 落库（human 页冲突转提案）
+    let (created, updated, proposals, all_slugs) =
+        upsert_generated_pages(&ctx, pool, lib, source_id, &candidates).await?;
+
+    // 链接图 + 索引/日志/overview 维护
+    rebuild_links(pool, lib, &all_slugs).await?;
+    update_index_and_log(
+        pool,
+        lib,
+        source_id,
+        &source_title,
+        created,
+        updated,
+        proposals,
+    )
+    .await?;
+
+    // 新/变页回读 → tsv（FTS） → 嵌入（失败不阻塞）
+    let stored = read_generated_pages(pool, lib, &all_slugs).await?;
+    write_page_tsv(pool, lib, &stored).await?;
+    let embedded_pages = embed_generated_pages(&ctx, &llm, pool, lib, source_id, &stored).await?;
+
+    mark_source_ready(pool, source_id).await?;
+    // 全局状态更新：overview/权重 + 社区摘要 + 存量页向量回填
+    refresh_after_generate(&ctx, &llm, pool, lib, created + updated).await?;
+
+    let thin_hint = if created + updated + proposals == 0 {
+        "（0 产物：内容较薄，LLM 未产出页面——status=ready 仅代表处理完成，不代表有产物）"
+    } else {
+        ""
+    };
+    ctx.emit(
+        &format!(
+            "Wiki 生成：新建 {created} / 更新 {updated} / 提案 {proposals}（{embedded_pages} 页已嵌入）{thin_hint}"
+        ),
+        Some(json!({"created": created, "updated": updated, "proposals": proposals, "embedded": embedded_pages})),
+    )
+    .await
+    .ok();
+
+    Ok(
+        json!({"created": created, "updated": updated, "proposals": proposals, "source_id": source_id}),
+    )
+}
+
+/// 解析 job payload → `(source_id, analysis, source_title)`。
+fn generate_payload(ctx: &JobContext) -> Result<(Uuid, serde_json::Value, String), JobError> {
     let source_id: Uuid = ctx
         .job
         .payload
@@ -37,18 +109,20 @@ pub async fn generate_job(
         .and_then(|v| v.as_str())
         .unwrap_or("未命名源")
         .to_string();
+    Ok((source_id, analysis, source_title))
+}
 
-    // 多库（0037）：取源所属库，全流程只在库内读写（源不存在此处即报错）
-    let lib: Uuid = sqlx::query_scalar("SELECT library_id FROM wiki_sources WHERE id = $1")
-        .bind(source_id)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
-
-    let text = read_source(pool, source_id).await?;
-    let existing_pages = read_index(pool, lib).await?;
-
-    let purpose = crate::purpose::purpose_context(pool, lib).await;
+/// 候选页产出：分片消费 → 每片 LLM 织入 → 聚合去重 → 建页量软上限截断。
+async fn generate_candidates(
+    ctx: &JobContext,
+    llm: &crate::service::LlmRef,
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    analysis: &serde_json::Value,
+    text: &str,
+    existing_pages: &str,
+    purpose: &str,
+) -> Result<Vec<serde_json::Value>, JobError> {
     // 分片消费（工单「高反斜杠大文档织入必败」）：整篇塞给 LLM 会超时+产出巨 JSON 易坏
     // ——超过 GEN_SLICE_CHARS 按段落边界切片，每片独立调用，聚合候选页后走既有去重/截断链
     let slices = slice_source(&text, GEN_SLICE_CHARS);
@@ -84,7 +158,7 @@ pub async fn generate_job(
             existing_pages
         );
         let out = engram_distill::llm_port::chat_json_retrying(
-            &ctx,
+            ctx,
             llm.as_ref(),
             engram_llm::types::Purpose::WikiGeneration,
             &prompts::generation_system(),
@@ -125,11 +199,21 @@ pub async fn generate_job(
         .await
         .ok();
     }
+    Ok(pages)
+}
+
+/// 候选页落库：slug 规范化 → 单语句 UPSERT（human 页冲突转提案）→ 计数与 slug 清单。
+async fn upsert_generated_pages(
+    ctx: &JobContext,
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    source_id: Uuid,
+    pages: &[serde_json::Value],
+) -> Result<(usize, usize, usize, Vec<String>), JobError> {
     let mut created = 0usize;
     let mut updated = 0usize;
     let mut proposals = 0usize;
     let mut all_slugs: Vec<String> = Vec::new();
-
     // 链接规范化：查库内 slug 建 lowercase → real 映射，生成时对齐大小写变体
     // （防 case_mismatch 落到事后 lint；只修大小写，不补死链）
     let existing_slugs: Vec<String> =
@@ -143,7 +227,7 @@ pub async fn generate_job(
         .map(|s| (s.to_lowercase(), s))
         .collect();
 
-    for p in &pages {
+    for p in pages {
         let slug = p
             .get("slug")
             .and_then(|v| v.as_str())
@@ -229,35 +313,34 @@ pub async fn generate_job(
             }
         }
     }
+    Ok((created, updated, proposals, all_slugs))
+}
 
-    // 链接图：本批页面的 wikilinks + 到既有页的边（库内）
-    rebuild_links(pool, lib, &all_slugs).await?;
-
-    // 索引 + 日志 + overview 维护
-    update_index_and_log(
-        pool,
-        lib,
-        source_id,
-        &source_title,
-        created,
-        updated,
-        proposals,
-    )
-    .await?;
-
-    // 新/变页索引与嵌入（W2/W3 重构；库内回读）
-    // W2：tsv 统一 title+content 口径（旧实现只嵌 slug——LLM 页内容词搜不到）；
-    // W3：tsv 写入与嵌入解耦——嵌入失败只丢向量不丢 FTS 索引，页面不再从检索消失
+/// 回读本批页面（slug/title/content；库内）。
+async fn read_generated_pages(
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    slugs: &[String],
+) -> Result<Vec<(String, String, String)>, JobError> {
     let pages: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT slug, COALESCE(frontmatter->>'title', slug), content FROM wiki_pages \
          WHERE slug = ANY($1) AND library_id = $2",
     )
-    .bind(&all_slugs)
+    .bind(slugs)
     .bind(lib)
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
-    for (slug, title, content) in &pages {
+    Ok(pages)
+}
+
+/// 写 tsv（FTS 索引口径：slug + title + content 同源）。
+async fn write_page_tsv(
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    pages: &[(String, String, String)],
+) -> Result<(), JobError> {
+    for (slug, title, content) in pages {
         let text = engram_search::tokenize::tsv_text_wiki(&format!("{slug} {title} {content}"));
         sqlx::query("UPDATE wiki_pages SET tsv = to_tsvector('simple', $3) WHERE slug = $1 AND library_id = $2")
             .bind(slug)
@@ -267,7 +350,18 @@ pub async fn generate_job(
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
     }
+    Ok(())
+}
 
+/// 批量嵌入新/变页（K4 守卫：数量/维度不符则整批放弃向量；失败不阻塞——tsv 已可召回）。
+async fn embed_generated_pages(
+    ctx: &JobContext,
+    llm: &crate::service::LlmRef,
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    source_id: Uuid,
+    pages: &[(String, String, String)],
+) -> Result<usize, JobError> {
     let texts: Vec<String> = pages
         .iter()
         .map(|(_, title, content)| format!("{title}\n{content}"))
@@ -322,15 +416,32 @@ pub async fn generate_job(
             }
         }
     }
+    Ok(embedded_pages)
+}
 
+/// 源状态置 ready（时间戳更新）。
+async fn mark_source_ready(pool: &sqlx::PgPool, source_id: Uuid) -> Result<(), JobError> {
     sqlx::query("UPDATE wiki_sources SET status = 'ready', last_ingested_at = now() WHERE id = $1")
         .bind(source_id)
         .execute(pool)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
+    Ok(())
+}
 
+/// 织入后的全局状态更新：overview + 相关性权重 + 社区摘要 + 存量页向量回填（均 best-effort）。
+async fn refresh_after_generate(
+    ctx: &JobContext,
+    llm: &crate::service::LlmRef,
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    changed: usize,
+) -> Result<(), JobError> {
+    if changed == 0 {
+        return Ok(());
+    }
     // overview.md 重生成 + 4 信号权重重算（llm_wiki：每次 ingest 后全局状态更新；按库）
-    if created + updated > 0 {
+    if changed > 0 {
         rebuild_overview_page(pool, lib).await?;
         let n = crate::relevance::rebuild_weights(pool, lib).await?;
         ctx.emit(&format!("相关性权重更新 {n} 条边"), None)
@@ -340,8 +451,8 @@ pub async fn generate_job(
 
     // 批次③ 社区摘要层（wiki 大库化）：Louvain 社区 → synthesis 综述页参与召回。
     // hash 守卫增量（成员不变不重调 LLM）；失败只告警不阻塞织入主流程。
-    if created + updated > 0 {
-        match crate::community_summaries::refresh_community_summaries(pool, &llm, lib, &ctx).await {
+    if changed > 0 {
+        match crate::community_summaries::refresh_community_summaries(pool, llm, lib, ctx).await {
             Ok(stats) => {
                 let c = stats.get("created").and_then(|v| v.as_i64()).unwrap_or(0);
                 let d = stats.get("deleted").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -369,24 +480,7 @@ pub async fn generate_job(
             }
         }
     }
-
-    let thin_hint = if created + updated + proposals == 0 {
-        "（0 产物：内容较薄，LLM 未产出页面——status=ready 仅代表处理完成，不代表有产物）"
-    } else {
-        ""
-    };
-    ctx.emit(
-        &format!(
-            "Wiki 生成：新建 {created} / 更新 {updated} / 提案 {proposals}（{embedded_pages} 页已嵌入）{thin_hint}"
-        ),
-        Some(json!({"created": created, "updated": updated, "proposals": proposals, "embedded": embedded_pages})),
-    )
-    .await
-    .ok();
-
-    Ok(
-        json!({"created": created, "updated": updated, "proposals": proposals, "source_id": source_id}),
-    )
+    Ok(())
 }
 
 /// W4：Permanent 失败 → wiki_sources 标 failed + error 落列（此前 'failed' 态全代码无人写）。
