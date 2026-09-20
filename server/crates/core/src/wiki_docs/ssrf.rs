@@ -30,22 +30,37 @@ pub enum FetchError {
 }
 
 /// IP 是否私网/保留/环回/链路本地（IPv4 + IPv6）。
+/// IPv4 私有/保留网段表：`(网络地址, 前缀长度)`——判定统一查表，
+/// 避免一长串 `||` 分支（架构治理 判据1c：本函数 CC≈23 → ≈8）。
+/// 逐条对应原实现：0/8、10/8、100.64/10 CGNAT、127/8、169.254/16、
+/// 172.16/12、192.0.2/24 TEST-NET、192.168/16、198.18/15、224/4 组播、
+/// 240/4 保留、255.255.255.255 广播。
+const V4_PRIVATE_PREFIXES: &[(u32, u32)] = &[
+    (0x0000_0000, 8),
+    (0x0A00_0000, 8),
+    (0x6440_0000, 10),
+    (0x7F00_0000, 8),
+    (0xA9FE_0000, 16),
+    (0xAC10_0000, 12),
+    (0xC000_0200, 24),
+    (0xC0A8_0000, 16),
+    (0xC612_0000, 15),
+    (0xE000_0000, 4),
+    (0xF000_0000, 4),
+    (0xFFFF_FFFF, 32),
+];
+
+/// IPv4 是否落在私有/保留网段（查表；掩码按前缀长度生成）。
+fn is_private_v4(v4: std::net::Ipv4Addr) -> bool {
+    let n = u32::from(v4);
+    V4_PRIVATE_PREFIXES
+        .iter()
+        .any(|(net, bits)| n & (u32::MAX << (32 - bits)) == net & (u32::MAX << (32 - bits)))
+}
+
 pub fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private() // 10/8, 172.16/12, 192.168/16
-                || v4.is_link_local() // 169.254/16
-                || v4.is_broadcast()
-                || v4.is_unspecified()
-                || v4.octets()[0] == 100 && v4.octets()[1] & 0xC0 == 64 // 100.64/10 CGNAT
-                || v4.octets()[0] & 0xF0 == 224 // 组播
-                || v4.octets()[0] & 0xF0 == 240 // 保留
-                || v4.octets()[0] == 0 // 0/8
-                || v4.octets()[0] == 127 // 127/8（IPv4 映射环回）
-                || v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 2 // 192.0.2/24 TEST-NET
-                || v4.octets()[0] == 198 && (v4.octets()[1] == 18 || v4.octets()[1] == 19) // 198.18/15
-        }
+        IpAddr::V4(v4) => is_private_v4(v4),
         IpAddr::V6(v6) => {
             v6.is_loopback()
                 || v6.is_unspecified()
