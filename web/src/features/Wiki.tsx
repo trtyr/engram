@@ -14,7 +14,7 @@ import { DocumentsPane } from './DocumentsPane'
 import { useSearchParams } from 'react-router-dom'
 import { api, type GraphDto, type LintReport, type Purpose, type WikiPage } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
-import { fmtTime, inputCls, relTime, tableCls } from '@/lib/ui'
+import { fmtTime, inputCls, relTime, selectCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -619,16 +619,61 @@ function PageReader({
 function GraphPane({ libSlug }: { libSlug: string }) {
   const [g, setG] = useState<GraphDto | null>(null)
   const [err, setErr] = useState('')
-  useEffect(() => {
-    api
-      .get<GraphDto>(withLib('/wiki/graph', libSlug))
-      .then(setG)
+  // 规模化 task-5：子图过滤——社区（Louvain 全图编号）+ 页型。全量 communities
+  // 缓存下来做下拉选项（子图响应只含选中社区，选项不能跟着丢）。
+  const [allComms, setAllComms] = useState<{ id: number; size: number }[] | null>(null)
+  const [community, setCommunity] = useState<number | null>(null)
+  const [pageType, setPageType] = useState<string>('')
+  const load = useCallback(() => {
+    const qs = new URLSearchParams({ lib: libSlug })
+    if (community !== null) qs.set('community', String(community))
+    if (pageType) qs.set('page_type', pageType)
+    return api
+      .get<GraphDto>(`/wiki/graph?${qs.toString()}`)
+      .then((r) => {
+        setG(r)
+        if (community === null && !pageType) setAllComms((r.communities ?? []).map((c) => ({ id: c.id, size: c.size })))
+      })
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : '图谱加载失败'))
-  }, [libSlug])
+  }, [libSlug, community, pageType])
+  useEffect(() => {
+    void load()
+  }, [load])
   if (err) return <ErrorBox msg={err} />
   if (!g) return <Spinner />
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <select
+          aria-label="按社区过滤"
+          className={selectCls}
+          value={community ?? ''}
+          onChange={(e) => setCommunity(e.target.value === '' ? null : Number(e.target.value))}
+        >
+          <option value="">全部社区</option>
+          {(allComms ?? []).map((c) => (
+            <option key={c.id} value={c.id}>
+              社区 {c.id}（{c.size} 页）
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="按页型过滤"
+          className={selectCls}
+          value={pageType}
+          onChange={(e) => setPageType(e.target.value)}
+        >
+          <option value="">全部页型</option>
+          {['entity', 'concept', 'source', 'synthesis', 'comparison', 'analysis'].map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        <span className="text-muted-foreground">
+          {g.nodes.length} 节点 / {g.edges.length} 边
+        </span>
+      </div>
       <WikiGraph graph={g} />
     </div>
   )

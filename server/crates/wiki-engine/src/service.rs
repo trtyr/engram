@@ -141,6 +141,52 @@ pub async fn backfill_page_embeddings(
     Ok(pages.len())
 }
 
+/// 规模化 task-3：查询类型路由——零成本规则分类决定 FTS/向量通道权重。
+/// 判定顺序：对比 > 概念 > 场景 > 实体（默认）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryKind {
+    /// 对比题：「X vs Y」「X 和 Y 区别」「对比」——comparison 页天然匹配
+    Comparison,
+    /// 概念题：「什么是 X」「X 是什么」——概念页 + 摘要页
+    Concept,
+    /// 场景题：「怎么/如何/配置/部署」——语义相似优先（向量主导）
+    Scenario,
+    /// 实体题（默认）：专名/产品名/短词——精确匹配优先（FTS 主导）
+    Entity,
+}
+
+impl QueryKind {
+    /// RRF 通道权重：(fts, vec)。实体题 FTS 加倍（专名精确命中最准）；
+    /// 场景题向量加倍（语义意图）；对比/概念默认等权。
+    pub fn rrf_weights(&self) -> (f64, f64) {
+        match self {
+            QueryKind::Entity => (2.0, 1.0),
+            QueryKind::Scenario => (1.0, 2.0),
+            QueryKind::Concept | QueryKind::Comparison => (1.0, 1.0),
+        }
+    }
+}
+
+/// 纯规则分类（零成本——不加任何模型调用）。命中词表即归类，否则实体题兜底。
+pub fn classify_query(query: &str) -> QueryKind {
+    let q = query.to_lowercase();
+    const COMPARE: [&str; 5] = ["vs", "对比", "区别", "相比", "差异"];
+    const CONCEPT: [&str; 6] = ["什么是", "是什么", "什么叫", "概念", "含义", "介绍"];
+    const SCENARIO: [&str; 8] = [
+        "怎么", "如何", "怎样", "配置", "部署", "处理", "设置", "排查",
+    ];
+    if COMPARE.iter().any(|k| q.contains(k)) {
+        return QueryKind::Comparison;
+    }
+    if CONCEPT.iter().any(|k| q.contains(k)) {
+        return QueryKind::Concept;
+    }
+    if SCENARIO.iter().any(|k| q.contains(k)) {
+        return QueryKind::Scenario;
+    }
+    QueryKind::Entity
+}
+
 /// 批次② 查询日志：检索后 UPSERT（calls 累计；零命中/低分计数——缺口挖掘原料）。
 async fn log_query(
     pool: &sqlx::PgPool,
@@ -149,6 +195,7 @@ async fn log_query(
     hits: usize,
     top_score: Option<f64>,
 ) -> Result<(), sqlx::Error> {
+    maybe_cleanup_query_log(pool, lib).await;
     let top = top_score.unwrap_or(0.0) as f32;
     let zero = (hits == 0) as i32;
     let low = (hits > 0 && top_score.is_some_and(|s| s < QUERY_LOG_LOW_SCORE)) as i32;
@@ -170,6 +217,74 @@ async fn log_query(
     .execute(pool)
     .await
     .map(|_| ())
+}
+
+/// 查询日志保留策略（规模化四件套 2026-09-20，goal mu9frlhh-4e1fmj task-2）：
+/// 万级检索写入下行数受控——(1) TTL：90 天未活跃的查询行过期；
+/// (2) 硬顶：每库最多保留 QUERY_LOG_MAX_ROWS 行，超出删最旧。
+/// 触发：log_query 按天桶幂等（进程级，每天首次检索触发一次），
+/// 后台 spawn 执行不阻塞 search 路径。
+const QUERY_LOG_TTL_DAYS: i32 = 90;
+const QUERY_LOG_MAX_ROWS: i64 = 5000;
+
+fn query_log_day_bucket() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64 / 86_400)
+        .unwrap_or(0)
+}
+
+/// 进程级天桶去重：同一自然日只触发一次清理。
+fn should_cleanup_query_log_today() -> bool {
+    static LAST_DAY: std::sync::OnceLock<std::sync::atomic::AtomicI64> = std::sync::OnceLock::new();
+    let last = LAST_DAY.get_or_init(|| std::sync::atomic::AtomicI64::new(-1));
+    let today = query_log_day_bucket();
+    last.swap(today, std::sync::atomic::Ordering::Relaxed) != today
+}
+
+/// 后台清理入口：fire-and-forget，失败仅日志（清理失败不影响检索）。
+async fn maybe_cleanup_query_log(pool: &sqlx::PgPool, lib: Uuid) {
+    if !should_cleanup_query_log_today() {
+        return;
+    }
+    let pool = pool.clone();
+    tokio::spawn(async move {
+        match cleanup_query_log(&pool, lib).await {
+            Ok(removed) if removed > 0 => {
+                tracing::info!(removed, "wiki_query_log 例行清理完成（TTL + 行数上限）")
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "wiki_query_log 清理失败——留待明日重试"),
+        }
+    });
+}
+
+/// 查询日志清理：TTL 过期 + 行数硬顶（公开供测试与未来节律挂钩）。
+pub async fn cleanup_query_log(pool: &sqlx::PgPool, lib: Uuid) -> Result<u64, sqlx::Error> {
+    let mut removed = sqlx::query(
+        "DELETE FROM wiki_query_log \
+         WHERE library_id = $1 \
+           AND last_queried_at < now() - ($2 || ' days')::interval",
+    )
+    .bind(lib)
+    .bind(QUERY_LOG_TTL_DAYS.to_string())
+    .execute(pool)
+    .await?
+    .rows_affected();
+    // 硬顶：保留最近 QUERY_LOG_MAX_ROWS 行，更旧的淘汰（长尾查询防膨胀）
+    removed += sqlx::query(
+        "DELETE FROM wiki_query_log \
+         WHERE id IN (\
+           SELECT id FROM wiki_query_log WHERE library_id = $1 \
+           ORDER BY last_queried_at DESC OFFSET $2\
+         )",
+    )
+    .bind(lib)
+    .bind(QUERY_LOG_MAX_ROWS)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(removed)
 }
 
 /// page_type → 目录树默认文件夹（Obsidian 式目录树层级）。
@@ -215,6 +330,8 @@ pub struct GraphNode {
     pub slug: String,
     pub title: String,
     pub page_type: String,
+    /// 目录树层级（规模化 task-5：子图过滤维度之一）
+    pub folder: String,
     /// Louvain 社区 id（着色切换用）
     #[serde(default)]
     pub community: usize,
@@ -540,34 +657,81 @@ impl WikiService {
 
     /// 链接图（节点 = 页面，边 = wikilink；含 Louvain 社区 + 凝聚度；库内）。
     pub async fn graph(&self, lib: Uuid) -> Result<GraphDto, WikiError> {
+        self.graph_filtered(lib, None, None, None).await
+    }
+
+    /// 规模化 task-5：图谱子图过滤——按 community（Louvain 全图编号）/ folder 前缀 /
+    /// page_type 裁剪。folder/page_type 在 SQL 层过滤（万页少拉）；community 为运行时
+    /// 计算，先分区再按编号裁剪节点与边，communities 元数据保留全图编号子集
+    /// （前端「从全图下拉选社区 N」→ 子图里社区 ID 语义一致）。
+    pub async fn graph_filtered(
+        &self,
+        lib: Uuid,
+        community: Option<usize>,
+        folder: Option<&str>,
+        page_type: Option<&str>,
+    ) -> Result<GraphDto, WikiError> {
         // D23：排除系统 log 页（list_pages 不可见，图里也不该出现——否则节点无法溯源）
-        let nodes: Vec<(String, String, String)> = sqlx::query_as(
-            "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type FROM wiki_pages \
-             WHERE page_type <> 'log' AND library_id = $1",
+        let nodes: Vec<(String, String, String, String)> = sqlx::query_as(
+            "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type, folder FROM wiki_pages \
+             WHERE page_type <> 'log' AND library_id = $1 \
+               AND ($2::text IS NULL OR folder LIKE $2 || '%') \
+               AND ($3::text IS NULL OR page_type = $3)",
         )
         .bind(lib)
+        .bind(folder)
+        .bind(page_type)
         .fetch_all(&self.pool)
         .await?;
-        // 边随节点过滤：任一端是 log 页的边一并剔除（防悬空引用进社区发现）；边与两端都限库内
+        // 边随节点过滤：任一端是 log 页的边一并剔除（防悬空引用进社区发现）；边与两端都限库内。
+        // 规模化 task-5 修正（万页压测）：EXISTS 子查询 + 可选参数 OR 模式在万页下计划劣化
+        // （page_type 过滤 151s）——改为仅按库拉边（54869 行内存过滤秒级），节点集条件
+        // （log 排除/folder/page_type）由下方的 slug 集合过滤统一承接。
         let edges: Vec<(String, String, f32)> = sqlx::query_as(
             "SELECT l.from_slug, l.to_slug, l.weight FROM wiki_links l \
-             WHERE l.library_id = $1 \
-               AND EXISTS (SELECT 1 FROM wiki_pages f WHERE f.slug = l.from_slug \
-                           AND f.page_type <> 'log' AND f.library_id = $1) \
-               AND EXISTS (SELECT 1 FROM wiki_pages t WHERE t.slug = l.to_slug \
-                           AND t.page_type <> 'log' AND t.library_id = $1)",
+             WHERE l.library_id = $1",
         )
         .bind(lib)
         .fetch_all(&self.pool)
         .await?;
         // 社区发现
-        let node_slugs: Vec<String> = nodes.iter().map(|(s, _, _)| s.clone()).collect();
+        let node_slugs: Vec<String> = nodes.iter().map(|(s, _, _, _)| s.clone()).collect();
         let e64: Vec<(String, String, f64)> = edges
             .iter()
             .map(|(f, t, w)| (f.clone(), t.clone(), *w as f64))
             .collect();
-        let comms = crate::community::louvain_communities(&node_slugs, &e64);
-        let cohesion = crate::community::community_cohesion(&node_slugs, &e64, &comms);
+        // 万页保护（压测实测三个发现）：Louvain 是纯 CPU 计算——(1) 万级全图 >120s；
+        // (2) 4077 节点子图在 debug 下分钟级且阻塞 tokio worker（连接池 acquire 等 638s、
+        // 实例整体无响应）；(3) 阈值内也必须 spawn_blocking 隔离。超限的 community 过滤
+        // 直接拒绝（引导先 SQL 层收窄）；全量请求降级跳过社区计算（community=0、空列表）。
+        const LOUVAIN_MAX_NODES: usize = 1500;
+        let over_limit = node_slugs.len() > LOUVAIN_MAX_NODES;
+        if over_limit && community.is_some() {
+            return Err(WikiError::BadRequest(format!(
+                "子图 {} 节点超过社区计算上限 {}——请先用 folder/page_type 参数收窄后再按社区过滤",
+                node_slugs.len(),
+                LOUVAIN_MAX_NODES
+            )));
+        }
+        let (comms, cohesion): (
+            std::collections::HashMap<String, usize>,
+            std::collections::HashMap<usize, f64>,
+        ) = if over_limit {
+            Default::default()
+        } else {
+            let slugs = node_slugs.clone();
+            let e64c = e64.clone();
+            tokio::task::spawn_blocking(move || {
+                let comms = crate::community::louvain_communities(&slugs, &e64c);
+                let cohesion = crate::community::community_cohesion(&slugs, &e64c, &comms);
+                // louvain 返回借用 key（&str 借 slugs）——转自有 String 后才能跨闭包返回
+                let owned: std::collections::HashMap<String, usize> =
+                    comms.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+                (owned, cohesion)
+            })
+            .await
+            .unwrap_or_default()
+        };
         // 成员映射（id → 成员 slugs，保持节点顺序）——top_slug/size 真实统计，
         // 与 insights.rs 的 CommunityInfo 口径一致（曾长期 size:0 且缺 top_slug 违约）
         let mut members: std::collections::HashMap<usize, Vec<&str>> =
@@ -578,36 +742,50 @@ impl WikiService {
                 .or_default()
                 .push(slug);
         }
-        Ok(GraphDto {
-            communities: cohesion
-                .into_iter()
-                .map(|(id, cohesion)| {
-                    let m = members.get(&id);
-                    let size = m.map_or(0, |v| v.len());
-                    CommunityInfo {
-                        id,
-                        top_slug: m
-                            .and_then(|v| v.first().copied())
-                            .unwrap_or_default()
-                            .to_string(),
-                        size,
-                        cohesion,
-                        sparse: size >= crate::community::SPARSE_MIN_SIZE
-                            && cohesion < crate::community::SPARSE_COHESION,
-                    }
-                })
+        // community 后置裁剪：保留全图社区编号 == 选中值的节点，边随节点过滤
+        let kept: std::collections::HashSet<String> = match community {
+            Some(n) => nodes
+                .iter()
+                .filter(|(s, _, _, _)| comms.get(s.as_str()).copied().unwrap_or(0) == n)
+                .map(|(s, _, _, _)| s.clone())
                 .collect(),
+            None => node_slugs.iter().cloned().collect(),
+        };
+        let comm_meta = |id: usize| {
+            let m = members.get(&id);
+            let size = m.map_or(0, |v| v.len());
+            CommunityInfo {
+                id,
+                top_slug: m
+                    .and_then(|v| v.first().copied())
+                    .unwrap_or_default()
+                    .to_string(),
+                size,
+                cohesion: cohesion.get(&id).copied().unwrap_or(0.0),
+                sparse: size >= crate::community::SPARSE_MIN_SIZE
+                    && cohesion.get(&id).copied().unwrap_or(0.0)
+                        < crate::community::SPARSE_COHESION,
+            }
+        };
+        Ok(GraphDto {
+            communities: match community {
+                Some(n) => vec![comm_meta(n)],
+                None => cohesion.keys().copied().map(comm_meta).collect(),
+            },
             nodes: nodes
                 .into_iter()
-                .map(|(slug, title, page_type)| GraphNode {
+                .filter(|(s, _, _, _)| kept.contains(s.as_str()))
+                .map(|(slug, title, page_type, folder)| GraphNode {
                     community: comms.get(slug.as_str()).copied().unwrap_or(0),
                     slug,
                     title,
                     page_type,
+                    folder,
                 })
                 .collect(),
             edges: edges
                 .into_iter()
+                .filter(|(f, t, _)| kept.contains(f.as_str()) && kept.contains(t.as_str()))
                 .map(|(from_slug, to_slug, weight)| GraphEdge {
                     from_slug,
                     to_slug,
@@ -760,6 +938,10 @@ impl WikiService {
         if !engram_search::tokenize::has_query_tokens(query) {
             return Ok(vec![]);
         }
+        // 规模化 task-3：查询类型路由——零成本规则分类决定 FTS/向量通道权重
+        let kind = classify_query(query);
+        let (w_fts, w_vec) = kind.rrf_weights();
+        tracing::info!(kind = ?kind, query = %query, w_fts, w_vec, "wiki 检索路由");
         let tsq = tsv_query_smart_wiki(query, 3);
         let limit = limit.min(50);
 
@@ -790,18 +972,20 @@ impl WikiService {
                  vec AS (SELECT slug, ROW_NUMBER() OVER (ORDER BY embedding <=> $3) AS rank \
                  FROM wiki_pages WHERE embedding IS NOT NULL AND library_id = $1 \
                    AND page_type NOT IN ('index','log','overview') LIMIT 100) \
-                 SELECT p.*, (COALESCE(1.0/(60 + fts.rank), 0) + COALESCE(1.0/(60 + vec.rank), 0))::float8 AS rrf_score \
+                 SELECT p.*, (COALESCE($5/(60 + fts.rank), 0) + COALESCE($6/(60 + vec.rank), 0))::float8 AS rrf_score \
                  FROM wiki_pages p \
                  LEFT JOIN fts ON fts.slug = p.slug \
                  LEFT JOIN vec ON vec.slug = p.slug \
                  WHERE p.library_id = $1 AND (fts.slug IS NOT NULL OR vec.slug IS NOT NULL) \
-                 ORDER BY (COALESCE(1.0/(60 + fts.rank), 0) + COALESCE(1.0/(60 + vec.rank), 0)) DESC \
+                 ORDER BY (COALESCE($5/(60 + fts.rank), 0) + COALESCE($6/(60 + vec.rank), 0)) DESC \
                  LIMIT $4",
             )
             .bind(lib)
             .bind(tsq)
             .bind(pgvector::Vector::from(qv))
             .bind(fetch_n)
+            .bind(w_fts)
+            .bind(w_vec)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| WikiError::Storage(e.to_string()))?;
@@ -1537,6 +1721,38 @@ impl WikiService {
     /// duplicate 并入 primary：正文为空或为 primary 子串 → 冗余丢弃；否则整段并入「合并自」章节；
     /// primary 自身引用 dup 的链接去链接化（改指会变自链）；全库其他页指向 dup 的链接改指 primary；
     /// delete_page(dup)（版本快照兜底——下架不烧书）。返回人话明细。
+    /// 规模化 task-4：概念页内容级合并——重复候选检测（聚合出口）。
+    /// v1 检测口径：标题归一化（lower+trim）相同的页面组——LLM 从不同来源织入
+    /// 产出同名页是最常见的重复形态。研判流：duplicate_candidates → AI/人工
+    /// 逐组研判 → merge_pages 合并（留痕）或确认共存。
+    pub async fn duplicate_candidates(
+        &self,
+        lib: Uuid,
+    ) -> Result<Vec<serde_json::Value>, WikiError> {
+        let rows: Vec<(String, i64, serde_json::Value)> = sqlx::query_as(
+            "SELECT lower(btrim(title)) AS norm_title, count(*) AS cnt, \
+                json_agg(json_build_object(\
+                    'slug', slug, 'title', title, 'page_type', page_type, \
+                    'folder', folder, 'version', version, 'updated_at', updated_at) \
+                    ORDER BY updated_at DESC) AS pages \
+            FROM wiki_pages \
+            WHERE library_id = $1 AND page_type NOT IN ('index','log','overview') \
+              AND slug NOT LIKE 'community-synthesis-%' \
+            GROUP BY lower(btrim(title)) HAVING count(*) > 1 \
+            ORDER BY count(*) DESC, norm_title",
+        )
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| WikiError::Storage(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(|(norm_title, cnt, pages)| {
+                serde_json::json!({ "norm_title": norm_title, "count": cnt, "pages": pages })
+            })
+            .collect())
+    }
+
     pub async fn merge_pages(
         &self,
         lib: Uuid,

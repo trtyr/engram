@@ -196,15 +196,38 @@ pub async fn put_page(
     ))
 }
 
+/// 规模化 task-5：图谱子图过滤参数——community（Louvain 全图编号）/ folder 前缀 / page_type。
+#[derive(Deserialize, IntoParams)]
+pub struct GraphFilterParams {
+    /// Louvain 社区编号（全图口径；不传 = 全图）
+    pub community: Option<usize>,
+    /// folder 前缀（如 `topic-03`）；不传 = 全部
+    pub folder: Option<String>,
+    /// 页型过滤（entity/concept/…）；不传 = 全部
+    pub page_type: Option<String>,
+}
+
 #[utoipa::path(get, path = "/wiki/graph", operation_id = "wiki_graph",
+    params(GraphFilterParams),
     responses((status = 200, body = engram_core::wiki::GraphDto)))]
 pub async fn graph(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
+    Query(f): Query<GraphFilterParams>,
 ) -> Result<Json<engram_core::wiki::GraphDto>, ApiError> {
     require_wiki(&principal)?;
     let lib = main_lib(&state).await?;
-    Ok(Json(svc(&state).graph(lib).await.map_err(we)?))
+    Ok(Json(
+        svc(&state)
+            .graph_filtered(
+                lib,
+                f.community,
+                f.folder.as_deref(),
+                f.page_type.as_deref(),
+            )
+            .await
+            .map_err(we)?,
+    ))
 }
 
 /// Lint（只报告）。
@@ -290,6 +313,20 @@ pub async fn merge_pages(
         .await
         .map_err(we)?;
     Ok(Json(serde_json::json!({ "detail": detail })))
+}
+
+/// 规模化 task-4：重复候选聚合出口——标题归一化相同的页面组。
+/// 研判流：候选 → 逐组 AI/人工研判 → merge_pages 合并（留痕）或确认共存。
+#[utoipa::path(get, path = "/wiki/duplicates",
+    responses((status = 200, body = Object)))]
+pub async fn duplicates(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_wiki(&principal)?;
+    let lib = main_lib(&state).await?;
+    let candidates = svc(&state).duplicate_candidates(lib).await.map_err(we)?;
+    Ok(Json(serde_json::json!({ "candidates": candidates })))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]

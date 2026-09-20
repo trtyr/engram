@@ -1905,6 +1905,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/wiki/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 规模化 task-4：重复候选聚合出口——标题归一化相同的页面组。
+         *     研判流：候选 → 逐组 AI/人工研判 → merge_pages 合并（留痕）或确认共存。
+         */
+        get: operations["duplicates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/wiki/graph": {
         parameters: {
             query?: never;
@@ -2868,6 +2888,8 @@ export interface components {
         GraphNode: {
             /** @description Louvain 社区 id（着色切换用） */
             community?: number;
+            /** @description 目录树层级（规模化 task-5：子图过滤维度之一） */
+            folder: string;
             page_type: string;
             slug: string;
             title: string;
@@ -7149,9 +7171,35 @@ export interface operations {
             };
         };
     };
-    wiki_graph: {
+    duplicates: {
         parameters: {
             query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    wiki_graph: {
+        parameters: {
+            query?: {
+                /** @description Louvain 社区编号（全图口径；不传 = 全图） */
+                community?: number | null;
+                /** @description folder 前缀（如 `topic-03`）；不传 = 全部 */
+                folder?: string | null;
+                /** @description 页型过滤（entity/concept/…）；不传 = 全部 */
+                page_type?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7292,6 +7340,7 @@ export interface operations {
                 page_type?: string | null;
                 /** @description keyset 分页游标：{updated_at ISO8601}|{id}（上一页最后一条） */
                 cursor?: string | null;
+                /** @description 返回条数上限；不传 = 全量（2026-09-20 单库终局：不要截断） */
                 limit?: number | null;
             };
             header?: never;

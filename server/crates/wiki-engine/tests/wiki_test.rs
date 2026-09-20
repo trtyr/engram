@@ -1824,3 +1824,194 @@ async fn en63_tsv_coverage_and_system_page_exclusion() {
     .unwrap();
     assert!(imp_ok, "导入页 tsv 应按 wiki 口径写入（含 slug token）");
 }
+
+/// 查询日志保留策略（规模化 task-2）：TTL 90 天过期删除——旧行清、新行留；
+/// 行数硬顶保留最近 QUERY_LOG_MAX_ROWS 行。天桶触发逻辑是进程级 swap，不在此断言。
+#[tokio::test]
+async fn query_log_ttl_cleanup_removes_stale_rows() {
+    let (pool, _svc, _runner, _t, lib) = setup(vec![]).await;
+    // 新行（今天）与旧行（91 天前，超 TTL）
+    sqlx::query(
+        "INSERT INTO wiki_query_log (id, library_id, query, calls, last_queried_at) \
+         VALUES ($1, $2, 'fresh query', 1, now())",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(lib)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO wiki_query_log (id, library_id, query, calls, last_queried_at) \
+         VALUES ($1, $2, 'stale query', 1, now() - interval '91 days')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(lib)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let removed = engram_wiki_engine::service::cleanup_query_log(&pool, lib)
+        .await
+        .unwrap();
+    assert_eq!(removed, 1, "只应清理 TTL 过期行");
+    let left: Vec<(String,)> =
+        sqlx::query_as("SELECT query FROM wiki_query_log WHERE library_id = $1")
+            .bind(lib)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        left,
+        vec![("fresh query".into(),)],
+        "新行必须保留: {left:?}"
+    );
+}
+
+/// 查询类型路由（规模化 task-3）：规则分类的判定顺序与权重映射。
+#[test]
+fn classify_query_rules_and_weights() {
+    use engram_wiki_engine::service::{QueryKind, classify_query};
+    // 对比优先级最高（同时含「区别」和「什么」也归对比）
+    assert_eq!(
+        classify_query("守元和透明代理的区别是什么"),
+        QueryKind::Comparison
+    );
+    assert_eq!(classify_query("Rust vs Go"), QueryKind::Comparison);
+    // 概念题
+    assert_eq!(classify_query("什么是透明代理"), QueryKind::Concept);
+    assert_eq!(classify_query("Jev 是什么"), QueryKind::Concept);
+    // 场景题
+    assert_eq!(classify_query("告警怎么配置"), QueryKind::Scenario);
+    assert_eq!(classify_query("如何排查检测超时"), QueryKind::Scenario);
+    // 实体题（默认）
+    assert_eq!(classify_query("模型货架"), QueryKind::Entity);
+    assert_eq!(classify_query("AAGP 协议"), QueryKind::Entity);
+    // 权重映射：实体 FTS 加倍、场景向量加倍、其余等权
+    assert_eq!(QueryKind::Entity.rrf_weights(), (2.0, 1.0));
+    assert_eq!(QueryKind::Scenario.rrf_weights(), (1.0, 2.0));
+    assert_eq!(QueryKind::Concept.rrf_weights(), (1.0, 1.0));
+    assert_eq!(QueryKind::Comparison.rrf_weights(), (1.0, 1.0));
+}
+
+/// 图谱子图过滤（规模化 task-5）：folder 前缀在 SQL 层裁剪节点与边（跨 folder 边被剪）；
+/// community 后置裁剪保留全图编号语义（子图社区元数据与全图对账一致）。
+#[tokio::test]
+async fn graph_filtered_subgraph() {
+    let (_pool, svc, _runner, _t, lib) = setup(vec![]).await;
+    // topic-01 两页互链 + 跨 folder 一条边 + topic-02 孤立页
+    svc.put_page(
+        lib,
+        "a-1",
+        "甲一",
+        "内容 [[a-2]] 与 [[b-1]] 互链。",
+        Some("topic-01"),
+        None,
+    )
+    .await
+    .unwrap();
+    svc.put_page(
+        lib,
+        "a-2",
+        "甲二",
+        "内容引用 [[a-1]]。",
+        Some("topic-01"),
+        None,
+    )
+    .await
+    .unwrap();
+    svc.put_page(
+        lib,
+        "b-1",
+        "乙一",
+        "内容引用 [[a-1]]。",
+        Some("topic-02"),
+        None,
+    )
+    .await
+    .unwrap();
+    svc.put_page(lib, "b-2", "乙二", "独立内容。", Some("topic-02"), None)
+        .await
+        .unwrap();
+
+    // 全图：4 节点 / 4 条有向边（a1→a2、a1→b1、a2→a1、b1→a1）
+    let full = svc.graph_filtered(lib, None, None, None).await.unwrap();
+    assert_eq!(full.nodes.len(), 4);
+    assert_eq!(full.edges.len(), 4);
+
+    // folder 前缀过滤：topic-01 → 2 节点，跨 folder 边被剪（剩 a1→a2、a2→a1）
+    let sub = svc
+        .graph_filtered(lib, None, Some("topic-01"), None)
+        .await
+        .unwrap();
+    assert_eq!(sub.nodes.len(), 2, "folder 过滤后节点: {sub:?}");
+    assert_eq!(sub.edges.len(), 2, "folder 过滤后边: {sub:?}");
+    assert!(
+        sub.edges
+            .iter()
+            .all(|e| e.from_slug.starts_with("a-") && e.to_slug.starts_with("a-")),
+        "跨 folder 边必须被剪: {sub:?}"
+    );
+
+    // community 过滤：取全图第一个社区按编号裁剪 → 节点数与元数据 size 对账一致，
+    // 子图社区元数据保留全图编号（前端下拉语义一致）
+    let target = full.communities[0].id;
+    let sub = svc
+        .graph_filtered(lib, Some(target), None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        sub.nodes.len(),
+        full.communities[0].size,
+        "子图节点数应等于该社区 size"
+    );
+    assert_eq!(sub.communities.len(), 1);
+    assert_eq!(sub.communities[0].id, target);
+}
+
+/// 重复候选聚合与合并流（规模化 task-4）：标题归一化相同的页面组被检测 →
+/// merge_pages 合并（留痕）→ 候选消失。无关标题不受牵连。
+#[tokio::test]
+async fn duplicates_candidates_and_merge_flow() {
+    let (_pool, svc, _runner, _t, lib) = setup(vec![]).await;
+    // 两个同标题（空白差异归一后相同）页面 + 一个无关标题页
+    svc.put_page(
+        lib,
+        "dup-alpha",
+        "透传原则",
+        "Alpha 版本内容：透传原则的核心机制。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    svc.put_page(
+        lib,
+        "dup-beta",
+        " 透传原则 ",
+        "Beta 版本内容：另一来源的同主题笔记。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    svc.put_page(lib, "unrelated", "完全不同的标题", "无关内容。", None, None)
+        .await
+        .unwrap();
+
+    let cands = svc.duplicate_candidates(lib).await.unwrap();
+    assert_eq!(cands.len(), 1, "应只有一组重复候选: {cands:?}");
+    assert_eq!(cands[0]["norm_title"], json!("透传原则"));
+    assert_eq!(cands[0]["count"], json!(2));
+    let pages = cands[0]["pages"].as_array().unwrap();
+    let slugs: Vec<&str> = pages.iter().filter_map(|p| p["slug"].as_str()).collect();
+    assert!(slugs.contains(&"dup-alpha") && slugs.contains(&"dup-beta"));
+
+    // 合并：alpha 吸收 beta（留痕）→ 候选消失
+    let detail = svc.merge_pages(lib, "dup-alpha", "dup-beta").await.unwrap();
+    assert!(
+        detail.contains("dup-beta"),
+        "合并明细应提及被并页: {detail}"
+    );
+    let cands = svc.duplicate_candidates(lib).await.unwrap();
+    assert!(cands.is_empty(), "合并后候选应清空: {cands:?}");
+}

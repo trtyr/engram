@@ -58,6 +58,7 @@ use utoipa::OpenApi;
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
         wiki_api::query_gaps,
         wiki_api::rebuild_links,
+        wiki_api::duplicates,
         wiki_api::list_proposals,
         wiki_api::get_purpose, wiki_api::set_purpose,
         wiki_api::list_reviews, wiki_api::resolve_review,
@@ -326,6 +327,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/wiki/pages/merge", post(wiki_api::merge_pages))
         .route("/wiki/graph", get(wiki_api::graph))
+        .route("/wiki/duplicates", get(wiki_api::duplicates))
         .route("/wiki/lint", post(wiki_api::lint))
         .route("/wiki/query-gaps", get(wiki_api::query_gaps))
         .route("/wiki/links/rebuild", post(wiki_api::rebuild_links))

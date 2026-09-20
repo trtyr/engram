@@ -1,0 +1,40 @@
+{
+  "label": "baseline-prod-358",
+  "base": "http://127.0.0.1:17654",
+  "measured_at": "2026-09-20T14:43:32+0800",
+  "metrics": {
+    "pages_list": {
+      "median_ms": 27.4,
+      "bytes": 820647,
+      "count": 359,
+      "runs": [
+        32.9,
+        27.4,
+        16.1
+      ]
+    },
+    "graph_api": {
+      "median_ms": 43.7,
+      "nodes": 359,
+      "edges": 3954,
+      "runs": [
+        43.3,
+        43.7,
+        45.8
+      ]
+    },
+    "search": {
+      "p50_ms": 362.8,
+      "p95_ms": 2886.3,
+      "max_ms": 3329.9,
+      "zero_hits": 0,
+      "queries": 20
+    },
+    "insights": {
+      "ms": 35.1
+    },
+    "query_gaps": {
+      "ms": 4.9
+    }
+  }
+}
