@@ -121,146 +121,19 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
         ));
     }
 
-    let mut c_session = DomainCount::default();
-    for it in each(data.get("memory"), "sessions") {
-        c_session.merge(DomainCount::bump(repo::import_session(pool, &it).await?));
-    }
-    // 外键序：scenarios 先于 atoms（atoms.scenario_id → scenarios）——顺序颠倒会在
-    // 干净库导入时违反 atoms_scenario_id_fkey（公网加固 t9 往返演练抓出并修复）
-    let mut c_scenario = DomainCount::default();
-    for it in each(data.get("memory"), "scenarios") {
-        c_scenario.merge(DomainCount::bump(repo::import_scenario(pool, &it).await?));
-    }
-    // superseded_by 是表内自引用 FK（atoms → atoms.id）——行序随机，插入期置 NULL，
-    // 全量入库后统一回填（公网加固 t9 往返演练抓出）
-    let mut c_atom = DomainCount::default();
-    for it in each(data.get("memory"), "atoms") {
-        let mut row = it.clone();
-        if let Some(obj) = row.as_object_mut() {
-            obj.insert("superseded_by".into(), serde_json::Value::Null);
-        }
-        c_atom.merge(DomainCount::bump(repo::import_atom(pool, &row).await?));
-    }
-    for it in each(data.get("memory"), "atoms") {
-        let superseded_by = it
-            .get("superseded_by")
-            .and_then(|x| x.as_str())
-            .unwrap_or("");
-        if superseded_by.is_empty() {
-            continue;
-        }
-        let (Ok(id), Ok(target)) = (
-            uuid::Uuid::parse_str(it.get("id").and_then(|x| x.as_str()).unwrap_or("")),
-            uuid::Uuid::parse_str(superseded_by),
-        ) else {
-            continue;
-        };
-        repo::backfill_atom_superseded_by(pool, id, target).await?;
-    }
-    let mut c_persona = DomainCount::default();
-    for it in each(data.get("memory"), "persona") {
-        c_persona.merge(DomainCount::bump(repo::import_persona(pool, &it).await?));
-    }
-    let mut c_entity = DomainCount::default();
-    for it in each(data.get("memory"), "entities") {
-        c_entity.merge(DomainCount::bump(repo::import_entity(pool, &it).await?));
-    }
-    let mut c_relation = DomainCount::default();
-    for it in each(data.get("memory"), "relations") {
-        c_relation.merge(DomainCount::bump(
-            repo::import_entity_relation(pool, &it).await?,
-        ));
-    }
-
-    let mut c_skill = DomainCount::default();
-    let mut files_imported = 0usize;
-    for s in each(Some(data), "skills") {
-        let files = s
-            .get("files")
-            .and_then(|x| x.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let (imported, files_n) = repo::import_skill(pool, &s, &files).await?;
-        c_skill.merge(DomainCount::bump(imported));
-        files_imported += files_n;
-    }
-
-    // wiki 多库迁移（2026-09-18 数据同步线补齐）：先导库行建「包内 library_id → 目标库 id」
-    // 映射，页面按映射挂原库；旧包无 libraries 字段时页面 fallback main（v1 包兼容）。
-    let mut lib_map: std::collections::HashMap<String, uuid::Uuid> =
-        std::collections::HashMap::new();
-    let mut c_wikilib = DomainCount::default();
-    for it in each(data.get("wiki"), "libraries") {
-        let src_id = it
-            .get("id")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string();
-        if src_id.is_empty() {
-            continue;
-        }
-        let (mapped, imported) = repo::import_wiki_library(pool, &it).await?;
-        lib_map.insert(src_id, mapped);
-        c_wikilib.merge(DomainCount::bump(imported));
-    }
-    let main_lib = repo::main_library_id(pool).await?;
-    let mut c_wiki = DomainCount::default();
-    for it in each(data.get("wiki"), "pages") {
-        // EN-63：导入页 tsv 按 wiki 口径现算（slug+title+content、wiki 分词变体）
-        let tsv_text = engram_search::tokenize::tsv_text_wiki(&format!(
-            "{} {} {}",
-            it.get("slug").and_then(|x| x.as_str()).unwrap_or(""),
-            it.get("title").and_then(|x| x.as_str()).unwrap_or(""),
-            it.get("content").and_then(|x| x.as_str()).unwrap_or(""),
-        ));
-        let target_lib = it
-            .get("library_id")
-            .and_then(|x| x.as_str())
-            .and_then(|s| lib_map.get(s).copied())
-            .unwrap_or(main_lib);
-        c_wiki.merge(DomainCount::bump(
-            repo::import_wiki_page(pool, &it, &tsv_text, target_lib).await?,
-        ));
-    }
-
-    let mut c_project = DomainCount::default();
-    for it in each(data.get("projects"), "projects") {
-        c_project.merge(DomainCount::bump(repo::import_project(pool, &it).await?));
-    }
-    let mut c_location = DomainCount::default();
-    for it in each(data.get("projects"), "locations") {
-        c_location.merge(DomainCount::bump(
-            repo::import_project_location(pool, &it).await?,
-        ));
-    }
-    let mut c_doc = DomainCount::default();
-    for it in each(data.get("projects"), "docs") {
-        c_doc.merge(DomainCount::bump(
-            repo::import_project_doc(pool, &it).await?,
-        ));
-    }
-
-    // todos / kv / promotions 域（t9 补齐 v1 覆盖缺口；promotions 的 library 映射目标 main 库）
-    let todo_items = data
-        .get("todos")
-        .and_then(|x| x.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let (t_imp, t_skip) = repo::import_todos(pool, &todo_items).await?;
-
-    let kv_items = data
-        .get("kv_entries")
-        .and_then(|x| x.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let (kv_imp, kv_skip) = repo::import_kv_entries(pool, &kv_items).await?;
-
-    let promo_items = data
-        .get("wiki_promotions")
-        .and_then(|x| x.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let (p_imp, p_skip) = repo::import_wiki_promotions(pool, &promo_items).await?;
+    let mem = import_memory_domain(pool, data).await?;
+    let (c_skill, files_imported) = import_skills_domain(pool, data).await?;
+    let (c_wikilib, c_wiki) = import_wiki_domain(pool, data).await?;
+    let (c_project, c_location, c_doc) = import_projects_domain(pool, data).await?;
+    let (t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip) = import_tail_domains(pool, data).await?;
+    let (c_session, c_atom, c_scenario, c_persona, c_entity, c_relation) = (
+        mem.sessions,
+        mem.atoms,
+        mem.scenarios,
+        mem.persona,
+        mem.entities,
+        mem.relations,
+    );
 
     Ok(json!({
         "format": "engram-transfer",
@@ -510,4 +383,190 @@ pub async fn sync_transfer(
         }
         _ => unreachable!("direction 已在入口校验"),
     }
+}
+
+/// memory 域导入计数（六个子域）。
+struct MemoryImported {
+    sessions: DomainCount,
+    atoms: DomainCount,
+    scenarios: DomainCount,
+    persona: DomainCount,
+    entities: DomainCount,
+    relations: DomainCount,
+}
+
+/// memory 域导入：sessions → scenarios → atoms（外键序：scenarios 先于 atoms；自引用 FK 后置回填）
+/// → persona → entities → relations。
+async fn import_memory_domain(pool: &PgPool, data: &Value) -> Result<MemoryImported> {
+    let mut c_session = DomainCount::default();
+    for it in each(data.get("memory"), "sessions") {
+        c_session.merge(DomainCount::bump(repo::import_session(pool, &it).await?));
+    }
+    // 外键序：scenarios 先于 atoms（atoms.scenario_id → scenarios）——顺序颠倒会在
+    // 干净库导入时违反 atoms_scenario_id_fkey（公网加固 t9 往返演练抓出并修复）
+    let mut c_scenario = DomainCount::default();
+    for it in each(data.get("memory"), "scenarios") {
+        c_scenario.merge(DomainCount::bump(repo::import_scenario(pool, &it).await?));
+    }
+    // superseded_by 是表内自引用 FK（atoms → atoms.id）——行序随机，插入期置 NULL，
+    // 全量入库后统一回填（公网加固 t9 往返演练抓出）
+    let mut c_atom = DomainCount::default();
+    for it in each(data.get("memory"), "atoms") {
+        let mut row = it.clone();
+        if let Some(obj) = row.as_object_mut() {
+            obj.insert("superseded_by".into(), serde_json::Value::Null);
+        }
+        c_atom.merge(DomainCount::bump(repo::import_atom(pool, &row).await?));
+    }
+    for it in each(data.get("memory"), "atoms") {
+        let superseded_by = it
+            .get("superseded_by")
+            .and_then(|x| x.as_str())
+            .unwrap_or("");
+        if superseded_by.is_empty() {
+            continue;
+        }
+        let (Ok(id), Ok(target)) = (
+            uuid::Uuid::parse_str(it.get("id").and_then(|x| x.as_str()).unwrap_or("")),
+            uuid::Uuid::parse_str(superseded_by),
+        ) else {
+            continue;
+        };
+        repo::backfill_atom_superseded_by(pool, id, target).await?;
+    }
+    let mut c_persona = DomainCount::default();
+    for it in each(data.get("memory"), "persona") {
+        c_persona.merge(DomainCount::bump(repo::import_persona(pool, &it).await?));
+    }
+    let mut c_entity = DomainCount::default();
+    for it in each(data.get("memory"), "entities") {
+        c_entity.merge(DomainCount::bump(repo::import_entity(pool, &it).await?));
+    }
+    let mut c_relation = DomainCount::default();
+    for it in each(data.get("memory"), "relations") {
+        c_relation.merge(DomainCount::bump(
+            repo::import_entity_relation(pool, &it).await?,
+        ));
+    }
+    Ok(MemoryImported {
+        sessions: c_session,
+        atoms: c_atom,
+        scenarios: c_scenario,
+        persona: c_persona,
+        entities: c_entity,
+        relations: c_relation,
+    })
+}
+
+/// 技能域导入（技能行 + 文件），返回 `(技能计数, 文件导入数)`。
+async fn import_skills_domain(pool: &PgPool, data: &Value) -> Result<(DomainCount, usize)> {
+    let mut c_skill = DomainCount::default();
+    let mut files_imported = 0usize;
+    for s in each(Some(data), "skills") {
+        let files = s
+            .get("files")
+            .and_then(|x| x.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let (imported, files_n) = repo::import_skill(pool, &s, &files).await?;
+        c_skill.merge(DomainCount::bump(imported));
+        files_imported += files_n;
+    }
+
+    Ok((c_skill, files_imported))
+}
+
+/// wiki 域导入（库 + 页面，库先于页——页面外键指向库）。
+async fn import_wiki_domain(pool: &PgPool, data: &Value) -> Result<(DomainCount, DomainCount)> {
+    // wiki 多库迁移（2026-09-18 数据同步线补齐）：先导库行建「包内 library_id → 目标库 id」
+    // 映射，页面按映射挂原库；旧包无 libraries 字段时页面 fallback main（v1 包兼容）。
+    let mut lib_map: std::collections::HashMap<String, uuid::Uuid> =
+        std::collections::HashMap::new();
+    let mut c_wikilib = DomainCount::default();
+    for it in each(data.get("wiki"), "libraries") {
+        let src_id = it
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        if src_id.is_empty() {
+            continue;
+        }
+        let (mapped, imported) = repo::import_wiki_library(pool, &it).await?;
+        lib_map.insert(src_id, mapped);
+        c_wikilib.merge(DomainCount::bump(imported));
+    }
+    let main_lib = repo::main_library_id(pool).await?;
+    let mut c_wiki = DomainCount::default();
+    for it in each(data.get("wiki"), "pages") {
+        // EN-63：导入页 tsv 按 wiki 口径现算（slug+title+content、wiki 分词变体）
+        let tsv_text = engram_search::tokenize::tsv_text_wiki(&format!(
+            "{} {} {}",
+            it.get("slug").and_then(|x| x.as_str()).unwrap_or(""),
+            it.get("title").and_then(|x| x.as_str()).unwrap_or(""),
+            it.get("content").and_then(|x| x.as_str()).unwrap_or(""),
+        ));
+        let target_lib = it
+            .get("library_id")
+            .and_then(|x| x.as_str())
+            .and_then(|s| lib_map.get(s).copied())
+            .unwrap_or(main_lib);
+        c_wiki.merge(DomainCount::bump(
+            repo::import_wiki_page(pool, &it, &tsv_text, target_lib).await?,
+        ));
+    }
+    Ok((c_wikilib, c_wiki))
+}
+
+/// 项目域导入（项目 → 位置 → 文档）。
+async fn import_projects_domain(
+    pool: &PgPool,
+    data: &Value,
+) -> Result<(DomainCount, DomainCount, DomainCount)> {
+    let mut c_project = DomainCount::default();
+    for it in each(data.get("projects"), "projects") {
+        c_project.merge(DomainCount::bump(repo::import_project(pool, &it).await?));
+    }
+    let mut c_location = DomainCount::default();
+    for it in each(data.get("projects"), "locations") {
+        c_location.merge(DomainCount::bump(
+            repo::import_project_location(pool, &it).await?,
+        ));
+    }
+    let mut c_doc = DomainCount::default();
+    for it in each(data.get("projects"), "docs") {
+        c_doc.merge(DomainCount::bump(
+            repo::import_project_doc(pool, &it).await?,
+        ));
+    }
+    Ok((c_project, c_location, c_doc))
+}
+
+/// todos / kv / promotions 三域导入（t9 补齐 v1 覆盖缺口）。
+async fn import_tail_domains(
+    pool: &PgPool,
+    data: &Value,
+) -> Result<(usize, usize, usize, usize, usize, usize)> {
+    // todos / kv / promotions 域（t9 补齐 v1 覆盖缺口；promotions 的 library 映射目标 main 库）
+    let todo_items = data
+        .get("todos")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let (t_imp, t_skip) = repo::import_todos(pool, &todo_items).await?;
+
+    let kv_items = data
+        .get("kv_entries")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let (kv_imp, kv_skip) = repo::import_kv_entries(pool, &kv_items).await?;
+
+    let promo_items = data
+        .get("wiki_promotions")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let (p_imp, p_skip) = repo::import_wiki_promotions(pool, &promo_items).await?;
+    Ok((t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip))
 }
