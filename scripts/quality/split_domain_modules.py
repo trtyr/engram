@@ -269,20 +269,114 @@ CONFIGS = {
 }
 
 
-def strip_noise(line: str) -> str:
-    """去掉字符串字面量与行注释后再数括号（避免 `"{"` 之类误判）。"""
-    line = LINE_COMMENT.sub("", STR_RE.sub('""', line))
-    return line
+def clean_lines(lines):
+    """有状态清洗：把字符串字面量/块注释/行注释内的字符去掉（跨行状态保持）。
+
+    逐行剥离字符串在**跨行字符串**上会失效（eg `format!("...{\"k\":...")` 跨行），
+    导致花括号计数漂移、项边界溢出——这里一次性按状态机扫描整份文件。
+    """
+    out = []
+    state = None          # None | "str" | "block" | int(raw 的 # 个数)
+    for line in lines:
+        res, i, n = [], 0, len(line)
+        while i < n:
+            if state == "block":
+                j = line.find("*/", i)
+                if j < 0:
+                    i = n
+                    break
+                state = None
+                i = j + 2
+                continue
+            if state == "str":
+                c = line[i]
+                if c == "\\":
+                    i += 2
+                    continue
+                if c == '"':
+                    state = None
+                i += 1
+                continue
+            if isinstance(state, int):
+                if line.startswith('"' + "#" * state, i):
+                    i += 1 + state
+                    state = None
+                    continue
+                i += 1
+                continue
+            # 正常代码区
+            if line.startswith("//", i):
+                break
+            if line.startswith("/*", i):
+                state = "block"
+                i += 2
+                continue
+            m = re.match(r'(?:b|br|r)?(#*)"', line[i:])
+            if m and m.group(0)[0] in "br":
+                state = len(m.group(1))
+                i += m.end()
+                continue
+            c = line[i]
+            if c == '"':
+                state = "str"
+                i += 1
+                continue
+            if c == "'":                      # 字符字面量（生命周期不当作字符串）
+                if i + 2 < n and line[i + 2] == "'":
+                    i += 3
+                    continue
+                if i + 3 < n and line[i + 1] == "\\" and line[i + 3] == "'":
+                    i += 4
+                    continue
+            res.append(c)
+            i += 1
+        out.append("".join(res))
+    return out
 
 
-def delta(line: str) -> int:
-    s = strip_noise(line)
-    return s.count("{") - s.count("}")
+def delta(clean_line: str) -> int:
+    return clean_line.count("{") - clean_line.count("}")
 
 
-def mark_attr_lines(lines):
-    """返回布尔数组：该行是否属于属性/文档块（多行 `#[...]` 按方括号配平，先剥字符串）。"""
-    n = len(lines)
+def parse_items(lines, clean=None):
+    """顶层项：[{start, end, kind, name, decl}]，属性/文档行并入其下声明所属的项。"""
+    clean = clean if clean is not None else clean_lines(lines)
+    items, i, n = [], 0, len(lines)
+    marks = mark_attr_lines(clean, lines)
+    while i < n:
+        if marks[i] or not lines[i].strip():
+            i += 1
+            continue
+        decl = lines[i]
+        m = DECL_RE.match(decl)
+        if not m:
+            i += 1
+            continue
+        kw = m.group("kw")
+        name_m = NAME_RE.match(decl)
+        name = name_m.group("n") if name_m else None
+        k, depth, started = i, 0, False
+        while k < n:
+            depth += delta(clean[k])
+            if "{" in clean[k]:
+                started = True
+            if started and depth <= 0:
+                break
+            if not started and lines[k].rstrip().endswith(";"):
+                break
+            k += 1
+        start = i
+        while start - 1 >= 0 and marks[start - 1]:
+            start -= 1
+        kind = "use" if USE_RE.match(decl) else ("mod" if kw == "mod" else kw)
+        items.append({"start": start, "end": k, "kind": kind, "name": name, "decl": decl})
+        i = k + 1
+    return items
+
+
+def mark_attr_lines(clean, lines):
+    """属性/文档行标记：`///`/`//!`/`#[` 用**原行**判定，方括号配平用清洗行。"""
+    n = len(clean)
     marks = [False] * n
     i = 0
     while i < n:
@@ -291,8 +385,7 @@ def mark_attr_lines(lines):
             depth = 0
             j = i
             while j < n:
-                clean = strip_noise(lines[j])
-                depth += clean.count("[") - clean.count("]")
+                depth += clean[j].count("[") - clean[j].count("]")
                 marks[j] = True
                 if depth <= 0:
                     break
@@ -303,46 +396,6 @@ def mark_attr_lines(lines):
             marks[i] = True
         i += 1
     return marks
-
-
-def parse_items(lines):
-    """顶层项：[{start, end, kind, name, indent_of_members}]，属性/文档注释计入项起始。"""
-    marks = mark_attr_lines(lines)
-    items, i, n = [], 0, len(lines)
-    while i < n:
-        line = lines[i]
-        if marks[i] or not line.strip():
-            i += 1
-            continue
-        j = i
-        decl = lines[j]
-        m = DECL_RE.match(decl)
-        if not m:
-            i = j + 1
-            continue
-        # 向上扩展：把紧邻其上的属性/文档行并入项（供整体搬迁）
-        start = i
-        while start - 1 >= 0 and marks[start - 1]:
-            start -= 1
-        kw = m.group("kw")
-        name_m = NAME_RE.match(decl)
-        name = name_m.group("n") if name_m else None
-        # 计算项区间（含属性块）：先找到含 `{` 的行再配平到闭合；无花括号的语句到 `;` 为止
-        k, depth, started = j, 0, False
-        while k < n:
-            depth += delta(lines[k])
-            if "{" in strip_noise(lines[k]):
-                started = True
-            if started and depth <= 0:
-                break
-            if not started and lines[k].rstrip().endswith(";"):
-                break
-            k += 1
-        end = k
-        kind = "use" if USE_RE.match(decl) else ("mod" if kw == "mod" else kw)
-        items.append({"start": start, "end": end, "kind": kind, "name": name, "decl": decl})
-        i = end + 1
-    return items
 
 
 def parse_methods(lines, item):
@@ -366,8 +419,9 @@ def parse_methods(lines, item):
             while s - 1 >= 0 and ATTR.match(body[s - 1]):
                 s -= 1
             k, depth, started = idx, 0, False
+            cbody = clean_lines(body)
             while k < len(body):
-                depth += delta(body[k])
+                depth += delta(cbody[k])
                 if "{" in strip_noise(body[k]):
                     started = True
                 if started and depth <= 0:
@@ -444,7 +498,7 @@ def main():
         if all(re.search(rf"^mod {m};", text, re.M) for m in mods):
             print(f"  ⏭ {file} 已拆分，跳过")
             continue
-        items = parse_items(lines)
+        items = parse_items(lines, clean_lines(lines))
         member2mod = {n: m for m, names in cfg["modules"].items() for n in names}
         moves = []          # 待删除行区间
         buckets = {m: [] for m in mods}
