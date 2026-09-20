@@ -20,6 +20,37 @@ pub fn louvain_communities<'a>(
     nodes: &'a [String],
     edges: &[(String, String, f64)],
 ) -> HashMap<&'a str, usize> {
+    let n = nodes.len();
+    if n == 0 {
+        return HashMap::new();
+    }
+    let (adj, m2) = build_adjacency(nodes, edges);
+    if m2 <= 0.0 {
+        // 无边：每节点独立社区
+        return nodes.iter().map(|s| (s.as_str(), 0)).collect();
+    }
+
+    // 初始：每节点自己的社区；k = 节点度（权重和）
+    let mut comm: Vec<usize> = (0..n).collect();
+    let k: Vec<f64> = (0..n)
+        .map(|i| adj[i].iter().map(|(_, w)| w).sum())
+        .collect();
+
+    migrate_communities(n, &adj, m2, &k, &mut comm);
+    remap_communities(&mut comm);
+
+    nodes
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.as_str(), comm[i]))
+        .collect()
+}
+
+/// 邻接（无向累计）+ 总权重×2。
+fn build_adjacency(
+    nodes: &[String],
+    edges: &[(String, String, f64)],
+) -> (Vec<Vec<(usize, f64)>>, f64) {
     let idx: HashMap<&str, usize> = nodes
         .iter()
         .map(|n| n.as_str())
@@ -27,10 +58,6 @@ pub fn louvain_communities<'a>(
         .map(|(i, n)| (n, i))
         .collect();
     let n = nodes.len();
-    if n == 0 {
-        return HashMap::new();
-    }
-
     // 邻接（无向累计）
     let mut adj: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
     let mut m2: f64 = 0.0; // 总权重×2
@@ -41,17 +68,17 @@ pub fn louvain_communities<'a>(
             m2 += w;
         }
     }
-    if m2 <= 0.0 {
-        // 无边：每节点独立社区
-        return nodes.iter().map(|s| (s.as_str(), 0)).collect();
-    }
+    (adj, m2)
+}
 
-    // 初始：每节点自己的社区
-    let mut comm: Vec<usize> = (0..n).collect();
-    let k: Vec<f64> = (0..n)
-        .map(|i| adj[i].iter().map(|(_, w)| w).sum())
-        .collect();
-
+/// 贪心节点迁移（Louvain 主体）：每轮把节点迁往 ΔQ 最大的邻接社区，直至无改进。
+fn migrate_communities(
+    n: usize,
+    adj: &[Vec<(usize, f64)>],
+    m2: f64,
+    k: &[f64],
+    comm: &mut [usize],
+) {
     // 贪心节点迁移：最多 O(n) 轮（实际 2-4 轮收敛），EPS 防震荡死循环
     const EPS: f64 = 1e-12;
     let max_rounds = n.max(1);
@@ -99,21 +126,19 @@ pub fn louvain_communities<'a>(
             }
         }
     }
+}
+
+/// 社区编号重映射（连续化，从 0 起）。
+fn remap_communities(comm: &mut [usize]) {
     // 重编号
     let mut remap: HashMap<usize, usize> = HashMap::new();
-    for c in &comm {
+    for c in comm.iter() {
         let next = remap.len();
         remap.entry(*c).or_insert(next);
     }
     for c in comm.iter_mut() {
         *c = remap[c];
     }
-
-    nodes
-        .iter()
-        .enumerate()
-        .map(|(i, s)| (s.as_str(), comm[i]))
-        .collect()
 }
 
 /// 社区凝聚度：社区内实际边权重 / 可能边数（无向对）。

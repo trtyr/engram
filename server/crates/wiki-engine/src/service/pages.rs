@@ -274,9 +274,7 @@ impl WikiService {
         duplicate_slug: &str,
     ) -> Result<String, WikiError> {
         if primary_slug == duplicate_slug {
-            return Err(WikiError::BadRequest(
-                "primary 与 duplicate 不能是同一页".into(),
-            ));
+            return Err(WikiError::BadRequest("主页面与重复页面不能相同".into()));
         }
         let primary = self.resolve_slug(lib, primary_slug).await?;
         let dup = self.resolve_slug(lib, duplicate_slug).await?;
@@ -299,19 +297,46 @@ impl WikiService {
             let (nc, _) = crate::repair::rewrite_links(&new_primary, &dup, None);
             new_primary = nc;
         }
+        let rewrite_total = self.rewrite_referencing_links(lib, &dup, &primary).await?;
 
+        // 3) primary 落合并内容（内容有变才写）
+        if new_primary != pri_page.content {
+            self.put_page(
+                lib,
+                &primary,
+                &pri_page.title,
+                &new_primary,
+                None,
+                Some("ai"),
+            )
+            .await?;
+        }
+        self.delete_page(lib, &dup).await?;
+        self.rebuild_all_links(lib).await?;
+        Ok(format!(
+            "已合并：{dup} → {primary}（去重丢弃 {n_self} 处自引用、改写 {rewrite_total} 处外部引用）"
+        ))
+    }
+
+    /// 全库其他页指向 `dup` 的链接改指 `primary`（防合并后新增死链），返回改写页数。
+    async fn rewrite_referencing_links(
+        &self,
+        lib: Uuid,
+        dup: &str,
+        primary: &str,
+    ) -> Result<usize, WikiError> {
         // 2) 全库其他页指向 dup 的链接改指 primary（防合并后新增死链）
         let mut rewrite_total = 0usize;
         let others: Vec<(String, String)> = sqlx::query_as(
         "SELECT slug, content FROM wiki_pages WHERE library_id = $1 AND slug <> $2 AND slug <> $3",
     )
     .bind(lib)
-    .bind(&dup)
-    .bind(&primary)
+    .bind(dup)
+    .bind(primary)
     .fetch_all(&self.pool)
     .await?;
         for (slug, content) in &others {
-            let (nc, n) = crate::repair::rewrite_links(content, &dup, Some(&primary));
+            let (nc, n) = crate::repair::rewrite_links(content, dup, Some(primary));
             if n > 0 {
                 rewrite_total += n;
                 let title: String = sqlx::query_scalar(
@@ -326,30 +351,7 @@ impl WikiService {
                     .await?;
             }
         }
-
-        // 3) primary 落合并内容（内容有变才写）
-        if new_primary != pri_page.content {
-            self.put_page(
-                lib,
-                &primary,
-                &pri_page.title,
-                &new_primary,
-                None,
-                Some("ai"),
-            )
-            .await?;
-        }
-        // 4) 删 dup（快照兜底 + 双向链清理 + 提案级联 dismiss）
-        self.delete_page(lib, &dup).await?;
-        self.rebuild_all_links(lib).await?;
-        Ok(format!(
-            "{dup} → {primary}（{}，链接改写 {rewrite_total} 处）",
-            if discarded {
-                "冗余丢弃"
-            } else {
-                "内容并入"
-            }
-        ))
+        Ok(rewrite_total)
     }
 
     /// 页面版本列表（新→旧；不带正文，content_chars 供决策）。

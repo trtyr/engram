@@ -99,13 +99,11 @@ pub async fn rebuild_weights(pool: &PgPool, lib: uuid::Uuid) -> Result<usize, Jo
     Ok(updated)
 }
 
+/// 邻接表（slug → 邻居 slug 列表）。
+type NeighborMap<'a> = std::collections::HashMap<&'a str, Vec<&'a str>>;
+
 /// 邻接表：出/入邻居（保留边表原始顺序，供 AA 与度数使用）。
-fn build_neighbor_maps(
-    links: &[(String, String)],
-) -> (
-    std::collections::HashMap<&str, Vec<&str>>,
-    std::collections::HashMap<&str, Vec<&str>>,
-) {
+fn build_neighbor_maps(links: &[(String, String)]) -> (NeighborMap<'_>, NeighborMap<'_>) {
     let mut out_neighbors: std::collections::HashMap<&str, Vec<&str>> =
         std::collections::HashMap::new();
     let mut in_neighbors: std::collections::HashMap<&str, Vec<&str>> =
@@ -131,8 +129,8 @@ async fn recompute_direct_weights(
     links: &[(String, String)],
     slug_type: &std::collections::HashMap<&str, &str>,
     slug_sources: &std::collections::HashMap<&str, &Vec<String>>,
-    out_neighbors: &std::collections::HashMap<&str, Vec<&str>>,
-    in_neighbors: &std::collections::HashMap<&str, Vec<&str>>,
+    out_neighbors: &NeighborMap<'_>,
+    in_neighbors: &NeighborMap<'_>,
 ) -> Result<usize, JobError> {
     let neighbor_list = |slug: &str| -> Vec<String> {
         let mut v: Vec<String> = out_neighbors
