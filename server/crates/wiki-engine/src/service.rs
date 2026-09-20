@@ -1144,7 +1144,8 @@ impl WikiService {
             .enumerate()
             .map(|(i, r)| (r.slug.clone(), 1.0 / (60.0 + i as f64 + 1.0)))
             .collect();
-        let adjacency = self.load_adjacency(lib).await?;
+        let seed_slugs: Vec<String> = seeds.iter().map(|(s, _)| s.clone()).collect();
+        let adjacency = self.load_adjacency(lib, &seed_slugs, 2).await?;
         let expanded = crate::relevance::graph_expand_scores(&seeds, &adjacency);
         // 直接命中保留 RRF 序；扩展分 tie-break 实测调参史（基准集为尺）：
         // 0.05× → 枢纽页霸榜雪崩（92.9%→7.1%）；0.02× → MRR 0.783 仍低于基线 0.789（微扰超阈值）；
@@ -1200,21 +1201,43 @@ impl WikiService {
 
     /// 库内双链无向邻接表（图扩展用；百页级内存直载）。
     /// weight 列是 FLOAT4——SQL 层 ::float8 转，避免 sqlx 运行时解码类型错配（2026-09-19 实测炸点）。
+    /// 邻域邻接（规模化 2026-09-20）：只加载 seed 的 `hops` 跳邻域内的边。
+    /// 此前是每检索一次就全库拉边（万页 54869 行 ≈1.1s/次 + 全量建图）；而图扩展只在
+    /// 2-hop 内给 bonus，更远的节点无论如何拿不到加分——结果不变，只省 IO。
     async fn load_adjacency(
         &self,
         lib: Uuid,
+        seeds: &[String],
+        hops: usize,
     ) -> Result<std::collections::HashMap<String, Vec<(String, f64)>>, WikiError> {
-        let edges: Vec<(String, String, f64)> = sqlx::query_as(
-            "SELECT from_slug, to_slug, weight::float8 FROM wiki_links WHERE library_id = $1",
-        )
-        .bind(lib)
-        .fetch_all(&self.pool)
-        .await?;
         let mut adj: std::collections::HashMap<String, Vec<(String, f64)>> =
             std::collections::HashMap::new();
-        for (f, t, w) in edges {
-            adj.entry(f.clone()).or_default().push((t.clone(), w));
-            adj.entry(t).or_default().push((f, w));
+        let mut seen: std::collections::HashSet<String> = seeds.iter().cloned().collect();
+        let mut frontier: Vec<String> = seeds.to_vec();
+        for _ in 0..hops.max(1) {
+            if frontier.is_empty() {
+                break;
+            }
+            let edges: Vec<(String, String, f64)> = sqlx::query_as(
+                "SELECT from_slug, to_slug, weight::float8 FROM wiki_links \
+                 WHERE library_id = $1 AND (from_slug = ANY($2) OR to_slug = ANY($2))",
+            )
+            .bind(lib)
+            .bind(&frontier)
+            .fetch_all(&self.pool)
+            .await?;
+            let mut next: Vec<String> = Vec::new();
+            for (f, t, w) in edges {
+                adj.entry(f.clone()).or_default().push((t.clone(), w));
+                adj.entry(t.clone()).or_default().push((f.clone(), w));
+                if seen.insert(f.clone()) {
+                    next.push(f);
+                }
+                if seen.insert(t.clone()) {
+                    next.push(t);
+                }
+            }
+            frontier = next;
         }
         Ok(adj)
     }

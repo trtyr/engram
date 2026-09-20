@@ -2018,3 +2018,63 @@ async fn duplicates_candidates_and_merge_flow() {
     let cands = svc.duplicate_candidates(lib).await.unwrap();
     assert!(cands.is_empty(), "合并后候选应清空: {cands:?}");
 }
+
+/// 规模化 2026-09-20（用户反馈「wiki 一变大加载就非常卡」）：列表只回元数据
+/// （不带正文、带 content_chars），且支持 folder 子树过滤 + 目录骨架索引。
+#[tokio::test]
+async fn list_pages_meta_only_and_folder_filter() {
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
+
+    wiki.put_page(lib, "root-page", "根页", "正文甲", Some(""), None)
+        .await
+        .unwrap();
+    wiki.put_page(lib, "nested-page", "嵌套页", "正文乙丙", Some("a/b"), None)
+        .await
+        .unwrap();
+
+    // 1) 全量：不带正文，带 content_chars（P1-7 语义保留）
+    let all = wiki.list_pages(lib, None, None, None, None).await.unwrap();
+    let nested = all
+        .iter()
+        .find(|p| p.slug == "nested-page")
+        .expect("应有嵌套页");
+    assert_eq!(nested.folder, "a/b");
+    assert_eq!(
+        nested.content_chars,
+        "正文乙丙".chars().count() as i32,
+        "content_chars 应等于正文字符数"
+    );
+    let json = serde_json::to_value(nested).unwrap();
+    assert!(
+        json.get("content").is_none(),
+        "列表不应回正文（万页下正是它导致 18MB）：{json}"
+    );
+
+    // 2) folder 子树过滤：'a' 命中 a/b 的页；根层（''）只回 folder='' 的页
+    let sub = wiki
+        .list_pages(lib, None, Some("a"), None, None)
+        .await
+        .unwrap();
+    assert_eq!(sub.len(), 1, "{sub:?}");
+    assert_eq!(sub[0].slug, "nested-page");
+    let root = wiki
+        .list_pages(lib, None, Some(""), None, None)
+        .await
+        .unwrap();
+    assert!(
+        root.iter().all(|p| p.folder.is_empty()),
+        "根层过滤只应回 folder='' 的页：{root:?}"
+    );
+
+    // 3) 目录骨架索引（懒加载首屏用它渲染结构）
+    let folders = wiki.list_folders(lib).await.unwrap();
+    assert!(
+        folders.iter().any(|(f, n)| f == "a/b" && *n == 1),
+        "folders 应含 a/b=1：{folders:?}"
+    );
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+    let _ = pool;
+}

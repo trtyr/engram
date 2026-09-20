@@ -584,12 +584,22 @@ pub async fn delete_source(
 ) -> Result<Json<CascadeReport>, ApiError> {
     require_wiki(&principal)?;
     let lib = main_lib(&state).await?;
-    Ok(Json(
-        svc(&state)
-            .delete_source_cascade(lib, id)
-            .await
-            .map_err(we)?,
-    ))
+    let report = svc(&state)
+        .delete_source_cascade(lib, id)
+        .await
+        .map_err(we)?;
+    // 级联删页会留下死链/孤页（2026-09-20 实测：删 4 份原料立刻冒出 dead_link 19 / orphan 28，
+    // 当时靠事后手跑 repair 才收口）——删完自动补一次 repair，AI 代管、用户零操作。
+    // repair 是确定性修复（不调 LLM）且重复跑无害，故不设幂等键（删原料本就是低频手动操作）。
+    match engram_wiki_engine::repair::enqueue(&state.pool, lib).await {
+        Ok(job_id) => tracing::info!(%job_id, source_id = %id, "删原料后已自动入队 wiki_repair"),
+        Err(e) => tracing::warn!(
+            error = %e,
+            source_id = %id,
+            "删原料后自动 repair 入队失败——可手动 POST /wiki/repair/async 补跑"
+        ),
+    }
+    Ok(Json(report))
 }
 
 // ---------- 图洞察 ----------
