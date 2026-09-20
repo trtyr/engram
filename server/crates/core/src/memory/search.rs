@@ -123,9 +123,7 @@ impl MemoryService {
 
         // 实体：token 命中（名字加权）——主角先行
         let entities = if want_e {
-            engram_search::search_entities(&self.pool, query, max_items)
-                .await
-                .map_err(StoreError::from)?
+            self.entity_hits(query, max_items).await?
         } else {
             vec![]
         };
@@ -144,6 +142,193 @@ impl MemoryService {
         } else {
             vec![]
         };
+        // ILIKE 补漏与 KV 权威通道（见助手：KV 恒合并置顶、atoms 兜底仅零命中时触发）
+        l1 = self
+            .kv_and_literal_supplement(query, want_l1, max_items, l1)
+            .await?;
+
+        let l2 = if want_l2 {
+            search_scenarios(&self.pool, query, qv.as_deref(), max_items)
+                .await
+                .map_err(StoreError::from)?
+        } else {
+            vec![]
+        };
+        // L3：小体量——分词双侧匹配打分排序（见助手）
+        let l3 = if want_l3 {
+            self.persona_hits(query).await?
+        } else {
+            vec![]
+        };
+        // B9：命中反馈（异步 best-effort，不阻塞返回）；no_feedback=true 跳过（B6 污染防护）
+        if !no_feedback {
+            self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
+            self.fire_hit_feedback("scenarios", l2.iter().map(|h| h.id).collect());
+        }
+        Ok(SearchResponse {
+            entities,
+            l1,
+            l2,
+            l3,
+            query: query.to_string(),
+        })
+    }
+
+    /// 实体层检索（token 命中，名字加权）——主角先行。
+    async fn entity_hits(
+        &self,
+        query: &str,
+        max_items: i64,
+    ) -> Result<Vec<engram_search::SearchHit>, MemoryError> {
+        Ok(engram_search::search_entities(&self.pool, query, max_items)
+            .await
+            .map_err(StoreError::from)?)
+    }
+
+    /// L3 画像层检索：jieba 分词双侧匹配打分排序（弃子串 contains——跨词边界/无序不可靠）。
+    async fn persona_hits(&self, query: &str) -> Result<Vec<PersonaVersion>, MemoryError> {
+        let tokens: std::collections::HashSet<String> = tokenize(query).into_iter().collect();
+        let mut scored: Vec<(usize, PersonaVersion)> = self
+            .persona()
+            .await?
+            .into_iter()
+            .map(|p| {
+                let ct: std::collections::HashSet<String> =
+                    tokenize(&p.content).into_iter().collect();
+                let s = tokens.intersection(&ct).count();
+                (s, p)
+            })
+            .filter(|(s, _)| *s > 0)
+            .collect();
+        scored.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
+        Ok(scored.into_iter().map(|(_, p)| p).collect())
+    }
+
+    /// 实体透镜（小预算 ~20%）：AI 冷启动要知道用户世界里都有谁。
+    /// 有 query 走 token 相关（纯 jieba，不依赖向量）；无 query 按密度头部。best-effort。
+    /// 返回 `(实体, 累计字符数, 是否截断)`。
+    async fn entity_lens(
+        &self,
+        query: Option<&str>,
+        ent_budget: usize,
+        budget_chars: usize,
+        chars_used: usize,
+    ) -> Result<(Vec<EntityDto>, usize, bool), MemoryError> {
+        let mut chars_used = chars_used;
+        let mut truncated = false;
+        let entity_ids: Vec<Uuid> = match query {
+            Some(q) => engram_search::search_entities(&self.pool, q, ent_budget as i64)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|h| h.id)
+                .collect(),
+            None => self
+                .list_entities(None)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .take(ent_budget)
+                .map(|e| e.id)
+                .collect(),
+        };
+        let mut out_entities = Vec::new();
+        if !entity_ids.is_empty() {
+            let rows = repo::entities_by_ids(&self.pool, &entity_ids).await?;
+            // 保持命中序（query 路径相关性优先；无 query 路径密度优先）
+            let by_id: std::collections::HashMap<Uuid, EntityDto> =
+                rows.into_iter().map(|e| (e.id, e)).collect();
+            for id in entity_ids {
+                if let Some(e) = by_id.get(&id).cloned() {
+                    if count_json(&e, budget_chars, &mut chars_used, &mut truncated) {
+                        out_entities.push(e);
+                    } else {
+                        truncated = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok((out_entities, chars_used, truncated))
+    }
+
+    /// L1 原子层打包：有 query 按相关性 + 新鲜度混排（30 天半衰），无 query 取最近活跃；
+    /// 过期原子（valid_until 已过）不注入。返回 `(原子, 累计字符数, 是否截断)`。
+    #[allow(clippy::too_many_arguments)]
+    async fn pack_atoms(
+        &self,
+        query: Option<&str>,
+        qv: Option<&[f32]>,
+        remaining: usize,
+        budget_chars: usize,
+        chars_used: usize,
+    ) -> Result<(Vec<AtomDto>, usize, bool), MemoryError> {
+        let mut chars_used = chars_used;
+        let mut truncated = false;
+        // L1：v2 修复（N3）——条数上限 = budget_items（各层独立预算，不再被 persona/场景/实体
+        // 相减挤成 0）；字符预算仍全局统一裁剪
+        let atoms: Vec<AtomDto> = match query {
+            Some(q) => {
+                let hits = search_atoms(
+                    &self.pool,
+                    q,
+                    qv.as_deref(),
+                    remaining as i64,
+                    true, // sensitive 口径放开（2026-09-12）
+                    None,
+                    None,
+                )
+                .await
+                .map_err(StoreError::from)?;
+                let ids: Vec<Uuid> = hits.iter().map(|h| h.id).collect();
+                if ids.is_empty() {
+                    vec![]
+                } else {
+                    let score_of: std::collections::HashMap<Uuid, f64> =
+                        hits.iter().map(|h| (h.id, h.score)).collect();
+                    let mut fetched = repo::atoms_by_ids(&self.pool, &ids).await?;
+                    // 过期原子不注入（phase-2）：valid_until 已过 = 真记性不递过期记忆
+                    let now = chrono::Utc::now();
+                    fetched.retain(|a| a.valid_until.map(|vu| vu > now).unwrap_or(true));
+                    // P10 新鲜度混排：final = 相关分 × 时间衰减（30 天半衰）——
+                    // 老记忆不再凭旧高分挤掉新记忆；无 query 路径本就按新→旧。
+                    fetched.sort_by(|a, b| {
+                        let f = |x: &AtomDto| {
+                            let age = (now - x.created_at).num_days().max(0) as f64;
+                            score_of.get(&x.id).copied().unwrap_or(0.0) * (-age / 30.0).exp()
+                        };
+                        f(b).partial_cmp(&f(a)).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    fetched
+                }
+            }
+            None => repo::recent_active_atoms(&self.pool, remaining as i64).await?,
+        };
+        let mut out_atoms = Vec::new();
+        for a in atoms {
+            if count_json(&a, budget_chars, &mut chars_used, &mut truncated) {
+                out_atoms.push(a);
+            } else {
+                truncated = true;
+                break;
+            }
+        }
+
+        Ok((out_atoms, chars_used, truncated))
+    }
+
+    /// ILIKE 补漏与 KV 权威通道（工单「库里有一搜必有」）：
+    /// - KV 是精确值唯一权威源——字面量命中**恒合并**进结果最前（FTS 噪音命中不应把权威值挤出结果）；
+    /// - atoms ILIKE 兜底仅在双腿零命中时触发（补漏，不打扰正常排序）。
+    async fn kv_and_literal_supplement(
+        &self,
+        query: &str,
+        want_l1: bool,
+        max_items: i64,
+        l1: Vec<engram_search::SearchHit>,
+    ) -> Result<Vec<engram_search::SearchHit>, MemoryError> {
+        let mut l1 = l1;
         // ILIKE 补漏与 KV 权威通道（工单「库里有一搜必有」）：
         // - KV 是精确值唯一权威源——字面量命中**恒合并**进结果最前（FTS 噪音命中
         //   不应把权威值挤出结果），带 stale_hint
@@ -184,45 +369,7 @@ impl MemoryService {
                 }
             }
         }
-        let l2 = if want_l2 {
-            search_scenarios(&self.pool, query, qv.as_deref(), max_items)
-                .await
-                .map_err(StoreError::from)?
-        } else {
-            vec![]
-        };
-        // L3：小体量——jieba 分词双侧匹配打分排序（弃子串 contains：跨词边界/无序不可靠）
-        let l3 = if want_l3 {
-            let tokens: std::collections::HashSet<String> = tokenize(query).into_iter().collect();
-            let mut scored: Vec<(usize, PersonaVersion)> = self
-                .persona()
-                .await?
-                .into_iter()
-                .map(|p| {
-                    let ct: std::collections::HashSet<String> =
-                        tokenize(&p.content).into_iter().collect();
-                    let s = tokens.intersection(&ct).count();
-                    (s, p)
-                })
-                .filter(|(s, _)| *s > 0)
-                .collect();
-            scored.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
-            scored.into_iter().map(|(_, p)| p).collect()
-        } else {
-            vec![]
-        };
-        // B9：命中反馈（异步 best-effort，不阻塞返回）；no_feedback=true 跳过（B6 污染防护）
-        if !no_feedback {
-            self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
-            self.fire_hit_feedback("scenarios", l2.iter().map(|h| h.id).collect());
-        }
-        Ok(SearchResponse {
-            entities,
-            l1,
-            l2,
-            l3,
-            query: query.to_string(),
-        })
+        Ok(l1)
     }
 
     /// 冷启动上下文包：L3 全量 + L2 相关/最近 + L1 补充，预算裁剪。
@@ -238,21 +385,6 @@ impl MemoryService {
 
         // v2 修复（N7）：按**完整序列化体积**计量（含 evidence_refs/source_refs）——
         // 此前只数正文文本，chars_used 远小于真实注入体积，字符预算形同虚设。
-        pub(super) fn count_json(
-            item: &impl serde::Serialize,
-            budget_chars: usize,
-            used: &mut usize,
-            trunc: &mut bool,
-        ) -> bool {
-            let full = serde_json::to_string(item).unwrap_or_default();
-            if *used + full.len() > budget_chars {
-                *trunc = true;
-                false
-            } else {
-                *used += full.len();
-                true
-            }
-        }
 
         // 有 query 时预计算 query 向量（L2/L1 共用，避免重复 embed）
         let qv: Option<Vec<f32>> = match query {
@@ -305,92 +437,20 @@ impl MemoryService {
             }
         }
 
-        // 实体透镜（小预算 ~20%）：AI 冷启动要知道用户世界里都有谁。
-        // 有 query 走 token 相关（纯 jieba，不依赖向量）；无 query 按密度头部。best-effort。
+        // 实体透镜（小预算 ~20%）：AI 冷启动要知道用户世界里都有谁
         let ent_budget = (budget_items / 5).max(2).min(budget_items.max(1));
-        let entity_ids: Vec<Uuid> = match query {
-            Some(q) => engram_search::search_entities(&self.pool, q, ent_budget as i64)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .map(|h| h.id)
-                .collect(),
-            None => self
-                .list_entities(None)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .take(ent_budget)
-                .map(|e| e.id)
-                .collect(),
-        };
-        let mut out_entities = Vec::new();
-        if !entity_ids.is_empty() {
-            let rows = repo::entities_by_ids(&self.pool, &entity_ids).await?;
-            // 保持命中序（query 路径相关性优先；无 query 路径密度优先）
-            let by_id: std::collections::HashMap<Uuid, EntityDto> =
-                rows.into_iter().map(|e| (e.id, e)).collect();
-            for id in entity_ids {
-                if let Some(e) = by_id.get(&id).cloned() {
-                    if count_json(&e, budget_chars, &mut chars_used, &mut truncated) {
-                        out_entities.push(e);
-                    } else {
-                        truncated = true;
-                        break;
-                    }
-                }
-            }
-        }
+        let (out_entities, used_e, trunc_e) = self
+            .entity_lens(query, ent_budget, budget_chars, chars_used)
+            .await?;
+        chars_used = used_e;
+        truncated |= trunc_e;
 
-        // L1：v2 修复（N3）——条数上限 = budget_items（各层独立预算，不再被 persona/场景/实体
-        // 相减挤成 0）；字符预算仍全局统一裁剪
-        let remaining = budget_items;
-        let atoms: Vec<AtomDto> = match query {
-            Some(q) => {
-                let hits = search_atoms(
-                    &self.pool,
-                    q,
-                    qv.as_deref(),
-                    remaining as i64,
-                    true, // sensitive 口径放开（2026-09-12）
-                    None,
-                    None,
-                )
-                .await
-                .map_err(StoreError::from)?;
-                let ids: Vec<Uuid> = hits.iter().map(|h| h.id).collect();
-                if ids.is_empty() {
-                    vec![]
-                } else {
-                    let score_of: std::collections::HashMap<Uuid, f64> =
-                        hits.iter().map(|h| (h.id, h.score)).collect();
-                    let mut fetched = repo::atoms_by_ids(&self.pool, &ids).await?;
-                    // 过期原子不注入（phase-2）：valid_until 已过 = 真记性不递过期记忆
-                    let now = chrono::Utc::now();
-                    fetched.retain(|a| a.valid_until.map(|vu| vu > now).unwrap_or(true));
-                    // P10 新鲜度混排：final = 相关分 × 时间衰减（30 天半衰）——
-                    // 老记忆不再凭旧高分挤掉新记忆；无 query 路径本就按新→旧。
-                    fetched.sort_by(|a, b| {
-                        let f = |x: &AtomDto| {
-                            let age = (now - x.created_at).num_days().max(0) as f64;
-                            score_of.get(&x.id).copied().unwrap_or(0.0) * (-age / 30.0).exp()
-                        };
-                        f(b).partial_cmp(&f(a)).unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                    fetched
-                }
-            }
-            None => repo::recent_active_atoms(&self.pool, remaining as i64).await?,
-        };
-        let mut out_atoms = Vec::new();
-        for a in atoms {
-            if count_json(&a, budget_chars, &mut chars_used, &mut truncated) {
-                out_atoms.push(a);
-            } else {
-                truncated = true;
-                break;
-            }
-        }
+        // L1 原子（条数上限 = budget_items；字符预算全局统一裁剪）
+        let (out_atoms, used_a, trunc_a) = self
+            .pack_atoms(query, qv.as_deref(), budget_items, budget_chars, chars_used)
+            .await?;
+        chars_used = used_a;
+        truncated |= trunc_a;
 
         // B9：context_pack 也是使用（AI 冷启动读路径），同样计热度；
         // no_feedback=true 供 harness 注入/测试使用——不刷热度（B6 污染防护）
@@ -415,5 +475,22 @@ impl MemoryService {
                 query: query.map(String::from),
             },
         })
+    }
+}
+
+/// 序列化体积计量（v2/N7）：按完整 JSON 体积判断是否超字符预算。
+pub(super) fn count_json(
+    item: &impl serde::Serialize,
+    budget_chars: usize,
+    used: &mut usize,
+    trunc: &mut bool,
+) -> bool {
+    let full = serde_json::to_string(item).unwrap_or_default();
+    if *used + full.len() > budget_chars {
+        *trunc = true;
+        false
+    } else {
+        *used += full.len();
+        true
     }
 }
