@@ -78,15 +78,50 @@ impl UnifiedSearch {
         rerank: bool,
     ) -> Result<Vec<UnifiedHit>, UnifiedError> {
         if query.trim().is_empty() {
-            return Err(UnifiedError::BadRequest("query 不能为空".into()));
+            return Ok(Vec::new());
         }
         metrics::counter!(
-            "unified_search_total",
-            "rerank" => rerank.to_string()
+            "engram_unified_search_total",
+            "layers" => "l1,l2,wiki_doc,wiki_page,entity,todo"
         )
         .increment(1);
         let per_domain = limit.clamp(5, 50);
 
+        // 五域并行检索（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
+        let (mem_res, know_res, wiki_res, ent_res, todo_res) =
+            self.query_all_domains(query, per_domain).await;
+
+        // 域内 rank 归一化 + 全局排序 + 截断
+        let mut merged = merge_domain_hits(mem_res, know_res, ent_res, todo_res, wiki_res);
+        assign_rrf_scores(&mut merged);
+        merged.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        merged.truncate(limit.max(0) as usize);
+
+        if rerank && merged.len() > 1 {
+            apply_unified_rerank(&self.llm, query, &mut merged).await;
+        }
+
+        Ok(merged)
+    }
+
+    /// 五域并行检索（memory / wiki 文档 / wiki 页 / 实体 / 待办）。
+    /// 多库：文档与 wiki 页按库各查一份再并集（RRF 归一化不变）。
+    #[allow(clippy::type_complexity)]
+    async fn query_all_domains(
+        &self,
+        query: &str,
+        per_domain: i64,
+    ) -> (
+        Result<crate::memory::SearchResponse, crate::memory::MemoryError>,
+        Result<Vec<crate::wiki_docs::ChunkHit>, UnifiedError>,
+        Result<Vec<engram_wiki_engine::WikiPageDto>, UnifiedError>,
+        Result<Vec<engram_search::SearchHit>, engram_storage::StoreError>,
+        Result<Vec<(Uuid, String, String, String)>, engram_storage::StoreError>,
+    ) {
         let mem = MemoryService::new(self.pool.clone(), self.registry.clone());
         let know = WikiDocumentService::new(
             self.pool.clone(),
@@ -103,7 +138,7 @@ impl UnifiedSearch {
             .collect();
 
         // 三域并行检索 + 实体层（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
-        let (mem_res, know_res, wiki_res, ent_res, todo_res) = tokio::join!(
+        tokio::join!(
             mem.search(query, &["l1", "l2"], per_domain, true, None, None),
             async {
                 let mut out = Vec::new();
@@ -139,131 +174,7 @@ impl UnifiedSearch {
                             .collect::<Vec<_>>()
                     })
             },
-        );
-
-        let mut merged: Vec<UnifiedHit> = Vec::new();
-
-        if let Ok(res) = mem_res {
-            for h in res.l1 {
-                merged.push(UnifiedHit {
-                    domain: "memory".into(),
-                    id: h.id,
-                    title: h.title,
-                    snippet: h.snippet,
-                    score: 0.0,
-                    extra: serde_json::json!({ "layer": "l1", "kind": h.kind }),
-                });
-            }
-            for h in res.l2 {
-                merged.push(UnifiedHit {
-                    domain: "memory".into(),
-                    id: h.id,
-                    title: h.title,
-                    snippet: h.snippet,
-                    score: 0.0,
-                    extra: serde_json::json!({ "layer": "l2", "kind": h.kind }),
-                });
-            }
-        } else {
-            tracing::warn!("统一检索：memory 域失败，跳过");
-        }
-
-        if let Ok(res) = know_res {
-            for h in res {
-                merged.push(UnifiedHit {
-                    domain: "wiki".into(),
-                    id: h.chunk_id,
-                    title: Some(h.document_title),
-                    snippet: h.snippet,
-                    score: 0.0,
-                    extra: serde_json::json!({ "document_id": h.document_id, "seq": h.seq }),
-                });
-            }
-        } else {
-            tracing::warn!("统一检索：wiki 文档域失败，跳过");
-        }
-
-        // 实体域：主角先行（palette 命中实体 → 直达星系详情）
-        if let Ok(hits) = ent_res {
-            for h in hits {
-                merged.push(UnifiedHit {
-                    domain: "entity".into(),
-                    id: h.id,
-                    title: h.title,
-                    snippet: h.snippet,
-                    score: 0.0,
-                    extra: serde_json::json!({ "kind": h.kind }),
-                });
-            }
-        } else {
-            tracing::warn!("统一检索：entity 域失败，跳过");
-        }
-
-        // 待办域：open 待办的标题/正文 ILIKE 匹配
-        if let Ok(hits) = todo_res {
-            for t in hits {
-                merged.push(UnifiedHit {
-                    domain: "todo".into(),
-                    id: t.0,
-                    title: Some(t.1),
-                    snippet: t.2.chars().take(200).collect(),
-                    score: 0.0,
-                    extra: serde_json::json!({ "priority": t.3 }),
-                });
-            }
-        } else {
-            tracing::warn!("统一检索：todo 域失败，跳过");
-        }
-
-        if let Ok(res) = wiki_res {
-            for p in res {
-                merged.push(UnifiedHit {
-                    domain: "wiki".into(),
-                    id: p.id,
-                    title: Some(p.title),
-                    snippet: p.content.chars().take(200).collect(),
-                    score: 0.0,
-                    extra: serde_json::json!({ "slug": p.slug, "page_type": p.page_type }),
-                });
-            }
-        } else {
-            tracing::warn!("统一检索：wiki 域失败，跳过");
-        }
-
-        // 域内 rank 归一化 + 全局排序 + 截断
-        assign_rrf_scores(&mut merged);
-        merged.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        merged.truncate(limit.max(0) as usize);
-
-        if rerank && merged.len() > 1 {
-            let top = merged.len().min(10);
-            match rerank_hits(&self.llm, query, &merged[..top]).await {
-                Ok(order) if order.len() == top && order.iter().all(|i| *i < top) => {
-                    let rest: Vec<UnifiedHit> = merged.split_off(top);
-                    let mut top_vec: Vec<Option<UnifiedHit>> = merged.drain(..).map(Some).collect();
-                    let mut reordered: Vec<UnifiedHit> = Vec::with_capacity(top);
-                    for i in order {
-                        if let Some(h) = top_vec[i].take() {
-                            reordered.push(h);
-                        }
-                    }
-                    reordered.extend(top_vec.into_iter().flatten());
-                    reordered.extend(rest);
-                    merged = reordered;
-                }
-                Ok(order) if order.len() == top => {
-                    tracing::warn!("统一检索 rerank：order 含越界索引，降级原序");
-                }
-                Ok(_) => tracing::warn!("统一检索 rerank：order 长度不符，降级原序"),
-                Err(e) => tracing::warn!(error = %e, "统一检索 rerank 失败，降级原序"),
-            }
-        }
-
-        Ok(merged)
+        )
     }
 }
 
@@ -382,5 +293,134 @@ mod tests {
             })
             .collect();
         assert!(first_scores.iter().all(|s| (*s - 1.0 / 60.0).abs() < 1e-9));
+    }
+}
+
+/// 五域命中并入结果集（失败域跳过并告警，不阻塞其余域）。
+#[allow(clippy::type_complexity)]
+fn merge_domain_hits(
+    mem_res: Result<crate::memory::SearchResponse, crate::memory::MemoryError>,
+    know_res: Result<Vec<crate::wiki_docs::ChunkHit>, UnifiedError>,
+    ent_res: Result<Vec<engram_search::SearchHit>, engram_storage::StoreError>,
+    todo_res: Result<Vec<(Uuid, String, String, String)>, engram_storage::StoreError>,
+    wiki_res: Result<Vec<engram_wiki_engine::WikiPageDto>, UnifiedError>,
+) -> Vec<UnifiedHit> {
+    let mut merged: Vec<UnifiedHit> = Vec::new();
+
+    if let Ok(res) = mem_res {
+        for h in res.l1 {
+            merged.push(UnifiedHit {
+                domain: "memory".into(),
+                id: h.id,
+                title: h.title,
+                snippet: h.snippet,
+                score: 0.0,
+                extra: serde_json::json!({ "layer": "l1", "kind": h.kind }),
+            });
+        }
+        for h in res.l2 {
+            merged.push(UnifiedHit {
+                domain: "memory".into(),
+                id: h.id,
+                title: h.title,
+                snippet: h.snippet,
+                score: 0.0,
+                extra: serde_json::json!({ "layer": "l2", "kind": h.kind }),
+            });
+        }
+    } else {
+        tracing::warn!("统一检索：memory 域失败，跳过");
+    }
+
+    if let Ok(res) = know_res {
+        for h in res {
+            merged.push(UnifiedHit {
+                domain: "wiki".into(),
+                id: h.chunk_id,
+                title: Some(h.document_title),
+                snippet: h.snippet,
+                score: 0.0,
+                extra: serde_json::json!({ "document_id": h.document_id, "seq": h.seq }),
+            });
+        }
+    } else {
+        tracing::warn!("统一检索：wiki 文档域失败，跳过");
+    }
+
+    // 实体域：主角先行（palette 命中实体 → 直达星系详情）
+    if let Ok(hits) = ent_res {
+        for h in hits {
+            merged.push(UnifiedHit {
+                domain: "entity".into(),
+                id: h.id,
+                title: h.title,
+                snippet: h.snippet,
+                score: 0.0,
+                extra: serde_json::json!({ "kind": h.kind }),
+            });
+        }
+    } else {
+        tracing::warn!("统一检索：entity 域失败，跳过");
+    }
+
+    // 待办域：open 待办的标题/正文 ILIKE 匹配
+    if let Ok(hits) = todo_res {
+        for t in hits {
+            merged.push(UnifiedHit {
+                domain: "todo".into(),
+                id: t.0,
+                title: Some(t.1),
+                snippet: t.2.chars().take(200).collect(),
+                score: 0.0,
+                extra: serde_json::json!({ "priority": t.3 }),
+            });
+        }
+    } else {
+        tracing::warn!("统一检索：todo 域失败，跳过");
+    }
+
+    if let Ok(res) = wiki_res {
+        for p in res {
+            merged.push(UnifiedHit {
+                domain: "wiki".into(),
+                id: p.id,
+                title: Some(p.title),
+                snippet: p.content.chars().take(200).collect(),
+                score: 0.0,
+                extra: serde_json::json!({ "slug": p.slug, "page_type": p.page_type }),
+            });
+        }
+    } else {
+        tracing::warn!("统一检索：wiki 域失败，跳过");
+    }
+    merged
+}
+
+/// R6：LLM 精排——top 候选交模型输出目标顺序（越界/长度不符/失败一律降级原序）。
+async fn apply_unified_rerank(
+    llm: &engram_distill::llm_port::LlmRef,
+    query: &str,
+    merged: &mut Vec<UnifiedHit>,
+) {
+    let top = merged.len().min(10);
+    match rerank_hits(llm, query, &merged[..top]).await {
+        Ok(order) if order.len() == top && order.iter().all(|i| *i < top) => {
+            let rest: Vec<UnifiedHit> = merged.split_off(top);
+            let mut top_vec: Vec<Option<UnifiedHit>> = merged.drain(..).map(Some).collect();
+            let mut reordered: Vec<UnifiedHit> = Vec::with_capacity(top);
+            for i in order {
+                if let Some(h) = top_vec[i].take() {
+                    reordered.push(h);
+                }
+            }
+            reordered.extend(top_vec.into_iter().flatten());
+            reordered.extend(rest);
+            *merged = reordered;
+        }
+        Ok(order) if order.len() == top => {
+            tracing::warn!("统一检索 rerank：order 含越界索引，降级原序");
+        }
+        Ok(_) => tracing::warn!("统一检索 rerank：order 长度不符，降级原序"),
+        Err(e) => tracing::warn!(error = %e, "统一检索 rerank 失败，降级原序"),
     }
 }
