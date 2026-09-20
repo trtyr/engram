@@ -22,7 +22,6 @@ pub struct LintReport {
 /// 全量 lint（某库）：死链 / 孤儿 / 过时源 / 损坏 frontmatter / 重复实体。
 /// pages/links/sources 全部按 library_id 隔离（多库 0037）。
 pub async fn lint(pool: &PgPool, lib: Uuid) -> Result<LintReport, sqlx::Error> {
-    // D23：排除系统 log 页——list_pages 不可见的页不该进 lint 口径（此前 checked_pages 恒定 +1）
     let pages: Vec<(Uuid, String, String, String, serde_json::Value)> = sqlx::query_as(
         "SELECT id, slug, page_type, content, frontmatter FROM wiki_pages \
          WHERE page_type <> 'log' AND library_id = $1",
@@ -39,8 +38,29 @@ pub async fn lint(pool: &PgPool, lib: Uuid) -> Result<LintReport, sqlx::Error> {
         .map(|(_, s, ..)| (s.to_lowercase(), s.clone()))
         .collect();
     let system = ["index", "log", "overview"];
-    let mut issues = Vec::new();
 
+    // 逐页检查：死链 / 孤儿 / 损坏 frontmatter
+    let mut issues = lint_page_issues(pool, lib, &pages, &slugs, &lower_slugs, &system).await?;
+    // 库级检查：重复实体 / 过时源
+    issues.extend(duplicate_title_issues(pool, lib).await?);
+    issues.extend(stale_source_issues(pool, lib).await?);
+
+    Ok(LintReport {
+        issues,
+        checked_pages: pages.len(),
+    })
+}
+
+/// 逐页检查：死链（含跨库 / 大小写）、孤儿页、损坏 frontmatter。
+async fn lint_page_issues(
+    pool: &PgPool,
+    lib: Uuid,
+    pages: &[(Uuid, String, String, String, serde_json::Value)],
+    slugs: &std::collections::HashSet<String>,
+    lower_slugs: &std::collections::HashMap<String, String>,
+    system: &[&str],
+) -> Result<Vec<LintIssue>, sqlx::Error> {
+    let mut issues = Vec::new();
     // 入链计数（wikilink 边，库内）
     let inlinks: Vec<(String, i64)> = sqlx::query_as(
         "SELECT to_slug, count(*) FROM wiki_links WHERE library_id = $1 GROUP BY to_slug",
@@ -52,7 +72,7 @@ pub async fn lint(pool: &PgPool, lib: Uuid) -> Result<LintReport, sqlx::Error> {
 
     // R 多库补全：先批量收集跨库引用目标（lib/slug），一次查存在性——存在则跳过死链判定
     let mut cross_keys: Vec<(String, String)> = Vec::new();
-    for (_, _, _, content, _) in &pages {
+    for (_, _, _, content, _) in pages {
         for target in extract_wikilinks(content) {
             if let Some(pair) = crate::markup::split_cross_lib(&target) {
                 cross_keys.push(pair);
@@ -61,40 +81,15 @@ pub async fn lint(pool: &PgPool, lib: Uuid) -> Result<LintReport, sqlx::Error> {
     }
     let cross_existing = crate::cross_links::filter_existing(pool, &cross_keys).await?;
 
-    for (_, slug, _page_type, content, fm) in &pages {
-        // 1. 死链（W-1：精确未中→小写重查，仅大小写差异报 case_mismatch 而非 dead_link）
-        for target in extract_wikilinks(content) {
-            // 跨库引用：目标（库+页）存在则合法跳过；不存在报跨库 dead_link
-            if let Some((to_lib, to_slug)) = crate::markup::split_cross_lib(&target) {
-                if !cross_existing.contains_key(&(to_lib.clone(), to_slug.clone())) {
-                    issues.push(LintIssue {
-                        rule: "dead_link".into(),
-                        slug: slug.clone(),
-                        detail: format!(
-                            "[[{target}]] 指向不存在的跨库页面（库「{to_lib}」无页「{to_slug}」）"
-                        ),
-                    });
-                }
-                continue;
-            }
-            if !slugs.contains(&target) {
-                if let Some(real) = lower_slugs.get(&target.to_lowercase()) {
-                    issues.push(LintIssue {
-                        rule: "case_mismatch".into(),
-                        slug: slug.clone(),
-                        detail: format!(
-                            "[[{target}]] 与页面 slug「{real}」仅大小写不同——建议改用 [[{real}]]"
-                        ),
-                    });
-                } else {
-                    issues.push(LintIssue {
-                        rule: "dead_link".into(),
-                        slug: slug.clone(),
-                        detail: format!("[[{target}]] 指向不存在的页面"),
-                    });
-                }
-            }
-        }
+    for (_, slug, _page_type, content, fm) in pages {
+        // 1. 死链（逐链接判定，见助手）
+        issues.extend(dead_link_issues(
+            slug,
+            content,
+            slugs,
+            lower_slugs,
+            &cross_existing,
+        ));
         // 2. 孤儿（系统页豁免）
         if !system.contains(&slug.as_str()) && inlink_map.get(slug).copied().unwrap_or(0) == 0 {
             issues.push(LintIssue {
@@ -114,8 +109,12 @@ pub async fn lint(pool: &PgPool, lib: Uuid) -> Result<LintReport, sqlx::Error> {
             });
         }
     }
+    Ok(issues)
+}
 
-    // 4. 重复实体（同名标题不同 slug 的 entity/concept，库内）
+/// 重复实体：同名标题不同 slug 的 entity/concept（库内）。
+async fn duplicate_title_issues(pool: &PgPool, lib: Uuid) -> Result<Vec<LintIssue>, sqlx::Error> {
+    let mut issues = Vec::new();
     let by_title: Vec<(String, String)> = sqlx::query_as(
         "SELECT COALESCE(frontmatter->>'title', slug), slug FROM wiki_pages \
          WHERE page_type IN ('entity','concept') AND library_id = $1",
@@ -136,8 +135,12 @@ pub async fn lint(pool: &PgPool, lib: Uuid) -> Result<LintReport, sqlx::Error> {
             });
         }
     }
+    Ok(issues)
+}
 
-    // 5. 过时源：sha 已变但页面未重新 ingest（原料目录与页面 sources 对比，库内）
+/// 过时源：原料已 ingest 但没有页面引用其内容（库内）。
+async fn stale_source_issues(pool: &PgPool, lib: Uuid) -> Result<Vec<LintIssue>, sqlx::Error> {
+    let mut issues = Vec::new();
     let sources: Vec<(String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
         "SELECT id::text, COALESCE(last_ingested_at, created_at) FROM wiki_sources WHERE library_id = $1",
     )
@@ -172,9 +175,51 @@ pub async fn lint(pool: &PgPool, lib: Uuid) -> Result<LintReport, sqlx::Error> {
             }
         }
     }
+    Ok(issues)
+}
 
-    Ok(LintReport {
-        issues,
-        checked_pages: pages.len(),
-    })
+/// 死链检查（逐 wikilink）：跨库引用按「目标库+页是否存在」判定，本库引用精确未中后
+/// 小写重查——仅大小写差异报 `case_mismatch` 而非 `dead_link`（W-1）。
+fn dead_link_issues(
+    page_slug: &str,
+    content: &str,
+    slugs: &std::collections::HashSet<String>,
+    lower_slugs: &std::collections::HashMap<String, String>,
+    cross_existing: &std::collections::HashMap<(String, String), ()>,
+) -> Vec<LintIssue> {
+    let mut issues = Vec::new();
+    // 1. 死链（W-1：精确未中→小写重查，仅大小写差异报 case_mismatch 而非 dead_link）
+    for target in extract_wikilinks(content) {
+        // 跨库引用：目标（库+页）存在则合法跳过；不存在报跨库 dead_link
+        if let Some((to_lib, to_slug)) = crate::markup::split_cross_lib(&target) {
+            if !cross_existing.contains_key(&(to_lib.clone(), to_slug.clone())) {
+                issues.push(LintIssue {
+                    rule: "dead_link".into(),
+                    slug: page_slug.to_string(),
+                    detail: format!(
+                        "[[{target}]] 指向不存在的跨库页面（库「{to_lib}」无页「{to_slug}」）"
+                    ),
+                });
+            }
+            continue;
+        }
+        if !slugs.contains(&target) {
+            if let Some(real) = lower_slugs.get(&target.to_lowercase()) {
+                issues.push(LintIssue {
+                    rule: "case_mismatch".into(),
+                    slug: page_slug.to_string(),
+                    detail: format!(
+                        "[[{target}]] 与页面 slug「{real}」仅大小写不同——建议改用 [[{real}]]"
+                    ),
+                });
+            } else {
+                issues.push(LintIssue {
+                    rule: "dead_link".into(),
+                    slug: page_slug.to_string(),
+                    detail: format!("[[{target}]] 指向不存在的页面"),
+                });
+            }
+        }
+    }
+    issues
 }
