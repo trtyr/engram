@@ -274,49 +274,6 @@ pub fn register_handlers(
         })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mime_from_extension() {
-        assert_eq!(mime_from_name("a.txt"), Some("text/plain".into()));
-        assert_eq!(mime_from_name("a.md"), Some("text/markdown".into()));
-        assert_eq!(mime_from_name("a.MARKDOWN"), Some("text/markdown".into()));
-        assert_eq!(mime_from_name("a.html"), Some("text/html".into()));
-        assert_eq!(mime_from_name("a.htm"), Some("text/html".into()));
-        assert_eq!(mime_from_name("a.pdf"), Some("application/pdf".into()));
-        assert_eq!(
-            mime_from_name("a.docx"),
-            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document".into())
-        );
-        assert_eq!(mime_from_name("a.unknown"), None);
-        assert_eq!(mime_from_name("noext"), None);
-    }
-
-    #[test]
-    fn url_normalization_strips_tracking_and_fragment() {
-        assert_eq!(
-            normalize_url("https://a.com/x?utm_source=s&id=1#sec"),
-            "https://a.com/x?id=1"
-        );
-        // 只去 utm_*，保留其他 query（内容相关参数不动）
-        assert_eq!(
-            normalize_url("https://a.com/x?q=rust&utm_medium=m"),
-            "https://a.com/x?q=rust"
-        );
-        // 纯 tracking → query 全清
-        assert_eq!(
-            normalize_url("https://a.com/x?utm_source=s&utm_campaign=c"),
-            "https://a.com/x"
-        );
-        // 无 query 不变
-        assert_eq!(normalize_url("https://a.com/x"), "https://a.com/x");
-        // 非法 URL 原样返回（不 panic）
-        assert_eq!(normalize_url("not a url"), "not a url");
-    }
-}
-
 /// 文档摄取失败错误（统一告警 + Permanent 语义）。
 fn doc_fail(doc_id: Uuid, msg: String) -> JobError {
     tracing::warn!(doc = %doc_id, error = %msg, "文档摄取失败");
@@ -356,7 +313,7 @@ async fn parse_and_store_document(
         Ok(Ok(t)) => t,
         Ok(Err(e)) => {
             let m = e.to_string();
-            mark_doc_failed(&ctx, lib, doc_id, &m).await;
+            mark_doc_failed(ctx, lib, doc_id, &m).await;
             return Err(doc_fail(doc_id, m));
         }
         Err(e) => return Err(JobError::Permanent(format!("解析线程崩溃: {e}"))),
@@ -445,7 +402,7 @@ async fn fetch_document_bytes(
                 };
                 let last_attempt = ctx.job.attempts >= ctx.job.max_attempts;
                 if permanent || last_attempt {
-                    mark_doc_failed(&ctx, lib, doc_id, &m).await;
+                    mark_doc_failed(ctx, lib, doc_id, &m).await;
                 }
                 if permanent {
                     return Err(doc_fail(doc_id, m));
@@ -460,7 +417,7 @@ async fn fetch_document_bytes(
             Ok(b) => b,
             Err(e) => {
                 let m = format!("读文件失败: {e}");
-                mark_doc_failed(&ctx, lib, doc_id, &m).await;
+                mark_doc_failed(ctx, lib, doc_id, &m).await;
                 return Err(doc_fail(doc_id, m));
             }
         };
@@ -491,11 +448,11 @@ async fn insert_and_enqueue_document(
         queue.pool(),
         lib,
         id,
-        &title,
-        &source_uri,
+        title,
+        source_uri,
         mime.as_deref(),
-        &raw_path,
-        &sha,
+        raw_path,
+        sha,
     )
     .await
     .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
@@ -505,7 +462,7 @@ async fn insert_and_enqueue_document(
         if !raw_path.is_empty() {
             let _ = tokio::fs::remove_file(&raw_path).await; // 有意忽略：best-effort 清理/建目录（失败由后续步骤或下次运行暴露）
         }
-        let existing = repo::find_document_id_by_sha(queue.pool(), lib, &sha)
+        let existing = repo::find_document_id_by_sha(queue.pool(), lib, sha)
             .await
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))?;
 
@@ -625,4 +582,47 @@ async fn embed_missing_chunks(
         }
     }
     Ok(embedded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mime_from_extension() {
+        assert_eq!(mime_from_name("a.txt"), Some("text/plain".into()));
+        assert_eq!(mime_from_name("a.md"), Some("text/markdown".into()));
+        assert_eq!(mime_from_name("a.MARKDOWN"), Some("text/markdown".into()));
+        assert_eq!(mime_from_name("a.html"), Some("text/html".into()));
+        assert_eq!(mime_from_name("a.htm"), Some("text/html".into()));
+        assert_eq!(mime_from_name("a.pdf"), Some("application/pdf".into()));
+        assert_eq!(
+            mime_from_name("a.docx"),
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document".into())
+        );
+        assert_eq!(mime_from_name("a.unknown"), None);
+        assert_eq!(mime_from_name("noext"), None);
+    }
+
+    #[test]
+    fn url_normalization_strips_tracking_and_fragment() {
+        assert_eq!(
+            normalize_url("https://a.com/x?utm_source=s&id=1#sec"),
+            "https://a.com/x?id=1"
+        );
+        // 只去 utm_*，保留其他 query（内容相关参数不动）
+        assert_eq!(
+            normalize_url("https://a.com/x?q=rust&utm_medium=m"),
+            "https://a.com/x?q=rust"
+        );
+        // 纯 tracking → query 全清
+        assert_eq!(
+            normalize_url("https://a.com/x?utm_source=s&utm_campaign=c"),
+            "https://a.com/x"
+        );
+        // 无 query 不变
+        assert_eq!(normalize_url("https://a.com/x"), "https://a.com/x");
+        // 非法 URL 原样返回（不 panic）
+        assert_eq!(normalize_url("not a url"), "not a url");
+    }
 }
