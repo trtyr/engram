@@ -171,61 +171,12 @@ impl CgBridge {
             return Ok(outline);
             // 大纲不可用 → 落回 CLI explore 源码形态
         }
-        let (args, timeout): (Vec<String>, Duration) = match kind {
-            QueryKind::Explore => {
-                // explore 无 --json：Markdown 文本
-                let mut a = vec!["explore".to_string(), target.to_string()];
-                if let Some(mf) = depth {
-                    a.push("--max-files".into());
-                    a.push(mf.to_string());
-                }
-                (a, TIMEOUT_QUERY)
-            }
-            QueryKind::Search => (
-                vec![
-                    "query".into(),
-                    target.to_string(),
-                    "--json".into(),
-                    "--limit".into(),
-                    "20".into(),
-                ],
-                TIMEOUT_QUERY,
-            ),
-            QueryKind::Node => (vec!["node".into(), target.to_string()], TIMEOUT_QUERY),
-            QueryKind::Callers => (
-                vec!["callers".into(), target.to_string(), "--json".into()],
-                TIMEOUT_QUERY,
-            ),
-            QueryKind::Callees => (
-                vec!["callees".into(), target.to_string(), "--json".into()],
-                TIMEOUT_QUERY,
-            ),
-            QueryKind::Impact => {
-                let mut a = vec!["impact".into(), target.to_string(), "--json".into()];
-                if let Some(d) = depth {
-                    a.push("--depth".into());
-                    a.push(d.to_string());
-                }
-                (a, TIMEOUT_QUERY)
-            }
-        };
+        let (args, timeout) = build_query_args(kind, target, depth);
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let out = run_cli(&arg_refs, Some(path), timeout).await?;
         let stdout = String::from_utf8_lossy(&out.stdout);
 
-        match kind {
-            QueryKind::Explore => Ok(serde_json::json!({
-                "kind": "explore",
-                "text": truncate(&stdout, 24_000),
-                "truncated": stdout.len() > 24_000,
-            })),
-            QueryKind::Node => Ok(serde_json::json!({
-                "kind": "node",
-                "text": truncate(&stdout, 24_000),
-            })),
-            _ => serde_json::from_str(stdout.trim())
-                .map_err(|e| CgError::Parse(format!("JSON 归一失败: {e}"))),
-        }
+        Self::format_query_result(kind, &stdout)
     }
 
     /// 删除项目：移除注册行；工作目录在本桥 root 之下（git clone 的）连目录一起清，
@@ -300,6 +251,22 @@ impl CgBridge {
         }
 
         Ok(normalize_callgraph(symbol, &proj.name, &callers, &callees))
+    }
+    /// 结果格式化：explore/node 取截断文本，其余按 JSON 归一。
+    fn format_query_result(kind: QueryKind, stdout: &str) -> Result<serde_json::Value, CgError> {
+        match kind {
+            QueryKind::Explore => Ok(serde_json::json!({
+                "kind": "explore",
+                "text": truncate(&stdout, 24_000),
+                "truncated": stdout.len() > 24_000,
+            })),
+            QueryKind::Node => Ok(serde_json::json!({
+                "kind": "node",
+                "text": truncate(&stdout, 24_000),
+            })),
+            _ => serde_json::from_str(stdout.trim())
+                .map_err(|e| CgError::Parse(format!("JSON 归一失败: {e}"))),
+        }
     }
 }
 
@@ -437,4 +404,46 @@ fn outline_json(
              看影响面：kind=callers/impact；要完整源码文件：本查询传 include_source=true。{total_hint}"
         ),
     })))
+}
+
+/// 按查询类型构造 CLI 参数与超时（explore 无 --json；impact 支持 depth）。
+fn build_query_args(kind: QueryKind, target: &str, depth: Option<u32>) -> (Vec<String>, Duration) {
+    match kind {
+        QueryKind::Explore => {
+            // explore 无 --json：Markdown 文本
+            let mut a = vec!["explore".to_string(), target.to_string()];
+            if let Some(mf) = depth {
+                a.push("--max-files".into());
+                a.push(mf.to_string());
+            }
+            (a, TIMEOUT_QUERY)
+        }
+        QueryKind::Search => (
+            vec![
+                "query".into(),
+                target.to_string(),
+                "--json".into(),
+                "--limit".into(),
+                "20".into(),
+            ],
+            TIMEOUT_QUERY,
+        ),
+        QueryKind::Node => (vec!["node".into(), target.to_string()], TIMEOUT_QUERY),
+        QueryKind::Callers => (
+            vec!["callers".into(), target.to_string(), "--json".into()],
+            TIMEOUT_QUERY,
+        ),
+        QueryKind::Callees => (
+            vec!["callees".into(), target.to_string(), "--json".into()],
+            TIMEOUT_QUERY,
+        ),
+        QueryKind::Impact => {
+            let mut a = vec!["impact".into(), target.to_string(), "--json".into()];
+            if let Some(d) = depth {
+                a.push("--depth".into());
+                a.push(d.to_string());
+            }
+            (a, TIMEOUT_QUERY)
+        }
+    }
 }
