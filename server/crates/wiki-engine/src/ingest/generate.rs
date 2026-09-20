@@ -28,17 +28,8 @@ pub async fn generate_job(
     let purpose = crate::purpose::purpose_context(pool, lib).await;
 
     // 候选页产出（分片 + 聚合去重 + 建页量软上限）
-    let candidates = generate_candidates(
-        &ctx,
-        &llm,
-        pool,
-        lib,
-        &analysis,
-        &text,
-        &existing_pages,
-        &purpose,
-    )
-    .await?;
+    let candidates =
+        generate_candidates(&ctx, &llm, &analysis, &text, &existing_pages, &purpose).await?;
     // 落库（human 页冲突转提案）
     let (created, updated, proposals, all_slugs) =
         upsert_generated_pages(&ctx, pool, lib, source_id, &candidates).await?;
@@ -116,8 +107,6 @@ fn generate_payload(ctx: &JobContext) -> Result<(Uuid, serde_json::Value, String
 async fn generate_candidates(
     ctx: &JobContext,
     llm: &crate::service::LlmRef,
-    pool: &sqlx::PgPool,
-    lib: Uuid,
     analysis: &serde_json::Value,
     text: &str,
     existing_pages: &str,
@@ -125,7 +114,7 @@ async fn generate_candidates(
 ) -> Result<Vec<serde_json::Value>, JobError> {
     // 分片消费（工单「高反斜杠大文档织入必败」）：整篇塞给 LLM 会超时+产出巨 JSON 易坏
     // ——超过 GEN_SLICE_CHARS 按段落边界切片，每片独立调用，聚合候选页后走既有去重/截断链
-    let slices = slice_source(&text, GEN_SLICE_CHARS);
+    let slices = slice_source(text, GEN_SLICE_CHARS);
     if slices.len() > 1 {
         ctx.emit(
             "源文档过大，分片织入",
@@ -202,6 +191,15 @@ async fn generate_candidates(
     Ok(pages)
 }
 
+/// 候选页规范化结果（slug 合法性已校验，wikilinks 已对齐库内大小写）。
+struct CandidatePage {
+    slug: String,
+    title: String,
+    page_type: String,
+    content: String,
+    frontmatter: serde_json::Value,
+}
+
 /// 候选页落库：slug 规范化 → 单语句 UPSERT（human 页冲突转提案）→ 计数与 slug 清单。
 async fn upsert_generated_pages(
     ctx: &JobContext,
@@ -214,6 +212,7 @@ async fn upsert_generated_pages(
     let mut updated = 0usize;
     let mut proposals = 0usize;
     let mut all_slugs: Vec<String> = Vec::new();
+
     // 链接规范化：查库内 slug 建 lowercase → real 映射，生成时对齐大小写变体
     // （防 case_mismatch 落到事后 lint；只修大小写，不补死链）
     let existing_slugs: Vec<String> =
@@ -228,73 +227,11 @@ async fn upsert_generated_pages(
         .collect();
 
     for p in pages {
-        let slug = p
-            .get("slug")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let page_type = p
-            .get("page_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("concept");
-        let title = p
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&slug)
-            .trim()
-            .to_string();
-        let content = p
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let content = normalize_wikilinks(&content, &lower_slug_map);
-        if !is_valid_slug(&slug) || content.is_empty() {
+        let Some(c) = normalize_candidate(p, &lower_slug_map, source_id) else {
             continue;
-        }
-        all_slugs.push(slug.clone());
-
-        let fm = json!({
-            "title": title,
-            "page_type": page_type,
-            "sources": [source_id.to_string()],
-            "origin_if_new": "llm",
-        });
-
-        // W6：单语句 UPSERT——消除 check-then-act 竞态（并发 generate 不再撞
-        // slug UNIQUE，也不会双 UPDATE 互相覆盖）。human 页保护语义收进
-        // DO UPDATE 的 WHERE：冲突且 origin=human 时子句为假 → RETURNING 无行 → 提案路径。
-        // 多库：冲突目标 (library_id, slug)，页面落到源所属库
-        let upserted: Option<bool> = sqlx::query_scalar(
-            "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, folder) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'llm', 1, $9) \
-             ON CONFLICT (library_id, slug) DO UPDATE SET \
-                content = $6, \
-                folder = CASE WHEN wiki_pages.folder = '' THEN $9 ELSE wiki_pages.folder END, \
-                frontmatter = jsonb_set(wiki_pages.frontmatter, '{sources}', \
-                    (SELECT COALESCE(jsonb_agg(DISTINCT s), '[]'::jsonb) FROM \
-                        (SELECT jsonb_array_elements_text(wiki_pages.frontmatter->'sources') AS s \
-                         UNION ALL SELECT $8::text) sub)), \
-                version = wiki_pages.version + 1, updated_at = now() \
-             WHERE wiki_pages.origin = 'llm' \
-             RETURNING (xmax = 0)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(lib)
-        .bind(&slug)
-        .bind(&title)
-        .bind(page_type)
-        .bind(&content)
-        .bind(sqlx::types::Json(&fm))
-        .bind(source_id.to_string())
-        .bind(folder_for_type(page_type))
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
-
-        match upserted {
+        };
+        all_slugs.push(c.slug.clone());
+        match upsert_candidate_page(pool, lib, source_id, &c).await? {
             Some(true) => created += 1,
             Some(false) => updated += 1,
             None => {
@@ -303,8 +240,8 @@ async fn upsert_generated_pages(
                 ctx.emit(
                     "人工页面更新提案（待审核）",
                     Some(json!({
-                        "page_slug": slug,
-                        "proposal_content": content,
+                        "page_slug": c.slug,
+                        "proposal_content": c.content,
                         "current_version_note": "人工编辑页，需 UI 确认后合入",
                     })),
                 )
@@ -314,6 +251,92 @@ async fn upsert_generated_pages(
         }
     }
     Ok((created, updated, proposals, all_slugs))
+}
+
+/// 规范化单个候选页：取字段 → wikilinks 大小写对齐 → 校验（非法 slug / 空内容 → None）。
+fn normalize_candidate(
+    p: &serde_json::Value,
+    lower_slug_map: &std::collections::HashMap<String, String>,
+    source_id: Uuid,
+) -> Option<CandidatePage> {
+    let slug = p
+        .get("slug")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let page_type = p
+        .get("page_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("concept")
+        .to_string();
+    let title = p
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&slug)
+        .trim()
+        .to_string();
+    let content = p
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let content = normalize_wikilinks(&content, lower_slug_map);
+    if !is_valid_slug(&slug) || content.is_empty() {
+        return None;
+    }
+    let frontmatter = json!({
+        "title": title,
+        "page_type": page_type,
+        "sources": [source_id.to_string()],
+        "origin_if_new": "llm",
+    });
+    Some(CandidatePage {
+        slug,
+        title,
+        page_type,
+        content,
+        frontmatter,
+    })
+}
+
+/// 单页 UPSERT：W6 单语句消除 check-then-act 竞态（并发 generate 不撞 slug UNIQUE、
+/// 不双 UPDATE 互相覆盖）；human 页保护语义收进 DO UPDATE 的 WHERE——冲突且
+/// origin=human 时子句为假 → RETURNING 无行 → 返回 None 走提案路径。
+async fn upsert_candidate_page(
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    source_id: Uuid,
+    c: &CandidatePage,
+) -> Result<Option<bool>, JobError> {
+    let upserted: Option<bool> = sqlx::query_scalar(
+        "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, folder) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'llm', 1, $9) \
+         ON CONFLICT (library_id, slug) DO UPDATE SET \
+            content = $6, \
+            folder = CASE WHEN wiki_pages.folder = '' THEN $9 ELSE wiki_pages.folder END, \
+            frontmatter = jsonb_set(wiki_pages.frontmatter, '{sources}', \
+                (SELECT COALESCE(jsonb_agg(DISTINCT s), '[]'::jsonb) FROM \
+                    (SELECT jsonb_array_elements_text(wiki_pages.frontmatter->'sources') AS s \
+                     UNION ALL SELECT $8::text) sub)), \
+            version = wiki_pages.version + 1, updated_at = now() \
+         WHERE wiki_pages.origin = 'llm' \
+         RETURNING (xmax = 0)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(lib)
+    .bind(&c.slug)
+    .bind(&c.title)
+    .bind(&c.page_type)
+    .bind(&c.content)
+    .bind(sqlx::types::Json(&c.frontmatter))
+    .bind(source_id.to_string())
+    .bind(folder_for_type(&c.page_type))
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
+    Ok(upserted)
 }
 
 /// 回读本批页面（slug/title/content；库内）。
@@ -470,7 +493,7 @@ async fn refresh_after_generate(
             }
         }
         // 审计缺陷④自愈：存量页向量回填（cap 50/次）——嵌入失败丢失的页在后续织入中自动补全
-        match crate::service::backfill_page_embeddings(pool, Some(&llm), lib).await {
+        match crate::service::backfill_page_embeddings(pool, Some(llm), lib).await {
             Ok(n) if n > 0 => {
                 ctx.emit(&format!("存量页向量回填 {n} 页"), None).await.ok();
             }
