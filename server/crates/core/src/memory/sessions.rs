@@ -66,20 +66,7 @@ impl MemoryService {
 
         // LLM 未配置时显式暴露（MCP 黑盒测试 D1：蒸馏静默失败不可接受——
         // manual 最应显式失败；auto 已入库但提示不会蒸馏）
-        if distill != "off"
-            && let Err(e) = self
-                .registry
-                .resolve(engram_llm::types::Purpose::Extract)
-                .await
-        {
-            let msg = format!(
-                "LLM 未配置或不可用（{e}）——蒸馏无法执行。请管理员在「设置 → AI 功能」配置模型后重试"
-            );
-            if distill == "manual" {
-                return Err(MemoryError::LlmNotConfigured(msg));
-            }
-            tracing::warn!("{msg}（auto 会话已入库，distill_status 保持 pending）");
-        }
+        self.require_llm_for_distill(distill).await?;
 
         match distill {
             "auto" => {
@@ -410,5 +397,24 @@ impl MemoryService {
             )
             .await
             .map_err(|e| MemoryError::Storage(e.to_string()))
+    }
+    /// LLM 未配置时显式暴露（MCP 黑盒测试 D1：蒸馏静默失败不可接受——
+    /// manual 最应显式失败；auto 已入库但提示不会蒸馏）。
+    async fn require_llm_for_distill(&self, distill: &str) -> Result<(), MemoryError> {
+        if distill != "off"
+            && let Err(e) = self
+                .registry
+                .resolve(engram_llm::types::Purpose::Extract)
+                .await
+        {
+            let msg = format!(
+                "LLM 未配置或不可用（{e}）——蒸馏无法执行。请管理员在「设置 → AI 功能」配置模型后重试"
+            );
+            if distill == "manual" {
+                return Err(MemoryError::LlmNotConfigured(msg));
+            }
+            tracing::warn!("{msg}（auto 会话已入库，distill_status 保持 pending）");
+        }
+        Ok(())
     }
 }

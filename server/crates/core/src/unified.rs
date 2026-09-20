@@ -293,52 +293,7 @@ fn merge_domain_hits(
         tracing::warn!("统一检索：wiki 文档域失败，跳过");
     }
 
-    // 实体域：主角先行（palette 命中实体 → 直达星系详情）
-    if let Ok(hits) = ent_res {
-        for h in hits {
-            merged.push(UnifiedHit {
-                domain: "entity".into(),
-                id: h.id,
-                title: h.title,
-                snippet: h.snippet,
-                score: 0.0,
-                extra: serde_json::json!({ "kind": h.kind }),
-            });
-        }
-    } else {
-        tracing::warn!("统一检索：entity 域失败，跳过");
-    }
-
-    // 待办域：open 待办的标题/正文 ILIKE 匹配
-    if let Ok(hits) = todo_res {
-        for t in hits {
-            merged.push(UnifiedHit {
-                domain: "todo".into(),
-                id: t.0,
-                title: Some(t.1),
-                snippet: t.2.chars().take(200).collect(),
-                score: 0.0,
-                extra: serde_json::json!({ "priority": t.3 }),
-            });
-        }
-    } else {
-        tracing::warn!("统一检索：todo 域失败，跳过");
-    }
-
-    if let Ok(res) = wiki_res {
-        for p in res {
-            merged.push(UnifiedHit {
-                domain: "wiki".into(),
-                id: p.id,
-                title: Some(p.title),
-                snippet: p.content.chars().take(200).collect(),
-                score: 0.0,
-                extra: serde_json::json!({ "slug": p.slug, "page_type": p.page_type }),
-            });
-        }
-    } else {
-        tracing::warn!("统一检索：wiki 域失败，跳过");
-    }
+    merge_secondary_hits(&mut merged, ent_res, todo_res, wiki_res);
     merged
 }
 
@@ -422,5 +377,60 @@ mod tests {
             })
             .collect();
         assert!(first_scores.iter().all(|s| (*s - 1.0 / 60.0).abs() < 1e-9));
+    }
+}
+
+/// 实体 / 待办 / wiki 页面三域命中并入（失败域跳过并告警，不阻塞其余域）。
+fn merge_secondary_hits(
+    merged: &mut Vec<UnifiedHit>,
+    ent_res: Result<Vec<engram_search::SearchHit>, engram_storage::StoreError>,
+    todo_res: Result<Vec<(Uuid, String, String, String)>, engram_storage::StoreError>,
+    wiki_res: Result<Vec<engram_wiki_engine::WikiPageDto>, UnifiedError>,
+) {
+    // 实体域：主角先行（palette 命中实体 → 直达星系详情）
+    if let Ok(hits) = ent_res {
+        for h in hits {
+            merged.push(UnifiedHit {
+                domain: "entity".into(),
+                id: h.id,
+                title: h.title,
+                snippet: h.snippet,
+                score: 0.0,
+                extra: serde_json::json!({ "kind": h.kind }),
+            });
+        }
+    } else {
+        tracing::warn!("统一检索：entity 域失败，跳过");
+    }
+
+    // 待办域：open 待办的标题/正文 ILIKE 匹配
+    if let Ok(hits) = todo_res {
+        for t in hits {
+            merged.push(UnifiedHit {
+                domain: "todo".into(),
+                id: t.0,
+                title: Some(t.1),
+                snippet: t.2.chars().take(200).collect(),
+                score: 0.0,
+                extra: serde_json::json!({ "priority": t.3 }),
+            });
+        }
+    } else {
+        tracing::warn!("统一检索：todo 域失败，跳过");
+    }
+
+    if let Ok(res) = wiki_res {
+        for p in res {
+            merged.push(UnifiedHit {
+                domain: "wiki".into(),
+                id: p.id,
+                title: Some(p.title),
+                snippet: p.content.chars().take(200).collect(),
+                score: 0.0,
+                extra: serde_json::json!({ "slug": p.slug, "page_type": p.page_type }),
+            });
+        }
+    } else {
+        tracing::warn!("统一检索：wiki 域失败，跳过");
     }
 }

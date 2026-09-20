@@ -381,20 +381,7 @@ impl MemoryService {
         // F4 治：归档或标敏感 → 受影响场景快照需要收敛重算（best-effort 异步，
         // 30s 防抖合并批量归档；重算仅活跃非敏感成员、0 活跃则解散——organize 收敛段）
         if new_status == "archived" || sensitive == Some(true) {
-            let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
-            self.queue
-                .enqueue(
-                    JobTemplate::new("organize_scenarios")
-                        .with_idempotency_key(format!("snapshot-refresh-{bucket}"))
-                        .with_payload(
-                            serde_json::json!({"converge_only": true, "atom_id": id.to_string()}),
-                        )
-                        .with_due(
-                            chrono::Utc::now() + chrono::Duration::seconds(self.debounce_secs),
-                        ),
-                )
-                .await
-                .ok();
+            self.enqueue_converge_refresh(id);
         }
         Ok(row)
     }
@@ -441,5 +428,20 @@ impl MemoryService {
     )
     .await;
         Ok(())
+    }
+    /// F4 治：归档或标敏感 → 受影响场景快照收敛重算（best-effort 异步，30s 防抖合并批量归档）。
+    async fn enqueue_converge_refresh(&self, id: Uuid) {
+        let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
+        self.queue
+            .enqueue(
+                JobTemplate::new("organize_scenarios")
+                    .with_idempotency_key(format!("snapshot-refresh-{bucket}"))
+                    .with_payload(
+                        serde_json::json!({"converge_only": true, "atom_id": id.to_string()}),
+                    )
+                    .with_due(chrono::Utc::now() + chrono::Duration::seconds(self.debounce_secs)),
+            )
+            .await
+            .ok();
     }
 }

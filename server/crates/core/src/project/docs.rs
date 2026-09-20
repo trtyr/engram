@@ -237,62 +237,14 @@ impl ProjectService {
         } else {
             real_total
         };
-        match mode {
-            "replace" => {
-                let Some(text) = content else {
-                    return Err(ProjectError::BadRequest(
-                        "mode=replace 需要传 content（替换后的文本，可多行）".into(),
-                    ));
-                };
-                if end_line < start_line {
-                    return Err(ProjectError::BadRequest(format!(
-                        "end_line({end_line}) 不能小于 start_line({start_line})"
-                    )));
-                }
-                if end_line > bounded_total {
-                    return Err(ProjectError::BadRequest(format!(
-                        "end_line({end_line}) 超出文档总行数（{bounded_total}）——先 doc_get 确认行号"
-                    )));
-                }
-                let replacement: Vec<String> = text.split('\n').map(str::to_string).collect();
-                let pos = (start_line - 1) as usize;
-                lines.splice(pos..(end_line as usize), replacement);
-            }
-            "insert" => {
-                let Some(text) = content else {
-                    return Err(ProjectError::BadRequest(
-                        "mode=insert 需要传 content（插入的文本，可多行）".into(),
-                    ));
-                };
-                if start_line > bounded_total + 1 {
-                    return Err(ProjectError::BadRequest(format!(
-                        "start_line({start_line}) 超界——插入允许 1..={}（total+1 = 追加到末尾）",
-                        bounded_total + 1
-                    )));
-                }
-                let insertion: Vec<String> = text.split('\n').map(str::to_string).collect();
-                let pos = (start_line - 1) as usize;
-                lines.splice(pos..pos, insertion);
-            }
-            "delete" => {
-                if end_line < start_line {
-                    return Err(ProjectError::BadRequest(format!(
-                        "end_line({end_line}) 不能小于 start_line({start_line})"
-                    )));
-                }
-                if end_line > bounded_total {
-                    return Err(ProjectError::BadRequest(format!(
-                        "end_line({end_line}) 超出文档总行数（{bounded_total}）"
-                    )));
-                }
-                lines.drain((start_line - 1) as usize..(end_line as usize));
-            }
-            other => {
-                return Err(ProjectError::BadRequest(format!(
-                    "mode 只支持 replace/insert/delete（收到 {other:?}）"
-                )));
-            }
-        }
+        apply_doc_patch(
+            mode,
+            &mut lines,
+            content,
+            start_line,
+            end_line,
+            bounded_total,
+        )?;
         let patched = lines.join("\n");
         self.update_doc(id, None, None, None, Some(&patched), expected_version)
             .await
@@ -367,4 +319,72 @@ fn score_doc_hits(docs: Vec<(Uuid, String, String, String)>, terms: &[String]) -
         });
     }
     results
+}
+
+/// 按 mode 改写行切片：replace / insert / delete；越界与缺参一律 400。
+fn apply_doc_patch(
+    mode: &str,
+    lines: &mut Vec<String>,
+    content: Option<&str>,
+    start_line: i64,
+    end_line: i64,
+    bounded_total: i64,
+) -> Result<(), ProjectError> {
+    match mode {
+        "replace" => {
+            let Some(text) = content else {
+                return Err(ProjectError::BadRequest(
+                    "mode=replace 需要传 content（替换后的文本，可多行）".into(),
+                ));
+            };
+            if end_line < start_line {
+                return Err(ProjectError::BadRequest(format!(
+                    "end_line({end_line}) 不能小于 start_line({start_line})"
+                )));
+            }
+            if end_line > bounded_total {
+                return Err(ProjectError::BadRequest(format!(
+                    "end_line({end_line}) 超出文档总行数（{bounded_total}）——先 doc_get 确认行号"
+                )));
+            }
+            let replacement: Vec<String> = text.split('\n').map(str::to_string).collect();
+            let pos = (start_line - 1) as usize;
+            lines.splice(pos..(end_line as usize), replacement);
+        }
+        "insert" => {
+            let Some(text) = content else {
+                return Err(ProjectError::BadRequest(
+                    "mode=insert 需要传 content（插入的文本，可多行）".into(),
+                ));
+            };
+            if start_line > bounded_total + 1 {
+                return Err(ProjectError::BadRequest(format!(
+                    "start_line({start_line}) 超界——插入允许 1..={}（total+1 = 追加到末尾）",
+                    bounded_total + 1
+                )));
+            }
+            let insertion: Vec<String> = text.split('\n').map(str::to_string).collect();
+            let pos = (start_line - 1) as usize;
+            lines.splice(pos..pos, insertion);
+        }
+        "delete" => {
+            if end_line < start_line {
+                return Err(ProjectError::BadRequest(format!(
+                    "end_line({end_line}) 不能小于 start_line({start_line})"
+                )));
+            }
+            if end_line > bounded_total {
+                return Err(ProjectError::BadRequest(format!(
+                    "end_line({end_line}) 超出文档总行数（{bounded_total}）"
+                )));
+            }
+            lines.drain((start_line - 1) as usize..(end_line as usize));
+        }
+        other => {
+            return Err(ProjectError::BadRequest(format!(
+                "mode 只支持 replace/insert/delete（收到 {other:?}）"
+            )));
+        }
+    }
+    Ok(())
 }
