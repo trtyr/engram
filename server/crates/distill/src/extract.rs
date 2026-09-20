@@ -38,7 +38,8 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
 }
 
 /// 1. 认领待蒸馏会话（processing 中防重复认领）。
-/// v2 修复（H-A2）：metadata.distill=off 的会话**永久豁免**——off 是会话级语义，
+///
+/// v2 修复（H-A2）：`metadata.distill=off` 的会话**永久豁免**——off 是会话级语义，
 /// 不再被后续任何 extract 任务的 pending 全量扫描顺带蒸掉。
 async fn claim_pending_sessions(ctx: &JobContext) -> Result<Vec<SessionRow>, JobError> {
     let rows = sqlx::query_as::<_, (Uuid, String, serde_json::Value, bool, serde_json::Value)>(

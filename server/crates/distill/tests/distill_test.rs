@@ -1782,11 +1782,20 @@ async fn jobs_mock_extract_main_and_error() {
         "主分支应成功: {:?}",
         j.error
     );
+    // extract 只落 candidate，随后把链交给 arbitrate（本条无相似 → 直接转正）；
+    // 断言必须等链上仲裁跑完看最终态，否则与候选态断言竞态。
+    let j2 = wait_done(&env.queue, "arbitrate_atoms").await;
+    assert_eq!(
+        j2.status,
+        JobStatus::Succeeded,
+        "链上仲裁应成功: {:?}",
+        j2.error
+    );
     let (n, st): (i64, String) = sqlx::query_as("SELECT count(*), min(status) FROM atoms")
         .fetch_one(&env.pool)
         .await
         .unwrap();
-    assert_eq!((n, st.as_str()), (1, "candidate"), "应落一条候选原子");
+    assert_eq!((n, st.as_str()), (1, "active"), "候选经链上仲裁转正");
     env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
 
     // 错误分支：两段垃圾响应 → 两次解析失败 → 任务失败；认领会话必须回滚 pending
