@@ -99,16 +99,7 @@ pub async fn purge_agent(
     Json(req): Json<PurgeRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_memory(&principal)?;
-    // F1 双因子：erase scope（持有）× 逐操作二校验
-    match &*principal {
-        Principal::Admin => {}
-        Principal::ApiKey { scopes, .. } if scopes.iter().any(|s| s == "erase") => {}
-        _ => {
-            return Err(ApiError::Forbidden(
-                "清场需要 erase scope（不可逆操作，与读写分权）".into(),
-            ));
-        }
-    }
+    require_erase_scope(&principal)?;
 
     if req.deep.unwrap_or(false) {
         // deep 收权（2026-09-03 测试报告 SEC-D/R-1 决策）：全库清空仅限管理员会话
@@ -251,4 +242,19 @@ pub(crate) fn actor_of(principal: &Principal) -> String {
         Principal::Admin => "admin".to_string(),
         Principal::ApiKey { name, .. } => format!("key:{name}"),
     }
+}
+
+/// F1 双因子：erase scope（持有）× 逐操作二校验。
+fn require_erase_scope(principal: &Principal) -> Result<(), ApiError> {
+    // F1 双因子：erase scope（持有）× 逐操作二校验
+    match principal {
+        Principal::Admin => {}
+        Principal::ApiKey { scopes, .. } if scopes.iter().any(|s| s == "erase") => {}
+        _ => {
+            return Err(ApiError::Forbidden(
+                "清场需要 erase scope（不可逆操作，与读写分权）".into(),
+            ));
+        }
+    }
+    Ok(())
 }

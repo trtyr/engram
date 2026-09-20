@@ -344,16 +344,7 @@ pub async fn test_provider(
             .map_err(|e| ApiError::BadRequest(e.to_string()))?,
     );
     // 一个 provider 一个模型：按 capability 只探测对应方向
-    let chat_model = if capability == "chat" {
-        model_id.clone()
-    } else {
-        String::new()
-    };
-    let embed_model = if capability == "embedding" {
-        Some(model_id)
-    } else {
-        None
-    };
+    let (chat_model, embed_model) = probe_models(&capability, model_id);
 
     // chat 探测（有 chat 模型时）
     let mut chat_result: Option<Result<_, _>> = None;
@@ -502,4 +493,19 @@ fn validate_provider_update(req: &UpdateProviderRequest) -> Result<Option<String
         )));
     }
     Ok(base_url)
+}
+
+/// 按 capability 选出要探测的方向（chat 模型 / embedding 模型；一个 provider 一个模型）。
+fn probe_models(capability: &str, model_id: String) -> (String, Option<String>) {
+    let chat_model = if capability == "chat" {
+        model_id.clone()
+    } else {
+        String::new()
+    };
+    let embed_model = if capability == "embedding" {
+        Some(model_id)
+    } else {
+        None
+    };
+    (chat_model, embed_model)
 }
