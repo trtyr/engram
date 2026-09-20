@@ -10,6 +10,7 @@ pub use engram_wiki_engine::libraries::{self, WikiLibraryDto};
 pub use engram_wiki_engine::purpose::Purpose;
 pub use engram_wiki_engine::review::ReviewItem;
 pub use engram_wiki_engine::service::GraphDto;
+pub use engram_wiki_engine::service::WikiPageMetaDto;
 pub use engram_wiki_engine::service::WikiPageVersionDto;
 pub use engram_wiki_engine::{LintReport, LlmRef, WikiError, WikiPageDto, WikiService};
 

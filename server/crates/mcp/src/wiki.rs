@@ -38,9 +38,11 @@ pub fn svc(state: &engram_core::state::AppState) -> engram_core::wiki::WikiServi
 /// content_chars（P1-7）给「值不值得拉全文」的决策依据。
 pub fn trim_page(page: serde_json::Value) -> serde_json::Value {
     let mut v = page;
-    let chars = v["content"]
-        .as_str()
-        .map(|c| c.chars().count())
+    // 规模化 2026-09-20：list 现在直接返回元数据（带 content_chars、无 content），
+    // 字优先取 content_chars；其余调用方（如带正文的行）仍从 content 计算。
+    let chars = v["content_chars"]
+        .as_i64()
+        .or_else(|| v["content"].as_str().map(|c| c.chars().count() as i64))
         .unwrap_or(0);
     v["content"] = serde_json::json!("");
     v["content_omitted"] = serde_json::json!(true);
@@ -114,6 +116,11 @@ pub struct WikiListPagesParams {
         description = "可选：按页型过滤。entity=实体, concept=概念, source=来源, synthesis=综合, comparison=对比, queries=查询存档, overview=总览, index=索引, analysis=分析归档。"
     )]
     pub page_type: Option<String>,
+    /// 目录子树过滤：folder 精确等于该路径或其下级（folder LIKE '路径/%'）
+    #[schemars(
+        description = "可选：按目录子树过滤（folder 路径或其下级）。与 GET /wiki/folders 配合可按目录逐个拉取。"
+    )]
+    pub folder: Option<String>,
     /// keyset 分页游标（D28）：上一页最后一条的 {updated_at ISO8601}|{id}
     #[schemars(
         description = "可选：keyset 分页游标。取上一页最后一条构造 {updated_at ISO8601}|{id}。首查不传；返回条数恰等于 limit 时说明可能还有下一页。"

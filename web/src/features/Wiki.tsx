@@ -12,7 +12,7 @@ import ReviewQueue from '@/components/ReviewQueue'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { DocumentsPane } from './DocumentsPane'
 import { useSearchParams } from 'react-router-dom'
-import { api, type GraphDto, type LintReport, type Purpose, type WikiPage } from '@/lib/api'
+import { api, type GraphDto, type LintReport, type Purpose, type WikiPage, type WikiPageMeta } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, relTime, selectCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
@@ -50,7 +50,12 @@ export default function Wiki() {
   // —— 单库终局（2026-09-20）：库选择 UI 已移除，lib 固定 main（API ?lib= 参数保留兼容）——
   const [lib] = useState('main')
   // —— 状态提升（审计 #4）：切图谱 / 收件箱 / 运维再回来，选中与折叠不丢 ——
-  const [pages, setPages] = useState<WikiPage[] | null>(null)
+  const [pages, setPages] = useState<WikiPageMeta[] | null>(null)
+  // 目录骨架索引（folder → 页数，规模化 2026-09-20 懒加载）：先渲染结构，页面按需拉
+  const [folderIndex, setFolderIndex] = useState<Record<string, number>>({})
+  // 已拉取的 folder 子树（'' = 根层）——避免重复请求
+  const loadedRef = useRef<Set<string>>(new Set())
+  const pagesRef = useRef<WikiPageMeta[]>([])
   const [loadErr, setLoadErr] = useState('')
   const [open, setOpen] = useState<WikiPage | null>(null)
   const [opening, setOpening] = useState(false)
@@ -63,15 +68,44 @@ export default function Wiki() {
   // onSelect 已拉取的页面，深链 effect 跳过重复请求
   const requestedRef = useRef<string | null>(null)
 
+  // 规模化（2026-09-20，用户反馈「加载非常卡」）：首屏只拉目录骨架 + 根层页面，
+  // 子 folder 在展开时按需拉取——万页下从 18MB/3.2s 降到几 KB 起步。
   const load = useCallback(() => {
-    return api
-      .get<WikiPage[]>(withLib('/wiki/pages', lib))
-      .then((r) => {
-        setPages(r)
+    return Promise.all([
+      api.get<[string, number][]>(withLib('/wiki/folders', lib)),
+      api.get<WikiPageMeta[]>(withLib('/wiki/pages?folder=', lib)),
+    ])
+      .then(([idx, rootPages]) => {
+        setFolderIndex(Object.fromEntries(idx))
+        loadedRef.current = new Set([''])
+        pagesRef.current = rootPages
+        setPages(rootPages)
         setLoadErr('')
       })
       .catch((e: unknown) => setLoadErr(e instanceof Error ? e.message : '目录树加载失败'))
   }, [lib])
+
+  /** 展开 folder 时按需拉它的子树（幂等，同一 folder 只拉一次；失败允许重试）。 */
+  const ensureFolder = useCallback(
+    async (path: string) => {
+      if (loadedRef.current.has(path)) return
+      loadedRef.current.add(path)
+      try {
+        const rows = await api.get<WikiPageMeta[]>(
+          withLib(`/wiki/pages?folder=${encodeURIComponent(path)}`, lib),
+        )
+        const seen = new Set(pagesRef.current.map((p) => p.slug))
+        const add = rows.filter((r) => !seen.has(r.slug))
+        if (add.length) {
+          pagesRef.current = [...pagesRef.current, ...add]
+          setPages(pagesRef.current)
+        }
+      } catch {
+        loadedRef.current.delete(path)
+      }
+    },
+    [lib],
+  )
   useEffect(() => {
     void load()
   }, [load])
@@ -93,6 +127,8 @@ export default function Wiki() {
         if (stale) return
         setOpen(p)
         setOpenErr('')
+        // 懒加载：深链页所在 folder 的子树按需拉取（根层已拉）
+        if (p.folder) void ensureFolder(p.folder)
         const parts = (p.folder || '')
           .split('/')
           .map((s) => s.trim())
@@ -149,6 +185,7 @@ export default function Wiki() {
     try {
       const page = await api.get<WikiPage>(withLib(`/wiki/pages/${encodeURIComponent(slug)}`, lib))
       setOpen(page)
+      if (page.folder) void ensureFolder(page.folder)
       const next = new URLSearchParams(params)
       next.set('page', slug)
       setParams(next)
@@ -161,6 +198,7 @@ export default function Wiki() {
   }
 
   const toggleFolder = (p: string) => {
+    const expanding = collapsed.has(p)
     setCollapsed((prev) => {
       const next = new Set(prev)
       if (next.has(p)) next.delete(p)
@@ -168,6 +206,8 @@ export default function Wiki() {
       lsSet('engram-wiki-collapsed', [...next])
       return next
     })
+    // 懒加载：展开时按需拉该 folder 子树（已拉过则直接返回）
+    if (expanding) void ensureFolder(p)
   }
 
   // 树 / 阅读分割线拖拽（#6，唯一新增交互）
@@ -236,6 +276,7 @@ export default function Wiki() {
               collapsed={collapsed}
               onSelect={onSelect}
               onToggleFolder={toggleFolder}
+              counts={folderIndex}
             />
           </div>
           <div
@@ -282,11 +323,12 @@ function InboxPane({ libSlug }: { libSlug: string }) {
 interface FolderNode {
   name: string
   folders: FolderNode[]
-  pages: WikiPage[]
+  pages: WikiPageMeta[]
 }
 
-/** 按 folder（/ 分隔多级）把页面聚成嵌套树；folder='' 的页面落在根。 */
-function buildFolders(pages: WikiPage[]): FolderNode {
+/** 按 folder（/ 分隔多级）把页面聚成嵌套树；folder='' 的页面落在根。
+ *  懒加载（2026-09-20）：额外接收目录索引——尚未拉取的 folder 也先渲染成节点。 */
+function buildFolders(pages: WikiPageMeta[], index: Record<string, number> = {}): FolderNode {
   const root: FolderNode = { name: '', folders: [], pages: [] }
   const ensure = (node: FolderNode, parts: string[]): FolderNode => {
     let cur = node
@@ -313,6 +355,13 @@ function buildFolders(pages: WikiPage[]): FolderNode {
     if (parts.length === 0) root.pages.push(p)
     else ensure(root, parts).pages.push(p)
   }
+  for (const path of Object.keys(index)) {
+    const parts = path
+      .split('/')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (parts.length) ensure(root, parts)
+  }
   sort(root)
   return root
 }
@@ -330,16 +379,18 @@ function TreePane({
   collapsed,
   onSelect,
   onToggleFolder,
+  counts,
 }: {
-  pages: WikiPage[] | null
+  pages: WikiPageMeta[] | null
   loadErr: string
   onRetry: () => void
   openId: string | null
   collapsed: Set<string>
   onSelect: (slug: string) => void
   onToggleFolder: (p: string) => void
+  counts: Record<string, number>
 }) {
-  const tree = useMemo(() => (pages ? buildFolders(pages) : null), [pages])
+  const tree = useMemo(() => (pages ? buildFolders(pages, counts) : null), [pages, counts])
   return (
     <Card className="flex max-h-[45vh] flex-col overflow-hidden bg-muted/30 lg:h-full lg:max-h-none">
       {loadErr ? (
@@ -368,6 +419,7 @@ function TreePane({
                 onSelect={onSelect}
                 collapsed={collapsed}
                 onToggleFolder={onToggleFolder}
+                counts={counts}
               />
             </div>
           </nav>
@@ -385,6 +437,7 @@ function FolderTree({
   onSelect,
   collapsed,
   onToggleFolder,
+  counts,
 }: {
   node: FolderNode
   path: string
@@ -393,6 +446,7 @@ function FolderTree({
   onSelect: (slug: string) => void
   collapsed: Set<string>
   onToggleFolder: (p: string) => void
+  counts: Record<string, number>
 }) {
   const level = depth + 1
   return (
@@ -416,7 +470,7 @@ function FolderTree({
                 {f.name}
               </span>
               <span aria-hidden="true" className="ml-auto font-mono text-xs tabular-nums text-muted-foreground/80">
-                {countPages(f)}
+                {counts[fp] ?? countPages(f)}
               </span>
             </button>
             {!isCollapsed && (
@@ -429,6 +483,7 @@ function FolderTree({
                   onSelect={onSelect}
                   collapsed={collapsed}
                   onToggleFolder={onToggleFolder}
+                  counts={counts}
                 />
               </div>
             )}

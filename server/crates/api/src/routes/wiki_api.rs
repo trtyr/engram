@@ -6,7 +6,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use engram_core::wiki::libraries;
 use engram_core::wiki::{CascadeReport, InsightsReport, Purpose, ReviewItem};
-use engram_core::wiki::{LintReport, WikiError, WikiPageDto, WikiService};
+use engram_core::wiki::{LintReport, WikiError, WikiPageDto, WikiPageMetaDto, WikiService};
 use engram_jobs::types::JobEvent;
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -121,6 +121,9 @@ pub struct IngestAccepted {
 #[derive(Deserialize, IntoParams)]
 pub struct ListPagesParams {
     pub page_type: Option<String>,
+    /// 目录子树过滤：folder 精确等于该路径或其下级（folder LIKE '路径/%'）——
+    /// 规模化（2026-09-20）：前端树按 folder 懒加载，不再一次拉全库。
+    pub folder: Option<String>,
     /// keyset 分页游标：{updated_at ISO8601}|{id}（上一页最后一条）
     pub cursor: Option<String>,
     /// 返回条数上限；不传 = 全量（2026-09-20 单库终局：不要截断）
@@ -128,20 +131,37 @@ pub struct ListPagesParams {
 }
 
 #[utoipa::path(get, path = "/wiki/pages", params(ListPagesParams),
-    responses((status = 200, body = [WikiPageDto])))]
+    responses((status = 200, body = [WikiPageMetaDto])))]
 pub async fn list_pages(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Query(p): Query<ListPagesParams>,
-) -> Result<Json<Vec<WikiPageDto>>, ApiError> {
+) -> Result<Json<Vec<WikiPageMetaDto>>, ApiError> {
     require_wiki(&principal)?;
     let lib = main_lib(&state).await?;
     Ok(Json(
         svc(&state)
-            .list_pages(lib, p.page_type.as_deref(), p.limit, p.cursor.as_deref())
+            .list_pages(
+                lib,
+                p.page_type.as_deref(),
+                p.folder.as_deref(),
+                p.limit,
+                p.cursor.as_deref(),
+            )
             .await
             .map_err(we)?,
     ))
+}
+
+/// 目录骨架索引：(folder, 页数) 全量——几百行量级，供前端懒加载树先渲染结构。
+#[utoipa::path(get, path = "/wiki/folders", responses((status = 200, body = Vec<(String, i64)>)))]
+pub async fn list_folders(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<(String, i64)>>, ApiError> {
+    require_wiki(&principal)?;
+    let lib = main_lib(&state).await?;
+    Ok(Json(svc(&state).list_folders(lib).await.map_err(we)?))
 }
 
 #[utoipa::path(get, path = "/wiki/pages/{slug}",

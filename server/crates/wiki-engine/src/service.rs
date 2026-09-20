@@ -59,6 +59,26 @@ pub struct WikiPageDto {
     pub updated_at: DateTime<Utc>,
 }
 
+/// 列表行（元数据，**不含正文**）——规模化 2026-09-20：万页下正文合计 18MB，目录树
+/// 只需要元数据；正文走 `get_page`。`content_chars` 保留原 P1-7 语义（len 由 SQL
+/// char_length 计算，不经网络），供调用方判断「值不值得拉全文」。
+#[derive(Debug, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct WikiPageMetaDto {
+    pub id: Uuid,
+    pub slug: String,
+    pub title: String,
+    pub page_type: String,
+    /// 目录树层级（/ 分隔多级，Obsidian 式文件夹）
+    pub folder: String,
+    #[schema(value_type = Object)]
+    pub frontmatter: serde_json::Value,
+    pub origin: String,
+    pub version: i32,
+    pub updated_at: DateTime<Utc>,
+    /// 正文字符数（SQL char_length，不含正文本体）
+    pub content_chars: i32,
+}
+
 /// 页面版本快照行（列表用——不带正文，防一次拖回全史）。
 #[derive(Debug, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
 pub struct WikiPageVersionDto {
@@ -471,9 +491,10 @@ impl WikiService {
         &self,
         lib: Uuid,
         page_type: Option<&str>,
+        folder: Option<&str>,
         limit: Option<i64>,
         cursor: Option<&str>,
-    ) -> Result<Vec<WikiPageDto>, WikiError> {
+    ) -> Result<Vec<WikiPageMetaDto>, WikiError> {
         let parse_cursor =
             |raw: &str| -> Result<(chrono::DateTime<chrono::Utc>, uuid::Uuid), WikiError> {
                 let parts: Vec<&str> = raw.split('|').collect();
@@ -495,36 +516,61 @@ impl WikiService {
                 })?;
                 Ok((ts, id))
             };
+        // 规模化（2026-09-20，用户拍板「加载太慢」）：列表**不回正文**——万页下每页 content
+        // 合计 18MB，而目录树只用元数据（正文走 GET /wiki/pages/{slug}）；folder 支持按子树
+        // 拉取（folder = $4 或 folder LIKE $4 || '/%'），配合 list_folders 做前端懒加载。
+        const COLS: &str = "SELECT id, slug, title, page_type, folder, frontmatter, origin, version, \
+                            updated_at, char_length(content) AS content_chars FROM wiki_pages";
         match cursor {
-            None | Some("") => Ok(sqlx::query_as::<_, WikiPageDto>(
-                "SELECT * FROM wiki_pages \
-                     WHERE library_id = $1 AND ($2::text IS NULL OR page_type = $2) \
+            None | Some("") => {
+                let sql = format!(
+                    "{COLS} WHERE library_id = $1 AND ($2::text IS NULL OR page_type = $2) \
+                       AND ($4::text IS NULL OR folder = $4 OR folder LIKE $4 || '/%') \
                        AND page_type NOT IN ('log') \
-                     ORDER BY updated_at DESC, id DESC LIMIT $3",
-            )
-            .bind(lib)
-            .bind(page_type)
-            .bind(limit)
-            .fetch_all(&self.pool)
-            .await?),
+                     ORDER BY updated_at DESC, id DESC LIMIT $3"
+                );
+                Ok(sqlx::query_as::<_, WikiPageMetaDto>(&sql)
+                    .bind(lib)
+                    .bind(page_type)
+                    .bind(limit)
+                    .bind(folder)
+                    .fetch_all(&self.pool)
+                    .await?)
+            }
             Some(raw) => {
                 let (ts, id) = parse_cursor(raw)?;
-                Ok(sqlx::query_as::<_, WikiPageDto>(
-                    "SELECT * FROM wiki_pages \
-                     WHERE library_id = $1 AND ($2::text IS NULL OR page_type = $2) \
+                let sql = format!(
+                    "{COLS} WHERE library_id = $1 AND ($2::text IS NULL OR page_type = $2) \
+                       AND ($4::text IS NULL OR folder = $4 OR folder LIKE $4 || '/%') \
                        AND page_type NOT IN ('log') \
-                       AND (updated_at, id) < ($4::timestamptz, $5::uuid) \
-                     ORDER BY updated_at DESC, id DESC LIMIT $3",
-                )
-                .bind(lib)
-                .bind(page_type)
-                .bind(limit)
-                .bind(ts)
-                .bind(id)
-                .fetch_all(&self.pool)
-                .await?)
+                       AND (updated_at, id) < ($5::timestamptz, $6::uuid) \
+                     ORDER BY updated_at DESC, id DESC LIMIT $3"
+                );
+                Ok(sqlx::query_as::<_, WikiPageMetaDto>(&sql)
+                    .bind(lib)
+                    .bind(page_type)
+                    .bind(limit)
+                    .bind(folder)
+                    .bind(ts)
+                    .bind(id)
+                    .fetch_all(&self.pool)
+                    .await?)
             }
         }
+    }
+
+    /// 目录骨架索引（规模化 2026-09-20）：只回 folder 路径与页数——供前端懒加载树渲染
+    /// 空文件夹与页数角标。万页下这是「folder 数量级」行数（几百），不是一万行页面。
+    pub async fn list_folders(&self, lib: Uuid) -> Result<Vec<(String, i64)>, WikiError> {
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT folder, count(*) FROM wiki_pages \
+             WHERE library_id = $1 AND page_type NOT IN ('log') \
+             GROUP BY folder ORDER BY folder",
+        )
+        .bind(lib)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
     }
 
     /// 读单页（库内）。先精确匹配；未中则按「小写 + 空格转连字符」宽容重查——LLM 生成正文时

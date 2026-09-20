@@ -291,6 +291,20 @@ export interface WikiPage {
   version: number
   updated_at: string
 }
+/** 列表行（规模化 2026-09-20）：不带正文，只带字数——目录树懒加载用。
+ *  正文走单页接口 GET /wiki/pages/{slug}。 */
+export interface WikiPageMeta {
+  id: string
+  slug: string
+  title: string
+  page_type: string
+  folder: string
+  frontmatter: Record<string, unknown>
+  origin: string
+  version: number
+  updated_at: string
+  content_chars: number
+}
 export interface GraphDto {
   nodes: { slug: string; title: string; page_type: string; community?: number }[]
   edges: { from_slug: string; to_slug: string; weight: number }[]

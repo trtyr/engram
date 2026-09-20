@@ -319,6 +319,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/wiki/ingest", post(wiki_api::ingest))
         .route("/wiki/pages", get(wiki_api::list_pages))
+        .route("/wiki/folders", get(wiki_api::list_folders))
         .route(
             "/wiki/pages/{slug}",
             get(wiki_api::get_page)

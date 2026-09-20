@@ -3509,7 +3509,13 @@ impl EngramMcpServer {
         let lp = params.0;
         let lib = self.resolve_wiki_lib().await?;
         let pages = wiki::svc(&self.state)
-            .list_pages(lib, lp.page_type.as_deref(), lp.limit, lp.cursor.as_deref())
+            .list_pages(
+                lib,
+                lp.page_type.as_deref(),
+                lp.folder.as_deref(),
+                lp.limit,
+                lp.cursor.as_deref(),
+            )
             .await
             .map_err(wiki::from_wiki)?;
         let values: Vec<serde_json::Value> = serde_json::to_value(&pages)

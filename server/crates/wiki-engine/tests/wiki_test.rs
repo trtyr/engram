@@ -140,7 +140,10 @@ async fn two_docs_interlinked_no_duplicate() {
     ));
     wait_jobs(&pool, &["wiki_analyze", "wiki_generate"]).await;
 
-    let pages = wiki.list_pages(lib, None, Some(50), None).await.unwrap();
+    let pages = wiki
+        .list_pages(lib, None, None, Some(50), None)
+        .await
+        .unwrap();
     // 3 内容页 + synthesis + comparison + index
     assert!(
         pages.len() >= 6,
@@ -1086,7 +1089,7 @@ async fn list_pages_cursor_pagination_walks_all() {
     let mut cursor: Option<String> = None;
     loop {
         let page = wiki
-            .list_pages(lib, None, Some(2), cursor.as_deref())
+            .list_pages(lib, None, None, Some(2), cursor.as_deref())
             .await
             .unwrap();
         assert!(page.len() <= 2);
@@ -1108,7 +1111,7 @@ async fn list_pages_cursor_pagination_walks_all() {
     );
     // 垃圾游标响亮拒
     let err = wiki
-        .list_pages(lib, None, Some(2), Some("garbage"))
+        .list_pages(lib, None, None, Some(2), Some("garbage"))
         .await
         .expect_err("垃圾游标应被拒");
     assert!(err.to_string().contains("cursor"), "{err}");
@@ -1135,7 +1138,7 @@ async fn log_page_excluded_from_graph_and_lint_and_empty_ingest_rejected() {
 
     // D23：list_pages / lint / graph 三口径一致（都不含 log）
     assert_eq!(
-        svc.list_pages(lib, None, Some(100), None)
+        svc.list_pages(lib, None, None, Some(100), None)
             .await
             .unwrap()
             .len(),
