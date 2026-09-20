@@ -1,40 +1,40 @@
 {
   "label": "stress-10k",
   "base": "http://127.0.0.1:17660",
-  "measured_at": "2026-09-20T16:27:13+0800",
+  "measured_at": "2026-09-20T19:17:17+0800",
   "metrics": {
     "pages_list": {
-      "median_ms": 8064.1,
+      "median_ms": 4489.1,
       "bytes": 18082968,
       "count": 10000,
       "runs": [
-        8064.1,
-        5041.5,
-        8343.0
+        4040.9,
+        4869.9,
+        4489.1
       ]
     },
     "graph_api": {
-      "median_ms": 573.1,
+      "median_ms": 3077.1,
       "nodes": 10000,
-      "edges": 0,
+      "edges": 54869,
       "runs": [
-        644.4,
-        506.7,
-        573.1
+        3077.1,
+        2838.1,
+        3089.1
       ]
     },
     "search": {
-      "p50_ms": 47.3,
-      "p95_ms": 1012.9,
-      "max_ms": 4673.7,
-      "zero_hits": 11,
+      "p50_ms": 1141.3,
+      "p95_ms": 1645.9,
+      "max_ms": 2190.9,
+      "zero_hits": 0,
       "queries": 14
     },
     "insights": {
-      "ms": 2586.2
+      "ms": 1239.7
     },
     "query_gaps": {
-      "ms": 122.2
+      "ms": 26.6
     }
   }
 }

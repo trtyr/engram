@@ -103,9 +103,25 @@ pub async fn refresh_community_summaries(
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    // 3. Louvain 划社区
+    // 3. Louvain 划社区。万页保护（2026-09-20 压测发现）：纯 CPU 计算会阻塞 tokio worker——
+    // 后台 job 不做规模降级（摘要层是维护能力，大库同样要摘要），但 spawn_blocking 隔离。
+    // 闭包按索引回传（不携借用），外层再与 nodes 重建 slug→社区映射。
     let nodes: Vec<String> = rows.iter().map(|(s, _, _)| s.clone()).collect();
-    let assignment = crate::community::louvain_communities(&nodes, &edges);
+    let assign_ids: Vec<usize> = {
+        let nodes_c = nodes.clone();
+        let edges_c = edges.clone();
+        tokio::task::spawn_blocking(move || {
+            let m = crate::community::louvain_communities(&nodes_c, &edges_c);
+            nodes_c
+                .iter()
+                .map(|n| m.get(n.as_str()).copied().unwrap_or(0))
+                .collect()
+        })
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?
+    };
+    let assignment: HashMap<&str, usize> =
+        nodes.iter().map(|n| n.as_str()).zip(assign_ids).collect();
     let groups = group_communities(&assignment);
 
     // 4. 已有摘要页：hash → slug

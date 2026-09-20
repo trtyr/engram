@@ -704,7 +704,7 @@ impl WikiService {
         // (2) 4077 节点子图在 debug 下分钟级且阻塞 tokio worker（连接池 acquire 等 638s、
         // 实例整体无响应）；(3) 阈值内也必须 spawn_blocking 隔离。超限的 community 过滤
         // 直接拒绝（引导先 SQL 层收窄）；全量请求降级跳过社区计算（community=0、空列表）。
-        const LOUVAIN_MAX_NODES: usize = 1500;
+        const LOUVAIN_MAX_NODES: usize = crate::community::LOUVAIN_MAX_NODES;
         let over_limit = node_slugs.len() > LOUVAIN_MAX_NODES;
         if over_limit && community.is_some() {
             return Err(WikiError::BadRequest(format!(

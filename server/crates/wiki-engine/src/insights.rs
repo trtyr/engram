@@ -69,33 +69,52 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
         *degree.entry(t.as_str()).or_default() += 1;
     }
 
-    // 社区
-    let comms = louvain_communities(&nodes, &edges);
-    let cohesion = community_cohesion(&nodes, &edges, &comms);
-    let mut community_info: Vec<CommunityInfo> = {
-        let mut sizes: HashMap<usize, Vec<&str>> = HashMap::new();
-        for n in &nodes {
-            sizes
-                .entry(comms.get(n.as_str()).copied().unwrap_or(0))
-                .or_default()
-                .push(n);
-        }
-        sizes
-            .into_iter()
-            .map(|(id, members)| {
-                let size = members.len();
-                let cohesion = cohesion.get(&id).copied().unwrap_or(0.0);
-                crate::service::CommunityInfo {
-                    id,
-                    top_slug: members.first().copied().unwrap_or_default().to_string(),
-                    size,
-                    cohesion,
-                    sparse: size >= crate::community::SPARSE_MIN_SIZE
-                        && cohesion < crate::community::SPARSE_COHESION,
-                }
-            })
-            .collect()
-    };
+    // 社区。万页保护（2026-09-20 压测发现，与 graph 路径同类）：Louvain 是纯 CPU 计算，
+    // 万级全图分钟级且阻塞 tokio worker（实测 10k 节点洞察请求令实例整体无响应）。
+    // 超阈值时降级跳过社区计算（community_info 空 → 少「稀疏社区」一类洞察）；
+    // 阈值内也 spawn_blocking 隔离，不占 worker。
+    let (comms, mut community_info): (HashMap<String, usize>, Vec<CommunityInfo>) =
+        if nodes.len() > crate::community::LOUVAIN_MAX_NODES {
+            // 降级：不做社区计算（community_info 空 → 少「稀疏社区」类洞察）
+            (HashMap::new(), Vec::new())
+        } else {
+            let (comms, cohesion) = {
+                let nodes_c = nodes.clone();
+                let edges_c = edges.clone();
+                tokio::task::spawn_blocking(move || {
+                    let comms = louvain_communities(&nodes_c, &edges_c);
+                    let cohesion = community_cohesion(&nodes_c, &edges_c, &comms);
+                    let owned: HashMap<String, usize> =
+                        comms.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+                    (owned, cohesion)
+                })
+                .await
+                .unwrap_or_default()
+            };
+            let mut sizes: HashMap<usize, Vec<&str>> = HashMap::new();
+            for n in &nodes {
+                sizes
+                    .entry(comms.get(n.as_str()).copied().unwrap_or(0))
+                    .or_default()
+                    .push(n);
+            }
+            let info: Vec<CommunityInfo> = sizes
+                .into_iter()
+                .map(|(id, members)| {
+                    let size = members.len();
+                    let cohesion = cohesion.get(&id).copied().unwrap_or(0.0);
+                    crate::service::CommunityInfo {
+                        id,
+                        top_slug: members.first().copied().unwrap_or_default().to_string(),
+                        size,
+                        cohesion,
+                        sparse: size >= crate::community::SPARSE_MIN_SIZE
+                            && cohesion < crate::community::SPARSE_COHESION,
+                    }
+                })
+                .collect();
+            (comms, info)
+        };
     community_info.sort_by_key(|c| std::cmp::Reverse(c.size));
 
     let mut insights: Vec<Insight> = Vec::new();

@@ -9,6 +9,11 @@ pub const SPARSE_COHESION: f64 = 0.15;
 /// 稀疏社区最小成员数。
 pub const SPARSE_MIN_SIZE: usize = 3;
 
+/// Louvain 计算规模上限（2026-09-20 万页压测发现）：万级全图分区在 debug 下分钟级
+/// 且阻塞 tokio worker（实测 10k 节点请求令实例整体无响应）。用户面调用超限时降级
+/// 跳过社区计算；后台 job 用 spawn_blocking 隔离（可保留计算但不再阻塞 worker）。
+pub const LOUVAIN_MAX_NODES: usize = 1500;
+
 /// 无向加权图上的 Louvain 一层（节点迁移直到模块度无提升）。
 /// 返回：slug → community id（0..k）。
 pub fn louvain_communities<'a>(
