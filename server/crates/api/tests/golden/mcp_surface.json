@@ -1,0 +1,245 @@
+{
+  "instructions": "Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：七个领域各一个入口工具（memory 用户记忆 / projects 项目记忆 / skills 技能 / wiki 知识库 / todos 待办 / tickets 工单 / codegraph 代码图谱），外加跨域全局检索 search_all（一次查询并发五域，各回 top-k 摘要）。域工具调用形态 {\"action\":\"<操作名>\", ...参数}；每个工具的描述里带操作目录（常驻可见），参数细节用 {\"action\":\"help\"} 一轮取回全域操作手册。\n\n用户记忆分四层蒸馏：L0 原始会话 →（蒸馏）→ L1 原子事实 → L2 场景模式 → L3 用户画像；另有实体坐标系（人物/项目/主题/群组/地点）横向串联记忆。全部记忆可溯源、可遗忘（void 可 restore 撤销）。\n\nmemory 域用法：\n1. 会话开始：{\"action\":\"context\"} 装载用户画像与近期记忆，再开始对话；\n2. 对话中需要背景：{\"action\":\"search\",\"query\":\"…\"} 定向回忆，或 {\"action\":\"entities\"} 按人/项目/主题查档案；\n3. 记一句话事实：{\"action\":\"remember\",\"text\":\"…\"}（不必手搓 turns）；\n4. 会话收尾：{\"action\":\"write_session\",\"turns\":[…]} 把值得长期记住的对话写入（蒸馏自动沉淀）；\n   长对话分段用 {\"action\":\"append_session\"} 追加；\n5. 用户明确表达遗忘：「别记住这个」→ {\"action\":\"forget\"}（void 会话作废且蒸馏产物级联归档；\n   误作废用 mode=\"restore\" 撤销）。凭据类内容（账号/密码/密钥/令牌）**照记不脱敏**——记忆库是用户的外置大脑，2026-09-20 用户拍板改口径；安全边界在传输与存储加密。\n\nprojects 域用法：项目 = 一件有明确目标、一次干不完、跨多次会话推进的工作。\n1. 开工：{\"action\":\"list\"} / {\"action\":\"get\"} 找到这件事的锚点接上上下文；没有就 {\"action\":\"create\"}；\n2. 找内容：get 默认索引模式（文档只给 id/分类/标题/字符数）；{\"action\":\"doc_search\"} 定位到哪篇哪行，\n   {\"action\":\"doc_get\",\"doc_id\":\"…\",\"start_line\":…,\"end_line\":…} 区间精读——按需取用，无截断；\n3. 干活中：{\"action\":\"doc_add\"} / {\"action\":\"doc_update\"} 沉淀进展与结论；\n   小修一段用 {\"action\":\"doc_patch\"}（行级 replace/insert/delete，不必取全文重发）；\n4. 收尾：{\"action\":\"update\"} 改状态、写总结文档，下次会话从 get 接上。\n\nskills 域用法：技能 = 可复用的指令包（SKILL.md 形态 + scripts/references 附件）。\n1. 需要某种能力前：{\"action\":\"list\"} 看有没有现成技能，命中 {\"action\":\"get\"} 照做；\n2. 用户说「把这个做法存成技能」：{\"action\":\"create\"}；修正演进：{\"action\":\"update\"}（自动留版本）；\n   改坏了 {\"action\":\"versions\"} 查历史、{\"action\":\"restore\"} 回滚；\n3. 用户给现成 SKILL.md：{\"action\":\"import\"}。\n\nwiki 域用法：单库知识库（Markdown 页面 + [[wikilink]] + 混合检索）。单库终局——无 library 参数，一切读写恒定在 main 主库。\n1. 查证事实性知识 → {\"action\":\"search\"}（命中带片段，全文 get_page）；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}；\n2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步，产物落同库），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；\n2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步，产物落同库），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；\n3. 版本与原料：{\"action\":\"versions\"}/{\"action\":\"restore_version\"} 查历史与回滚（误删页可重建）；{\"action\":\"sources\"}/{\"action\":\"delete_source\"} 清理织入原料（lint 报 stale_source 时用）。\n\ntodos 域用法：不绑定项目的快速待办（灵感/学习计划/系统操作——做完勾掉）。\n{\"action\":\"add\",\"title\":\"…\"} 秒记；{\"action\":\"list\"} 看进行中；{\"action\":\"done\",\"id\":\"…\"} 完成。\n\ntickets 域用法：工单 = 结构化问题跟踪（与待办同表不同心智，2026-09-18 拆域互不可见）。\n{\"action\":\"add\",\"title\":\"…\",\"severity\":\"P1\",\"symptom\":\"…\",\"acceptance\":\"…\"} 开单；\n{\"action\":\"list\"} 看工单（status 六态 open/confirmed/in_progress/resolved/verified/archived）；\n{\"action\":\"update\",\"id\":\"…\",\"status\":\"resolved\",\"resolution\":\"…\"} 流转；链接关系（blocked_by/relates_to/parent）两域通用。\n\ncodegraph 域用法：注册代码库 → index/sync → {\"action\":\"query\"}（search/explore/node/callers/callees/impact）读懂调用关系。explore 默认返回符号大纲（不带源码）；单符号源码用 node，整份源码 explore 传 include_source=true。\n\n域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory；查证「客观知识」用 wiki；\n跨会话的工作线用 projects；可复用能力用 skills；随手记行动项用 todos；开工单跟踪问题用 tickets；不确定在哪域就 search_all。\nLLM 供应商/模型的配置与排障是管理员专属，走 Web 控制台「设置 → AI 功能」——MCP 工具面\n不提供 provider 配置工具（AI 报 LLM 未配置时，引导用户去设置页，不要尝试自行配置）。\n\n分权规则（务必遵守）：\n- 用户记忆的写入通道只有「写会话」：事实抽取、画像更新、实体维护全部由蒸馏完成；\n- 直接改写用户记忆语义内容（原子内容、画像分面、实体档案）是用户专属权限，MCP 工具面不提供；\n- 纠错也走会话：把正确的表述写成对话（correction 语义），蒸馏会自动生成取代链；\n- 敏感对话（医疗/感情/财务等）写入时可置 sensitive=true——敏感是标记不是隐身，检索与上下文默认可见（2026-09-12 口径放开）；凭据类（账号/密码/密钥/token）**照记逐字、不脱敏**（2026-09-20 口径改版：外置大脑什么都记，安全边界在传输与存储加密）——需要精确值检索时同样走 kv_put/kv_get 通道；\n- 破坏性操作（各域 delete/forget 类，目录里有【破坏性】标注）不可逆，只对用户明确请求使用；\n- skills delete 仅限用户明确要求——内容过时用 update 修订，改坏用 restore 回滚，不要自行删除。",
+  "protocol_version": "2025-11-25",
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "代码图谱域"
+      },
+      "description": "代码图谱域（单一入口）：注册代码库 → 建索引 → 图谱查询\n（search/explore/node/callers/callees/impact），读懂陌生代码库的调用关系。\n操作全景：action=\"help\"。\n\n【本域操作 8 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- list：列出已注册代码库（注册状态/索引规模/当下可用性 usable）\n- gc：失效条目对账（路径已不存在/索引产物已丢失的条目标为 error；可重新 index 恢复）\n- register：注册代码库（本地绝对路径按服务端文件系统校验，或 git URL）\n- query：代码图谱查询（search/explore大纲/node/callers/callees/impact/full_graph全图）\n- index：建索引/重建索引（异步 job）\n- sync：增量同步索引（小改动后刷新）\n- upload：【破坏性】产物上传（公网模型）——客户端本机 codegraph index 后上传 db(base64)+HEAD；服务端只存+声明式新鲜度，无代码无 git 凭证\n- delete：【破坏性】注销代码图谱项目（删注册与索引；源码不动）",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "codegraph"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "异步任务域"
+      },
+      "description": "异步任务域（EN-61）：轮询 job 状态/错误/事件，闭环 codegraph index/sync\n的异步链路（拿到 job_id 不再干看着）。list/get/events 任何合法凭证可读；\nrevive 复活 dead/failed 任务仅管理员（与 HTTP 同语义）。操作全景：action=\"help\"。\n\n【本域操作 4 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- list：列出异步任务（可按 kind/status 过滤——codegraph index/sync 与 gc 自愈的 job 都在这）\n- get：查任务详情（状态/错误/进度/attempts——job_id 从 codegraph index/sync 返回拿）\n- events：任务事件时间线（增量轮询）\n- revive：【破坏性】复活 dead/failed 任务重跑（仅管理员——amk_ key 会收到明确拒绝）",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "jobs"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "用户记忆域"
+      },
+      "description": "用户记忆域（单一入口）。记忆四层：L0 会话 →（蒸馏）→ L1 原子 → L2 场景 → L3 画像，\n实体坐标系横向串联。开场用 action=\"context\" 装载，定向回忆用 \"search\"，\n收尾用 \"write_session\" 写入；遗忘用 \"forget\"。\n速记：remember 正文字段名是 text；strength=fact 直写原话限 120 字，默认蒸馏路径成段内容也可，更长走 write_session。操作全景：action=\"help\"。\n\n【本域操作 20 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- context：装载用户记忆上下文包（L3 画像 + L2 场景 + L1 原子 + 实体；会话开场调用一次）\n- search：定向检索用户记忆（全文+向量，跨 L1/L2/L3/实体）\n- distill_result：蒸馏回执：查一次会话蒸馏产出了哪些原子（id/内容/强度/状态）——写入方可验收\n- kv_put：写入/更新结构化精确值（序列号/UUID/IP:PORT 等）——同 key 就地覆盖，蒸馏零介入逐字保存\n- kv_get：读取结构化精确值（按 key）\n- kv_list：列出全部 KV 值（按 updated_at 倒序）\n- kv_search：字面量直查 KV（key/value/context ILIKE——精确值不依赖分词）\n- remember：一句话记忆（正文字段 text；strength=fact 直写限 120 字；缺省走 auto 蒸馏，产物默认 inference；strength=fact 显式声明用户明示事实则直写落库原话保真）\n- correct：更正记忆（快路径取代链）：用户说「你记错了」时用——先 search 定位旧原子，再 correct(target_id, text)；旧原子 superseded 指向新条目，仅 active 非敏感可更正\n- confirm：待审复核通过：摘掉 needs_review 标记（仅 needs_review=true 可处置；AI 代管复核）\n- discard：待审复核丢弃：归档该条（仅 needs_review=true 可处置；AI 代管复核）\n- persona_edit：编辑画像分面（AI 记忆管家）：version+1 落钉（manually_edited=true），蒸馏对该分面不再覆盖；aspect 七值之一，内容 1~4000 字\n- distill：手动触发蒸馏链（撞车守卫：正在蒸馏时只提示不投递）；full=true 附带 consolidate 全量整理；mode=sleep 为记忆巩固预留位\n- write_session：写入一段对话到 L0 会话（收尾用；蒸馏自动抽取记忆）\n- append_session：向未蒸馏的会话追加轮次（长对话分段落库）\n- list_sessions：列出 L0 会话（keyset 分页，可按 agent 过滤）\n- get_session：读取一个会话的逐轮原文全文\n- list_atoms：浏览 L1 原子事实（默认只看 active；可按类型/状态/待审过滤，分页）\n- entities：检索实体（人物/项目/主题/群组/地点的横向档案）\n- forget：【破坏性】遗忘：void 作废（级联归档产物）/ erase 物理删除（需 erase scope）/ restore 撤销 void",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "memory"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "项目记忆域"
+      },
+      "description": "项目记忆域（单一入口）：项目 = 一件有明确目标、跨会话推进的工作，\n下挂多主机位置（登记制）与「分类 > 文档」树。开工 \"list\"/\"get\" 接上下文，\n干活中 \"doc_add\"/\"doc_update\" 沉淀，收尾 \"update\" 改状态。\n速记：所有 doc_* 操作需先定位项目（参数 project_id 或 project_name，先 \"list\"）。操作全景：action=\"help\"。\n\n【本域操作 20 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- types：列出项目类型模板（建项目选 type 用）\n- list：列出项目（按创建时间倒序）\n- get：项目详情（目标/位置/文档索引；默认索引模式不带正文）\n- create：新建项目（type 决定初始分类）\n- update：编辑项目（改名/状态/描述/分类；补丁式）\n- delete：【破坏性】删除项目（级联删除位置与文档，不可逆）\n- batch_delete：【破坏性】批量删除项目（不可逆）\n- location_add：登记项目在主机上的位置（多主机登记制）\n- location_update：编辑已登记的位置\n- location_delete：【破坏性】删除一条位置登记\n- doc_add：项目下新增分类文档（Markdown）\n- doc_get：读项目文档（全文或按行区间精读）\n- doc_search：grep 式跨文档按行检索（需 project_id/project_name 定位项目，先 list；定位到哪篇哪行）\n- doc_patch：行级补丁（replace/insert/delete 一个行区间——改长文档不必取全文重发）\n- doc_update：编辑项目文档（补丁式）\n- doc_delete：【破坏性】删除项目文档（不可逆）\n- file_put：写项目文件（架构图 HTML/配置/报告等制品；同 name 覆盖 version+1，旧版进快照）\n- file_get：读项目文件（当前或指定版本；支持 project_id/project_name 定位）\n- file_list：列出项目文件（name/mime/version/大小；不含内容）\n- file_delete：【破坏性】删除项目文件（历史快照级联删，不可逆）",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "projects"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "全局检索"
+      },
+      "description": "全局检索（R 报告 P1-8）：一次查询并发打 memory/wiki/skills/todos/projects 五域，\n各返回 top-k 摘要（含命中域标注）——「6 次单域搜索」压成 1 次。\n何时用：不确定信息在哪域、或要先扫一遍全库面时。\n何时不用：已知域的精确检索直接用单域工具（省时省 token，且支持更多过滤参数）。\n只检索本 key 有 scope 的域；命中只有摘要，全文按各域 get/read 通道按需取。",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "max_per_domain": {
+            "description": "每域返回条数上限，默认 3。结果只有摘要——精确检索请用单域工具。",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "query": {
+            "description": "检索词。对 key 有 scope 的域并发检索（memory/wiki/skills/todos/projects）。",
+            "type": "string"
+          },
+          "rerank": {
+            "description": "可选：LLM 精排（默认关）。开时五域命中合并 top-10 交 LLM 重排，响应附 reranked 视图（LLM 失败降级原分组）。",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "search_all"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "技能域"
+      },
+      "description": "技能域（单一入口）：技能 = 可复用的指令包（SKILL.md 形态 + scripts/references 附件）。\n需要某种能力前先 \"list\" 找现成的，命中 \"get\" 取全文照做；验证有效的做法\n用 \"create\" 沉淀。操作全景：action=\"help\"。\n\n【本域操作 10 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- list：列出技能（q/tag/enabled 过滤，不含正文；kind=script 的条目带 local_path 指针）\n- get：读技能全文（script 型从 local_path 现读，指针失效报错）\n- file_get：读技能附属文件（scripts/references 等；script 型不可用——文件在本地，系统只存指针）\n- file_put：写技能附属文件（同路径覆盖；SKILL.md 本体走 update；script 型不可用；text 型禁 .py/.sh 等脚本后缀）\n- create：沉淀新技能（默认 text 整体入库；带 .py/.sh 等脚本的用 kind=script + local_path 存本地指针）\n- update：更新技能（语义变更自动留版本快照；script 型改正文拒绝、可改 origin/repo_url/local_path）\n- versions：版本快照列表（改坏前看历史 / 找回滚 revision_id；script 型不可用——版本归本地 git）\n- restore：回滚到历史版本（回滚本身也留快照；script 型不可用）\n- delete：【破坏性】删除技能（级联删版本快照，不可逆；仅限用户明确要求）\n- import：导入现成 SKILL.md（frontmatter 容错解析；导入为 text 型）",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "skills"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "工单域"
+      },
+      "description": "工单域（todos scope）：结构化问题跟踪——severity/symptom/acceptance 结构化字段，\n状态流转 confirmed/in_progress/resolved/verified（工单六态）。与待办同表不同心智\n（2026-09-18 拆域：todos 纯待办、tickets 纯工单，互不可见）。操作全景：action=\"help\"。\n\n【本域操作 8 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- add：开工单（kind 固定 ticket——结构化问题跟踪；建议填 severity/symptom/acceptance）\n- list：工单列表（仅 kind=ticket；status 含 confirmed/in_progress/resolved/verified 六态；默认摘要模式 brief 只回短号/标题/状态/分级/关联计数）\n- link：建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号\n- unlink：解除关联\n- links：双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口\n- get：详情（含 severity/symptom/acceptance/resolution）\n- update：编辑与状态流转（confirmed/in_progress/resolved/verified/archived；工单字段 severity/symptom/acceptance/resolution）\n- delete：【破坏性】删除工单（不可逆）",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "tickets"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "待办域"
+      },
+      "description": "待办域（todos scope）：快速记录与跟进不绑定项目的行动项/灵感速记（kind 固定 todo）。\n工单在独立 tickets 域（2026-09-18 拆域——同表不同心智）。\"add\" 秒记，\"list\" 看进行中，\n\"done\" 完成，\"delete\" 删。操作全景：action=\"help\"。\n\n【本域操作 9 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- add：记一条待办（kind 固定 todo——行动项/灵感速记；开工单用 tickets 域）\n- list：待办列表（仅 kind=todo；status/priority/tag/q 过滤；默认摘要模式 brief 只回短号/标题/状态/优先级/关联计数）\n- link：建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号\n- unlink：解除关联\n- links：双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口\n- get：详情\n- done：标记完成（记 done_at）\n- update：编辑（标题/详情/优先级/状态/截止）\n- delete：【破坏性】删除待办（不可逆）",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "todos"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Wiki 域"
+      },
+      "description": "Wiki 域（单一入口）：世界知识库——Markdown 页面 + [[wikilink]] + 混合检索。\n查证「客观知识」用 \"search\"；用户要求沉淀时：单条结论 \"archive_query\"、\n整篇文档 \"ingest\"（异步）、明确要页面 \"write_page\"。操作全景：action=\"help\"。\n\n【本域操作 27 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- search：Wiki 检索（FTS + 向量融合；命中带片段，全文按需 get_page；按库）\n- list_pages：浏览页面列表（可按页型过滤；不含正文）\n- get_page：读页面全文（含 frontmatter 与版本）\n- write_page：写/覆盖一个页面（Markdown + [[wikilink]]；覆盖前先 get_page，旧文自动留版本快照）\n- ingest：整篇源文本织入 Wiki（异步 LLM 流水线，sha 去重）\n- archive_query：把一条问答存档为 queries 页（幂等跳过重复）\n- versions：页面版本列表（含已删除页的最后状态快照）\n- version_content：读某版本快照的正文（回滚前预览）\n- restore_version：回滚到历史版本（已删除页面从快照重建）\n- sources：列出织入原料（wiki_sources 及其状态；stale_source 清理的入口）\n- delete_source：【破坏性】删除一条织入原料及其全部产出（级联，不可逆）\n- graph：Wiki 链接图全貌（节点/边/社区划分；按库）\n- lint：Wiki 体检（死链/孤页/缺源；只报告不修改；按库）\n- lint_deep：语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步任务，产出入人审队列；slugs 可限定范围控成本）\n- merge：合并页面：duplicate 并入 primary（冗余丢弃或内容并入 + 全库链接改指 + 快照兜底删除）——处置重复页 flag 用\n- document_add：入库文档（text 或 url）——分块+嵌入进原文 RAG 并触发织入；幂等去重\n- document_get：文档状态（status/error 即处理进度）\n- documents_search：原文检索（chunk 级 FTS+向量混合——与页面级 search 互补）\n- reviews：人审队列：列出审查项（lint 深检/织入期 LLM 旗标的发现——kind/payload/来源；status 可过滤 open/resolved/dismissed，缺省 open）\n- review_resolve：处置评审项：标记已处理（resolved）或驳回作废（dismiss），可附动作标签\n- index：内容目录（按页型分组的全库目录：slug/标题/入链数/首段摘要；只读动态聚合）\n- archive：问答/分析产物归档为 analysis 页（related 自动建双向 wikilinks——好答案不该消失在聊天记录里）\n- purpose：读取库的方向意图（每库一份——写页前先读，避免写跑题）\n- insights：列出库的洞察（AI 评审产出的观察项，可与 reviews 对照看）\n- promote：知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 synthesis 页（frontmatter 带源回链）+ 源文档自动追加 ⛳ 标记——提炼由调用方完成\n- promotions：晋升登记列表（谁家的哪些知识晋升成了 wiki 页；按项目过滤）\n- delete_page：【破坏性】删除页面（连带清理双向 wikilink；最后状态留快照可重建）",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "wiki"
+    }
+  ]
+}
