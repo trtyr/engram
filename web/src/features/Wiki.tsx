@@ -1,6 +1,6 @@
 /** Wiki 域：Obsidian 式浏览 —— 目录树（folder 层级）+ Markdown 阅读 + 图谱独立视图。
- *  文档 = 收件箱入口；洞察/Lint/提案/原料/目标/库 = 运维二级入口。
- *  多库支持：顶部切换库（默认 main），组件内 /wiki/* 请求统一带 ?lib=；
+ *  文档 = 收件箱入口；洞察/Lint/提案/原料/目标 = 运维二级入口。
+ *  单库终局（2026-09-20）：库选择/建库/删库 UI 已移除，lib 固定 main，/wiki/* 请求仍带 ?lib=；
  *  POST /wiki/search 例外走 body.library（当前前端无该调用点）。
  *  2026-09-03 审计 28 项全修：布局骨架 / 状态提升与 URL / 视觉层次 / 排版 / 可访问性 / 健壮性。 */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -10,12 +10,11 @@ import WikiGraph from '@/components/WikiGraph'
 import InsightsPanel from '@/components/InsightsPanel'
 import ReviewQueue from '@/components/ReviewQueue'
 import WikiMarkdown from '@/components/WikiMarkdown'
-import { appConfirm } from '@/components/confirm'
 import { DocumentsPane } from './DocumentsPane'
 import { useSearchParams } from 'react-router-dom'
-import { api, ApiError, type GraphDto, type LintReport, type Purpose, type WikiLibrary, type WikiPage } from '@/lib/api'
+import { api, type GraphDto, type LintReport, type Purpose, type WikiPage } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
-import { fmtTime, inputCls, relTime, selectCls, tableCls } from '@/lib/ui'
+import { fmtTime, inputCls, relTime, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -50,10 +49,8 @@ export default function Wiki() {
   const [view, setView] = useState<View>('tree')
   const [panel, setPanel] = useState<Panel>('none')
   const [params, setParams] = useSearchParams()
-  // —— 多库：当前库 slug（默认 main，不做 URL 同步）+ 可选库列表 ——
-  const [lib, setLib] = useState('main')
-  const [libraries, setLibraries] = useState<WikiLibrary[]>([])
-  const [newLibOpen, setNewLibOpen] = useState(false)
+  // —— 单库终局（2026-09-20）：库选择 UI 已移除，lib 固定 main（API ?lib= 参数保留兼容）——
+  const [lib] = useState('main')
   // —— 状态提升（审计 #4）：切图谱 / 收件箱 / 运维再回来，选中与折叠不丢 ——
   const [pages, setPages] = useState<WikiPage[] | null>(null)
   const [loadErr, setLoadErr] = useState('')
@@ -68,16 +65,6 @@ export default function Wiki() {
   // onSelect 已拉取的页面，深链 effect 跳过重复请求
   const requestedRef = useRef<string | null>(null)
 
-  const loadLibraries = useCallback(() => {
-    return api
-      .get<WikiLibrary[]>('/wiki/libraries')
-      .then(setLibraries)
-      .catch(() => {})
-  }, [])
-  useEffect(() => {
-    void loadLibraries()
-  }, [loadLibraries])
-
   const load = useCallback(() => {
     return api
       .get<WikiPage[]>(withLib(`/wiki/pages?limit=${PAGE_LIMIT}`, lib))
@@ -90,26 +77,6 @@ export default function Wiki() {
   useEffect(() => {
     void load()
   }, [load])
-
-  /** 切换库：清选中页与深链（属于上一个库），load 依赖 lib 自动重载目录树。 */
-  const switchLib = (slug: string) => {
-    if (slug === lib) return
-    setLib(slug)
-    setOpen(null)
-    setOpenErr('')
-    requestedRef.current = null
-    if (params.get('page')) {
-      const next = new URLSearchParams(params)
-      next.delete('page')
-      setParams(next)
-    }
-  }
-
-  // 切换器选项：当前库不在列表（接口失败 / 尚未返回）时兜底补一项，保证下拉可用
-  const libOptions = useMemo(() => {
-    if (libraries.some((l) => l.slug === lib)) return libraries
-    return [{ id: '', slug: lib, name: lib, createdAt: '', pages: 0, sources: 0 }, ...libraries]
-  }, [libraries, lib])
 
   // ?page= 深链（wikilink / 分享 / 刷新）：打开页面 + 自动展开所在 folder（#21）
   useEffect(() => {
@@ -155,21 +122,20 @@ export default function Wiki() {
   }, [params, lib])
 
   const onSelect = async (slug: string) => {
-    // R 多库补全：[[lib/slug]] 跨库引用——切库后打开目标页
+    // 存量 [[lib/slug]] 跨库引用容错：单库终局后统一按 main 打开尾段 slug
     if (slug.includes('/')) {
-      const [targetLib, targetSlug] = slug.split('/')
-      setLib(targetLib)
+      const targetSlug = slug.split('/').pop() ?? slug
       setOpen(null)
       requestedRef.current = targetSlug
       setOpening(true)
       setOpenErr('')
       try {
         const page = await api.get<WikiPage>(
-          withLib(`/wiki/pages/${encodeURIComponent(targetSlug)}`, targetLib),
+          withLib(`/wiki/pages/${encodeURIComponent(targetSlug)}`, lib),
         )
         setOpen(page)
         const next = new URLSearchParams(params)
-        next.set('lib', targetLib)
+        next.set('lib', lib)
         next.set('page', targetSlug)
         setParams(next)
       } catch {
@@ -238,26 +204,6 @@ export default function Wiki() {
             </Button>
           ) : (
             <>
-              <select
-                aria-label="切换知识库"
-                className={selectCls}
-                value={lib}
-                onChange={(e) => {
-                  if (e.target.value === '__new__') {
-                    setNewLibOpen(true)
-                    e.target.value = lib
-                    return
-                  }
-                  switchLib(e.target.value)
-                }}
-              >
-                {libOptions.map((l) => (
-                  <option key={l.slug} value={l.slug}>
-                    {l.name}（{l.slug}）· {l.pages} 页
-                  </option>
-                ))}
-                <option value="__new__">＋ 新建库…</option>
-              </select>
               <Tabs
                 items={[
                   { value: 'tree', label: '目录' },
@@ -272,22 +218,12 @@ export default function Wiki() {
               <Button size="sm" variant="outline" onClick={() => setPanel('ops')}>
                 运维
               </Button>
-              {newLibOpen && (
-                <NewLibDialog
-                  onClose={() => setNewLibOpen(false)}
-                  onCreated={(slug) => {
-                    setNewLibOpen(false)
-                    loadLibraries()
-                    switchLib(slug)
-                  }}
-                />
-              )}
             </>
           )}
         </PageHeader>
       </div>
       {panel === 'inbox' && <InboxPane libSlug={lib} />}
-      {panel === 'ops' && <OpsPanel lib={lib} onSwitch={switchLib} onLibrariesChanged={loadLibraries} />}
+      {panel === 'ops' && <OpsPanel lib={lib} />}
       {panel === 'none' && view === 'tree' && (
         <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
           <div
@@ -705,85 +641,16 @@ function GraphPane({ libSlug }: { libSlug: string }) {
 
 // ---------- 运维二级入口 ----------
 
-type OpsSection = 'insights' | 'lint' | 'proposals' | 'sources' | 'purpose' | 'libraries'
+type OpsSection = 'insights' | 'lint' | 'proposals' | 'sources' | 'purpose'
 const OPS_SECTIONS: { value: OpsSection; label: string }[] = [
   { value: 'insights', label: '洞察' },
   { value: 'lint', label: 'Lint' },
   { value: 'proposals', label: '提案' },
   { value: 'sources', label: '原料' },
   { value: 'purpose', label: '目标' },
-  { value: 'libraries', label: '库' },
 ]
 
-/** 页头快速建库（R：入口显性化——建库不再只藏在运维面板） */
-export function NewLibDialog({
-  onClose,
-  onCreated,
-}: {
-  onClose: () => void
-  onCreated: (slug: string) => void
-}) {
-  const [slug, setSlug] = useState('')
-  const [name, setName] = useState('')
-  const [err, setErr] = useState('')
-  const [busy, setBusy] = useState(false)
-  const slugOk = SLUG_RE.test(slug)
-  const create = async () => {
-    if (!slugOk || busy) return
-    setBusy(true)
-    setErr('')
-    try {
-      const created = await api.post<WikiLibrary>('/wiki/libraries', { slug, name: name.trim() || slug })
-      onCreated(created.slug)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '建库失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
-      <input
-        autoFocus
-        aria-label="新库 slug"
-        placeholder="slug（小写字母/数字/连字符）"
-        className="w-44 rounded border border-line bg-transparent px-2 py-1 font-mono text-xs"
-        value={slug}
-        onChange={(e) => {
-          setSlug(e.target.value)
-          setErr('')
-        }}
-        onKeyDown={(e) => e.key === 'Enter' && create()}
-      />
-      <input
-        aria-label="新库名称"
-        placeholder="显示名（可选）"
-        className="w-40 rounded border border-line bg-transparent px-2 py-1 text-xs"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && create()}
-      />
-      <Button size="sm" onClick={create} disabled={!slugOk || busy}>
-        创建
-      </Button>
-      <Button size="sm" variant="ghost" onClick={onClose}>
-        取消
-      </Button>
-      {!slugOk && slug && <span className="text-xs text-danger">slug 需小写字母/数字/连字符（1-40 字符）</span>}
-      {err && <span className="text-xs text-danger">{err}</span>}
-    </div>
-  )
-}
-
-function OpsPanel({
-  lib,
-  onSwitch,
-  onLibrariesChanged,
-}: {
-  lib: string
-  onSwitch: (slug: string) => void
-  onLibrariesChanged: () => void
-}) {
+function OpsPanel({ lib }: { lib: string }) {
   const [section, setSection] = useState<OpsSection>('insights')
   return (
     <div className="space-y-4">
@@ -794,7 +661,6 @@ function OpsPanel({
       {section === 'proposals' && <ReviewAndProposals libSlug={lib} />}
       {section === 'sources' && <SourcesPane libSlug={lib} />}
       {section === 'purpose' && <PurposePane libSlug={lib} />}
-      {section === 'libraries' && <LibrariesPane lib={lib} onSwitch={onSwitch} onChanged={onLibrariesChanged} />}
     </div>
   )
 }
@@ -1052,172 +918,4 @@ function PurposePane({ libSlug }: { libSlug: string }) {
   )
 }
 
-// ---------- 库管理（多库） ----------
 
-const SLUG_RE = /^[a-z0-9-]{1,40}$/
-
-/** 库管理：列表（slug/名称/页面数/原料数/删除）+ 新建。删除走 appConfirm；
- * 非空库（400 且错误含「非空」）二次确认后带 ?force=true 重发。建库成功刷新列表并切换到新库。 */
-function LibrariesPane({
-  lib,
-  onSwitch,
-  onChanged,
-}: {
-  /** 当前库 slug：删除当前库后切回 main */
-  lib: string
-  onSwitch: (slug: string) => void
-  /** 库集合变化后通知上层（刷新页头切换器） */
-  onChanged: () => void
-}) {
-  const [rows, setRows] = useState<WikiLibrary[] | null>(null)
-  const [slug, setSlug] = useState('')
-  const [name, setName] = useState('')
-  const [err, setErr] = useState('')
-  const [msg, setMsg] = useState('')
-  const [busy, setBusy] = useState(false)
-  const load = () =>
-    api
-      .get<WikiLibrary[]>('/wiki/libraries')
-      .then(setRows)
-      .catch(() => setRows([]))
-  useEffect(() => {
-    load()
-  }, [])
-  const slugOk = SLUG_RE.test(slug)
-
-  const create = async () => {
-    if (!slugOk || busy) return
-    setBusy(true)
-    setErr('')
-    try {
-      const created = await api.post<WikiLibrary>('/wiki/libraries', { slug, name: name.trim() || slug })
-      setSlug('')
-      setName('')
-      setMsg(`已创建库「${created.slug}」并切换`)
-      onChanged()
-      onSwitch(created.slug)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '建库失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async (target: WikiLibrary) => {
-    if (
-      !(await appConfirm({
-        title: `删除库「${target.slug}」？`,
-        description: '删除后不可恢复。',
-        destructive: true,
-        confirmLabel: '删除',
-      }))
-    )
-      return
-    setErr('')
-    setMsg('')
-    try {
-      await api.del(`/wiki/libraries/${encodeURIComponent(target.slug)}?force=false`)
-    } catch (e) {
-      const status = e instanceof ApiError ? e.status : 0
-      const m = e instanceof Error ? e.message : ''
-      if (status !== 400 || !m.includes('非空')) {
-        setErr(m || '删除失败')
-        return
-      }
-      // 非空库：二次确认强制删除（连带库内全部页面与原料）
-      if (
-        !(await appConfirm({
-          title: `库「${target.slug}」非空`,
-          description: '库非空——确认强制删除将连带库内全部页面与原料',
-          destructive: true,
-          confirmLabel: '强制删除',
-        }))
-      )
-        return
-      try {
-        await api.del(`/wiki/libraries/${encodeURIComponent(target.slug)}?force=true`)
-      } catch (ex) {
-        setErr(ex instanceof Error ? ex.message : '删除失败')
-        return
-      }
-    }
-    setMsg(`已删除库「${target.slug}」`)
-    onChanged()
-    if (target.slug === lib) onSwitch('main')
-    load()
-  }
-
-  return (
-    <div className="space-y-3" data-testid="libraries-pane">
-      {rows === null ? (
-        <Spinner />
-      ) : rows.length === 0 ? (
-        <Empty text="暂无库——先建一个（默认 main 由服务端提供）" />
-      ) : (
-        <Card className="overflow-x-auto">
-          <table className={tableCls.root}>
-            <thead className={tableCls.thead}>
-              <tr>
-                <th className={tableCls.th}>Slug</th>
-                <th className={tableCls.th}>名称</th>
-                <th className={tableCls.th}>页面数</th>
-                <th className={tableCls.th}>原料数</th>
-                <th className={tableCls.th} />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.slug} className={tableCls.row}>
-                  <td className={`${tableCls.td} font-mono text-xs`}>
-                    {r.slug}
-                    {lib === r.slug && <span className="ml-1.5 text-xs text-muted-foreground">（当前）</span>}
-                  </td>
-                  <td className={tableCls.td}>{r.name}</td>
-                  <td className={`${tableCls.td} font-mono text-xs tabular-nums`}>{r.pages}</td>
-                  <td className={`${tableCls.td} font-mono text-xs tabular-nums`}>{r.sources}</td>
-                  <td className={`${tableCls.td} text-right`}>
-                    <Button size="sm" variant="outline" onClick={() => void remove(r)}>
-                      删除
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-      {err && <ErrorBox msg={err} />}
-      {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
-      <Card className="p-3">
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void create()
-          }}
-        >
-          <input
-            className={`${inputCls} w-56 font-mono`}
-            placeholder="slug（小写字母/数字/连字符）"
-            aria-label="库 slug"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-          />
-          <input
-            className={`${inputCls} w-56`}
-            placeholder="库名称（留空同 slug）"
-            aria-label="库名称"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <Button size="sm" type="submit" disabled={!slugOk || busy}>
-            {busy ? '创建中…' : '建库'}
-          </Button>
-          {slug && !slugOk && (
-            <span className="text-xs text-warning">slug 需为小写字母 / 数字 / 连字符，≤40 字符</span>
-          )}
-        </form>
-      </Card>
-    </div>
-  )
-}
