@@ -274,7 +274,7 @@ impl WikiService {
         duplicate_slug: &str,
     ) -> Result<String, WikiError> {
         if primary_slug == duplicate_slug {
-            return Err(WikiError::BadRequest("主页面与重复页面不能相同".into()));
+            return Err(WikiError::BadRequest("主页面与重复页面不能是同一页".into()));
         }
         let primary = self.resolve_slug(lib, primary_slug).await?;
         let dup = self.resolve_slug(lib, duplicate_slug).await?;
@@ -314,7 +314,12 @@ impl WikiService {
         self.delete_page(lib, &dup).await?;
         self.rebuild_all_links(lib).await?;
         Ok(format!(
-            "已合并：{dup} → {primary}（去重丢弃 {n_self} 处自引用、改写 {rewrite_total} 处外部引用）"
+            "{dup} → {primary}（{}，链接改写 {rewrite_total} 处）",
+            if discarded {
+                "冗余丢弃"
+            } else {
+                "内容并入"
+            }
         ))
     }
 
