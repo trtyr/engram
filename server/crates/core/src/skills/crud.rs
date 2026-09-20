@@ -226,41 +226,7 @@ impl SkillsService {
                 "origin {origin:?} 不合法——只支持 self（自建）/ github（源自 GitHub）/ both（自建且已发布）"
             )));
         }
-        let local_path: Option<String> = if current.kind == "script" {
-            match patch
-                .local_path
-                .as_deref()
-                .map(str::trim)
-                .filter(|p| !p.is_empty())
-            {
-                Some(p) => {
-                    if p.len() > LOCAL_PATH_MAX {
-                        return Err(SkillsError::BadRequest(format!(
-                            "local_path 过长（>{LOCAL_PATH_MAX} 字符）"
-                        )));
-                    }
-                    Some(p.to_string())
-                }
-                None => current.local_path.clone(),
-            }
-        } else {
-            if patch.local_path.is_some() {
-                return Err(SkillsError::BadRequest(
-                    "text 型技能整体入库，不接受 local_path——脚本存本地的请用 kind=script".into(),
-                ));
-            }
-            None
-        };
-        let repo_url: Option<String> = if origin == "self" {
-            None // 改回自建 → 仓库地址联动清空
-        } else {
-            patch
-                .repo_url
-                .clone()
-                .map(|u| u.trim().to_string())
-                .filter(|u| !u.is_empty())
-                .or(current.repo_url.clone())
-        };
+        let (local_path, repo_url) = resolve_skill_paths(&current, &patch, &origin)?;
         let semantic_change = patch.name.is_some()
             || patch.description.is_some()
             || patch.content.is_some()
@@ -308,4 +274,48 @@ impl SkillsService {
         }
         Ok(true)
     }
+}
+
+/// update 解析 local_path（script 型专用，含长度校验）与 repo_url（self 型联动清空）。
+fn resolve_skill_paths(
+    current: &SkillDto,
+    patch: &SkillPatch,
+    origin: &str,
+) -> Result<(Option<String>, Option<String>), SkillsError> {
+    let local_path: Option<String> = if current.kind == "script" {
+        match patch
+            .local_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            Some(p) => {
+                if p.len() > LOCAL_PATH_MAX {
+                    return Err(SkillsError::BadRequest(format!(
+                        "local_path 过长（>{LOCAL_PATH_MAX} 字符）"
+                    )));
+                }
+                Some(p.to_string())
+            }
+            None => current.local_path.clone(),
+        }
+    } else {
+        if patch.local_path.is_some() {
+            return Err(SkillsError::BadRequest(
+                "text 型技能整体入库，不接受 local_path——脚本存本地的请用 kind=script".into(),
+            ));
+        }
+        None
+    };
+    let repo_url: Option<String> = if origin == "self" {
+        None // 改回自建 → 仓库地址联动清空
+    } else {
+        patch
+            .repo_url
+            .clone()
+            .map(|u| u.trim().to_string())
+            .filter(|u| !u.is_empty())
+            .or(current.repo_url.clone())
+    };
+    Ok((local_path, repo_url))
 }

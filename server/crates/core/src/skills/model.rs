@@ -54,81 +54,7 @@ pub fn parse_frontmatter(content: &str) -> (FrontmatterMeta, String) {
     let after = &body_start[close_rel + 4..];
     let body = after.trim_start_matches(['\n', '\r']);
 
-    let lines: Vec<&str> = fm_block.lines().collect();
-    let mut i = 0;
-    while i < lines.len() {
-        let line = lines[i];
-        i += 1;
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        let key = key.trim().to_ascii_lowercase();
-        let value = value.trim();
-        // YAML 块列表（D7）：`tags:` 值为空时收集后续 "- item" 行
-        if key == "tags"
-            && value.is_empty()
-            && i < lines.len()
-            && lines[i].trim_start().starts_with("- ")
-        {
-            let mut items: Vec<String> = Vec::new();
-            while i < lines.len() {
-                let l = lines[i].trim_start();
-                match l.strip_prefix("- ") {
-                    Some(item) => {
-                        items.push(item.trim().trim_matches('"').trim_matches('\'').to_string());
-                        i += 1;
-                    }
-                    None => break,
-                }
-            }
-            meta.tags = items;
-            continue;
-        }
-        if matches!(value, ">" | ">>" | ">-" | ">+" | "|" | "|-" | "|+") && i < lines.len() {
-            // 块标量：收集缩进行（空行不断块，去缩进后折叠或保留）
-            let mut buf: Vec<&str> = Vec::new();
-            let mut indent: Option<usize> = None;
-            while i < lines.len() {
-                let l = lines[i];
-                if l.trim().is_empty() {
-                    buf.push(l);
-                    i += 1;
-                    continue;
-                }
-                let ind = l.len() - l.trim_start().len();
-                if ind == 0 {
-                    break;
-                }
-                match indent {
-                    None => indent = Some(ind),
-                    Some(n) if ind < n => break,
-                    _ => {}
-                }
-                buf.push(l);
-                i += 1;
-            }
-            let min_indent = indent.unwrap_or(2);
-            let mut stripped: Vec<String> = buf
-                .iter()
-                .map(|l| l.get(min_indent..).unwrap_or(l.trim_start()).to_string())
-                .collect();
-            while stripped.last().is_some_and(|l| l.trim().is_empty()) {
-                stripped.pop();
-            }
-            let joined = if value.starts_with('>') {
-                stripped
-                    .iter()
-                    .map(|l| l.trim())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            } else {
-                stripped.join("\n")
-            };
-            assign_meta(&mut meta, &key, &joined);
-        } else {
-            assign_meta(&mut meta, &key, value);
-        }
-    }
+    let meta = parse_frontmatter_lines(fm_block);
     (meta, body.to_string())
 }
 
@@ -289,4 +215,85 @@ pub(crate) struct NormalizedKind {
     pub(crate) repo_url: Option<String>,
     /// script 型不产 create 快照（正文不在库中，无内容可快照）
     pub(crate) snapshot: bool,
+}
+
+/// 解析 frontmatter 块（YAML 子集：标量 / 块标量 / `tags:` 块列表），产出元数据。
+fn parse_frontmatter_lines(fm_block: &str) -> FrontmatterMeta {
+    let mut meta = FrontmatterMeta::default();
+    let lines: Vec<&str> = fm_block.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        i += 1;
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let value = value.trim();
+        // YAML 块列表（D7）：`tags:` 值为空时收集后续 "- item" 行
+        if key == "tags"
+            && value.is_empty()
+            && i < lines.len()
+            && lines[i].trim_start().starts_with("- ")
+        {
+            let mut items: Vec<String> = Vec::new();
+            while i < lines.len() {
+                let l = lines[i].trim_start();
+                match l.strip_prefix("- ") {
+                    Some(item) => {
+                        items.push(item.trim().trim_matches('"').trim_matches('\'').to_string());
+                        i += 1;
+                    }
+                    None => break,
+                }
+            }
+            meta.tags = items;
+            continue;
+        }
+        if matches!(value, ">" | ">>" | ">-" | ">+" | "|" | "|-" | "|+") && i < lines.len() {
+            // 块标量：收集缩进行（空行不断块，去缩进后折叠或保留）
+            let mut buf: Vec<&str> = Vec::new();
+            let mut indent: Option<usize> = None;
+            while i < lines.len() {
+                let l = lines[i];
+                if l.trim().is_empty() {
+                    buf.push(l);
+                    i += 1;
+                    continue;
+                }
+                let ind = l.len() - l.trim_start().len();
+                if ind == 0 {
+                    break;
+                }
+                match indent {
+                    None => indent = Some(ind),
+                    Some(n) if ind < n => break,
+                    _ => {}
+                }
+                buf.push(l);
+                i += 1;
+            }
+            let min_indent = indent.unwrap_or(2);
+            let mut stripped: Vec<String> = buf
+                .iter()
+                .map(|l| l.get(min_indent..).unwrap_or(l.trim_start()).to_string())
+                .collect();
+            while stripped.last().is_some_and(|l| l.trim().is_empty()) {
+                stripped.pop();
+            }
+            let joined = if value.starts_with('>') {
+                stripped
+                    .iter()
+                    .map(|l| l.trim())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                stripped.join("\n")
+            };
+            assign_meta(&mut meta, &key, &joined);
+        } else {
+            assign_meta(&mut meta, &key, value);
+        }
+    }
+    meta
 }
