@@ -71,42 +71,7 @@ pub async fn create_provider(
 
     // L1：校验（违规 400 带明细——不再让配置错误延迟到运行时爆发）。
     // base_url 先 trim：粘贴尾随空格是高频输入失误，自动纠正而非拒绝。
-    let base_url = req.base_url.trim().to_string();
-    if req.name.trim().is_empty() {
-        return Err(ApiError::BadRequest("name 不能为空".into()));
-    }
-    let scheme_ok = base_url.starts_with("http://") || base_url.starts_with("https://");
-    let host_part = base_url
-        .trim_start_matches("http://")
-        .trim_start_matches("https://");
-    if !scheme_ok
-        || host_part.is_empty()
-        || host_part.contains(char::is_whitespace)
-        || host_part.starts_with('/')
-    {
-        return Err(ApiError::BadRequest(format!(
-            "base_url 必须是 http(s):// 开头且含主机名（收到「{}」）",
-            base_url
-        )));
-    }
-    if req.api_key.trim().is_empty() {
-        return Err(ApiError::BadRequest("api_key 不能为空".into()));
-    }
-    // SEC-C（2026-09-03）：最小长度校验——挡手滑的占位串；真实性由 provider-test 连通探针判定
-    if req.api_key.trim().len() < 8 {
-        return Err(ApiError::BadRequest(
-            "api_key 看起来太短（<8 字符）——请填真实 key，连通性可用 provider-test 验证".into(),
-        ));
-    }
-    if req.model_id.trim().is_empty() {
-        return Err(ApiError::BadRequest("model_id 不能为空".into()));
-    }
-    if !matches!(req.capability.as_str(), "chat" | "embedding") {
-        return Err(ApiError::BadRequest(format!(
-            "capability 仅接受 chat / embedding（非法值：{}）",
-            req.capability
-        )));
-    }
+    let base_url = validate_provider_create(&req)?;
 
     let cipher = cipher_from(&state)?;
 
@@ -182,36 +147,7 @@ pub async fn update_provider(
 ) -> Result<Json<ProviderDto>, ApiError> {
     require_llm(&principal)?;
 
-    // 校验提供的字段（与 create 同规则；trim 粘贴空白）
-    let base_url = req.base_url.as_ref().map(|u| u.trim().to_string());
-    if let Some(u) = base_url.as_deref() {
-        let scheme_ok = u.starts_with("http://") || u.starts_with("https://");
-        let host_part = u
-            .trim_start_matches("http://")
-            .trim_start_matches("https://");
-        if !scheme_ok || host_part.is_empty() || host_part.contains(char::is_whitespace) {
-            return Err(ApiError::BadRequest(format!(
-                "base_url 非法（收到「{u}」）"
-            )));
-        }
-    }
-    if let Some(k) = &req.api_key
-        && k.trim().is_empty()
-    {
-        return Err(ApiError::BadRequest("api_key 不能为空".into()));
-    }
-    if let Some(mid) = &req.model_id
-        && mid.trim().is_empty()
-    {
-        return Err(ApiError::BadRequest("model_id 不能为空".into()));
-    }
-    if let Some(cap) = &req.capability
-        && !matches!(cap.as_str(), "chat" | "embedding")
-    {
-        return Err(ApiError::BadRequest(format!(
-            "capability 仅接受 chat / embedding（非法值：{cap}）"
-        )));
-    }
+    let base_url = validate_provider_update(&req)?;
 
     let cipher = cipher_from(&state)?;
     let enc_new = match &req.api_key {
@@ -490,4 +426,80 @@ pub async fn test_provider(
         }
     };
     Ok(Json(TestResult { ok, message }))
+}
+
+/// create provider 入参校验（name / base_url / capability；返回 trim 后的 base_url）。
+fn validate_provider_create(req: &CreateProviderRequest) -> Result<String, ApiError> {
+    let base_url = req.base_url.trim().to_string();
+    if req.name.trim().is_empty() {
+        return Err(ApiError::BadRequest("name 不能为空".into()));
+    }
+    let scheme_ok = base_url.starts_with("http://") || base_url.starts_with("https://");
+    let host_part = base_url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    if !scheme_ok
+        || host_part.is_empty()
+        || host_part.contains(char::is_whitespace)
+        || host_part.starts_with('/')
+    {
+        return Err(ApiError::BadRequest(format!(
+            "base_url 必须是 http(s):// 开头且含主机名（收到「{}」）",
+            base_url
+        )));
+    }
+    if req.api_key.trim().is_empty() {
+        return Err(ApiError::BadRequest("api_key 不能为空".into()));
+    }
+    // SEC-C（2026-09-03）：最小长度校验——挡手滑的占位串；真实性由 provider-test 连通探针判定
+    if req.api_key.trim().len() < 8 {
+        return Err(ApiError::BadRequest(
+            "api_key 看起来太短（<8 字符）——请填真实 key，连通性可用 provider-test 验证".into(),
+        ));
+    }
+    if req.model_id.trim().is_empty() {
+        return Err(ApiError::BadRequest("model_id 不能为空".into()));
+    }
+    if !matches!(req.capability.as_str(), "chat" | "embedding") {
+        return Err(ApiError::BadRequest(format!(
+            "capability 仅接受 chat / embedding（非法值：{}）",
+            req.capability
+        )));
+    }
+    Ok(base_url)
+}
+
+/// update provider 入参校验（可选字段；与 create 同规则，返回 trim 后的 base_url）。
+fn validate_provider_update(req: &UpdateProviderRequest) -> Result<Option<String>, ApiError> {
+    // 校验提供的字段（与 create 同规则；trim 粘贴空白）
+    let base_url = req.base_url.as_ref().map(|u| u.trim().to_string());
+    if let Some(u) = base_url.as_deref() {
+        let scheme_ok = u.starts_with("http://") || u.starts_with("https://");
+        let host_part = u
+            .trim_start_matches("http://")
+            .trim_start_matches("https://");
+        if !scheme_ok || host_part.is_empty() || host_part.contains(char::is_whitespace) {
+            return Err(ApiError::BadRequest(format!(
+                "base_url 非法（收到「{u}」）"
+            )));
+        }
+    }
+    if let Some(k) = &req.api_key
+        && k.trim().is_empty()
+    {
+        return Err(ApiError::BadRequest("api_key 不能为空".into()));
+    }
+    if let Some(mid) = &req.model_id
+        && mid.trim().is_empty()
+    {
+        return Err(ApiError::BadRequest("model_id 不能为空".into()));
+    }
+    if let Some(cap) = &req.capability
+        && !matches!(cap.as_str(), "chat" | "embedding")
+    {
+        return Err(ApiError::BadRequest(format!(
+            "capability 仅接受 chat / embedding（非法值：{cap}）"
+        )));
+    }
+    Ok(base_url)
 }
