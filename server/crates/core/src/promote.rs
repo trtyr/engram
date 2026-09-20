@@ -85,26 +85,7 @@ impl PromoteService {
                     ))
                 })?,
         };
-        let doc = project_repo::get_doc(&self.pool, req.doc_id)
-            .await?
-            .ok_or_else(|| {
-                PromoteError::NotFound(format!(
-                    "文档 {} 不存在——先 project-get <项目> 看文档列表取 id",
-                    req.doc_id
-                ))
-            })?;
-        if doc.project_id != project_id {
-            return Err(PromoteError::BadRequest(format!(
-                "文档 {} 不属于项目 {}——请核对来源",
-                req.doc_id, req.project
-            )));
-        }
-        let project_name = doc.title.clone(); // 回链展示用项目名优先，兜底文档标题
-        let project_name =
-            match engram_storage::repo::project::get_project(&self.pool, project_id).await {
-                Ok(Some(p)) => p.name,
-                _ => project_name,
-            };
+        let project_name = self.resolve_promote_source(&req, project_id).await?;
 
         let (lib, lib_slug) = self.register_promotion(&req, project_id).await?;
 
@@ -200,5 +181,33 @@ impl PromoteService {
             other => PromoteError::from(other),
         })?;
         Ok((lib, lib_slug))
+    }
+    /// ① 源解析收尾：文档必须属于该项目；项目名优先，兜底文档标题（回链展示用）。
+    async fn resolve_promote_source(
+        &self,
+        req: &PromoteRequest,
+        project_id: Uuid,
+    ) -> Result<String, PromoteError> {
+        let doc = project_repo::get_doc(&self.pool, req.doc_id)
+            .await?
+            .ok_or_else(|| {
+                PromoteError::NotFound(format!(
+                    "文档 {} 不存在——先 project-get <项目> 看文档列表取 id",
+                    req.doc_id
+                ))
+            })?;
+        if doc.project_id != project_id {
+            return Err(PromoteError::BadRequest(format!(
+                "文档 {} 不属于项目 {}——请核对来源",
+                req.doc_id, req.project
+            )));
+        }
+        let project_name = doc.title.clone(); // 回链展示用项目名优先，兜底文档标题
+        let project_name =
+            match engram_storage::repo::project::get_project(&self.pool, project_id).await {
+                Ok(Some(p)) => p.name,
+                _ => project_name,
+            };
+        Ok(project_name)
     }
 }

@@ -111,31 +111,7 @@ pub(super) async fn fetch_document_bytes(
                 }
                 (format!("{doc_id}_url.html"), page.bytes, page.content_type)
             }
-            Err(e) => {
-                let m = format!("URL 抓取失败: {e}");
-                // W-1/W-2（2026-09-04）：按错误类分治——
-                // · HTTP 4xx（除 429）重试无意义 → Permanent + mark_failed（404 文档
-                //   直接 failed，不再退避重试到 job dead 而文档永久卡 pending）；
-                // · 429/5xx 瞬态 → Retryable 退避重试；
-                // · 网络错误（连接/超时/流中断）保持 Retryable；
-                // · Retryable 最后一试也 mark_failed——重试耗尽 job dead 前文档必须
-                //   落终态，杜绝「job dead + 文档 pending」孤儿态。
-                // SSRF 判定/协议/大小/DNS 类保持 Permanent，防恶意 URL 反复探测。
-                let permanent = match &e {
-                    super::super::ssrf::FetchError::Status(c) => !matches!(c, 429) && *c < 500,
-                    super::super::ssrf::FetchError::Network(_) => false,
-                    _ => true,
-                };
-                let last_attempt = ctx.job.attempts >= ctx.job.max_attempts;
-                if permanent || last_attempt {
-                    mark_doc_failed(ctx, lib, doc_id, &m).await;
-                }
-                if permanent {
-                    return Err(doc_fail(doc_id, m));
-                }
-                ctx.emit(&m, None).await.ok();
-                return Err(JobError::Retryable(m));
-            }
+            Err(e) => return Err(fetch_failure_error(ctx, lib, doc_id, e).await),
         }
     } else {
         let path = PathBuf::from(&raw_path);
@@ -308,4 +284,37 @@ pub(super) async fn embed_missing_chunks(
         }
     }
     Ok(embedded)
+}
+
+/// URL 抓取失败分治（W-1/W-2）：HTTP 4xx（除 429）/SSRF 类 → Permanent；
+/// 429/5xx/网络 → Retryable；Retryable 最后一试也 mark_failed（杜绝 job dead + 文档 pending 孤儿态）。
+async fn fetch_failure_error(
+    ctx: &JobContext,
+    lib: Uuid,
+    doc_id: Uuid,
+    e: super::super::ssrf::FetchError,
+) -> JobError {
+    let m = format!("URL 抓取失败: {e}");
+    // W-1/W-2（2026-09-04）：按错误类分治——
+    // · HTTP 4xx（除 429）重试无意义 → Permanent + mark_failed（404 文档
+    //   直接 failed，不再退避重试到 job dead 而文档永久卡 pending）；
+    // · 429/5xx 瞬态 → Retryable 退避重试；
+    // · 网络错误（连接/超时/流中断）保持 Retryable；
+    // · Retryable 最后一试也 mark_failed——重试耗尽 job dead 前文档必须
+    //   落终态，杜绝「job dead + 文档 pending」孤儿态。
+    // SSRF 判定/协议/大小/DNS 类保持 Permanent，防恶意 URL 反复探测。
+    let permanent = match &e {
+        super::super::ssrf::FetchError::Status(c) => !matches!(c, 429) && *c < 500,
+        super::super::ssrf::FetchError::Network(_) => false,
+        _ => true,
+    };
+    let last_attempt = ctx.job.attempts >= ctx.job.max_attempts;
+    if permanent || last_attempt {
+        mark_doc_failed(ctx, lib, doc_id, &m).await;
+    }
+    if permanent {
+        return doc_fail(doc_id, m);
+    }
+    ctx.emit(&m, None).await.ok();
+    JobError::Retryable(m)
 }

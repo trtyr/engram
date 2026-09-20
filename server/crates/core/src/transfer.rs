@@ -316,71 +316,8 @@ pub async fn sync_transfer(
         .map_err(|e| TransferError::Storage(format!("HTTP 客户端构建失败: {e}")))?;
 
     match direction {
-        "push" => {
-            let bundle = export_bundle(pool).await?;
-            let source_counts = bundle.get("counts").cloned().unwrap_or(Value::Null);
-            if dry_run {
-                return Ok(SyncOutcome {
-                    direction: "push",
-                    source_counts,
-                    dry_run: true,
-                    import_report: None,
-                });
-            }
-            let resp = client
-                .post(format!("{base}/migrate/import"))
-                .bearer_auth(token)
-                .json(&bundle)
-                .send()
-                .await
-                .map_err(|e| TransferError::Storage(format!("目标不可达: {e}")))?;
-            let status = resp.status();
-            let body: Value = resp.json().await.unwrap_or(Value::Null);
-            if !status.is_success() {
-                return Err(TransferError::Storage(format!(
-                    "目标导入失败（HTTP {status}）: {}",
-                    serde_json::to_string(&body).unwrap_or_default()
-                )));
-            }
-            Ok(SyncOutcome {
-                direction: "push",
-                source_counts,
-                dry_run: false,
-                import_report: Some(body),
-            })
-        }
-        "pull" => {
-            let resp = client
-                .get(format!("{base}/migrate/export"))
-                .bearer_auth(token)
-                .send()
-                .await
-                .map_err(|e| TransferError::Storage(format!("目标不可达: {e}")))?;
-            let status = resp.status();
-            let bundle: Value = resp.json().await.unwrap_or(Value::Null);
-            if !status.is_success() {
-                return Err(TransferError::Storage(format!(
-                    "目标导出失败（HTTP {status}）: {}",
-                    serde_json::to_string(&bundle).unwrap_or_default()
-                )));
-            }
-            let source_counts = bundle.get("counts").cloned().unwrap_or(Value::Null);
-            if dry_run {
-                return Ok(SyncOutcome {
-                    direction: "pull",
-                    source_counts,
-                    dry_run: true,
-                    import_report: None,
-                });
-            }
-            let report = import_bundle(pool, &bundle).await?;
-            Ok(SyncOutcome {
-                direction: "pull",
-                source_counts,
-                dry_run: false,
-                import_report: Some(report),
-            })
-        }
+        "push" => sync_push(&client, &base, token, pool, dry_run).await,
+        "pull" => sync_pull(&client, &base, token, pool, dry_run).await,
         _ => unreachable!("direction 已在入口校验"),
     }
 }
@@ -576,4 +513,85 @@ async fn backfill_superseded_atoms(pool: &PgPool, data: &Value) -> Result<()> {
         repo::backfill_atom_superseded_by(pool, id, target).await?;
     }
     Ok(())
+}
+
+/// push：本地导出 → POST 目标 /migrate/import（dry_run 仅导出对比，不连目标）。
+async fn sync_push(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    pool: &PgPool,
+    dry_run: bool,
+) -> Result<SyncOutcome> {
+    let bundle = export_bundle(pool).await?;
+    let source_counts = bundle.get("counts").cloned().unwrap_or(Value::Null);
+    if dry_run {
+        return Ok(SyncOutcome {
+            direction: "push",
+            source_counts,
+            dry_run: true,
+            import_report: None,
+        });
+    }
+    let resp = client
+        .post(format!("{base}/migrate/import"))
+        .bearer_auth(token)
+        .json(&bundle)
+        .send()
+        .await
+        .map_err(|e| TransferError::Storage(format!("目标不可达: {e}")))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        return Err(TransferError::Storage(format!(
+            "目标导入失败（HTTP {status}）: {}",
+            serde_json::to_string(&body).unwrap_or_default()
+        )));
+    }
+    Ok(SyncOutcome {
+        direction: "push",
+        source_counts,
+        dry_run: false,
+        import_report: Some(body),
+    })
+}
+
+/// pull：GET 目标 /migrate/export → 本地导入（dry_run 只拉不写）。
+async fn sync_pull(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    pool: &PgPool,
+    dry_run: bool,
+) -> Result<SyncOutcome> {
+    let resp = client
+        .get(format!("{base}/migrate/export"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| TransferError::Storage(format!("目标不可达: {e}")))?;
+    let status = resp.status();
+    let bundle: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        return Err(TransferError::Storage(format!(
+            "目标导出失败（HTTP {status}）: {}",
+            serde_json::to_string(&bundle).unwrap_or_default()
+        )));
+    }
+    let source_counts = bundle.get("counts").cloned().unwrap_or(Value::Null);
+    if dry_run {
+        return Ok(SyncOutcome {
+            direction: "pull",
+            source_counts,
+            dry_run: true,
+            import_report: None,
+        });
+    }
+    let report = import_bundle(pool, &bundle).await?;
+    Ok(SyncOutcome {
+        direction: "pull",
+        source_counts,
+        dry_run: false,
+        import_report: Some(report),
+    })
 }
