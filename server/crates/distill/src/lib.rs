@@ -6,12 +6,15 @@
 pub mod arbitrate;
 pub mod chain;
 pub mod consolidate;
+pub mod entity_portraits;
 pub mod extract;
+pub mod extract_model;
 pub mod llm_port;
 pub mod organize;
 pub mod persona;
 pub mod prompts;
 pub mod reembed;
+pub mod scenario_converge;
 
 pub use chain::{gateway_llm, register_handlers, trigger_auto_extract};
 pub use llm_port::{DistillLlm, GatewayLlm};

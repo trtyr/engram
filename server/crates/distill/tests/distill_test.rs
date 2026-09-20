@@ -1725,3 +1725,358 @@ async fn extract_skips_distill_off_sessions() {
         "distill=off 会话不应被 extract 认领（H-A2 回归）"
     );
 }
+
+// ============================================================================
+// 架构治理 task-3：五个蒸馏 job 的 MockLlm 覆盖（主分支 + 错误分支）
+// ============================================================================
+
+/// 直插一条原子（测试用最小列集：id/kind/content/confidence/status/embedding/tsv）。
+async fn insert_atom(env: &Env, id: Uuid, content: &str, status: &str) {
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, embedding, tsv) \
+         VALUES ($1, 'fact', $2, 0.9, $3, $4, to_tsvector('simple', $2))",
+    )
+    .bind(id)
+    .bind(content)
+    .bind(status)
+    .bind(emb(1))
+    .execute(&env.pool)
+    .await
+    .unwrap();
+}
+
+async fn insert_session(env: &Env, id: Uuid, text: &str) {
+    sqlx::query("INSERT INTO raw_sessions (id, agent, content) VALUES ($1, 'pi', $2)")
+        .bind(id)
+        .bind(session(&[("user", text)]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+}
+
+async fn atom_status(env: &Env, id: Uuid) -> String {
+    sqlx::query_scalar("SELECT status FROM atoms WHERE id = $1")
+        .bind(id)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap()
+}
+
+/// extract：主分支落候选原子；错误分支（LLM 两次解析全败）判失败且会话回滚 pending。
+#[tokio::test]
+async fn jobs_mock_extract_main_and_error() {
+    let env = setup(vec![json!({"atoms": [
+        {"kind": "fact", "content": "用户用 Mac 开发", "confidence": 0.9, "turn_refs": [1]}
+    ]})])
+    .await;
+    let sid = Uuid::now_v7();
+    insert_session(&env, sid, "我用 Mac 开发").await;
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "extract_atoms").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "主分支应成功: {:?}",
+        j.error
+    );
+    let (n, st): (i64, String) = sqlx::query_as("SELECT count(*), min(status) FROM atoms")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!((n, st.as_str()), (1, "candidate"), "应落一条候选原子");
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+
+    // 错误分支：两段垃圾响应 → 两次解析失败 → 任务失败；认领会话必须回滚 pending
+    let env = setup(vec![
+        serde_json::Value::String("不是 JSON".into()),
+        serde_json::Value::String("仍不是 JSON".into()),
+    ])
+    .await;
+    let sid2 = Uuid::now_v7();
+    insert_session(&env, sid2, "这条会失败").await;
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "extract_atoms").await;
+    assert_ne!(
+        j.status,
+        JobStatus::Succeeded,
+        "解析全败应判失败，不能静默成功"
+    );
+    let st: String = sqlx::query_scalar("SELECT distill_status FROM raw_sessions WHERE id = $1")
+        .bind(sid2)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        st, "pending",
+        "失败应把认领会话回滚为 pending（重试不丢数据）"
+    );
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+}
+
+/// arbitrate：主分支按裁决归档候选并写取代链；错误分支失败且候选保持 candidate（无部分写入）。
+#[tokio::test]
+async fn jobs_mock_arbitrate_main_and_error() {
+    let active = Uuid::now_v7();
+    let cand = Uuid::now_v7();
+    let env = setup(vec![json!({"verdicts": [
+        {"candidate_id": cand.to_string(), "disposition": "duplicate", "target_id": active.to_string()}
+    ]})])
+    .await;
+    insert_atom(&env, active, "用户用 Mac 开发", "active").await;
+    insert_atom(&env, cand, "用户用 Mac 开发", "candidate").await;
+    env.queue
+        .enqueue(JobTemplate::new("arbitrate_atoms").with_payload(json!({"candidate_ids": [cand]})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "arbitrate_atoms").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "主分支应成功: {:?}",
+        j.error
+    );
+    assert_eq!(atom_status(&env, cand).await, "archived", "判重应归档候选");
+    let sup: Option<Uuid> = sqlx::query_scalar("SELECT superseded_by FROM atoms WHERE id = $1")
+        .bind(cand)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(sup, Some(active), "归档必须补取代指针（R1 取代链不断）");
+    let hits: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
+        .bind(active)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(hits, 1, "判重应给既有条计一次命中");
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+
+    // 错误分支：同样的素材 + 垃圾响应 → 失败，且候选不动
+    let active2 = Uuid::now_v7();
+    let cand2 = Uuid::now_v7();
+    let env = setup(vec![
+        serde_json::Value::String("不是 JSON".into()),
+        serde_json::Value::String("仍不是 JSON".into()),
+    ])
+    .await;
+    insert_atom(&env, active2, "用户用 Mac 开发", "active").await;
+    insert_atom(&env, cand2, "用户用 Mac 开发", "candidate").await;
+    env.queue
+        .enqueue(
+            JobTemplate::new("arbitrate_atoms").with_payload(json!({"candidate_ids": [cand2]})),
+        )
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "arbitrate_atoms").await;
+    assert_ne!(j.status, JobStatus::Succeeded, "解析全败应判失败");
+    assert_eq!(
+        atom_status(&env, cand2).await,
+        "candidate",
+        "裁决失败不得部分写入（候选应原地不动）"
+    );
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+}
+
+/// organize：主分支按动作建场景并回填 atom.scenario_id；错误分支失败且不建场景。
+#[tokio::test]
+async fn jobs_mock_organize_main_and_error() {
+    let atom = Uuid::now_v7();
+    let env = setup(vec![json!({"actions": [
+        {"action": "create", "topic": "开发环境", "summary": "用 Mac", "body": "详情",
+         "atom_ids": [atom.to_string()]}
+    ]})])
+    .await;
+    insert_atom(&env, atom, "用户用 Mac 开发", "active").await;
+    env.queue
+        .enqueue(JobTemplate::new("organize_scenarios"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "organize_scenarios").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "主分支应成功: {:?}",
+        j.error
+    );
+    let (scenarios, topic): (i64, String) =
+        sqlx::query_as("SELECT count(*), min(topic) FROM scenarios")
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!((scenarios, topic.as_str()), (1, "开发环境"));
+    let linked: Option<Uuid> = sqlx::query_scalar("SELECT scenario_id FROM atoms WHERE id = $1")
+        .bind(atom)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert!(linked.is_some(), "原子应被回填 scenario_id");
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+
+    // 错误分支：垃圾响应 → 失败且不建场景
+    let atom2 = Uuid::now_v7();
+    let env = setup(vec![
+        serde_json::Value::String("不是 JSON".into()),
+        serde_json::Value::String("仍不是 JSON".into()),
+    ])
+    .await;
+    insert_atom(&env, atom2, "用户用 Mac 开发", "active").await;
+    env.queue
+        .enqueue(JobTemplate::new("organize_scenarios"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "organize_scenarios").await;
+    assert_ne!(j.status, JobStatus::Succeeded, "解析全败应判失败");
+    let scenarios: i64 = sqlx::query_scalar("SELECT count(*) FROM scenarios")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(scenarios, 0, "失败不得留下半建场景");
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+}
+
+/// persona：主分支按分面写新版本并落证据链（S 编号 → 场景 id）；错误分支失败且不写分面。
+#[tokio::test]
+async fn jobs_mock_persona_main_and_error() {
+    let atom = Uuid::now_v7();
+    let scenario = Uuid::now_v7();
+    let env = setup(vec![json!({"aspects": [
+        {"aspect": "identity", "content": "用户是开发者", "evidence_scenarios": ["S1"]}
+    ]})])
+    .await;
+    insert_atom(&env, atom, "用户用 Mac 开发", "active").await;
+    sqlx::query(
+        "INSERT INTO scenarios (id, topic, summary, body, atom_refs) VALUES ($1, '开发', '用 Mac', '详情', $2)",
+    )
+    .bind(scenario)
+    .bind(json!([atom]))
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    env.queue
+        .enqueue(
+            JobTemplate::new("distill_persona").with_payload(json!({"scenario_ids": [scenario]})),
+        )
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "distill_persona").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "主分支应成功: {:?}",
+        j.error
+    );
+    let (aspect, content, evidence): (String, String, serde_json::Value) = sqlx::query_as(
+        "SELECT aspect, content, evidence_refs FROM persona_aspects ORDER BY version DESC LIMIT 1",
+    )
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(aspect, "identity");
+    assert_eq!(content, "用户是开发者");
+    assert_eq!(
+        evidence["scenarios"],
+        json!([scenario]),
+        "S1 应被映射回真实场景 id（L3→L2 链）"
+    );
+    assert_eq!(
+        evidence["atoms"],
+        json!([atom]),
+        "证据链应经场景 atom_refs 带到 L1"
+    );
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+
+    // 错误分支：垃圾响应 → 失败且不写分面
+    let scenario2 = Uuid::now_v7();
+    let env = setup(vec![
+        serde_json::Value::String("不是 JSON".into()),
+        serde_json::Value::String("仍不是 JSON".into()),
+    ])
+    .await;
+    sqlx::query(
+        "INSERT INTO scenarios (id, topic, summary, body) VALUES ($1, '开发', '用 Mac', '详情')",
+    )
+    .bind(scenario2)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    env.queue
+        .enqueue(
+            JobTemplate::new("distill_persona").with_payload(json!({"scenario_ids": [scenario2]})),
+        )
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "distill_persona").await;
+    assert_ne!(j.status, JobStatus::Succeeded, "解析全败应判失败");
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM persona_aspects")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0, "失败不得写入分面");
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+}
+
+/// consolidate：主分支按合并项归档 victim 并补取代链；错误分支失败且两条原子都保持 active。
+#[tokio::test]
+async fn jobs_mock_consolidate_main_and_error() {
+    let keep = Uuid::now_v7();
+    let victim = Uuid::now_v7();
+    let env = setup(vec![json!({"merges": [
+        {"keep_id": keep.to_string(), "merge_ids": [victim.to_string()]}
+    ]})])
+    .await;
+    insert_atom(&env, keep, "用户用 Mac 开发", "active").await;
+    insert_atom(&env, victim, "用户用 Mac 开发", "active").await;
+    env.queue
+        .enqueue(JobTemplate::new("consolidate"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "consolidate").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "主分支应成功: {:?}",
+        j.error
+    );
+    assert_eq!(atom_status(&env, victim).await, "archived", "victim 应归档");
+    let sup: Option<Uuid> = sqlx::query_scalar("SELECT superseded_by FROM atoms WHERE id = $1")
+        .bind(victim)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(sup, Some(keep), "近重复合并也要补取代指针（R1）");
+    assert_eq!(
+        atom_status(&env, keep).await,
+        "active",
+        "keep 应保持 active"
+    );
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+
+    // 错误分支：近重复合并的 LLM 解析全败 → 任务失败，且两条原子都不动
+    let keep2 = Uuid::now_v7();
+    let victim2 = Uuid::now_v7();
+    let env = setup(vec![
+        serde_json::Value::String("不是 JSON".into()),
+        serde_json::Value::String("仍不是 JSON".into()),
+    ])
+    .await;
+    insert_atom(&env, keep2, "用户用 Mac 开发", "active").await;
+    insert_atom(&env, victim2, "用户用 Mac 开发", "active").await;
+    env.queue
+        .enqueue(JobTemplate::new("consolidate"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "consolidate").await;
+    assert_ne!(j.status, JobStatus::Succeeded, "解析全败应判失败");
+    assert_eq!(atom_status(&env, keep2).await, "active");
+    assert_eq!(
+        atom_status(&env, victim2).await,
+        "active",
+        "合并失败不得部分写入"
+    );
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+}
