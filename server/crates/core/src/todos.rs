@@ -298,24 +298,7 @@ impl TodoService {
                 "kind 仅接受 todo（行动项）/ ticket（工单）".into(),
             ));
         }
-        if let Some(sv) = severity {
-            if !SEVERITIES.contains(&sv) {
-                return Err(TodoError::BadRequest(format!(
-                    "severity 仅接受 {}（收到 {sv}）",
-                    SEVERITIES.join("/")
-                )));
-            }
-            if kind != "ticket" {
-                return Err(TodoError::BadRequest(
-                    "severity 仅工单（kind=ticket）可用——todo 不需要严重度".into(),
-                ));
-            }
-        }
-        // 工单建议带症状描述（不强制——建票后可补）
-        let tags = Self::normalize_tags(tags);
-        for t in &tags {
-            Self::reject_nul("tags", t)?;
-        }
+        let tags = prepare_todo_create(kind, severity, tags)?;
         // 分级合并（工单模型细化）：ticket 分级用 severity，priority 退役——
         // 显式传非空 priority 才 400；缺省（空串）静默落 normal（列 NOT NULL 兼容）
         // 分级合并：ticket 分级用 severity——显式传非空 priority 400；
@@ -569,4 +552,31 @@ fn validate_todo_update_status(
         ));
     }
     Ok(())
+}
+
+/// 建单校验（severity 白名单 + 仅工单可用；tags 归一化 + NUL 拒绝），返回归一化 tags。
+fn prepare_todo_create(
+    kind: &str,
+    severity: Option<&str>,
+    tags: &[String],
+) -> Result<Vec<String>, TodoError> {
+    if let Some(sv) = severity {
+        if !SEVERITIES.contains(&sv) {
+            return Err(TodoError::BadRequest(format!(
+                "severity 仅接受 {}（收到 {sv}）",
+                SEVERITIES.join("/")
+            )));
+        }
+        if kind != "ticket" {
+            return Err(TodoError::BadRequest(
+                "severity 仅工单（kind=ticket）可用——todo 不需要严重度".into(),
+            ));
+        }
+    }
+    // 工单建议带症状描述（不强制——建票后可补）
+    let tags = TodoService::normalize_tags(tags);
+    for t in &tags {
+        TodoService::reject_nul("tags", t)?;
+    }
+    Ok(tags)
 }

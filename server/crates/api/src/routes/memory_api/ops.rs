@@ -102,79 +102,7 @@ pub async fn purge_agent(
     require_erase_scope(&principal)?;
 
     if req.deep.unwrap_or(false) {
-        // deep 收权（2026-09-03 测试报告 SEC-D/R-1 决策）：全库清空仅限管理员会话
-        // （Web 登录态 → 设置 → 危险区）。确认短语是公开常量（防误操作），挡不住蓄意；
-        // 真正的防线是把 deep 移出 AI key 能力面——erase scope 保留给 agent 级清场。
-        if !matches!(&*principal, Principal::Admin) {
-            return Err(ApiError::Forbidden(
-                "deep 全库清空仅限管理员（Web 登录态 → 设置 → 危险区）——AI key 即使有 erase scope 也不可。\
-                 按 agent 清场请用 {\"agent\":\"…\"}（erase scope 即可）"
-                    .into(),
-            ));
-        }
-        // 事故防线（2026-08-31 测试方案）：deep 是全库清空，agent 在此无过滤语义——
-        // 组合传入会让人误以为"只清这个 agent"。强制分开调用，语义零歧义。
-        if req.agent.is_some() {
-            return Err(ApiError::BadRequest(
-                "deep=true 是全库清空，不接受 agent 参数（agent 会在 deep 下被忽略，语义误导）。\
-                 按 agent 清场请去掉 deep；全库清空请去掉 agent 并带 confirm=\"清空记忆库\""
-                    .into(),
-            ));
-        }
-        // 此处 principal 已收权为 Admin（见上），审计 executed_by 恒为 admin
-        let source = "admin".to_string();
-        // P-C 后悔药先于确认短语：取消是安全方向，不该要危险确认
-        if let Some(job_id) = req.cancel {
-            // 后悔药：取消 armed job
-            let n = engram_jobs::admin::cancel_pending_deep_purge(&state.pool, job_id)
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
-            if n == 0 {
-                return Err(ApiError::BadRequest(
-                    "取消失败：job 不存在或已执行/已取消".into(),
-                ));
-            }
-            return Ok(Json(
-                serde_json::json!({"phase": "cancelled", "job_id": job_id}),
-            ));
-        }
-        // F2 一等清空：确认短语（用户亲口授权）+ P-C 两阶段（arm → 5min 冷却 → 到期执行）
-        if req.confirm.as_deref() != Some(PURGE_CONFIRM_PHRASE) {
-            return Err(ApiError::BadRequest(format!(
-                "deep 清空需要确认短语（AI 应先复述破坏半径，用户确认后传 confirm=\"{}\"）",
-                PURGE_CONFIRM_PHRASE
-            )));
-        }
-
-        // P-C 两阶段（两次真数据事故教训）：arm → 5 分钟冷却 → 到期执行。
-        // token = 立即执行；cancel = 后悔药。job 本身就是审计链。
-        if let Some(token) = req.token {
-            // 阶段二：确认执行——校验 armed job 存在且未执行，跳过剩余冷却
-            let armed = engram_jobs::admin::find_armed_deep_purge(&state.pool, token)
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
-            let Some((job_id, mut payload)) = armed else {
-                return Err(ApiError::BadRequest(
-                    "token 无效或已过期（armed 状态 5 分钟，到期自动执行或已被取消/执行）".into(),
-                ));
-            };
-            let counts = svc(&state).purge_deep().await.map_err(me)?;
-            payload["executed_by"] = serde_json::json!(source);
-            engram_jobs::admin::complete_deep_purge(&state.pool, job_id, &payload, &counts)
-                .await
-                .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
-            return Ok(Json(counts));
-        }
-
-        // 阶段一：arm——5 分钟冷却窗口（手滑后悔药），到期由 deep_purge handler 执行
-        let job = svc(&state).arm_deep_purge(&source).await.map_err(me)?;
-        return Ok(Json(serde_json::json!({
-            "phase": "armed",
-            "job_id": job.id,
-            "executes_at": job.due_at,
-            "confirm_now": format!("再次调用并带 token=\"{}\" 立即执行", job.id),
-            "cancel": format!("再次调用并带 cancel=\"{}\" 取消", job.id),
-        })));
+        return purge_deep_flow(&state, &principal.0, &req).await;
     }
 
     let agent = req.agent.clone().unwrap_or_default();
@@ -257,4 +185,85 @@ fn require_erase_scope(principal: &Principal) -> Result<(), ApiError> {
         }
     }
     Ok(())
+}
+
+/// deep 全库清空（管理员专用）：确认短语 + P-C 两阶段（arm → 5min 冷却 → 到期执行 / token 立即 / cancel 后悔药）。
+async fn purge_deep_flow(
+    state: &AppState,
+    principal: &Principal,
+    req: &PurgeRequest,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    // deep 收权（2026-09-03 测试报告 SEC-D/R-1 决策）：全库清空仅限管理员会话
+    // （Web 登录态 → 设置 → 危险区）。确认短语是公开常量（防误操作），挡不住蓄意；
+    // 真正的防线是把 deep 移出 AI key 能力面——erase scope 保留给 agent 级清场。
+    if !matches!(&*principal, Principal::Admin) {
+        return Err(ApiError::Forbidden(
+                "deep 全库清空仅限管理员（Web 登录态 → 设置 → 危险区）——AI key 即使有 erase scope 也不可。\
+                 按 agent 清场请用 {\"agent\":\"…\"}（erase scope 即可）"
+                    .into(),
+            ));
+    }
+    // 事故防线（2026-08-31 测试方案）：deep 是全库清空，agent 在此无过滤语义——
+    // 组合传入会让人误以为"只清这个 agent"。强制分开调用，语义零歧义。
+    if req.agent.is_some() {
+        return Err(ApiError::BadRequest(
+            "deep=true 是全库清空，不接受 agent 参数（agent 会在 deep 下被忽略，语义误导）。\
+                 按 agent 清场请去掉 deep；全库清空请去掉 agent 并带 confirm=\"清空记忆库\""
+                .into(),
+        ));
+    }
+    // 此处 principal 已收权为 Admin（见上），审计 executed_by 恒为 admin
+    let source = "admin".to_string();
+    // P-C 后悔药先于确认短语：取消是安全方向，不该要危险确认
+    if let Some(job_id) = req.cancel {
+        // 后悔药：取消 armed job
+        let n = engram_jobs::admin::cancel_pending_deep_purge(&state.pool, job_id)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+        if n == 0 {
+            return Err(ApiError::BadRequest(
+                "取消失败：job 不存在或已执行/已取消".into(),
+            ));
+        }
+        return Ok(Json(
+            serde_json::json!({"phase": "cancelled", "job_id": job_id}),
+        ));
+    }
+    // F2 一等清空：确认短语（用户亲口授权）+ P-C 两阶段（arm → 5min 冷却 → 到期执行）
+    if req.confirm.as_deref() != Some(PURGE_CONFIRM_PHRASE) {
+        return Err(ApiError::BadRequest(format!(
+            "deep 清空需要确认短语（AI 应先复述破坏半径，用户确认后传 confirm=\"{}\"）",
+            PURGE_CONFIRM_PHRASE
+        )));
+    }
+
+    // P-C 两阶段（两次真数据事故教训）：arm → 5 分钟冷却 → 到期执行。
+    // token = 立即执行；cancel = 后悔药。job 本身就是审计链。
+    if let Some(token) = req.token {
+        // 阶段二：确认执行——校验 armed job 存在且未执行，跳过剩余冷却
+        let armed = engram_jobs::admin::find_armed_deep_purge(&state.pool, token)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+        let Some((job_id, mut payload)) = armed else {
+            return Err(ApiError::BadRequest(
+                "token 无效或已过期（armed 状态 5 分钟，到期自动执行或已被取消/执行）".into(),
+            ));
+        };
+        let counts = svc(&state).purge_deep().await.map_err(me)?;
+        payload["executed_by"] = serde_json::json!(source);
+        engram_jobs::admin::complete_deep_purge(&state.pool, job_id, &payload, &counts)
+            .await
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
+        return Ok(Json(counts));
+    }
+
+    // 阶段一：arm——5 分钟冷却窗口（手滑后悔药），到期由 deep_purge handler 执行
+    let job = svc(&state).arm_deep_purge(&source).await.map_err(me)?;
+    Ok(Json(serde_json::json!({
+        "phase": "armed",
+        "job_id": job.id,
+        "executes_at": job.due_at,
+        "confirm_now": format!("再次调用并带 token=\"{}\" 立即执行", job.id),
+        "cancel": format!("再次调用并带 cancel=\"{}\" 取消", job.id),
+    })))
 }

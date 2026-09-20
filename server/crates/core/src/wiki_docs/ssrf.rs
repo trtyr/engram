@@ -181,33 +181,42 @@ pub async fn safe_fetch_opts(
         }
 
         // 大小限制（Content-Length 预检 + 流式读封顶）
-        if let Some(len) = resp.content_length()
-            && len as usize > max_bytes
-        {
-            return Err(FetchError::TooLarge);
-        }
-        let content_type = resp
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .map(String::from);
-        let mut bytes = Vec::with_capacity(8192);
-        let mut resp = resp;
-        while let Some(chunk) = resp
-            .chunk()
-            .await
-            .map_err(|e| FetchError::Network(e.to_string()))?
-        {
-            if bytes.len() + chunk.len() > max_bytes {
-                return Err(FetchError::TooLarge);
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        return Ok(FetchedPage {
-            content_type,
-            bytes,
-            final_url: current,
-        });
+        return read_page_body(resp, max_bytes, current).await;
     }
     Err(FetchError::TooManyRedirects)
+}
+
+/// 读响应体：Content-Length 预检 + 流式读封顶（TooLarge），产出 FetchedPage。
+async fn read_page_body(
+    mut resp: reqwest::Response,
+    max_bytes: usize,
+    current: String,
+) -> Result<FetchedPage, FetchError> {
+    if let Some(len) = resp.content_length()
+        && len as usize > max_bytes
+    {
+        return Err(FetchError::TooLarge);
+    }
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    let mut bytes = Vec::with_capacity(8192);
+    let mut resp = resp;
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| FetchError::Network(e.to_string()))?
+    {
+        if bytes.len() + chunk.len() > max_bytes {
+            return Err(FetchError::TooLarge);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    return Ok(FetchedPage {
+        content_type,
+        bytes,
+        final_url: current,
+    });
 }
