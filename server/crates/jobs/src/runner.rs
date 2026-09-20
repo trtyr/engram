@@ -267,7 +267,7 @@ impl RunnerHandle {
     /// 返回 true = 在途全部落库完成；false = 超时放弃（未完成任务由 reap_orphans 兜底回收）。
     pub async fn shutdown_and_wait(self, timeout: Duration) -> bool {
         let _ = self.shutdown_tx.send(true); // 有意忽略：接收端已退出即停机完成；join 结果不改变语义
-        let _ = self.join.await;
+        let _ = self.join.await; // 有意忽略：停机循环 join 结果不改变语义（超时由下方 wait_inflight_idle 判定）
         wait_inflight_idle(&self.semaphore, self.concurrency, timeout).await
     }
 }
