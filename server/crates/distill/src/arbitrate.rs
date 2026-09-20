@@ -228,26 +228,7 @@ async fn apply_verdicts(
 ) -> Result<(), JobError> {
     for v in verdicts {
         match v.disposition.as_str() {
-            "duplicate" => {
-                // B6：判重不再物理删除——归档 + superseded_by 指向既有条，
-                // 保留审计与恢复能力（LLM 误判时可追溯），UI 的 active 过滤天然屏蔽
-                if let Some(t) = v.target_id {
-                    sqlx::query(
-                        "UPDATE atoms SET status = 'archived', superseded_by = $2, updated_at = now() \
-                         WHERE id = $1 AND status = 'candidate'",
-                    )
-                    .bind(v.candidate_id)
-                    .bind(t)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| JobError::Retryable(e.to_string()))?;
-                    bump_hit_count(pool, t).await?;
-                } else {
-                    // 无 target 的 duplicate（异常裁决）：仅归档保留，不动任何既有条
-                    archive_candidate(pool, v.candidate_id).await?;
-                }
-                outcome.duplicates.push(v.candidate_id);
-            }
+            "duplicate" => apply_duplicate(pool, v, outcome).await?,
             "contradicts" => {
                 if let Some(t) = v.target_id {
                     // 候选转正 + 旧条 superseded
@@ -406,4 +387,32 @@ mod tests {
         assert!(parse_verdicts(&json!({"verdicts": "不是数组"}), &valid).is_empty());
         assert!(parse_verdicts(&json!({"verdicts": []}), &valid).is_empty());
     }
+}
+
+/// duplicate 裁决：归档候选 + superseded_by 指向既有条（B6 不物理删除，保留审计与恢复能力）；
+/// 无 target 的异常裁决仅归档，不动任何既有条。
+async fn apply_duplicate(
+    pool: &sqlx::PgPool,
+    v: &Verdict,
+    outcome: &mut Outcome,
+) -> Result<(), JobError> {
+    // B6：判重不再物理删除——归档 + superseded_by 指向既有条，
+    // 保留审计与恢复能力（LLM 误判时可追溯），UI 的 active 过滤天然屏蔽
+    if let Some(t) = v.target_id {
+        sqlx::query(
+            "UPDATE atoms SET status = 'archived', superseded_by = $2, updated_at = now() \
+                         WHERE id = $1 AND status = 'candidate'",
+        )
+        .bind(v.candidate_id)
+        .bind(t)
+        .execute(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        bump_hit_count(pool, t).await?;
+    } else {
+        // 无 target 的 duplicate（异常裁决）：仅归档保留，不动任何既有条
+        archive_candidate(pool, v.candidate_id).await?;
+    }
+    outcome.duplicates.push(v.candidate_id);
+    Ok(())
 }

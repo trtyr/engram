@@ -326,16 +326,7 @@ impl MemoryService {
 
         let new_content = content.unwrap_or(&cur.content).to_string();
         let new_conf = confidence.unwrap_or(cur.confidence);
-        let new_status = match status {
-            Some("archived") => "archived",
-            Some("active") if cur.status == "archived" => "active",
-            Some("active") | Some("superseded") | Some("candidate") => {
-                return Err(MemoryError::BadRequest(
-                    "status 只允许 active/archived 切换；supersede 走矛盾流程".into(),
-                ));
-            }
-            _ => cur.status.as_str(),
-        };
+        let new_status = resolve_atom_status(status, &cur)?;
         let content_changed = new_content != cur.content;
         let new_kind = kind.unwrap_or(&cur.kind);
         // 编辑能力：改写语义（content/kind/confidence）变化 → 旧值进 atom_revisions + 审计行。
@@ -444,4 +435,18 @@ impl MemoryService {
             .await
             .ok();
     }
+}
+
+/// status 只允许 active/archived 切换（archived → active 需当前为 archived）；supersede 走矛盾流程。
+fn resolve_atom_status<'a>(status: Option<&str>, cur: &'a AtomDto) -> Result<&'a str, MemoryError> {
+    Ok(match status {
+        Some("archived") => "archived",
+        Some("active") if cur.status == "archived" => "active",
+        Some("active") | Some("superseded") | Some("candidate") => {
+            return Err(MemoryError::BadRequest(
+                "status 只允许 active/archived 切换；supersede 走矛盾流程".into(),
+            ));
+        }
+        _ => cur.status.as_str(),
+    })
 }

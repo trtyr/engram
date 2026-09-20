@@ -151,38 +151,9 @@ impl JobQueue {
             JobError::Permanent(m) => (m.clone(), false),
         };
 
-        let can_retry = retryable && job.attempts < job.max_attempts;
-        let outcome = if can_retry {
-            // 指数退避 + 抖动：base * 2^n，封顶 30s
-            let backoff_ms = (200_i64 * (1 << job.attempts.min(8) as u32)).min(30_000);
-            let jitter = rand_jitter(backoff_ms);
-            sqlx::query(
-                "UPDATE jobs SET status = 'pending', error = $2, due_at = now() + ($3 || ' milliseconds')::interval, locked_by = NULL, locked_at = NULL WHERE id = $1",
-            )
-            .bind(job_id)
-            .bind(&message)
-            .bind(backoff_ms + jitter)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| JobError::Retryable(e.to_string()))?;
-            crate::types::FailOutcome::Rescheduled
-        } else if retryable {
-            sqlx::query("UPDATE jobs SET status = 'dead', error = $2, finished_at = now(), locked_by = NULL, locked_at = NULL WHERE id = $1")
-                .bind(job_id)
-                .bind(&message)
-                .execute(&self.pool)
-                .await
-                .map_err(|e| JobError::Retryable(e.to_string()))?;
-            crate::types::FailOutcome::Dead
-        } else {
-            sqlx::query("UPDATE jobs SET status = 'failed', error = $2, finished_at = now(), locked_by = NULL, locked_at = NULL WHERE id = $1")
-                .bind(job_id)
-                .bind(&message)
-                .execute(&self.pool)
-                .await
-                .map_err(|e| JobError::Retryable(e.to_string()))?;
-            crate::types::FailOutcome::Failed
-        };
+        let outcome = self
+            .resolve_fail_outcome(job_id, job.attempts, job.max_attempts, &message, retryable)
+            .await?;
 
         self.emit(
             job_id,
@@ -296,6 +267,49 @@ impl JobQueue {
             .map_err(|e| JobError::Retryable(e.to_string()))?;
         self.emit(job_id, "info", "人工复活重跑", None).await.ok();
         Ok(())
+    }
+    /// 失败落库三态：可重试 → pending（指数退避 + 抖动，封顶 30s）；重试耗尽 → dead；不可重试 → failed。
+    async fn resolve_fail_outcome(
+        &self,
+        job_id: Uuid,
+        attempts: i32,
+        max_attempts: i32,
+        message: &str,
+        retryable: bool,
+    ) -> Result<crate::types::FailOutcome, JobError> {
+        let can_retry = retryable && attempts < max_attempts;
+        let outcome = if can_retry {
+            // 指数退避 + 抖动：base * 2^n，封顶 30s
+            let backoff_ms = (200_i64 * (1 << attempts.min(8) as u32)).min(30_000);
+            let jitter = rand_jitter(backoff_ms);
+            sqlx::query(
+                "UPDATE jobs SET status = 'pending', error = $2, due_at = now() + ($3 || ' milliseconds')::interval, locked_by = NULL, locked_at = NULL WHERE id = $1",
+            )
+            .bind(job_id)
+            .bind(message)
+            .bind(backoff_ms + jitter)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+            crate::types::FailOutcome::Rescheduled
+        } else if retryable {
+            sqlx::query("UPDATE jobs SET status = 'dead', error = $2, finished_at = now(), locked_by = NULL, locked_at = NULL WHERE id = $1")
+                .bind(job_id)
+                .bind(message)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+            crate::types::FailOutcome::Dead
+        } else {
+            sqlx::query("UPDATE jobs SET status = 'failed', error = $2, finished_at = now(), locked_by = NULL, locked_at = NULL WHERE id = $1")
+                .bind(job_id)
+                .bind(message)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+            crate::types::FailOutcome::Failed
+        };
+        Ok(outcome)
     }
 }
 

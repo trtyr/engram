@@ -101,16 +101,11 @@ fn repair_trailing_commas(s: &str) -> String {
                 i += 1;
             }
             b',' => {
-                let mut j = i + 1;
-                while j < b.len() && b[j].is_ascii_whitespace() {
-                    j += 1;
-                }
-                if j < b.len() && (b[j] == b'}' || b[j] == b']') {
-                    i += 1; // 丢弃尾逗号
-                } else {
+                // 尾逗号（逗号后仅有空白且紧跟 } / ]）→ 丢弃，JSON 不允许
+                if !is_trailing_comma(b, i) {
                     out.push(c);
-                    i += 1;
                 }
+                i += 1;
             }
             _ => {
                 out.push(c);
@@ -507,4 +502,13 @@ mod tests {
             "应为 Retryable，实际 {err:?}"
         );
     }
+}
+
+/// 逗号后仅有空白且紧跟 `}` / `]` → 尾逗号（JSON 不允许，需丢弃）。
+fn is_trailing_comma(b: &[u8], i: usize) -> bool {
+    let mut j = i + 1;
+    while j < b.len() && b[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    j < b.len() && (b[j] == b'}' || b[j] == b']')
 }
