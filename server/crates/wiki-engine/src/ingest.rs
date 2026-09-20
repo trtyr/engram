@@ -120,7 +120,7 @@ pub async fn enqueue_ingest(
     let (id, real_id) = store_raw_source(queue, lib, title, text, &sha).await?;
 
     // 步骤 3：W1 状态感知重入队（analyze 在途 → 秒跳过；analyze 成功 → 直发 generate）
-    if let Some(outcome) = reenqueue_stale_source(queue, lib, real_id, id, title).await? {
+    if let Some(outcome) = reenqueue_stale_source(queue, real_id, id, title).await? {
         return Ok(outcome);
     }
 
@@ -144,7 +144,7 @@ async fn dedup_outcome(
 ) -> Result<Option<IngestOutcome>, JobError> {
     let existing: Option<(Uuid, String)> =
         sqlx::query_as("SELECT id, status FROM wiki_sources WHERE sha256 = $1 AND library_id = $2")
-            .bind(&sha)
+            .bind(sha)
             .bind(lib)
             .fetch_optional(queue.pool())
             .await
@@ -199,7 +199,7 @@ async fn store_raw_source(
     )
     .bind(id)
     .bind(lib)
-    .bind(&sha)
+    .bind(sha)
     .bind(path.to_string_lossy().as_ref())
     .bind(title)
     .fetch_one(queue.pool())
@@ -229,7 +229,6 @@ async fn store_raw_source(
 /// 返回 Some(outcome) 表示已入队 / None 表示无需重入队（走常规 analyze 入队）。
 async fn reenqueue_stale_source(
     queue: &engram_jobs::JobQueue,
-    lib: Uuid,
     real_id: Uuid,
     id: Uuid,
     title: &str,

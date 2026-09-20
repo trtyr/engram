@@ -42,54 +42,10 @@ impl WikiService {
         .bind(lib)
         .fetch_all(&self.pool)
         .await?;
-        // 社区发现
         let node_slugs: Vec<String> = nodes.iter().map(|(s, _, _, _)| s.clone()).collect();
-        let e64: Vec<(String, String, f64)> = edges
-            .iter()
-            .map(|(f, t, w)| (f.clone(), t.clone(), *w as f64))
-            .collect();
-        // 万页保护（压测实测三个发现）：Louvain 是纯 CPU 计算——(1) 万级全图 >120s；
-        // (2) 4077 节点子图在 debug 下分钟级且阻塞 tokio worker（连接池 acquire 等 638s、
-        // 实例整体无响应）；(3) 阈值内也必须 spawn_blocking 隔离。超限的 community 过滤
-        // 直接拒绝（引导先 SQL 层收窄）；全量请求降级跳过社区计算（community=0、空列表）。
-        const LOUVAIN_MAX_NODES: usize = crate::community::LOUVAIN_MAX_NODES;
-        let over_limit = node_slugs.len() > LOUVAIN_MAX_NODES;
-        if over_limit && community.is_some() {
-            return Err(WikiError::BadRequest(format!(
-                "子图 {} 节点超过社区计算上限 {}——请先用 folder/page_type 参数收窄后再按社区过滤",
-                node_slugs.len(),
-                LOUVAIN_MAX_NODES
-            )));
-        }
-        let (comms, cohesion): (
-            std::collections::HashMap<String, usize>,
-            std::collections::HashMap<usize, f64>,
-        ) = if over_limit {
-            Default::default()
-        } else {
-            let slugs = node_slugs.clone();
-            let e64c = e64.clone();
-            tokio::task::spawn_blocking(move || {
-                let comms = crate::community::louvain_communities(&slugs, &e64c);
-                let cohesion = crate::community::community_cohesion(&slugs, &e64c, &comms);
-                // louvain 返回借用 key（&str 借 slugs）——转自有 String 后才能跨闭包返回
-                let owned: std::collections::HashMap<String, usize> =
-                    comms.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-                (owned, cohesion)
-            })
-            .await
-            .unwrap_or_default()
-        };
-        // 成员映射（id → 成员 slugs，保持节点顺序）——top_slug/size 真实统计，
-        // 与 insights.rs 的 CommunityInfo 口径一致（曾长期 size:0 且缺 top_slug 违约）
-        let mut members: std::collections::HashMap<usize, Vec<&str>> =
-            std::collections::HashMap::new();
-        for slug in &node_slugs {
-            members
-                .entry(comms.get(slug.as_str()).copied().unwrap_or(0))
-                .or_default()
-                .push(slug);
-        }
+        // 社区发现（万页保护 + 成员映射）——纯 CPU 计算在助手内 spawn_blocking 隔离
+        let (comms, cohesion, members) =
+            discover_graph_communities(&node_slugs, &edges, community).await?;
         // community 后置裁剪：保留全图社区编号 == 选中值的节点，边随节点过滤
         let kept: std::collections::HashSet<String> = match community {
             Some(n) => nodes
@@ -472,4 +428,66 @@ impl WikiService {
             "pages": pages,
         }))
     }
+}
+
+/// 社区发现 + 成员映射（万页保护：Louvain 是纯 CPU 计算——万级全图 >120s 且阻塞 tokio
+/// worker，超限时降级跳过、阈值内也 spawn_blocking 隔离；超限的 community 过滤直接拒绝）。
+/// 返回 `(社区编号表, 凝聚度表, 成员映射)`；成员借用 `node_slugs` 的生命周期。
+async fn discover_graph_communities<'a>(
+    node_slugs: &'a [String],
+    edges: &[(String, String, f32)],
+    community: Option<usize>,
+) -> Result<
+    (
+        std::collections::HashMap<String, usize>,
+        std::collections::HashMap<usize, f64>,
+        std::collections::HashMap<usize, Vec<&'a str>>,
+    ),
+    WikiError,
+> {
+    // 万页保护（压测实测三个发现）：Louvain 是纯 CPU 计算——(1) 万级全图 >120s；
+    // (2) 4077 节点子图在 debug 下分钟级且阻塞 tokio worker（连接池 acquire 等 638s、
+    // 实例整体无响应）；(3) 阈值内也必须 spawn_blocking 隔离。超限的 community 过滤
+    // 直接拒绝（引导先 SQL 层收窄）；全量请求降级跳过社区计算（community=0、空列表）。
+    const LOUVAIN_MAX_NODES: usize = crate::community::LOUVAIN_MAX_NODES;
+    let over_limit = node_slugs.len() > LOUVAIN_MAX_NODES;
+    if over_limit && community.is_some() {
+        return Err(WikiError::BadRequest(format!(
+            "子图 {} 节点超过社区计算上限 {}——请先用 folder/page_type 参数收窄后再按社区过滤",
+            node_slugs.len(),
+            LOUVAIN_MAX_NODES
+        )));
+    }
+    let e64: Vec<(String, String, f64)> = edges
+        .iter()
+        .map(|(f, t, w)| (f.clone(), t.clone(), *w as f64))
+        .collect();
+    let (comms, cohesion): (
+        std::collections::HashMap<String, usize>,
+        std::collections::HashMap<usize, f64>,
+    ) = if over_limit {
+        Default::default()
+    } else {
+        let slugs = node_slugs.to_vec();
+        let e64c = e64.clone();
+        tokio::task::spawn_blocking(move || {
+            let comms = crate::community::louvain_communities(&slugs, &e64c);
+            let cohesion = crate::community::community_cohesion(&slugs, &e64c, &comms);
+            // louvain 返回借用 key（&str 借 slugs）——转自有 String 后才能跨闭包返回
+            let owned: std::collections::HashMap<String, usize> =
+                comms.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+            (owned, cohesion)
+        })
+        .await
+        .unwrap_or_default()
+    };
+    let mut members: std::collections::HashMap<usize, Vec<&'a str>> =
+        std::collections::HashMap::new();
+    for slug in node_slugs {
+        members
+            .entry(comms.get(slug.as_str()).copied().unwrap_or(0))
+            .or_default()
+            .push(slug);
+    }
+    Ok((comms, cohesion, members))
 }
