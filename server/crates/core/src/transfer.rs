@@ -418,22 +418,8 @@ async fn import_memory_domain(pool: &PgPool, data: &Value) -> Result<MemoryImpor
         }
         c_atom.merge(DomainCount::bump(repo::import_atom(pool, &row).await?));
     }
-    for it in each(data.get("memory"), "atoms") {
-        let superseded_by = it
-            .get("superseded_by")
-            .and_then(|x| x.as_str())
-            .unwrap_or("");
-        if superseded_by.is_empty() {
-            continue;
-        }
-        let (Ok(id), Ok(target)) = (
-            uuid::Uuid::parse_str(it.get("id").and_then(|x| x.as_str()).unwrap_or("")),
-            uuid::Uuid::parse_str(superseded_by),
-        ) else {
-            continue;
-        };
-        repo::backfill_atom_superseded_by(pool, id, target).await?;
-    }
+    backfill_superseded_atoms(pool, data).await?;
+
     let mut c_persona = DomainCount::default();
     for it in each(data.get("memory"), "persona") {
         c_persona.merge(DomainCount::bump(repo::import_persona(pool, &it).await?));
@@ -569,4 +555,25 @@ async fn import_tail_domains(
         .unwrap_or_default();
     let (p_imp, p_skip) = repo::import_wiki_promotions(pool, &promo_items).await?;
     Ok((t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip))
+}
+
+/// atoms.superseded_by 自引用 FK 回填（插入期置 NULL，全量入库后统一回填）。
+async fn backfill_superseded_atoms(pool: &PgPool, data: &Value) -> Result<()> {
+    for it in each(data.get("memory"), "atoms") {
+        let superseded_by = it
+            .get("superseded_by")
+            .and_then(|x| x.as_str())
+            .unwrap_or("");
+        if superseded_by.is_empty() {
+            continue;
+        }
+        let (Ok(id), Ok(target)) = (
+            uuid::Uuid::parse_str(it.get("id").and_then(|x| x.as_str()).unwrap_or("")),
+            uuid::Uuid::parse_str(superseded_by),
+        ) else {
+            continue;
+        };
+        repo::backfill_atom_superseded_by(pool, id, target).await?;
+    }
+    Ok(())
 }
