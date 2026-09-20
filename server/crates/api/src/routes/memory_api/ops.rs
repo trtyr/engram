@@ -196,7 +196,7 @@ async fn purge_deep_flow(
     // deep 收权（2026-09-03 测试报告 SEC-D/R-1 决策）：全库清空仅限管理员会话
     // （Web 登录态 → 设置 → 危险区）。确认短语是公开常量（防误操作），挡不住蓄意；
     // 真正的防线是把 deep 移出 AI key 能力面——erase scope 保留给 agent 级清场。
-    if !matches!(&*principal, Principal::Admin) {
+    if !matches!(*principal, Principal::Admin) {
         return Err(ApiError::Forbidden(
                 "deep 全库清空仅限管理员（Web 登录态 → 设置 → 危险区）——AI key 即使有 erase scope 也不可。\
                  按 agent 清场请用 {\"agent\":\"…\"}（erase scope 即可）"
@@ -249,7 +249,7 @@ async fn purge_deep_flow(
                 "token 无效或已过期（armed 状态 5 分钟，到期自动执行或已被取消/执行）".into(),
             ));
         };
-        let counts = svc(&state).purge_deep().await.map_err(me)?;
+        let counts = svc(state).purge_deep().await.map_err(me)?;
         payload["executed_by"] = serde_json::json!(source);
         engram_jobs::admin::complete_deep_purge(&state.pool, job_id, &payload, &counts)
             .await
@@ -258,7 +258,7 @@ async fn purge_deep_flow(
     }
 
     // 阶段一：arm——5 分钟冷却窗口（手滑后悔药），到期由 deep_purge handler 执行
-    let job = svc(&state).arm_deep_purge(&source).await.map_err(me)?;
+    let job = svc(state).arm_deep_purge(&source).await.map_err(me)?;
     Ok(Json(serde_json::json!({
         "phase": "armed",
         "job_id": job.id,

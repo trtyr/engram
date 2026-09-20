@@ -68,7 +68,7 @@ impl SkillsService {
                 tags.push(t.clone());
             }
         }
-        let exists = repo::exists_slug(&self.pool, &slug).await;
+        let _exists = repo::exists_slug(&self.pool, &slug).await;
         self.import_upsert(index, name, slug, meta, body, tags, source, overwrite)
             .await
     }

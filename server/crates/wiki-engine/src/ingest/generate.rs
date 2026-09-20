@@ -400,12 +400,12 @@ async fn finalize_generation(
     all_slugs: &[String],
 ) -> Result<usize, JobError> {
     // 链接图 + 索引/日志/overview 维护
-    rebuild_links(pool, lib, &all_slugs).await?;
+    rebuild_links(pool, lib, all_slugs).await?;
     update_index_and_log(
         pool,
         lib,
         source_id,
-        &source_title,
+        source_title,
         created,
         updated,
         proposals,
@@ -413,12 +413,12 @@ async fn finalize_generation(
     .await?;
 
     // 新/变页回读 → tsv（FTS） → 嵌入（失败不阻塞）
-    let stored = read_generated_pages(pool, lib, &all_slugs).await?;
+    let stored = read_generated_pages(pool, lib, all_slugs).await?;
     write_page_tsv(pool, lib, &stored).await?;
-    let embedded_pages = embed_generated_pages(&ctx, &llm, pool, lib, source_id, &stored).await?;
+    let embedded_pages = embed_generated_pages(ctx, llm, pool, lib, source_id, &stored).await?;
 
     mark_source_ready(pool, source_id).await?;
     // 全局状态更新：overview/权重 + 社区摘要 + 存量页向量回填
-    refresh_after_generate(&ctx, &llm, pool, lib, created + updated).await?;
+    refresh_after_generate(ctx, llm, pool, lib, created + updated).await?;
     Ok(embedded_pages)
 }

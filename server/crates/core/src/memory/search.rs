@@ -468,13 +468,9 @@ impl MemoryService {
         };
         let mut l1 = if want_l1 {
             search_atoms(
-                &self.pool,
-                query,
-                qv.as_deref(),
-                max_items,
+                &self.pool, query, qv, max_items,
                 true, // sensitive 口径放开（2026-09-12）——标记保留、不再隐身
-                from,
-                to,
+                from, to,
             )
             .await
             .map_err(StoreError::from)?
@@ -487,7 +483,7 @@ impl MemoryService {
             .await?;
 
         let l2 = if want_l2 {
-            search_scenarios(&self.pool, query, qv.as_deref(), max_items)
+            search_scenarios(&self.pool, query, qv, max_items)
                 .await
                 .map_err(StoreError::from)?
         } else {

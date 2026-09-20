@@ -372,7 +372,7 @@ impl MemoryService {
         // F4 治：归档或标敏感 → 受影响场景快照需要收敛重算（best-effort 异步，
         // 30s 防抖合并批量归档；重算仅活跃非敏感成员、0 活跃则解散——organize 收敛段）
         if new_status == "archived" || sensitive == Some(true) {
-            self.enqueue_converge_refresh(id);
+            self.enqueue_converge_refresh(id).await;
         }
         Ok(row)
     }

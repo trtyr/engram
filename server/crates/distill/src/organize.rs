@@ -344,6 +344,33 @@ async fn enqueue_persona(
     Ok(())
 }
 
+/// converge_only 快速通道：只跑收敛段（归档/标敏感触发的刷新），不进主组织流程。
+async fn converge_only_reply(
+    ctx: &JobContext,
+    converge: &mut crate::scenario_converge::Converge,
+) -> Result<serde_json::Value, JobError> {
+    if !converge.touched.is_empty() {
+        enqueue_persona(ctx, &converge.touched, &mut converge.removed_texts).await?;
+    }
+    Ok(json!({
+        "scenario_ids": converge.touched,
+        "converged": true,
+        "converge_only": true
+    }))
+}
+
+/// 无新原子：仍让收敛结果链下去（解散/重算同样该触发画像刷新）。
+async fn no_atoms_reply(
+    ctx: &JobContext,
+    converge: &mut crate::scenario_converge::Converge,
+) -> Result<serde_json::Value, JobError> {
+    // 无新原子也要让收敛结果链下去（解散/重算同样该触发画像刷新）
+    if !converge.touched.is_empty() {
+        enqueue_persona(ctx, &converge.touched, &mut converge.removed_texts).await?;
+    }
+    Ok(json!({"scenario_ids": converge.touched, "converged": true}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,31 +407,4 @@ mod tests {
         assert!(parse_actions(&json!({}), &empty, &empty).is_empty());
         assert!(parse_actions(&json!({"actions": "非数组"}), &empty, &empty).is_empty());
     }
-}
-
-/// converge_only 快速通道：只跑收敛段（归档/标敏感触发的刷新），不进主组织流程。
-async fn converge_only_reply(
-    ctx: &JobContext,
-    converge: &mut crate::scenario_converge::Converge,
-) -> Result<serde_json::Value, JobError> {
-    if !converge.touched.is_empty() {
-        enqueue_persona(&ctx, &converge.touched, &mut converge.removed_texts).await?;
-    }
-    return Ok(json!({
-        "scenario_ids": converge.touched,
-        "converged": true,
-        "converge_only": true
-    }));
-}
-
-/// 无新原子：仍让收敛结果链下去（解散/重算同样该触发画像刷新）。
-async fn no_atoms_reply(
-    ctx: &JobContext,
-    converge: &mut crate::scenario_converge::Converge,
-) -> Result<serde_json::Value, JobError> {
-    // 无新原子也要让收敛结果链下去（解散/重算同样该触发画像刷新）
-    if !converge.touched.is_empty() {
-        enqueue_persona(&ctx, &converge.touched, &mut converge.removed_texts).await?;
-    }
-    return Ok(json!({"scenario_ids": converge.touched, "converged": true}));
 }

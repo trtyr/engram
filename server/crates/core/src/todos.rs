@@ -441,7 +441,7 @@ impl TodoService {
                 resolution,
                 due_at,
                 project_hint,
-                tags: tags.as_deref(),
+                tags,
             },
         )
         .await?;

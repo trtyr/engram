@@ -188,7 +188,7 @@ pub async fn safe_fetch_opts(
 
 /// 读响应体：Content-Length 预检 + 流式读封顶（TooLarge），产出 FetchedPage。
 async fn read_page_body(
-    mut resp: reqwest::Response,
+    resp: reqwest::Response,
     max_bytes: usize,
     current: String,
 ) -> Result<FetchedPage, FetchError> {
@@ -214,9 +214,9 @@ async fn read_page_body(
         }
         bytes.extend_from_slice(&chunk);
     }
-    return Ok(FetchedPage {
+    Ok(FetchedPage {
         content_type,
         bytes,
         final_url: current,
-    });
+    })
 }

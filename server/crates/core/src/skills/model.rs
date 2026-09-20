@@ -35,7 +35,7 @@ pub(crate) fn assign_meta(meta: &mut FrontmatterMeta, key: &str, value: &str) {
 /// 绝不让导入因格式瑕疵整体失败。支持 YAML 块标量（`description: >-` 折叠 / `|` 保留多行——
 /// 现网 SKILL.md 常见形态），折叠 `>` 把多行并成一行，保留 `|` 以换行拼接。
 pub fn parse_frontmatter(content: &str) -> (FrontmatterMeta, String) {
-    let mut meta = FrontmatterMeta::default();
+    let meta = FrontmatterMeta::default();
     let trimmed = content.trim_start();
     let Some(rest) = trimmed.strip_prefix("---") else {
         return (meta, content.to_string());

@@ -292,6 +292,28 @@ async fn execute_job(queue: &JobQueue, handlers: Arc<HashMap<String, HandlerFn>>
     }
 }
 
+/// per-kind 分池（R12）：cap 不超过全局并发；空表 = 与旧行为一致。
+fn build_per_kind_semaphores(
+    config: &RunnerConfig,
+) -> HashMap<String, Arc<tokio::sync::Semaphore>> {
+    let mut per_kind_sem: HashMap<String, Arc<tokio::sync::Semaphore>> = HashMap::new();
+    for (kind, cap) in &config.per_kind_concurrency {
+        let cap = (*cap).min(config.concurrency);
+        per_kind_sem.insert(kind.clone(), Arc::new(tokio::sync::Semaphore::new(cap)));
+    }
+    if !per_kind_sem.is_empty() {
+        let mut parts: Vec<String> = per_kind_sem
+            .iter()
+            .map(|(k, s)| format!("{k}:{}", s.available_permits()))
+            .collect();
+        parts.sort();
+        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, per_kind = %parts.join(","), "job runner 启动（per-kind 并发生效）");
+    } else {
+        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, "job runner 启动");
+    }
+    per_kind_sem
+}
+
 #[cfg(test)]
 mod per_kind_tests {
     use super::*;
@@ -351,26 +373,4 @@ mod per_kind_tests {
         let sem = Arc::new(tokio::sync::Semaphore::new(3));
         assert!(wait_inflight_idle(&sem, 3, Duration::from_millis(100)).await);
     }
-}
-
-/// per-kind 分池（R12）：cap 不超过全局并发；空表 = 与旧行为一致。
-fn build_per_kind_semaphores(
-    config: &RunnerConfig,
-) -> HashMap<String, Arc<tokio::sync::Semaphore>> {
-    let mut per_kind_sem: HashMap<String, Arc<tokio::sync::Semaphore>> = HashMap::new();
-    for (kind, cap) in &config.per_kind_concurrency {
-        let cap = (*cap).min(config.concurrency);
-        per_kind_sem.insert(kind.clone(), Arc::new(tokio::sync::Semaphore::new(cap)));
-    }
-    if !per_kind_sem.is_empty() {
-        let mut parts: Vec<String> = per_kind_sem
-            .iter()
-            .map(|(k, s)| format!("{k}:{}", s.available_permits()))
-            .collect();
-        parts.sort();
-        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, per_kind = %parts.join(","), "job runner 启动（per-kind 并发生效）");
-    } else {
-        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, "job runner 启动");
-    }
-    per_kind_sem
 }

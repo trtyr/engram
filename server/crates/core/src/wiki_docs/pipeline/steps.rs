@@ -81,7 +81,7 @@ pub(super) async fn fetch_document_bytes(
         // URL
         ctx.emit(&format!("抓取 {source_uri}"), None).await.ok();
         match super::super::ssrf::safe_fetch(
-            &source_uri,
+            source_uri,
             20 * 1024 * 1024,
             std::time::Duration::from_secs(30),
         )

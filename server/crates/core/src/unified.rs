@@ -326,60 +326,6 @@ async fn apply_unified_rerank(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn hit(domain: &str, layer: Option<&str>) -> UnifiedHit {
-        UnifiedHit {
-            domain: domain.into(),
-            id: Uuid::now_v7(),
-            title: None,
-            snippet: "s".into(),
-            score: 0.0,
-            extra: layer
-                .map(|l| serde_json::json!({ "layer": l }))
-                .unwrap_or(serde_json::json!({})),
-        }
-    }
-
-    #[test]
-    fn rrf_rank_normalizes_per_domain_layer() {
-        // 两域混排：memory l1/l2、wiki（文档+页）
-        let mut hits = vec![
-            hit("memory", Some("l1")),
-            hit("wiki", None),
-            hit("wiki", None),
-            hit("memory", Some("l2")),
-            hit("memory", Some("l1")),
-            hit("wiki", None),
-        ];
-        assign_rrf_scores(&mut hits);
-
-        // 每个 domain:layer 组内：第 0 名 1/60，第 1 名 1/61
-        let mem_l1: Vec<f64> = hits
-            .iter()
-            .filter(|h| h.domain == "memory" && h.extra["layer"] == "l1")
-            .map(|h| h.score)
-            .collect();
-        assert_eq!(mem_l1.len(), 2);
-        assert!((mem_l1[0] - 1.0 / 60.0).abs() < 1e-9);
-        assert!((mem_l1[1] - 1.0 / 61.0).abs() < 1e-9);
-
-        // 跨域第 0 名分数相等（公平）
-        let first_scores: Vec<f64> = ["memory", "wiki"]
-            .iter()
-            .filter_map(|d| {
-                hits.iter()
-                    .filter(|h| &h.domain == d)
-                    .map(|h| h.score)
-                    .max_by(|a, b| a.partial_cmp(b).unwrap())
-            })
-            .collect();
-        assert!(first_scores.iter().all(|s| (*s - 1.0 / 60.0).abs() < 1e-9));
-    }
-}
-
 /// 实体 / 待办 / wiki 页面三域命中并入（失败域跳过并告警，不阻塞其余域）。
 fn merge_secondary_hits(
     merged: &mut Vec<UnifiedHit>,
@@ -432,5 +378,59 @@ fn merge_secondary_hits(
         }
     } else {
         tracing::warn!("统一检索：wiki 域失败，跳过");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hit(domain: &str, layer: Option<&str>) -> UnifiedHit {
+        UnifiedHit {
+            domain: domain.into(),
+            id: Uuid::now_v7(),
+            title: None,
+            snippet: "s".into(),
+            score: 0.0,
+            extra: layer
+                .map(|l| serde_json::json!({ "layer": l }))
+                .unwrap_or(serde_json::json!({})),
+        }
+    }
+
+    #[test]
+    fn rrf_rank_normalizes_per_domain_layer() {
+        // 两域混排：memory l1/l2、wiki（文档+页）
+        let mut hits = vec![
+            hit("memory", Some("l1")),
+            hit("wiki", None),
+            hit("wiki", None),
+            hit("memory", Some("l2")),
+            hit("memory", Some("l1")),
+            hit("wiki", None),
+        ];
+        assign_rrf_scores(&mut hits);
+
+        // 每个 domain:layer 组内：第 0 名 1/60，第 1 名 1/61
+        let mem_l1: Vec<f64> = hits
+            .iter()
+            .filter(|h| h.domain == "memory" && h.extra["layer"] == "l1")
+            .map(|h| h.score)
+            .collect();
+        assert_eq!(mem_l1.len(), 2);
+        assert!((mem_l1[0] - 1.0 / 60.0).abs() < 1e-9);
+        assert!((mem_l1[1] - 1.0 / 61.0).abs() < 1e-9);
+
+        // 跨域第 0 名分数相等（公平）
+        let first_scores: Vec<f64> = ["memory", "wiki"]
+            .iter()
+            .filter_map(|d| {
+                hits.iter()
+                    .filter(|h| &h.domain == d)
+                    .map(|h| h.score)
+                    .max_by(|a, b| a.partial_cmp(b).unwrap())
+            })
+            .collect();
+        assert!(first_scores.iter().all(|s| (*s - 1.0 / 60.0).abs() < 1e-9));
     }
 }

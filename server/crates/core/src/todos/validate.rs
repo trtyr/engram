@@ -7,7 +7,7 @@ pub(super) fn validate_todo_update_basic(
     body: Option<&str>,
     tags: Option<&[String]>,
 ) -> Result<(), TodoError> {
-    let kind = kind.to_string();
+    let _kind = kind.to_string();
     if let Some(t) = title {
         let t = t.trim();
         if t.is_empty() {

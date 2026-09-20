@@ -48,9 +48,6 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     .await
     .ok();
 
-    let mut done_atoms = 0usize;
-    let mut done_scenarios = 0usize;
-
     let (done_atoms, done_scenarios) =
         reembed_missing(pool, &llm, ctx.job.id, &atoms, &scenarios).await?;
 

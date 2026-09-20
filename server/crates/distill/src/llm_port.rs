@@ -426,6 +426,15 @@ impl DistillLlm for MockLlm {
 
 pub type LlmRef = Arc<dyn DistillLlm>;
 
+/// 逗号后仅有空白且紧跟 `}` / `]` → 尾逗号（JSON 不允许，需丢弃）。
+fn is_trailing_comma(b: &[u8], i: usize) -> bool {
+    let mut j = i + 1;
+    while j < b.len() && b[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    j < b.len() && (b[j] == b'}' || b[j] == b']')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,13 +511,4 @@ mod tests {
             "应为 Retryable，实际 {err:?}"
         );
     }
-}
-
-/// 逗号后仅有空白且紧跟 `}` / `]` → 尾逗号（JSON 不允许，需丢弃）。
-fn is_trailing_comma(b: &[u8], i: usize) -> bool {
-    let mut j = i + 1;
-    while j < b.len() && b[j].is_ascii_whitespace() {
-        j += 1;
-    }
-    j < b.len() && (b[j] == b'}' || b[j] == b']')
 }

@@ -281,7 +281,7 @@ impl WikiService {
         let dup_page = self.get_page(lib, &dup).await?;
         let pri_page = self.get_page(lib, &primary).await?;
 
-        let (mut new_primary, discarded) = merge_content(&pri_page, &dup_page, &dup);
+        let (new_primary, discarded) = merge_content(&pri_page, &dup_page, &dup);
         let rewrite_total = self.rewrite_referencing_links(lib, &dup, &primary).await?;
 
         // 3) primary 落合并内容（内容有变才写）
@@ -494,9 +494,9 @@ fn merge_content(
             pri.content, dup_page.title, dup_c
         )
     };
-    let (_, n_self) = crate::repair::rewrite_links(&new_primary, &dup, None);
+    let (_, n_self) = crate::repair::rewrite_links(&new_primary, dup, None);
     if n_self > 0 {
-        let (nc, _) = crate::repair::rewrite_links(&new_primary, &dup, None);
+        let (nc, _) = crate::repair::rewrite_links(&new_primary, dup, None);
         new_primary = nc;
     }
     (new_primary, discarded)

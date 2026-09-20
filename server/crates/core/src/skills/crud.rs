@@ -314,7 +314,8 @@ fn skill_snapshot<'a>(
         || patch.content.is_some()
         || patch.tags.is_some();
     let is_script = current.kind == "script";
-    let snapshot = if semantic_change && !is_script {
+
+    if semantic_change && !is_script {
         Some(repo::SkillSnapshot {
             skill_id: current.id,
             name: &current.name,
@@ -325,6 +326,5 @@ fn skill_snapshot<'a>(
         })
     } else {
         None
-    };
-    snapshot
+    }
 }

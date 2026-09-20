@@ -14,7 +14,7 @@ use engram_storage::repo::transfer as repo;
 mod sync;
 use engram_storage::{PgPool, StoreError};
 use serde_json::{Value, json};
-use sync::*;
+pub use sync::{check_sync_target, pull_from, sync_transfer};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransferError {

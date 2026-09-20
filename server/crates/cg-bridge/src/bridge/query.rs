@@ -257,12 +257,12 @@ impl CgBridge {
         match kind {
             QueryKind::Explore => Ok(serde_json::json!({
                 "kind": "explore",
-                "text": truncate(&stdout, 24_000),
+                "text": truncate(stdout, 24_000),
                 "truncated": stdout.len() > 24_000,
             })),
             QueryKind::Node => Ok(serde_json::json!({
                 "kind": "node",
-                "text": truncate(&stdout, 24_000),
+                "text": truncate(stdout, 24_000),
             })),
             _ => serde_json::from_str(stdout.trim())
                 .map_err(|e| CgError::Parse(format!("JSON 归一失败: {e}"))),
@@ -273,7 +273,7 @@ impl CgBridge {
 /// explore 大纲查询（阻塞段）：LIKE 通配转义 + 200 条上限，产出文件清单与符号大纲。
 fn explore_outline_query(db_str: &str, target: &str) -> Result<Option<serde_json::Value>, CgError> {
     let conn =
-        rusqlite::Connection::open_with_flags(&db_str, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        rusqlite::Connection::open_with_flags(db_str, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| CgError::Parse(format!("索引库打开失败: {e}")))?;
     // LIKE 通配符转义（target 是自由文本，% _ 会改变匹配语义）
     let like = format!(
@@ -308,13 +308,13 @@ fn explore_outline_query(db_str: &str, target: &str) -> Result<Option<serde_json
     if rows.is_empty() {
         return Ok(None);
     }
-    Ok(outline_json(&rows, target)?)
+    outline_json(&rows, target)
 }
 
 /// 文件级依赖图（阻塞段）：按 (源文件,目标文件) 聚合 import 边，产出 nodes/edges。
 fn full_graph_query(db_str: &str) -> Result<serde_json::Value, CgError> {
     let conn =
-        rusqlite::Connection::open_with_flags(&db_str, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        rusqlite::Connection::open_with_flags(db_str, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| CgError::Parse(format!("索引库打开失败: {e}")))?;
     let mut stmt = conn
             .prepare(
@@ -351,11 +351,11 @@ fn full_graph_query(db_str: &str) -> Result<serde_json::Value, CgError> {
     }))
 }
 
+/// SQLite 行：name / kind / file_path / start_line / end_line / signature。
+type OutlineRow = (String, String, String, i64, i64, Option<String>);
+
 /// explore 大纲的 JSON 组装（符号截断 + 文件清单去重保序 + 200 上限提示）。
-fn outline_json(
-    rows: &[(String, String, String, i64, i64, Option<String>)],
-    target: &str,
-) -> Result<Option<serde_json::Value>, CgError> {
+fn outline_json(rows: &[OutlineRow], target: &str) -> Result<Option<serde_json::Value>, CgError> {
     let truncate = |s: &str| -> String {
         if s.chars().count() <= 120 {
             s.to_string()

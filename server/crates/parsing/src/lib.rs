@@ -155,6 +155,36 @@ fn parse_html(bytes: &[u8]) -> Result<String, ParseError> {
     }
 }
 
+/// 表格 → 文本：逐行逐格取段落文本，「 | 」分隔（与段落分支同口径）。
+fn table_to_text(t: &docx_rs::Table, para_text: &dyn Fn(&docx_rs::Paragraph) -> String) -> String {
+    let mut out = String::new();
+    for tc in &t.rows {
+        let docx_rs::TableChild::TableRow(row) = tc;
+        {
+            let cells: Vec<String> = row
+                .cells
+                .iter()
+                .map(|cc| match cc {
+                    docx_rs::TableRowChild::TableCell(c) => {
+                        let texts: Vec<String> = c
+                            .children
+                            .iter()
+                            .filter_map(|content| match content {
+                                docx_rs::TableCellContent::Paragraph(p) => Some(para_text(p)),
+                                _ => None,
+                            })
+                            .collect();
+                        texts.join(" ")
+                    }
+                })
+                .collect();
+            out.push_str(&cells.join(" | "));
+            out.push('\n');
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,32 +253,4 @@ mod tests {
                 .is_err()
         );
     }
-}
-
-/// 表格 → 文本：逐行逐格取段落文本，「 | 」分隔（与段落分支同口径）。
-fn table_to_text(t: &docx_rs::Table, para_text: &dyn Fn(&docx_rs::Paragraph) -> String) -> String {
-    let mut out = String::new();
-    for tc in &t.rows {
-        let docx_rs::TableChild::TableRow(row) = tc;
-        {
-            let cells: Vec<String> = row
-                .cells
-                .iter()
-                .map(|cc| match cc {
-                    docx_rs::TableRowChild::TableCell(c) => {
-                        let texts: Vec<String> = c
-                            .children
-                            .iter()
-                            .filter_map(|content| match content {
-                                docx_rs::TableCellContent::Paragraph(p) => Some(para_text(p)),
-                                _ => None,
-                            })
-                            .collect();
-                        texts.join(" ")
-                    }
-                })
-                .collect();
-        }
-    }
-    out
 }
