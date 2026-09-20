@@ -154,7 +154,41 @@ impl WikiService {
         // 批次⑤：初召回扩到 2×limit（给图扩展留空间），召回后沿双链 2-hop 带衰减重排
         let fetch_n = (limit * 2).min(100);
         // 批次②：真实 RRF 融合分（双通道 rank 归一和）——查询日志的区分度信号；
-        // 召回序位分（1/61）对所有第一名恒同、无区分度（审计缺陷③修正）
+
+        let (mut pages, _top, direct_hits) = self
+            .retrieve_candidates(lib, &tsq, qv, fetch_n, w_fts, w_vec, limit)
+            .await?;
+
+        // 批次② 查询日志飞轮：每次检索 UPSERT（直接命中数=0 才记零命中——图扩展补充层
+        // 会让最终结果永不为空，零命中必须看直接召回；低分看真实 RRF 融合分）。
+        // best-effort——记录失败不影响检索结果。
+        if let Err(e) = log_query(&self.pool, lib, query, direct_hits, _top).await {
+            tracing::warn!(error = %e, "检索日志记录失败（不影响检索结果）");
+        }
+
+        // 批次④ LLM rerank 精排：top-20 交模型重排（单次不重试——检索热路径；失败/越界降级原序）
+        if rerank
+            && pages.len() > 1
+            && let Some(llm) = &self.llm
+        {
+            apply_llm_rerank(llm, query, &mut pages).await;
+        }
+        Ok(pages)
+    }
+
+    /// 初召回：FTS + ANN 双通道 RRF 融合（无查询向量时 FTS-only 降级）+ 图扩展重排。
+    /// 返回 `(页面, 最高 RRF 分, 直接命中数)`——零命中判定必须看直接召回。
+    #[allow(clippy::too_many_arguments)]
+    async fn retrieve_candidates(
+        &self,
+        lib: Uuid,
+        tsq: &str,
+        qv: Option<Vec<f32>>,
+        fetch_n: i64,
+        w_fts: f64,
+        w_vec: f64,
+        limit: i64,
+    ) -> Result<(Vec<WikiPageDto>, Option<f64>, usize), WikiError> {
         let result = if let Some(qv) = qv {
             // FTS + ANN 双候选 + RRF 融合（与 wiki 文档同款模式）；
             // CTE 与外层都按 library_id 过滤——slug 跨库可重名，外层不过滤会串库
@@ -210,70 +244,7 @@ impl WikiService {
             let (out, _graph_top) = self.rerank_with_graph(lib, rows, limit).await?;
             (out, None, direct_hits)
         };
-        // 批次② 查询日志飞轮：每次检索 UPSERT（直接命中数=0 才记零命中——图扩展补充层
-        // 会让最终结果永不为空，零命中必须看直接召回；低分看真实 RRF 融合分）。
-        // best-effort——记录失败不影响检索结果。
-        let (mut pages, _top, direct_hits) = result;
-        if let Err(e) = log_query(&self.pool, lib, query, direct_hits, _top).await {
-            tracing::warn!(error = %e, "检索日志记录失败（不影响检索结果）");
-        }
-        // 批次④ LLM rerank 精排：top-20 交模型重排（Purpose::SearchRerank；单次不重试——
-        // 检索热路径；失败/越界降级原序，对齐后端增强线 R6 语义）
-        if rerank
-            && pages.len() > 1
-            && let Some(llm) = &self.llm
-        {
-            let top: Vec<WikiPageDto> = pages.iter().take(20).cloned().collect();
-            let listing: String = top
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    format!(
-                        "[{}] {}\n{}",
-                        i,
-                        p.title,
-                        p.content.chars().take(120).collect::<String>()
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n---\n");
-            let system = "你是检索重排序员。给定查询与候选列表（每项带 [索引]），按与查询的相关性从高到低输出索引。只输出 JSON：{\"order\": [索引数组]}，必须包含全部索引且不重复。";
-            let user = format!("查询：{query}\n\n候选：\n{listing}");
-            match llm
-                .chat_json(
-                    engram_llm::types::Purpose::SearchRerank,
-                    system,
-                    &user,
-                    Uuid::now_v7(),
-                )
-                .await
-            {
-                Ok(v) => {
-                    let idx: Vec<usize> = v
-                        .get("order")
-                        .and_then(|o| o.as_array())
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|x| x.as_u64().map(|n| n as usize))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let n = top.len();
-                    if idx.len() == n && idx.iter().all(|&i| i < n) {
-                        let mut reordered: Vec<WikiPageDto> =
-                            idx.iter().map(|&i| top[i].clone()).collect();
-                        if pages.len() > n {
-                            reordered.extend(pages.into_iter().skip(n));
-                        }
-                        pages = reordered;
-                    } else {
-                        tracing::warn!("wiki rerank：order 长度/索引越界，降级原序");
-                    }
-                }
-                Err(e) => tracing::warn!(error = %e, "wiki rerank 失败，降级原序"),
-            }
-        }
-        Ok(pages)
+        Ok(result)
     }
 
     /// 图扩展重排（批次⑤）：初召回（已按 RRF/ts_rank 排序）→ 沿双链 2-hop 带衰减扩展 →
@@ -490,4 +461,57 @@ async fn discover_graph_communities<'a>(
             .push(slug);
     }
     Ok((comms, cohesion, members))
+}
+
+/// LLM rerank 精排：top-20 交模型重排（Purpose::SearchRerank；单次不重试——检索热路径；
+/// 失败或索引越界时降级原序，对齐后端增强线 R6 语义）。
+async fn apply_llm_rerank(llm: &crate::service::LlmRef, query: &str, pages: &mut Vec<WikiPageDto>) {
+    let top: Vec<WikiPageDto> = pages.iter().take(20).cloned().collect();
+    let listing: String = top
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            format!(
+                "[{}] {}\n{}",
+                i,
+                p.title,
+                p.content.chars().take(120).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n---\n");
+    let system = "你是检索重排序员。给定查询与候选列表（每项带 [索引]），按与查询的相关性从高到低输出索引。只输出 JSON：{\"order\": [索引数组]}，必须包含全部索引且不重复。";
+    let user = format!("查询：{query}\n\n候选：\n{listing}");
+    match llm
+        .chat_json(
+            engram_llm::types::Purpose::SearchRerank,
+            system,
+            &user,
+            Uuid::now_v7(),
+        )
+        .await
+    {
+        Ok(v) => {
+            let idx: Vec<usize> = v
+                .get("order")
+                .and_then(|o| o.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_u64().map(|n| n as usize))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let n = top.len();
+            if idx.len() == n && idx.iter().all(|&i| i < n) {
+                let mut reordered: Vec<WikiPageDto> = idx.iter().map(|&i| top[i].clone()).collect();
+                if pages.len() > n {
+                    reordered.extend(pages.drain(n..));
+                }
+                *pages = reordered;
+            } else {
+                tracing::warn!("wiki rerank：order 长度/索引越界，降级原序");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "wiki rerank 失败，降级原序"),
+    }
 }
