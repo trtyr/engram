@@ -273,7 +273,7 @@ impl MemoryService {
                 let hits = search_atoms(
                     &self.pool,
                     q,
-                    qv.as_deref(),
+                    qv,
                     remaining as i64,
                     true, // sensitive 口径放开（2026-09-12）
                     None,

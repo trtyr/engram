@@ -25,6 +25,78 @@ impl From<StoreError> for TodoError {
     }
 }
 
+/// 解析 keyset 游标：`{1|0}|{updated_at RFC3339}|{id}`（取上一页最后一条构造）。
+fn parse_todo_cursor(raw: Option<&str>) -> Result<Option<(i32, DateTime<Utc>, Uuid)>, TodoError> {
+    let cursor = match raw {
+        None | Some("") => None,
+        Some(raw) => {
+            let parts: Vec<&str> = raw.split('|').collect();
+            if parts.len() != 3 {
+                return Err(TodoError::BadRequest(format!(
+                    "cursor 非法（收到 {raw:?}）——期望 {{1|0}}|{{updated_at ISO8601}}|{{id}}，取上一页最后一条构造"
+                )));
+            }
+            let flag = parts[0].parse::<i32>().ok().filter(|f| *f == 0 || *f == 1);
+            let ts = chrono::DateTime::parse_from_rfc3339(parts[1].trim())
+                .map(|d| d.with_timezone(&Utc))
+                .ok();
+            let id = Uuid::parse_str(parts[2].trim()).ok();
+            match (flag, ts, id) {
+                (Some(flag), Some(ts), Some(id)) => Some((flag, ts, id)),
+                _ => {
+                    return Err(TodoError::BadRequest(format!(
+                        "cursor 非法（收到 {raw:?}）——期望 {{1|0}}|{{updated_at ISO8601}}|{{id}}，取上一页最后一条构造"
+                    )));
+                }
+            }
+        }
+    };
+    Ok(cursor)
+}
+
+/// 列表过滤参数校验（status/severity/priority 白名单；ticket 状态集另计）。
+fn validate_todo_list_filters(
+    status: Option<&str>,
+    kind: Option<&str>,
+    severity: Option<&str>,
+    priority: Option<&str>,
+) -> Result<(), TodoError> {
+    if let Some(s) = status
+        && !valid_status(kind.unwrap_or("todo"), s)
+        && !(kind.is_none() && TICKET_STATUSES.contains(&s))
+    {
+        let allowed = match kind {
+            Some("ticket") => TICKET_STATUSES.join("/"),
+            _ => format!(
+                "{}/{}",
+                STATUSES.join("/"),
+                "confirmed/in_progress/resolved/verified"
+            ),
+        };
+        return Err(TodoError::BadRequest(format!(
+            "status 仅接受 {}（收到 {s}）",
+            allowed
+        )));
+    }
+    if let Some(sv) = severity
+        && !SEVERITIES.contains(&sv)
+    {
+        return Err(TodoError::BadRequest(format!(
+            "severity 仅接受 {}（收到 {sv}）",
+            SEVERITIES.join("/")
+        )));
+    }
+    if let Some(p) = priority
+        && !PRIORITIES.contains(&p)
+    {
+        return Err(TodoError::BadRequest(format!(
+            "priority 仅接受 {}（收到 {p}）",
+            PRIORITIES.join("/")
+        )));
+    }
+    Ok(())
+}
+
 pub const STATUSES: &[&str] = &["open", "done", "archived"];
 pub const TICKET_STATUSES: &[&str] = &[
     "open",
@@ -303,63 +375,8 @@ impl TodoService {
                 "limit 不能为负（收到 {limit}）"
             )));
         }
-        let cursor = match cursor {
-            None | Some("") => None,
-            Some(raw) => {
-                let parts: Vec<&str> = raw.split('|').collect();
-                if parts.len() != 3 {
-                    return Err(TodoError::BadRequest(format!(
-                        "cursor 非法（收到 {raw:?}）——期望 {{1|0}}|{{updated_at ISO8601}}|{{id}}，取上一页最后一条构造"
-                    )));
-                }
-                let flag = parts[0].parse::<i32>().ok().filter(|f| *f == 0 || *f == 1);
-                let ts = chrono::DateTime::parse_from_rfc3339(parts[1].trim())
-                    .map(|d| d.with_timezone(&Utc))
-                    .ok();
-                let id = Uuid::parse_str(parts[2].trim()).ok();
-                match (flag, ts, id) {
-                    (Some(flag), Some(ts), Some(id)) => Some((flag, ts, id)),
-                    _ => {
-                        return Err(TodoError::BadRequest(format!(
-                            "cursor 非法（收到 {raw:?}）——期望 {{1|0}}|{{updated_at ISO8601}}|{{id}}，取上一页最后一条构造"
-                        )));
-                    }
-                }
-            }
-        };
-        if let Some(s) = status
-            && !valid_status(kind.unwrap_or("todo"), s)
-            && !(kind.is_none() && TICKET_STATUSES.contains(&s))
-        {
-            let allowed = match kind {
-                Some("ticket") => TICKET_STATUSES.join("/"),
-                _ => format!(
-                    "{}/{}",
-                    STATUSES.join("/"),
-                    "confirmed/in_progress/resolved/verified"
-                ),
-            };
-            return Err(TodoError::BadRequest(format!(
-                "status 仅接受 {}（收到 {s}）",
-                allowed
-            )));
-        }
-        if let Some(sv) = severity
-            && !SEVERITIES.contains(&sv)
-        {
-            return Err(TodoError::BadRequest(format!(
-                "severity 仅接受 {}（收到 {sv}）",
-                SEVERITIES.join("/")
-            )));
-        }
-        if let Some(p) = priority
-            && !PRIORITIES.contains(&p)
-        {
-            return Err(TodoError::BadRequest(format!(
-                "priority 仅接受 {}（收到 {p}）",
-                PRIORITIES.join("/")
-            )));
-        }
+        let cursor = parse_todo_cursor(cursor)?;
+        validate_todo_list_filters(status, kind, severity, priority)?;
         Ok(repo::list(
             &self.pool,
             status,

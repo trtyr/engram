@@ -78,6 +78,9 @@ async fn init_db(cfg: &Config) -> anyhow::Result<engram_storage::PgPool> {
 }
 
 /// 任务 runner：注册蒸馏链 + wiki 摄取 + codegraph/deep_purge handler，返回已启动句柄。
+///
+/// `expect` 可证安全：未配置主密钥时用 `"00"` × 32 占位（恒 64 hex，格式必然合法）。
+#[allow(clippy::expect_used)]
 async fn build_runner(
     cfg: &Config,
     pool: &engram_storage::PgPool,
@@ -162,11 +165,10 @@ async fn build_runner(
 
 /// HTTP 服务状态（管理员密码 / 主密钥 / 数据根）。
 fn build_state(pool: &engram_storage::PgPool, cfg: &Config) -> AppState {
-    let state = AppState::new(pool.clone())
+    AppState::new(pool.clone())
         .with_admin_password(cfg.admin_password.clone())
         .with_master_key(cfg.master_key.clone())
-        .with_data_dir(cfg.data_dir.clone());
-    state
+        .with_data_dir(cfg.data_dir.clone())
 }
 
 /// W2 存量补数：LLM 页 tsv 口径重写（幂等；失败仅告警不影响服务）。
