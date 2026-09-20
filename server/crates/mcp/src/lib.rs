@@ -1486,9 +1486,9 @@ impl EngramMcpServer {
         engram_core::skills::SkillsService::new(self.state.pool.clone())
     }
 
-    /// wiki 库 slug → 库 id（缺省 main）。多库（2026-09-08）：所有 wiki 操作按库隔离。
-    async fn resolve_wiki_lib(&self, library: Option<&str>) -> Result<Uuid, rmcp::ErrorData> {
-        engram_core::wiki::libraries::resolve(&self.state.pool, library)
+    /// 单库终局：main 主库 id（无外部入参——多库 API 已移除，2026-09-20）。
+    async fn resolve_wiki_lib(&self) -> Result<Uuid, rmcp::ErrorData> {
+        engram_core::wiki::libraries::resolve(&self.state.pool, None)
             .await
             .map_err(wiki::from_wiki)
     }
@@ -3474,7 +3474,7 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let wp = params.0;
-        let lib = self.resolve_wiki_lib(wp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let result = wiki::svc(&self.state)
             .search_with_purpose(
                 lib,
@@ -3507,7 +3507,7 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let lp = params.0;
-        let lib = self.resolve_wiki_lib(lp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let pages = wiki::svc(&self.state)
             .list_pages(
                 lib,
@@ -3535,7 +3535,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let page = wiki::svc(&self.state)
             .get_page(lib, &params.0.slug)
             .await
@@ -3557,7 +3557,7 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let wp = params.0;
-        let lib = self.resolve_wiki_lib(wp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let page = wiki::svc(&self.state)
             .put_page(
                 lib,
@@ -3599,7 +3599,7 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let wp = params.0;
-        let lib = self.resolve_wiki_lib(wp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let outcome = wiki::svc(&self.state)
             .ingest(lib, &wp.title, &wp.text)
             .await
@@ -3654,7 +3654,7 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
         let qp = params.0;
-        let lib = self.resolve_wiki_lib(qp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let skipped = wiki::svc(&self.state)
             .archive_query(lib, &qp.title, &qp.question, &qp.answer)
             .await
@@ -3677,11 +3677,11 @@ impl EngramMcpServer {
     async fn wiki_graph(
         &self,
         ctx: RequestContext<RoleServer>,
-        Parameters(libp): Parameters<wiki::WikiLibParams>,
+        Parameters(_): Parameters<wiki::WikiLibParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let graph = wiki::svc(&self.state)
             .graph(lib)
             .await
@@ -3695,11 +3695,11 @@ impl EngramMcpServer {
     async fn wiki_lint(
         &self,
         ctx: RequestContext<RoleServer>,
-        Parameters(libp): Parameters<wiki::WikiLibParams>,
+        Parameters(_): Parameters<wiki::WikiLibParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let report = wiki::svc(&self.state)
             .lint(lib)
             .await
@@ -3719,7 +3719,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let principal = principal_of(&ctx)?;
         wiki::require_wiki(&principal)?;
-        let lib = self.resolve_wiki_lib(p.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let detail = wiki::svc(&self.state)
             .merge_pages(lib, &p.primary, &p.duplicate)
             .await
@@ -3739,7 +3739,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(dp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let job_id = wiki::svc(&self.state)
             .lint_deep_enqueue(lib, dp.slugs)
             .await
@@ -3770,7 +3770,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(dp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let svc = engram_core::wiki_docs::WikiDocumentService::new(
             self.state.pool.clone(),
             self.state.registry(),
@@ -3815,7 +3815,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(dp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let id = uuid::Uuid::parse_str(dp.id.trim()).map_err(|_| {
             rmcp::ErrorData::invalid_params(format!("id 不是合法 UUID: {}", dp.id), None)
         })?;
@@ -3839,7 +3839,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(dp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let svc = engram_core::wiki_docs::WikiDocumentService::new(
             self.state.pool.clone(),
             self.state.registry(),
@@ -3862,7 +3862,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let items = wiki::svc(&self.state)
             .reviews(lib, libp.status.as_deref())
             .await
@@ -3881,7 +3881,6 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let _ = dp.library.as_deref(); // 库参数仅保留对称性——处置按全局 id 定位
         let id = uuid::Uuid::parse_str(&dp.id).map_err(|_| {
             rmcp::ErrorData::invalid_params(format!("评审项 id 不是合法 UUID: {}", dp.id), None)
         })?;
@@ -3901,11 +3900,11 @@ impl EngramMcpServer {
     async fn wiki_index(
         &self,
         ctx: RequestContext<RoleServer>,
-        Parameters(libp): Parameters<wiki::WikiLibParams>,
+        Parameters(_): Parameters<wiki::WikiLibParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let idx = wiki::svc(&self.state)
             .index(lib)
             .await
@@ -3924,7 +3923,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(ap.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let related = ap.related.unwrap_or_default();
         let page = wiki::svc(&self.state)
             .archive_answer(lib, &ap.slug, &ap.title, &ap.content, &related)
@@ -3939,11 +3938,11 @@ impl EngramMcpServer {
     async fn wiki_purpose(
         &self,
         ctx: RequestContext<RoleServer>,
-        params: Parameters<wiki::WikiLibParams>,
+        _params: Parameters<wiki::WikiLibParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let purpose = wiki::svc(&self.state)
             .get_purpose(lib)
             .await
@@ -3955,11 +3954,11 @@ impl EngramMcpServer {
     async fn wiki_insights(
         &self,
         ctx: RequestContext<RoleServer>,
-        params: Parameters<wiki::WikiLibParams>,
+        _params: Parameters<wiki::WikiLibParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let report = wiki::svc(&self.state)
             .insights(lib)
             .await
@@ -4049,7 +4048,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let deleted = wiki::svc(&self.state)
             .delete_page(lib, &params.0.slug)
             .await
@@ -4070,7 +4069,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let rows = wiki::svc(&self.state)
             .page_versions(lib, &params.0.slug)
             .await
@@ -4086,7 +4085,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let content = wiki::svc(&self.state)
             .page_version_content(lib, &params.0.slug, params.0.version)
             .await
@@ -4108,7 +4107,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let page = wiki::svc(&self.state)
             .restore_page_version(lib, &params.0.slug, params.0.version)
             .await
@@ -4125,11 +4124,11 @@ impl EngramMcpServer {
     async fn wiki_sources(
         &self,
         ctx: RequestContext<RoleServer>,
-        Parameters(libp): Parameters<wiki::WikiLibParams>,
+        Parameters(_): Parameters<wiki::WikiLibParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib(libp.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let rows = wiki::svc(&self.state)
             .list_sources(lib)
             .await
@@ -4155,7 +4154,7 @@ impl EngramMcpServer {
         wiki::require_wiki(&p)?;
         let id = Uuid::parse_str(&params.0.source_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "source_id 不是合法 UUID"))?;
-        let lib = self.resolve_wiki_lib(params.0.library.as_deref()).await?;
+        let lib = self.resolve_wiki_lib().await?;
         let report = wiki::svc(&self.state)
             .delete_source_cascade(lib, id)
             .await
@@ -4164,18 +4163,6 @@ impl EngramMcpServer {
             serde_json::to_value(&report)
                 .unwrap_or(serde_json::json!({ "deleted": params.0.source_id })),
         )
-    }
-
-    /// 列出全部 wiki 库（多库；页面/原料计数一并返回）。建库/删库走 Web（Wiki 页头「＋ 新建库…」或运维面板）。
-    async fn wiki_libraries(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        _params: Parameters<wiki::WikiLibrariesParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let rows = engram_core::wiki::libraries::list(&self.state.pool).await;
-        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
     }
 
     // ---------- 待办域工具（todos scope；第七域） ----------
@@ -5414,13 +5401,6 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "libraries" => {
-                self.wiki_libraries(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "libraries", call.args)?),
-                )
-                .await
-            }
             "graph" => {
                 self.wiki_graph(
                     ctx,
@@ -5879,9 +5859,9 @@ skills 域用法：技能 = 可复用的指令包（SKILL.md 形态 + scripts/re
    改坏了 {\"action\":\"versions\"} 查历史、{\"action\":\"restore\"} 回滚；
 3. 用户给现成 SKILL.md：{\"action\":\"import\"}。
 
-wiki 域用法：多库知识库（Markdown 页面 + [[wikilink]] + 混合检索）。每个操作可选 \"library\":\"<库slug>\"
-（缺省 main 主库）；{\"action\":\"libraries\"} 列出全部库及页面计数，建库/删库在 Web。
-1. 查证事实性知识 → {\"action\":\"search\"}（命中带片段，全文 get_page）；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}（均按库）；
+wiki 域用法：单库知识库（Markdown 页面 + [[wikilink]] + 混合检索）。单库终局——无 library 参数，一切读写恒定在 main 主库。
+1. 查证事实性知识 → {\"action\":\"search\"}（命中带片段，全文 get_page）；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}；
+2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步，产物落同库），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；
 2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步，产物落同库），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；
 3. 版本与原料：{\"action\":\"versions\"}/{\"action\":\"restore_version\"} 查历史与回滚（误删页可重建）；{\"action\":\"sources\"}/{\"action\":\"delete_source\"} 清理织入原料（lint 报 stale_source 时用）。
 

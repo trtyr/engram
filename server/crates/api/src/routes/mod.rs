@@ -57,8 +57,7 @@ use utoipa::OpenApi;
         wiki_api::ingest, wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
         wiki_api::query_gaps,
-        wiki_api::rebuild_links, wiki_api::list_libraries, wiki_api::create_library,
-        wiki_api::delete_library,
+        wiki_api::rebuild_links,
         wiki_api::list_proposals,
         wiki_api::get_purpose, wiki_api::set_purpose,
         wiki_api::list_reviews, wiki_api::resolve_review,
@@ -317,11 +316,6 @@ pub fn router(state: AppState) -> Router {
             "/wiki/documents/{id}/re-embed",
             post(wiki_docs_api::reembed),
         )
-        .route(
-            "/wiki/libraries",
-            get(wiki_api::list_libraries).post(wiki_api::create_library),
-        )
-        .route("/wiki/libraries/{slug}", delete(wiki_api::delete_library))
         .route("/wiki/ingest", post(wiki_api::ingest))
         .route("/wiki/pages", get(wiki_api::list_pages))
         .route(

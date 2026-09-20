@@ -1992,39 +1992,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/wiki/libraries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_libraries"];
-        put?: never;
-        post: operations["create_library"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/wiki/libraries/{slug}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** 删除库（非空需 force=true 级联；不可逆）。 */
-        delete: operations["delete_library"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/wiki/links/rebuild": {
         parameters: {
             query?: never;
@@ -2695,12 +2662,6 @@ export interface components {
             /** @description 画像摘要（关系行文，可后补） */
             summary?: string;
         };
-        CreateLibraryRequest: {
-            /** @description 显示名 */
-            name: string;
-            /** @description 库 slug（小写字母/数字/连字符，≤40 字符，唯一） */
-            slug: string;
-        };
         CreateProjectRequest: {
             description?: string | null;
             name: string;
@@ -3260,8 +3221,6 @@ export interface components {
              * @description 来源文档 id
              */
             doc_id: string;
-            /** @description 可选：目标库 slug（缺省 main） */
-            library?: string | null;
             /** @description 来源项目（名或 id） */
             project: string;
             /** @description 目标页 slug */
@@ -3758,25 +3717,6 @@ export interface components {
             max_items?: number | null;
             query: string;
         };
-        /** @description 库摘要（带 pages/sources 计数，供 UI 展示与删除前确认）。 */
-        WikiLibraryDto: {
-            /** Format: date-time */
-            created_at: string;
-            /** Format: uuid */
-            id: string;
-            name: string;
-            /**
-             * Format: int64
-             * @description 库内页面数（wiki_pages）
-             */
-            pages: number;
-            slug: string;
-            /**
-             * Format: int64
-             * @description 库内原料数（wiki_sources）
-             */
-            sources: number;
-        };
         WikiPageDto: {
             content: string;
             /** @description 目录树层级（/ 分隔多级，Obsidian 式文件夹） */
@@ -3808,8 +3748,6 @@ export interface components {
             project_id: string;
         };
         WikiSearchRequest: {
-            /** @description 库 slug（缺省 main） */
-            library?: string | null;
             /** Format: int64 */
             max_items?: number | null;
             query: string;
@@ -7213,10 +7151,7 @@ export interface operations {
     };
     wiki_graph: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7235,10 +7170,7 @@ export interface operations {
     };
     ingest: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main 主库） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7261,10 +7193,7 @@ export interface operations {
     };
     insights: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7283,10 +7212,7 @@ export interface operations {
     };
     dismiss_insight: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7307,10 +7233,7 @@ export interface operations {
     };
     reset_insights: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7325,90 +7248,9 @@ export interface operations {
             };
         };
     };
-    list_libraries: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WikiLibraryDto"][];
-                };
-            };
-        };
-    };
-    create_library: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateLibraryRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WikiLibraryDto"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    delete_library: {
-        parameters: {
-            query?: {
-                /** @description true = 连同库内页面/原料一起删（缺省 false：非空库拒绝删除） */
-                force?: boolean | null;
-            };
-            header?: never;
-            path: {
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": Record<string, never>;
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     rebuild_links: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7427,10 +7269,7 @@ export interface operations {
     };
     lint: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7450,8 +7289,6 @@ export interface operations {
     list_pages: {
         parameters: {
             query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
                 page_type?: string | null;
                 /** @description keyset 分页游标：{updated_at ISO8601}|{id}（上一页最后一条） */
                 cursor?: string | null;
@@ -7475,10 +7312,7 @@ export interface operations {
     };
     merge_pages: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7499,10 +7333,7 @@ export interface operations {
     };
     get_page: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 slug: string;
@@ -7523,10 +7354,7 @@ export interface operations {
     };
     put_page: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 slug: string;
@@ -7627,10 +7455,7 @@ export interface operations {
     };
     apply_proposal: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7653,10 +7478,7 @@ export interface operations {
     };
     get_purpose: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7675,10 +7497,7 @@ export interface operations {
     };
     set_purpose: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7699,10 +7518,7 @@ export interface operations {
     };
     archive_query: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7725,10 +7541,7 @@ export interface operations {
     };
     wiki_query_gaps: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7745,10 +7558,7 @@ export interface operations {
     };
     repair: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7767,10 +7577,7 @@ export interface operations {
     };
     wiki_repair_async: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7787,10 +7594,7 @@ export interface operations {
     };
     list_reviews: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7855,10 +7659,7 @@ export interface operations {
     };
     list_sources: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -7877,10 +7678,7 @@ export interface operations {
     };
     delete_source: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 id: string;
@@ -7901,10 +7699,7 @@ export interface operations {
     };
     rebuild_tsv: {
         parameters: {
-            query?: {
-                /** @description 库 slug（缺省 main） */
-                lib?: string | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;

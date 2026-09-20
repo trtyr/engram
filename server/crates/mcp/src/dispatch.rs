@@ -136,7 +136,6 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "review_resolve", false, "处置评审项：标记已处理（resolved）或驳回作废（dismiss），可附动作标签" => crate::wiki::WikiReviewResolveParams;
             "index", false, "内容目录（按页型分组的全库目录：slug/标题/入链数/首段摘要；只读动态聚合）" => crate::wiki::WikiLibParams;
             "archive", false, "问答/分析产物归档为 analysis 页（related 自动建双向 wikilinks——好答案不该消失在聊天记录里）" => crate::wiki::WikiArchiveParams;
-            "libraries", false, "列出全部 wiki 库（多库；页面/原料计数一并返回；建库/删库走 Web）" => crate::wiki::WikiLibrariesParams;
             "purpose", false, "读取库的方向意图（每库一份——写页前先读，避免写跑题）" => crate::wiki::WikiLibParams;
             "insights", false, "列出库的洞察（AI 评审产出的观察项，可与 reviews 对照看）" => crate::wiki::WikiLibParams;
             "promote", false, "知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 synthesis 页（frontmatter 带源回链）+ 源文档自动追加 ⛳ 标记——提炼由调用方完成" => crate::wiki::WikiPromoteParams;
@@ -332,7 +331,6 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                     | "documents_search"
                     | "reviews"
                     | "index"
-                    | "libraries"
                     | "purpose"
                     | "insights"
                     | "promotions"
