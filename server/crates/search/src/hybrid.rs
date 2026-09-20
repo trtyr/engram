@@ -108,31 +108,7 @@ pub async fn search_atoms(
     qb.push(sens_filter);
     qb.push(") AND tsv @@ q LIMIT 100) ");
 
-    if has_vec {
-        if fts_matched {
-            qb.push(", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> ");
-            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
-            qb.push(") AS rank FROM atoms WHERE status = 'active' AND embedding IS NOT NULL LIMIT 100) ");
-        } else {
-            // v2 遗留修复：兜底双条件——绝对天花板（挡全库无相关的查询）+ 相对间隔
-            // （只留与最近邻一档距离内的项，容忍逐措辞的绝对距离漂移：
-            //   「宠物」查询下橘猫即使绝对距离偏大也保留；完全无关查询全体超天花板 → 空）
-            qb.push(", vec_raw AS (SELECT id, embedding <=> ");
-            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
-            qb.push(
-                " AS dist FROM atoms WHERE status = 'active' AND embedding IS NOT NULL \
-                     AND embedding <=> ",
-            );
-            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
-            qb.push(format!(" <= {})", *VEC_FALLBACK_MAX_DISTANCE));
-            qb.push(
-                ", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY dist) AS rank \
-                     FROM vec_raw WHERE dist <= (SELECT min(dist) FROM vec_raw) + ",
-            );
-            qb.push_bind(*VEC_FALLBACK_RELATIVE_MARGIN);
-            qb.push(") ");
-        }
-    }
+    push_atom_vec_leg(&mut qb, query_vec, has_vec, fts_matched);
 
     qb.push("SELECT a.id, a.kind, a.content, a.needs_review, (COALESCE(1.0/(");
     qb.push_bind(RRF_K);
@@ -315,4 +291,38 @@ pub async fn search_entities(
     });
     hits.truncate(limit.max(0) as usize);
     Ok(hits)
+}
+
+/// v2（H-B2）：追加向量腿——FTS 有命中用普通 vec CTE；零命中则收紧阈值（兜底双条件）。
+fn push_atom_vec_leg(
+    qb: &mut QueryBuilder<sqlx::Postgres>,
+    query_vec: Option<&[f32]>,
+    has_vec: bool,
+    fts_matched: bool,
+) {
+    if has_vec {
+        if fts_matched {
+            qb.push(", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> ");
+            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
+            qb.push(") AS rank FROM atoms WHERE status = 'active' AND embedding IS NOT NULL LIMIT 100) ");
+        } else {
+            // v2 遗留修复：兜底双条件——绝对天花板（挡全库无相关的查询）+ 相对间隔
+            // （只留与最近邻一档距离内的项，容忍逐措辞的绝对距离漂移：
+            //   「宠物」查询下橘猫即使绝对距离偏大也保留；完全无关查询全体超天花板 → 空）
+            qb.push(", vec_raw AS (SELECT id, embedding <=> ");
+            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
+            qb.push(
+                " AS dist FROM atoms WHERE status = 'active' AND embedding IS NOT NULL \
+                     AND embedding <=> ",
+            );
+            qb.push_bind(Vector::from(query_vec.unwrap().to_vec()));
+            qb.push(format!(" <= {})", *VEC_FALLBACK_MAX_DISTANCE));
+            qb.push(
+                ", vec AS (SELECT id, ROW_NUMBER() OVER (ORDER BY dist) AS rank \
+                     FROM vec_raw WHERE dist <= (SELECT min(dist) FROM vec_raw) + ",
+            );
+            qb.push_bind(*VEC_FALLBACK_RELATIVE_MARGIN);
+            qb.push(") ");
+        }
+    }
 }
