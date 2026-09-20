@@ -1,5 +1,9 @@
 //! Provider 抽象 + OpenAI 兼容实现 + 注册表（含用量记账）。
 
+mod chat;
+mod wire;
+pub use wire::*;
+
 use std::sync::Arc;
 
 use sqlx::PgPool;
@@ -7,33 +11,9 @@ use uuid::Uuid;
 
 use crate::types::{ChatRequest, ChatResponse, EmbedRequest, EmbedResponse, LlmError, UsageRecord};
 
-/// Provider 能力 trait。mock 与真实实现共用；测试注入换实现即可。
-pub trait LlmProvider: Send + Sync {
-    /// 非流式 chat 补全。
-    fn chat(
-        &self,
-        req: ChatRequest,
-    ) -> impl std::future::Future<Output = Result<ChatResponse, LlmError>> + Send;
-    /// 批量嵌入。
-    fn embed(
-        &self,
-        req: EmbedRequest,
-    ) -> impl std::future::Future<Output = Result<EmbedResponse, LlmError>> + Send;
-    /// provider 名（记账用）。
-    fn name(&self) -> &str;
-}
-
-/// 熔断器状态。
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum CircuitState {
-    Closed,
-    Open,
-    HalfOpen,
-}
-
 /// 简单熔断器：连续失败达阈值 → Open（快速失败），冷却后 → HalfOpen（试探一次）。
 #[derive(Debug)]
-struct CircuitBreaker {
+pub(crate) struct CircuitBreaker {
     state: CircuitState,
     consecutive_failures: u32,
     opened_at: Option<std::time::Instant>,
@@ -117,28 +97,6 @@ fn retry_after_from_str(raw: &str) -> std::time::Duration {
     std::time::Duration::from_secs(2)
 }
 
-/// 从响应头解析 Retry-After，缺省 2s。
-fn retry_after_secs(resp: &reqwest::Response) -> std::time::Duration {
-    resp.headers()
-        .get("retry-after")
-        .and_then(|v| v.to_str().ok())
-        .map(retry_after_from_str)
-        .unwrap_or(std::time::Duration::from_secs(2))
-}
-
-/// OpenAI 兼容 HTTP provider（/v1/chat/completions + /v1/embeddings）。
-///
-/// base_url 规范化：trim → 去尾部 `/` → 去尾部 `/v1`（大小写不敏感）→ 再去尾部 `/`。
-/// 用户填 `https://api.xx.com` 或 `https://api.xx.com/v1`（含尾随空格）均归一为同一根，
-/// 路径拼接统一为 `{root}/v1/...`——消除两种填写约定的歧义（MCP 黑盒测试 D1 根因）。
-pub(crate) fn normalize_base_url(base_url: &str) -> String {
-    let mut b = base_url.trim().trim_end_matches('/').to_string();
-    if b.len() >= 3 && b[b.len() - 3..].eq_ignore_ascii_case("/v1") {
-        b.truncate(b.len() - 3);
-    }
-    b.trim_end_matches('/').to_string()
-}
-
 pub struct OpenAiCompatProvider {
     name: String,
     base_url: String,
@@ -152,276 +110,6 @@ pub struct OpenAiCompatProvider {
     circuit: std::sync::Arc<std::sync::Mutex<CircuitBreaker>>,
 }
 
-impl OpenAiCompatProvider {
-    pub fn new(
-        name: impl Into<String>,
-        base_url: impl Into<String>,
-        api_key: impl Into<String>,
-    ) -> Self {
-        let name = name.into();
-        let circuit = CIRCUITS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .entry(name.clone())
-            .or_insert_with(|| {
-                std::sync::Arc::new(std::sync::Mutex::new(CircuitBreaker::default()))
-            })
-            .clone();
-        Self {
-            name,
-            base_url: normalize_base_url(base_url.into().as_str()),
-            api_key: api_key.into(),
-            http: reqwest::Client::new(),
-            chat_timeout: std::time::Duration::from_secs(120),
-            embed_timeout: std::time::Duration::from_secs(30),
-            circuit,
-        }
-    }
-
-    /// 发送 POST 并处理熔断 + 429 Retry-After 退避（最多重试 2 次）。
-    async fn post_with_retry(
-        &self,
-        path: &str,
-        timeout: std::time::Duration,
-        body: &serde_json::Value,
-    ) -> Result<reqwest::Response, LlmError> {
-        if !self
-            .circuit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .allow()
-        {
-            return Err(LlmError::Transient("熔断器打开，快速失败".into()));
-        }
-        let url = format!("{}{}", self.base_url, path);
-        let mut resp = self
-            .http
-            .post(&url)
-            .bearer_auth(&self.api_key)
-            .timeout(timeout)
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| {
-                self.circuit
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .record_failure();
-                classify_http_error(e.status())
-            })?;
-        for _ in 0..2 {
-            if resp.status().as_u16() != 429 {
-                break;
-            }
-            self.circuit
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .record_failure();
-            tokio::time::sleep(retry_after_secs(&resp)).await;
-            resp = self
-                .http
-                .post(&url)
-                .bearer_auth(&self.api_key)
-                .timeout(timeout)
-                .json(body)
-                .send()
-                .await
-                .map_err(|e| {
-                    self.circuit
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .record_failure();
-                    classify_http_error(e.status())
-                })?;
-        }
-        Ok(resp)
-    }
-}
-
-/// OpenAI 兼容响应片段（只取需要的字段）。
-#[derive(serde::Deserialize)]
-struct ChatApiResp {
-    #[serde(default)]
-    choices: Vec<ChatChoice>,
-    #[serde(default)]
-    usage: Option<ApiUsage>,
-}
-
-#[derive(serde::Deserialize)]
-struct ChatChoice {
-    #[serde(default)]
-    message: Option<serde_json::Value>,
-}
-
-#[derive(serde::Deserialize)]
-struct ApiUsage {
-    #[serde(default)]
-    prompt_tokens: i64,
-    #[serde(default)]
-    completion_tokens: i64,
-    #[serde(default)]
-    total_tokens: i64,
-}
-
-#[derive(serde::Deserialize)]
-struct EmbedApiResp {
-    #[serde(default)]
-    data: Vec<EmbedItem>,
-    #[serde(default)]
-    usage: Option<ApiUsage>,
-}
-
-#[derive(serde::Deserialize)]
-struct EmbedItem {
-    embedding: Vec<f32>,
-}
-
-/// 把 reqwest 错误分类为瞬态/永久。
-fn classify_http_error(status: Option<reqwest::StatusCode>) -> LlmError {
-    match status {
-        Some(s) if s.as_u16() == 429 || s.is_server_error() => {
-            LlmError::Transient(format!("HTTP {s}"))
-        }
-        Some(s) => LlmError::Permanent(format!("HTTP {s}")),
-        // 无状态码 = 网络/超时
-        None => LlmError::Transient("网络错误或超时".into()),
-    }
-}
-
-impl LlmProvider for OpenAiCompatProvider {
-    async fn chat(&self, req: ChatRequest) -> Result<ChatResponse, LlmError> {
-        let started = std::time::Instant::now();
-        let mut body = serde_json::json!({
-            "model": req.model,
-            "messages": req.messages,
-        });
-        if let Some(t) = req.temperature {
-            body["temperature"] = serde_json::json!(t);
-        }
-        if let Some(m) = req.max_tokens {
-            body["max_tokens"] = serde_json::json!(m);
-        }
-        if req.json_mode {
-            body["response_format"] = serde_json::json!({ "type": "json_object" });
-        }
-
-        let resp = self
-            .post_with_retry("/v1/chat/completions", self.chat_timeout, &body)
-            .await?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            tracing::warn!(status = %status, body = %text.chars().take(500).collect::<String>(), "LLM chat 失败");
-            self.circuit
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .record_failure();
-            return Err(classify_http_error(Some(status)));
-        }
-
-        let api: ChatApiResp = resp
-            .json()
-            .await
-            .map_err(|e| LlmError::Permanent(format!("响应解析失败: {e}")))?;
-        let content = api
-            .choices
-            .first()
-            .and_then(|c| c.message.as_ref())
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_str())
-            .ok_or_else(|| LlmError::Permanent("响应缺少 content".into()))?
-            .to_string();
-        let usage = api.usage.unwrap_or(ApiUsage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-        });
-
-        self.circuit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .record_success();
-        Ok(ChatResponse {
-            content,
-            input_tokens: usage.prompt_tokens,
-            output_tokens: usage.completion_tokens,
-            model: req.model,
-            latency_ms: started.elapsed().as_millis() as i64,
-        })
-    }
-
-    async fn embed(&self, req: EmbedRequest) -> Result<EmbedResponse, LlmError> {
-        let started = std::time::Instant::now();
-        let inputs = req.inputs.clone();
-        let mut body = serde_json::json!({ "model": req.model, "input": inputs });
-        if let Some(d) = req.dimensions {
-            body["dimensions"] = serde_json::json!(d);
-        }
-
-        let mut resp = self
-            .post_with_retry("/v1/embeddings", self.embed_timeout, &body)
-            .await?;
-
-        // 兼容：部分上游（如硅基流动 bge-m3）不支持 dimensions 参数，4xx 时去掉重试一次，
-        // 靠模型默认维度（本项目统一 1024 维的模型默认即 1024）。
-        if req.dimensions.is_some() && resp.status().is_client_error() {
-            tracing::warn!(
-                status = %resp.status(),
-                model = %req.model,
-                "上游拒绝 dimensions 参数，去掉后重试"
-            );
-            let body_no_dim = serde_json::json!({ "model": req.model, "input": req.inputs });
-            resp = self
-                .post_with_retry("/v1/embeddings", self.embed_timeout, &body_no_dim)
-                .await?;
-        }
-
-        let status = resp.status();
-        if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            tracing::warn!(status = %status, body = %text.chars().take(500).collect::<String>(), "LLM embed 失败");
-            self.circuit
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .record_failure();
-            return Err(classify_http_error(Some(status)));
-        }
-
-        let api: EmbedApiResp = resp
-            .json()
-            .await
-            .map_err(|e| LlmError::Permanent(format!("响应解析失败: {e}")))?;
-        let mut embeddings: Vec<(usize, Vec<f32>)> = Vec::new();
-        for (i, item) in api.data.into_iter().enumerate() {
-            embeddings.push((i, item.embedding));
-        }
-        // 按 index 排序后提取（多数服务已有序，防御性处理）
-        embeddings.sort_by_key(|(i, _)| *i);
-        let embeddings: Vec<Vec<f32>> = embeddings.into_iter().map(|(_, v)| v).collect();
-        let usage = api.usage.unwrap_or(ApiUsage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-        });
-
-        self.circuit
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .record_success();
-        Ok(EmbedResponse {
-            embeddings,
-            input_tokens: usage.total_tokens.max(usage.prompt_tokens),
-            model: req.model,
-            latency_ms: started.elapsed().as_millis() as i64,
-        })
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-}
-
 /// Provider 注册表：读 DB 配置构建实例 + 记账。
 #[derive(Clone)]
 pub struct ProviderRegistry {
@@ -431,7 +119,7 @@ pub struct ProviderRegistry {
 
 /// DB 行。
 #[derive(Debug, sqlx::FromRow)]
-struct ProviderRow {
+pub(crate) struct ProviderRow {
     #[allow(dead_code, reason = "SELECT * 伴随字段")]
     id: Uuid,
     name: String,
@@ -582,66 +270,6 @@ impl ProviderRegistry {
         .await
         .map_err(|e| LlmError::Transient(e.to_string()))
     }
-}
-
-/// 拉取 OpenAI 兼容供应商的模型 ID 列表（GET {base}/models，标准端点）。
-/// 供应商未实现 /models 时返回 Err(Permanent)——前端回退手动输入模型 ID。
-pub async fn fetch_model_ids(
-    base_url: &str,
-    api_key: &str,
-) -> Result<Vec<String>, crate::types::LlmError> {
-    // 粘贴的地址/密钥常带尾随空白或换行——header 值被污染会直接 401
-    let base_url = normalize_base_url(base_url);
-    let api_key = api_key.trim();
-    use crate::types::LlmError;
-    // base_url 已规范化为根形式，模型列表统一 {root}/v1/models
-    let url = format!("{base_url}/v1/models");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| LlmError::Permanent(format!("HTTP 客户端构建失败: {e}")))?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {api_key}"))
-        .send()
-        .await
-        .map_err(|e| LlmError::Permanent(format!("连接失败: {e}")))?;
-    let resp = resp;
-    let status = resp.status();
-    if !status.is_success() {
-        // 按状态分类，避免误导（401 是 Key 错误，不是端点不支持）
-        let hint = match status.as_u16() {
-            401 | 403 => "认证失败——请检查 API Key 是否正确",
-            404 => "供应商可能不支持 /models 列表——请手动输入模型 ID",
-            _ => "供应商返回错误——请稍后重试或手动输入模型 ID",
-        };
-        return Err(LlmError::Permanent(format!(
-            "HTTP {}——{}",
-            status.as_u16(),
-            hint
-        )));
-    }
-    let v: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| LlmError::Permanent(format!("响应解析失败: {e}")))?;
-    let ids: Vec<String> = v
-        .get("data")
-        .and_then(|d| d.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|m| m.get("id").and_then(|x| x.as_str()).map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    if ids.is_empty() {
-        return Err(LlmError::Permanent(
-            "供应商返回空模型列表——请手动输入模型 ID".into(),
-        ));
-    }
-    let mut ids = ids;
-    ids.sort();
-    Ok(ids)
 }
 
 #[cfg(test)]
