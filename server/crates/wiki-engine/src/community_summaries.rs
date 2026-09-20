@@ -91,7 +91,7 @@ pub async fn refresh_community_summaries(
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
     if rows.len() < MIN_GRAPH_NODES {
-        return Ok(json!({"created": 0, "deleted": 0, "skipped": 0, "reason": "graph_too_small"}));
+        return Ok(json!({"created": 0, "deleted": 0, "skipped": 0}));
     }
 
     // 2. 库内双链边（weight 列 FLOAT4——SQL 层 ::float8，防 sqlx 解码类型错配）
@@ -150,7 +150,6 @@ pub async fn refresh_community_summaries(
 
     let mut created = 0usize;
     let mut skipped = 0usize;
-    let mut deleted = 0usize;
     let mut new_pages: Vec<(String, String, String)> = Vec::new(); // slug, title, content
     let mut new_hashes: Vec<String> = Vec::new();
 
@@ -163,62 +162,114 @@ pub async fn refresh_community_summaries(
             skipped += 1;
             continue;
         }
-        let member_lines: Vec<String> = members
-            .iter()
-            .map(|s| {
-                format!(
-                    "- {} | {} | {}",
-                    s,
-                    title_by_slug.get(*s).copied().unwrap_or(s),
-                    first_snippet(content_by_slug.get(*s).copied().unwrap_or(""))
-                )
-            })
-            .collect();
-        let user = format!(
-            "== 主题社区成员（{} 页）==\n{}\n\n请生成该社区的主题综述页。",
-            members.len(),
-            member_lines.join("\n")
-        );
-        // 单社区 LLM 失败不拖垮整层——留待下一轮织入重试
-        let out = match engram_distill::llm_port::chat_json_retrying(
-            ctx,
-            llm.as_ref(),
-            engram_llm::types::Purpose::WikiGeneration,
-            &crate::prompts::community_synthesis_system(),
-            &user,
-            ctx.job.id,
-        )
-        .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(error = %e, "社区综述 LLM 生成失败（本社区跳过）");
-                continue;
-            }
-        };
-        let title = out
-            .get("title")
-            .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "主题综述".into());
-        let content = out
-            .get("content")
-            .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
-        if content.is_empty() {
+        let Some((title, content)) =
+            build_summary_page(ctx, llm, members, &title_by_slug, &content_by_slug).await
+        else {
             continue;
+        };
+        let page = SummaryPage {
+            slug: format!("{SYNTHESIS_SLUG_PREFIX}{hash}"),
+            title,
+            content,
+            hash,
+            member_slugs,
+        };
+        upsert_summary_page(pool, lib, &page).await?;
+        new_pages.push((page.slug.clone(), page.title.clone(), page.content.clone()));
+        created += 1;
+    }
+
+    // 6. 清理消失社区的摘要页（连带清双向链接——可再生页，不留版本快照）
+    let fresh: std::collections::HashSet<&String> = new_hashes.iter().collect();
+    let deleted = cleanup_vanished_summaries(pool, lib, &existing, &fresh).await?;
+
+    // 7. 新页 tsv + embedding（嵌入失败不阻塞——FTS 已可召回）
+    index_new_summaries(pool, llm, lib, ctx, &new_pages).await?;
+
+    Ok(json!({"created": created, "deleted": deleted, "skipped": skipped}))
+}
+
+/// 社区综述页落库所需字段。
+struct SummaryPage {
+    slug: String,
+    title: String,
+    content: String,
+    hash: String,
+    member_slugs: Vec<String>,
+}
+
+/// 单社区 LLM 综述页生成：失败/空内容返回 None（不拖垮整层，留待下轮织入重试）。
+async fn build_summary_page(
+    ctx: &JobContext,
+    llm: &crate::service::LlmRef,
+    members: &[&str],
+    title_by_slug: &HashMap<&str, &str>,
+    content_by_slug: &HashMap<&str, &str>,
+) -> Option<(String, String)> {
+    let member_lines: Vec<String> = members
+        .iter()
+        .map(|s| {
+            format!(
+                "- {} | {} | {}",
+                s,
+                title_by_slug.get(*s).copied().unwrap_or(*s),
+                first_snippet(content_by_slug.get(*s).copied().unwrap_or(""))
+            )
+        })
+        .collect();
+    let user = format!(
+        "== 主题社区成员（{} 页）==\n{}\n\n请生成该社区的主题综述页。",
+        members.len(),
+        member_lines.join("\n")
+    );
+    // 单社区 LLM 失败不拖垮整层——留待下一轮织入重试
+    let out = match engram_distill::llm_port::chat_json_retrying(
+        ctx,
+        llm.as_ref(),
+        engram_llm::types::Purpose::WikiGeneration,
+        &crate::prompts::community_synthesis_system(),
+        &user,
+        ctx.job.id,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "社区综述 LLM 生成失败（本社区跳过）");
+            return None;
         }
-        let slug = format!("{SYNTHESIS_SLUG_PREFIX}{hash}");
-        let fm = json!({
-            "title": title,
-            "page_type": "synthesis",
-            "community_hash": hash,
-            "community_members": member_slugs,
-            "origin_if_new": "llm",
-        });
-        sqlx::query(
+    };
+    let title = out
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "主题综述".into());
+    let content = out
+        .get("content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    if content.is_empty() {
+        return None;
+    }
+    Some((title, content))
+}
+
+/// 综述页单语句 UPSERT（可再生产物：冲突即整体覆盖，不做 human 保护——不进织入提案链）。
+async fn upsert_summary_page(
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    c: &SummaryPage,
+) -> Result<(), JobError> {
+    let fm = json!({
+        "title": c.title,
+        "page_type": "synthesis",
+        "community_hash": c.hash,
+        "community_members": c.member_slugs.clone(),
+        "origin_if_new": "llm",
+    });
+    sqlx::query(
             "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, folder) \
              VALUES ($1, $2, $3, $4, 'synthesis', $5, $6::jsonb, 'llm', 1, $7) \
              ON CONFLICT (library_id, slug) DO UPDATE SET \
@@ -227,21 +278,26 @@ pub async fn refresh_community_summaries(
         )
         .bind(Uuid::now_v7())
         .bind(lib)
-        .bind(&slug)
-        .bind(&title)
-        .bind(&content)
+        .bind(&c.slug)
+        .bind(&c.title)
+        .bind(&c.content)
         .bind(sqlx::types::Json(&fm))
         .bind(crate::service::folder_for_type("synthesis"))
         .execute(pool)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
-        new_pages.push((slug, title, content));
-        created += 1;
-    }
+    Ok(())
+}
 
-    // 6. 清理消失社区的摘要页（连带清双向链接——可再生页，不留版本快照）
-    let fresh: std::collections::HashSet<&String> = new_hashes.iter().collect();
-    for (hash, slug) in &existing {
+/// 清理已消失社区的摘要页：删页 + 删其双向链接（可再生页不留快照），返回删除条数。
+async fn cleanup_vanished_summaries(
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    existing: &HashMap<String, String>,
+    fresh: &std::collections::HashSet<&String>,
+) -> Result<usize, JobError> {
+    let mut deleted = 0usize;
+    for (hash, slug) in existing {
         if !fresh.contains(hash) {
             sqlx::query("DELETE FROM wiki_pages WHERE slug = $1 AND library_id = $2")
                 .bind(slug)
@@ -260,9 +316,21 @@ pub async fn refresh_community_summaries(
             deleted += 1;
         }
     }
+    Ok(deleted)
+}
 
-    // 7. 新页 tsv + embedding（嵌入失败不阻塞——FTS 已可召回）
-    for (slug, title, content) in &new_pages {
+/// 新综述页 tsv + 批量嵌入（嵌入失败/响应不符只告警——FTS 已可召回）。
+async fn index_new_summaries(
+    pool: &sqlx::PgPool,
+    llm: &crate::service::LlmRef,
+    lib: Uuid,
+    ctx: &JobContext,
+    new_pages: &[(String, String, String)],
+) -> Result<(), JobError> {
+    if new_pages.is_empty() {
+        return Ok(());
+    }
+    for (slug, title, content) in new_pages {
         let text = engram_search::tokenize::tsv_text_wiki(&format!("{slug} {title} {content}"));
         sqlx::query("UPDATE wiki_pages SET tsv = to_tsvector('simple', $3) WHERE slug = $1 AND library_id = $2")
             .bind(slug)
@@ -308,8 +376,7 @@ pub async fn refresh_community_summaries(
             }
         }
     }
-
-    Ok(json!({"created": created, "deleted": deleted, "skipped": skipped}))
+    Ok(())
 }
 
 #[cfg(test)]
