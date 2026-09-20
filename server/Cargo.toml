@@ -96,6 +96,27 @@ scraper = "0.23"
 
 # 测试
 
+# ---------- 编译性能（2026-09-20 用户反馈「编译太慢」，实测定位）----------
+# 本机 8 核 / 8GB：默认 dev profile 的 debug = true 会给**每个依赖**产出完整调试
+# 信息，实测 target 达 51GB（deps 33G + incremental 18G）；配合默认并行度（=核数）
+# 把内存打爆（swap 用掉 2.96G/4G、空闲物理页仅 ~177MB）→ 编译高峰全在换页。
+# line-tables-only 保留行号（回溯定位够用）；依赖直接不带调试信息。
+[profile.dev]
+debug = "line-tables-only"
+incremental = true
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+debug = false
+
+# thin LTO 每次部署都要跨 crate 全程序优化（分钟级 + 峰值内存）——本项目非计算
+# 密集，关闭它换取部署构建速度；strip 保留（省磁盘/安装体积）。
 [profile.release]
-lto = "thin"
+lto = false
+codegen-units = 16
 strip = true
