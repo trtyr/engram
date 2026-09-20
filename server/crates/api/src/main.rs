@@ -1,4 +1,5 @@
 //! engram 服务入口（薄壳：配置 → 池 → 迁移 → 路由 → 监听）。
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 use std::net::SocketAddr;
 
@@ -9,6 +10,8 @@ use engram_storage::PoolConfig;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+/// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
+#[allow(clippy::expect_used)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 1. 结构化 JSON 日志（必须最先初始化——Config::from_env 的 data_root WARN 依赖它，
@@ -191,6 +194,8 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
+#[allow(clippy::expect_used)]
 async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c().await.ok();

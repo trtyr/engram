@@ -421,9 +421,11 @@ pub async fn test_provider(
         return Err(ApiError::NotFound(format!("provider {id} 不存在")));
     };
 
-    let api_key = registry.get(&name).await.map(|_| ()).err(); // get() 内部已解密；这里只用其错误通道做存在性检查
-
-    let _ = api_key;
+    // get() 内部已解密；这里只借用它的错误通道做存在性探针。原实现把探针结果直接丢弃
+    // （错误静默吞掉、探针形同虚设）——改为显式告警，控制流保持不变。
+    if let Err(e) = registry.get(&name).await {
+        tracing::warn!(provider = %name, error = %e, "provider 无法读取（存在性探针失败）");
+    }
     let provider = OpenAiCompatProvider::new(
         name.clone(),
         base_url,

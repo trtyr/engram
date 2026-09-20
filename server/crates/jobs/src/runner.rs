@@ -266,7 +266,7 @@ impl RunnerHandle {
     /// SIGTERM 会腰斩执行中的 job）。
     /// 返回 true = 在途全部落库完成；false = 超时放弃（未完成任务由 reap_orphans 兜底回收）。
     pub async fn shutdown_and_wait(self, timeout: Duration) -> bool {
-        let _ = self.shutdown_tx.send(true);
+        let _ = self.shutdown_tx.send(true); // 有意忽略：接收端已退出即停机完成；join 结果不改变语义
         let _ = self.join.await;
         wait_inflight_idle(&self.semaphore, self.concurrency, timeout).await
     }
@@ -275,12 +275,15 @@ impl RunnerHandle {
 async fn execute_job(queue: &JobQueue, handlers: Arc<HashMap<String, HandlerFn>>, job: Job) {
     let Some(handler) = handlers.get(&job.kind) else {
         // 未注册种类：永久失败（防无限重排）
-        let _ = queue
+        if let Err(e) = queue
             .fail(
                 job.id,
                 &JobError::Permanent(format!("未注册的任务种类: {}", job.kind)),
             )
-            .await;
+            .await
+        {
+            tracing::warn!(job = %job.id, error = %e, "未注册种类标记失败（job 留 pending 由 reap 兜底）");
+        }
         return;
     };
 

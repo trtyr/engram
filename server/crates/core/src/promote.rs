@@ -144,11 +144,13 @@ impl PromoteService {
         .await;
 
         // ⑤ 源文档标记双写（登记已成功；页面写入失败则回滚登记，不留半态）
-        if let Err(e) = page {
-            let _ = promo_repo::delete_by_page(&self.pool, lib, &req.slug).await;
-            return Err(e.into());
-        }
-        let page = page.unwrap();
+        let page = match page {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = promo_repo::delete_by_page(&self.pool, lib, &req.slug).await; // 有意忽略：登记回滚 best-effort，主错误已向上抛
+                return Err(e.into());
+            }
+        };
         project_repo::mark_doc_promoted(
             &self.pool,
             req.doc_id,

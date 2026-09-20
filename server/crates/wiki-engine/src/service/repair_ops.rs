@@ -335,7 +335,7 @@ impl WikiService {
             .await
             .map_err(WikiError::from)?;
         // 腐烂治理（工单「人审队列腐烂」）：指向该源的 open 提案自动 dismissed（可审计不删数据）
-        let _ = crate::review::cascade_dismiss(&self.pool, lib, None, Some(source_id)).await;
+        let _ = crate::review::cascade_dismiss(&self.pool, lib, None, Some(source_id)).await; // 有意忽略：派生审查项清理 best-effort
         // 破坏性操作落审计行（与 memory 域「job 行即审计链」同哲学）——best-effort，不阻断返回
         self.audit(
             "wiki_source_cascade_delete",

@@ -125,7 +125,7 @@ pub async fn upload(
                 );
             }
             _ => {
-                let _ = field.bytes().await;
+                let _ = field.bytes().await; // 有意忽略：未知字段必须消费掉（否则 multipart 迭代卡住），内容本身不使用
             }
         }
     }

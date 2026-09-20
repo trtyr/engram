@@ -340,7 +340,12 @@ impl CgBridge {
                 )
                 .bind(nid)
                 .bind(name)
-                .bind(dir.parent().unwrap().to_string_lossy().as_ref())
+                .bind(
+                    dir.parent()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                        .as_str(),
+                )
                 .bind(format!("upload://{head}"))
                 .fetch_one(&self.pool)
                 .await?;
@@ -919,7 +924,7 @@ impl CgBridge {
             .and_then(|root| workdir.canonicalize().ok().map(|w| w.starts_with(&root)))
             .unwrap_or(false);
         if ours {
-            let _ = tokio::fs::remove_dir_all(workdir).await;
+            let _ = tokio::fs::remove_dir_all(workdir).await; // 有意忽略：工作目录清理 best-effort
             return Ok(true);
         }
         Ok(false)

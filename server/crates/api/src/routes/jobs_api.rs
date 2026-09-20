@@ -50,7 +50,6 @@ pub async fn list_jobs(
     Query(params): Query<ListJobsParams>,
 ) -> Result<Json<Vec<Job>>, ApiError> {
     // 无域 scope 要求：任何合法凭证可读任务（AI 轮询自己触发的任务）
-    let _ = state;
     let queue = JobQueue::new(state.pool);
     let kinds: Vec<String> = params
         .kind

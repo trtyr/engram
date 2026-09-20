@@ -113,9 +113,10 @@ impl WikiDocumentService {
             .map_err(|e| WikiDocumentError::Storage(e.to_string()))?
             .ok_or_else(|| WikiDocumentError::NotFound(format!("文档 {id} 不存在")))?;
         if !raw_path.is_empty() {
-            let _ = tokio::fs::remove_file(&raw_path).await;
+            let _ = tokio::fs::remove_file(&raw_path).await; // 有意忽略：best-effort 清理/建目录（失败由后续步骤或下次运行暴露）
         }
         let _ = tokio::fs::remove_file(
+            // 有意忽略：best-effort 清理/建目录（失败由后续步骤或下次运行暴露）
             self.data_dir
                 .join("uploads")
                 .join(format!("{id}.extracted.txt")),

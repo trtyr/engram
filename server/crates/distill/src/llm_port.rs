@@ -338,7 +338,6 @@ impl DistillLlm for GatewayLlm {
             metrics::counter!("llm_calls_total", "purpose" => "embed").increment(1);
             metrics::histogram!("llm_duration_seconds", "purpose" => "embed")
                 .record(resp.latency_ms as f64 / 1000.0);
-            let _ = model;
             Ok(resp.embeddings)
         })
     }
@@ -387,8 +386,11 @@ impl DistillLlm for MockLlm {
         Box<dyn std::future::Future<Output = Result<serde_json::Value, JobError>> + Send + 'a>,
     > {
         Box::pin(async move {
-            self.sent_user.lock().unwrap().push(_user.to_string());
-            let mut q = self.chats.lock().unwrap();
+            self.sent_user
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(_user.to_string());
+            let mut q = self.chats.lock().unwrap_or_else(|e| e.into_inner());
             match q.pop_front() {
                 Some(s) => parse_json_lenient(&s)
                     .map_err(|e| JobError::Retryable(format!("LLM 输出非法 JSON: {e}"))),

@@ -263,7 +263,7 @@ impl WikiService {
         // R 多库补全：跨库引用级联清理（from 侧与 to 侧）
         crate::cross_links::delete_page_cleanup(&self.pool, lib, &slug).await?;
         // 腐烂治理（工单「人审队列腐烂」）：指向该页的 open 提案自动 dismissed（可审计不删数据）
-        let _ = crate::review::cascade_dismiss(&self.pool, lib, Some(&slug), None).await;
+        let _ = crate::review::cascade_dismiss(&self.pool, lib, Some(&slug), None).await; // 有意忽略：派生审查项清理 best-effort
         Ok(true)
     }
 

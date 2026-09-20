@@ -9,7 +9,8 @@ pub struct Chunk {
 
 const TARGET: usize = 800;
 const MAX: usize = 1400;
-const OVERLAP_FRAC: usize = 7; // 1/7 ≈ 15%
+// 相邻块重叠由「前进时回退一块」（下见 pack_sections）实现，
+// 不再按比例常量计算——原 OVERLAP_FRAC 常量已死，2026-09-20 架构治理 task-5 删除。
 
 /// 分块主入口：markdown 按标题切，其他文本按段落打包。
 pub fn chunk_text(text: &str) -> Vec<Chunk> {
@@ -105,7 +106,6 @@ fn pack_sections(sections: Vec<String>) -> Vec<Chunk> {
         } else {
             // 超长节硬切 + 重叠
             let pieces = hard_split(&sec, TARGET);
-            let overlap = TARGET / OVERLAP_FRAC;
             let mut i = 0;
             while i < pieces.len() {
                 let mut merged = pieces[i].clone();
@@ -123,7 +123,6 @@ fn pack_sections(sections: Vec<String>) -> Vec<Chunk> {
                     j.saturating_sub(1)
                 }
                 .max(i + 1);
-                let _ = overlap;
             }
         }
     }

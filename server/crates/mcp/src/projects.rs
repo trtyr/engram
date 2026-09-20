@@ -178,6 +178,8 @@ impl EngramMcpServer {
     /// 默认索引模式不带正文（文档多时省 token 也无信息损失）：
     /// 用 project_doc_search 定位关键词行号，project_doc_get 区间精读；
     /// 小项目想一次全量就 include_content=true。可用 project_id 或 project_name（唯一）定位。
+    /// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
+    #[allow(clippy::expect_used)]
     pub(crate) async fn project_get(
         &self,
         ctx: RequestContext<RoleServer>,

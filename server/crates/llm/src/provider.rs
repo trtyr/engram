@@ -161,7 +161,7 @@ impl OpenAiCompatProvider {
         let name = name.into();
         let circuit = CIRCUITS
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .entry(name.clone())
             .or_insert_with(|| {
                 std::sync::Arc::new(std::sync::Mutex::new(CircuitBreaker::default()))
@@ -185,7 +185,12 @@ impl OpenAiCompatProvider {
         timeout: std::time::Duration,
         body: &serde_json::Value,
     ) -> Result<reqwest::Response, LlmError> {
-        if !self.circuit.lock().unwrap().allow() {
+        if !self
+            .circuit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .allow()
+        {
             return Err(LlmError::Transient("熔断器打开，快速失败".into()));
         }
         let url = format!("{}{}", self.base_url, path);
@@ -198,14 +203,20 @@ impl OpenAiCompatProvider {
             .send()
             .await
             .map_err(|e| {
-                self.circuit.lock().unwrap().record_failure();
+                self.circuit
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .record_failure();
                 classify_http_error(e.status())
             })?;
         for _ in 0..2 {
             if resp.status().as_u16() != 429 {
                 break;
             }
-            self.circuit.lock().unwrap().record_failure();
+            self.circuit
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .record_failure();
             tokio::time::sleep(retry_after_secs(&resp)).await;
             resp = self
                 .http
@@ -216,7 +227,10 @@ impl OpenAiCompatProvider {
                 .send()
                 .await
                 .map_err(|e| {
-                    self.circuit.lock().unwrap().record_failure();
+                    self.circuit
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .record_failure();
                     classify_http_error(e.status())
                 })?;
         }
@@ -299,7 +313,10 @@ impl LlmProvider for OpenAiCompatProvider {
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             tracing::warn!(status = %status, body = %text.chars().take(500).collect::<String>(), "LLM chat 失败");
-            self.circuit.lock().unwrap().record_failure();
+            self.circuit
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .record_failure();
             return Err(classify_http_error(Some(status)));
         }
 
@@ -321,7 +338,10 @@ impl LlmProvider for OpenAiCompatProvider {
             total_tokens: 0,
         });
 
-        self.circuit.lock().unwrap().record_success();
+        self.circuit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record_success();
         Ok(ChatResponse {
             content,
             input_tokens: usage.prompt_tokens,
@@ -361,7 +381,10 @@ impl LlmProvider for OpenAiCompatProvider {
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             tracing::warn!(status = %status, body = %text.chars().take(500).collect::<String>(), "LLM embed 失败");
-            self.circuit.lock().unwrap().record_failure();
+            self.circuit
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .record_failure();
             return Err(classify_http_error(Some(status)));
         }
 
@@ -382,7 +405,10 @@ impl LlmProvider for OpenAiCompatProvider {
             total_tokens: 0,
         });
 
-        self.circuit.lock().unwrap().record_success();
+        self.circuit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record_success();
         Ok(EmbedResponse {
             embeddings,
             input_tokens: usage.total_tokens.max(usage.prompt_tokens),

@@ -252,6 +252,7 @@ impl MemoryService {
         )
         .await;
         let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
+        // 有意忽略：快照刷新建队是 best-effort（原子已归档，收敛失败由下次快照自愈）
         let _ = self
             .queue
             .enqueue(

@@ -61,7 +61,7 @@ pub async fn validate_admin_session(pool: &PgPool, token: &str) -> Result<bool, 
     match expires {
         Some(expires) if expires > Utc::now() => {
             // 更新 last_used（失败不阻塞）
-            let _ = repo::touch_admin_session(pool, &hash).await;
+            let _ = repo::touch_admin_session(pool, &hash).await; // 有意忽略：last_used 心跳更新失败不影响本次鉴权结果
             Ok(true)
         }
         _ => Ok(false),
@@ -168,7 +168,7 @@ async fn authenticate(pool: &PgPool, token: &str) -> Result<Option<Principal>, A
                 )));
             }
             // 更新 last_used（失败不阻塞）
-            let _ = repo::touch_api_key(pool, key_id).await;
+            let _ = repo::touch_api_key(pool, key_id).await; // 有意忽略：API key last_used 心跳更新失败不影响鉴权结果
             return Ok(Some(Principal::ApiKey {
                 key_id,
                 name,

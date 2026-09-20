@@ -2,6 +2,7 @@
 //! 不解析任何代码——只做注册/同步/查询代理与错误归一。
 //!
 //! 设计文档：topics/codegraph-bridge.md；决策 D0005（版本 pin 1.5.0）。
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 pub mod bridge;
 

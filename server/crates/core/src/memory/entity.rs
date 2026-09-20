@@ -191,6 +191,8 @@ impl MemoryService {
     }
 
     /// 手动建实体（蒸馏自动抽取之外的人工入口；同名同类活体只许一个）。
+    /// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
+    #[allow(clippy::expect_used)]
     pub async fn create_entity(
         &self,
         name: &str,

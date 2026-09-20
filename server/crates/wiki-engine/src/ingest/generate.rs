@@ -257,8 +257,6 @@ pub async fn generate_job(
     .fetch_all(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
-
-    let mut tsv_written = 0usize;
     for (slug, title, content) in &pages {
         let text = engram_search::tokenize::tsv_text_wiki(&format!("{slug} {title} {content}"));
         sqlx::query("UPDATE wiki_pages SET tsv = to_tsvector('simple', $3) WHERE slug = $1 AND library_id = $2")
@@ -268,7 +266,6 @@ pub async fn generate_job(
             .execute(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
-        tsv_written += 1;
     }
 
     let texts: Vec<String> = pages
@@ -325,8 +322,6 @@ pub async fn generate_job(
             }
         }
     }
-    let _ = tsv_written;
-    let _ = embedded_pages;
 
     sqlx::query("UPDATE wiki_sources SET status = 'ready', last_ingested_at = now() WHERE id = $1")
         .bind(source_id)
@@ -409,11 +404,16 @@ pub(super) async fn mark_source_failed(
     else {
         return;
     };
-    let _ = sqlx::query("UPDATE wiki_sources SET status = 'failed', error = $2 WHERE id = $1")
-        .bind(sid)
-        .bind(msg)
-        .execute(pool)
-        .await;
+    // 失败态必须落库；写失败要可见（否则原料永远停在 pending）
+    if let Err(e) =
+        sqlx::query("UPDATE wiki_sources SET status = 'failed', error = $2 WHERE id = $1")
+            .bind(sid)
+            .bind(msg)
+            .execute(pool)
+            .await
+    {
+        tracing::warn!(source = %sid, error = %e, "标记 source 失败态写库失败");
+    }
     // 织入失败可见（工单「write_page 哑写」②）：失败落人审队列 flag（via=ingest_failed）——
     // 人能在 reviews 里看到「这条原料织不进来」，而不是只有 source 表里一行 failed
     let row: Option<(Uuid, Option<String>)> =
@@ -424,7 +424,8 @@ pub(super) async fn mark_source_failed(
             .ok()
             .flatten();
     if let Some((lib, title)) = row {
-        let _ = sqlx::query(
+        // 让「织不进来」在日志里可见（失败不再静默）
+        if let Err(e) = sqlx::query(
             "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries, source_id) \
              VALUES ($1, $2, 'flag', $3, '[]'::jsonb, $4)",
         )
@@ -438,7 +439,10 @@ pub(super) async fn mark_source_failed(
         }))
         .bind(sid)
         .execute(pool)
-        .await;
+        .await
+        {
+            tracing::warn!(source = %sid, error = %e, "落人审 flag 失败（原料织不进来这件事将不可见）");
+        }
     }
 }
 

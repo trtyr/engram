@@ -69,9 +69,14 @@ pub fn rewrite_links(content: &str, target: &str, real: Option<&str>) -> (String
                 continue;
             }
         }
-        let ch = content[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
+        match content[i..].chars().next() {
+            Some(ch) => {
+                out.push(ch);
+                i += ch.len_utf8();
+            }
+            // i 越界不该发生（循环条件保证）；防御性退出而非 panic
+            None => break,
+        }
     }
     (out, count)
 }

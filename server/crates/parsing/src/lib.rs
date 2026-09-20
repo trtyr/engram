@@ -3,6 +3,7 @@
 //! 底层独立 crate（不依赖任何内部 crate）：`core` 知识域与 `wiki-engine`
 //! 摄取均经此解析，避免 wiki-engine 反向依赖 core（原 Q9 环）。CPU 密集调用由调用方
 //! 决定是否 spawn_blocking。
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError {

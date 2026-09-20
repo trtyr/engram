@@ -11,6 +11,7 @@
 //! rmcp 把 HTTP request Parts 注入工具上下文，工具实现从这里取 Principal
 //! 做与 HTTP API 同一套的 scope / 编辑分权检查。
 //! key 吊销即刻生效（每个请求独立认证，会话保活也不能豁免）。
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 mod codegraph;
 pub mod dispatch;

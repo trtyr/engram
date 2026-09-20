@@ -20,6 +20,8 @@ pub struct WikiLibraryDto {
     pub sources: i64,
 }
 
+/// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
+#[allow(clippy::expect_used)]
 /// 列出全部库（带 pages/sources 计数；LEFT JOIN 聚合子查询，防双 JOIN 笛卡尔积虚增）。
 /// 注意：按契约本函数不返回 Result——存储层故障此处 panic（列表是只读聚合，失败即基础设施故障）。
 pub async fn list(pool: &PgPool) -> Vec<WikiLibraryDto> {

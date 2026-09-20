@@ -302,7 +302,6 @@ pub async fn refresh_community_summaries(
                     got = emb.len(),
                     "社区综述嵌入响应与批次不符，向量放弃（FTS 不受影响）"
                 );
-                let _ = emb;
             }
             Err(e) => {
                 tracing::warn!(error = %e, "社区综述嵌入失败（FTS 不受影响）");

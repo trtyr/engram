@@ -31,7 +31,7 @@ fn key_of(username: &str) -> String {
 #[must_use]
 pub fn is_locked(username: &str) -> bool {
     let key = key_of(username);
-    let mut reg = registry().lock().unwrap();
+    let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
     let Some(e) = reg.get_mut(&key) else {
         return false;
     };
@@ -50,7 +50,7 @@ pub fn is_locked(username: &str) -> bool {
 /// 登录失败：计数 +1，达阈值进锁定窗口。
 pub fn record_failure(username: &str) {
     let key = key_of(username);
-    let mut reg = registry().lock().unwrap();
+    let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
     let e = reg.entry(key).or_insert(Entry {
         fails: 0,
         locked_until: None,
@@ -63,12 +63,15 @@ pub fn record_failure(username: &str) {
 
 /// 登录成功：清除该用户名的全部失败记录。
 pub fn record_success(username: &str) {
-    registry().lock().unwrap().remove(&key_of(username));
+    registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&key_of(username));
 }
 
 /// 测试钩子：清空限速表（集成测试用独特用户名隔离，必要时整体复位）。
 pub fn clear_all() {
-    registry().lock().unwrap().clear();
+    registry().lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
 #[cfg(test)]

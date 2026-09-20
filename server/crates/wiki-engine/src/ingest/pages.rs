@@ -92,7 +92,7 @@ pub(super) async fn rebuild_links(
 pub(super) async fn update_index_and_log(
     pool: &sqlx::PgPool,
     lib: Uuid,
-    source_id: Uuid,
+    _source_id: Uuid,
     source_title: &str,
     created: usize,
     updated: usize,
@@ -133,7 +133,6 @@ pub(super) async fn update_index_and_log(
     };
 
     upsert_system_page(pool, lib, "log", "log", "日志", &log_md).await?;
-    let _ = source_id;
     Ok(())
 }
 

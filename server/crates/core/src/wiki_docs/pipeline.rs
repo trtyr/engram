@@ -97,7 +97,7 @@ pub async fn enqueue_ingest(
     let Some(id) = inserted else {
         // 幂等命中：清掉刚写的文件
         if !raw_path.is_empty() {
-            let _ = tokio::fs::remove_file(&raw_path).await;
+            let _ = tokio::fs::remove_file(&raw_path).await; // 有意忽略：best-effort 清理/建目录（失败由后续步骤或下次运行暴露）
         }
         let existing = repo::find_document_id_by_sha(queue.pool(), lib, &sha)
             .await
@@ -135,9 +135,9 @@ pub async fn enqueue_ingest(
         )
         .await
     {
-        let _ = repo::delete_document_quiet(queue.pool(), lib, id).await;
+        let _ = repo::delete_document_quiet(queue.pool(), lib, id).await; // 有意忽略：quiet 删除本就吞错（函数名即契约）
         if !raw_path.is_empty() {
-            let _ = tokio::fs::remove_file(&raw_path).await;
+            let _ = tokio::fs::remove_file(&raw_path).await; // 有意忽略：best-effort 清理/建目录（失败由后续步骤或下次运行暴露）
         }
         return Err(WikiDocumentError::Storage(format!("job 入队失败: {e}")));
     }
@@ -195,7 +195,9 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
     };
     // 状态标记为 failed（尽力而为，事件可查）
     async fn mark_failed(ctx: &JobContext, lib: Uuid, doc_id: Uuid, msg: &str) {
-        let _ = repo::mark_failed_document(ctx.pool(), lib, doc_id, msg).await;
+        if let Err(e) = repo::mark_failed_document(ctx.pool(), lib, doc_id, msg).await {
+            tracing::warn!(doc = %doc_id, error = %e, "失败态落库失败（文档可能停在处理中）");
+        }
         ctx.emit("文档摄取失败", Some(serde_json::json!({"error": msg})))
             .await
             .ok();
@@ -215,11 +217,14 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
             Ok(page) => {
                 // 抓取成功后内容落盘（重试不重复抓）
                 let uploads = data_uploads();
-                let _ = tokio::fs::create_dir_all(&uploads).await;
+                let _ = tokio::fs::create_dir_all(&uploads).await; // 有意忽略：目录已存在不算失败；后续写入会暴露真错误
                 let path = uploads.join(format!("{doc_id}_url.html"));
-                let _ = tokio::fs::write(&path, &page.bytes).await;
+                if let Err(e) = tokio::fs::write(&path, &page.bytes).await {
+                    tracing::warn!(path = %path.display(), error = %e, "上传件落盘失败");
+                }
                 let title = extract_title_from_html(&page.bytes).or(Some(source_uri.clone()));
-                let _ = repo::update_document_fetch_result(
+                // 错误上浮：抓取结果落库失败必须可见（否则成功被抓取的文档状态失真）
+                if let Err(e) = repo::update_document_fetch_result(
                     pool,
                     lib,
                     doc_id,
@@ -227,7 +232,10 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
                     page.content_type.as_deref(),
                     title.as_deref(),
                 )
-                .await;
+                .await
+                {
+                    tracing::warn!(doc = %doc_id, error = %e, "抓取结果落库失败（文档状态可能失真）");
+                }
                 (format!("{doc_id}_url.html"), page.bytes, page.content_type)
             }
             Err(e) => {
@@ -294,7 +302,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
 
     // 存 extracted（临时文件，chunk 步消费）；确保目录存在
     let uploads_dir = data_uploads();
-    let _ = tokio::fs::create_dir_all(&uploads_dir).await;
+    let _ = tokio::fs::create_dir_all(&uploads_dir).await; // 有意忽略：目录已存在不算失败；后续写入会暴露真错误
     let extracted_path = uploads_dir.join(format!("{doc_id}.extracted.txt"));
     tokio::fs::write(&extracted_path, &text)
         .await
@@ -478,11 +486,11 @@ pub async fn embed_job(
     // best-effort（sha256 去重 + 失败不影响文档 ready，页面层降级为空）。
     {
         let wiki = crate::wiki::WikiService::new(pool.clone(), registry.clone());
-        let _ = wiki.ingest_document(lib, doc_id).await;
+        let _ = wiki.ingest_document(lib, doc_id).await; // 有意忽略：织入 Wiki 是 best-effort（见上方注释）
     }
 
     // 清理 extracted 临时文件
-    let _ = tokio::fs::remove_file(data_uploads().join(format!("{doc_id}.extracted.txt"))).await;
+    let _ = tokio::fs::remove_file(data_uploads().join(format!("{doc_id}.extracted.txt"))).await; // 有意忽略：best-effort 清理/建目录（失败由后续步骤或下次运行暴露）
 
     ctx.emit(
         &format!("文档 ready（补嵌 {embedded}/{missing}，共 {total} 块）"),

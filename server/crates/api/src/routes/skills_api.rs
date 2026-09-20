@@ -342,14 +342,14 @@ pub async fn get_file(
     if p.raw.is_some() {
         // 消费形态②：单文件直下——curl -s ".../file?path=…&raw=1" -o 文件名
         let name = p.path.rsplit('/').next().unwrap_or("file");
-        return Ok(Response::builder()
+        return Response::builder()
             .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
             .header(
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{name}\""),
             )
             .body(Body::from(content))
-            .unwrap());
+            .map_err(|e| ApiError::Internal(e.into()));
     }
     Ok(Json(engram_core::skills::SkillFileEntryDto {
         path: p.path,

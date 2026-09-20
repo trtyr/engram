@@ -363,6 +363,8 @@ pub async fn set_chunk_failed(pool: &PgPool, lib: Uuid, chunk_id: Uuid) -> Store
 
 // ---------- 混合检索 ----------
 
+/// `has_vec` 由 `query_vec.is_some()` 推出：分支内 unwrap 不可能失败（架构治理 task-5 分类 A）。
+#[allow(clippy::unwrap_used)]
 /// 混合检索 chunks（FTS + 向量 + RRF，带文档引用），库内检索：
 /// 两个 CTE 池与外层 WHERE 均按 library_id 收窄（fts/vec 的 top-200 池不跨库）。
 /// `query` 是已 token 化的 tsquery 表达式（core 的 tsv_query_smart 产物——tokenize 归 core，

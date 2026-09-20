@@ -35,6 +35,8 @@ pub enum ConfigError {
 pub const EMBEDDING_COLUMN_DIM: u32 = 1024;
 
 impl Config {
+    /// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
+    #[allow(clippy::expect_used)]
     pub fn from_env() -> Result<Self, ConfigError> {
         let database_url = std::env::var("AGENT_MEMORY_DATABASE_URL")
             .map_err(|_| ConfigError::MissingDatabaseUrl)?;
@@ -121,9 +123,8 @@ mod tests {
         let _g = env_lock();
         rm_env!("AGENT_MEMORY_EMBEDDING_DIMENSIONS");
         set_env!("AGENT_MEMORY_DATABASE_URL", "postgres://x");
-        let cfg = Config::from_env().unwrap();
         // 默认（未配置）应通过守门（无字段——值由 helper 消费）
-        let _ = cfg;
+        let _cfg = Config::from_env().unwrap();
     }
 
     #[test]

@@ -89,9 +89,14 @@ pub fn remove_wikilinks(content: &str, slug: &str) -> String {
                 continue;
             }
         }
-        let ch = content[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
+        match content[i..].chars().next() {
+            Some(ch) => {
+                out.push(ch);
+                i += ch.len_utf8();
+            }
+            // i 越界不该发生（循环条件保证）；防御性退出而非 panic
+            None => break,
+        }
     }
     out
 }
@@ -136,9 +141,14 @@ pub fn normalize_wikilinks(
             i += 2 + end_rel + 2;
             continue;
         }
-        let ch = content[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
+        match content[i..].chars().next() {
+            Some(ch) => {
+                out.push(ch);
+                i += ch.len_utf8();
+            }
+            // i 越界不该发生（循环条件保证）；防御性退出而非 panic
+            None => break,
+        }
     }
     out
 }

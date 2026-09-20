@@ -140,7 +140,7 @@ pub async fn enqueue_ingest(
 
     // 落不可变原料副本
     let dir = wiki_sources_dir();
-    let _ = tokio::fs::create_dir_all(&dir).await;
+    let _ = tokio::fs::create_dir_all(&dir).await; // 有意忽略：目录已存在不算失败；后续写入会二次暴露真错误
     let id = Uuid::now_v7();
     let path = dir.join(format!("{id}.md"));
     tokio::fs::write(&path, text)
@@ -168,7 +168,7 @@ pub async fn enqueue_ingest(
 
     // 冲突行的新原料内容以返回的 id 落盘（read_source 按 id 找路径）
     if real_id != id {
-        let _ = tokio::fs::remove_file(&path).await;
+        let _ = tokio::fs::remove_file(&path).await; // 有意忽略：冲突原料清理 best-effort
         let path = dir.join(format!("{real_id}.md"));
         tokio::fs::write(&path, text)
             .await

@@ -95,7 +95,7 @@ impl EngramMcpServer {
         ctx: RequestContext<RoleServer>,
         params: Parameters<jobs::JobsListParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _ = principal_of(&ctx)?;
+        principal_of(&ctx)?; // 鉴权门禁：Principal 值本处不使用
         let cursor = match params.0.cursor.as_deref() {
             Some(v) => Some(parse_flex_datetime(v).map_err(|e| {
                 mcp_err(
@@ -136,7 +136,7 @@ impl EngramMcpServer {
         ctx: RequestContext<RoleServer>,
         params: Parameters<jobs::JobsGetParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _ = principal_of(&ctx)?;
+        principal_of(&ctx)?; // 鉴权门禁：Principal 值本处不使用
         let id = Uuid::parse_str(&params.0.id).map_err(|_| {
             mcp_err(
                 ErrorCode::INVALID_PARAMS,
@@ -165,7 +165,7 @@ impl EngramMcpServer {
         ctx: RequestContext<RoleServer>,
         params: Parameters<jobs::JobsEventsParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let _ = principal_of(&ctx)?;
+        principal_of(&ctx)?; // 鉴权门禁：Principal 值本处不使用
         let id = Uuid::parse_str(&params.0.id).map_err(|_| {
             mcp_err(
                 ErrorCode::INVALID_PARAMS,
@@ -250,7 +250,7 @@ impl EngramMcpServer {
         Parameters(call): Parameters<dispatch::DomainCall>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         // jobs 无域 scope（对齐 HTTP：list/get 任何合法凭证可读）；revive 的 Admin 检查在 handler 内
-        let _ = principal_of(&ctx)?;
+        principal_of(&ctx)?; // 鉴权门禁：Principal 值本处不使用
         if call.action == "help" {
             let cfg = load_config(&self.state.pool).await;
             return ok_json(dispatch::render_manual("jobs", &cfg.disabled_tools));

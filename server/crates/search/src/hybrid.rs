@@ -67,6 +67,8 @@ async fn fts_has_match(
         .await
 }
 
+/// `has_vec` 由 `query_vec.is_some()` 推出：分支内 unwrap 不可能失败（架构治理 task-5 分类 A）。
+#[allow(clippy::unwrap_used)]
 /// atoms 混合检索（仅 active）。`query_vec` None 时退化为纯 FTS。
 pub async fn search_atoms(
     pool: &PgPool,
@@ -189,6 +191,8 @@ pub async fn search_atoms(
         .collect())
 }
 
+/// `has_vec` 由 `query_vec.is_some()` 推出：分支内 unwrap 不可能失败（架构治理 task-5 分类 A）。
+#[allow(clippy::unwrap_used)]
 /// scenarios 混合检索。
 pub async fn search_scenarios(
     pool: &PgPool,

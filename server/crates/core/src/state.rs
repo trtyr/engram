@@ -48,6 +48,8 @@ impl AppState {
     }
 
     /// LLM 注册表（master_key 缺省时用占位密钥——仅查询用量等不涉密操作可用）。
+    /// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
+    #[allow(clippy::expect_used)]
     pub fn registry(&self) -> engram_llm::ProviderRegistry {
         let hex = self
             .master_key
@@ -60,6 +62,8 @@ impl AppState {
     }
 
     /// LLM 门面（R6 rerank 等轻量 LLM 调用用；master_key 缺省时占位密钥——解密类操作不可用）。
+    /// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
+    #[allow(clippy::expect_used)]
     pub fn llm(&self) -> engram_distill::llm_port::LlmRef {
         let hex = self
             .master_key

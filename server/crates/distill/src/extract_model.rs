@@ -115,30 +115,31 @@ pub fn build_segments(sessions: &[SessionRow]) -> (Vec<Vec<SegmentLine>>, Vec<Uu
 
 /// 贪心打包：会话头不落单（开新段时若末行是头，连带迁去新段）。
 fn pack_segments(lines: Vec<SegmentLine>) -> Vec<Vec<SegmentLine>> {
-    let mut segments: Vec<Vec<SegmentLine>> = vec![Vec::new()];
+    // 用显式「当前段」代替 `segments.last().unwrap()`：段栈永不为空是本函数的局部不变式，
+    // 直接持有当前段即可表达，无需在循环体里反复 unwrap（架构治理 task-5）。
+    let mut segments: Vec<Vec<SegmentLine>> = Vec::new();
+    let mut current: Vec<SegmentLine> = Vec::new();
     let mut used = 0usize;
     for line in lines {
         let len = line.text.len() + 1;
-        if !segments.last().unwrap().is_empty() && used + len > SEGMENT_CHARS {
-            let mut new_seg: Vec<SegmentLine> = Vec::new();
+        if !current.is_empty() && used + len > SEGMENT_CHARS {
             // 头不落单：上一段末行若是会话头，迁移到新段首
-            if segments
-                .last()
-                .unwrap()
-                .last()
-                .map(|l| l.is_header)
-                .unwrap_or(false)
-                && let Some(header) = segments.last_mut().unwrap().pop()
+            let mut new_seg: Vec<SegmentLine> = Vec::new();
+            if current.last().map(|l| l.is_header).unwrap_or(false)
+                && let Some(header) = current.pop()
             {
                 new_seg.push(header);
             }
-            segments.push(new_seg);
+            segments.push(std::mem::take(&mut current));
+            current = new_seg;
             used = 0;
         }
         used += len;
-        segments.last_mut().unwrap().push(line);
+        current.push(line);
     }
-    segments.retain(|s| !s.is_empty());
+    if !current.is_empty() {
+        segments.push(current);
+    }
     segments
 }
 

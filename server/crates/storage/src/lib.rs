@@ -10,6 +10,7 @@
 //!   各自管道内部的 SQL（job 处理器 / 检索只读路径），不属于业务面仓储；
 //!   jobs 表的管理面只读/收尾操作在 `engram_jobs::admin`。
 //! - 事务边界归仓储：跨语句事务（快照+更新、purge 等）整体落在 repo 函数内。
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 pub mod error;
 pub mod migrate;

@@ -428,7 +428,7 @@ impl ProjectService {
                 content.len()
             )));
         }
-        let _ = self.get_project_bare(project_id).await?; // 存在性门禁
+        let _ = self.get_project_bare(project_id).await?; // 有意忽略：只借其错误通道做存在性门禁，Project 值本处不用
         let mime = mime
             .map(str::trim)
             .filter(|m| !m.is_empty())
@@ -439,7 +439,7 @@ impl ProjectService {
     }
 
     pub async fn list_files(&self, project_id: Uuid) -> Result<Vec<ProjectFileDto>, ProjectError> {
-        let _ = self.get_project_bare(project_id).await?;
+        let _ = self.get_project_bare(project_id).await?; // 有意忽略：存在性门禁（值本处不用）
         Ok(repo::list_files(&self.pool, project_id).await?)
     }
 
@@ -734,7 +734,7 @@ impl ProjectService {
         'outer: for mut d in results {
             d.lines.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
             let doc_hit_count = d.lines.len() as i64;
-            for (line, text, line_score) in d.lines {
+            for (line, text, _line_score) in d.lines {
                 if hits.len() >= cap {
                     break 'outer;
                 }
@@ -747,7 +747,6 @@ impl ProjectService {
                     score: d.doc_score,
                     doc_hit_count,
                 });
-                let _ = line_score;
             }
         }
         Ok(hits)
