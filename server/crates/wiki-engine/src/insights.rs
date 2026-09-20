@@ -33,6 +33,7 @@ pub struct InsightsReport {
 
 /// 某库的图洞察计算（pages/links/dismissals 全部按 library_id 隔离）。
 pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport, JobError> {
+    use std::collections::HashMap;
     let pages: Vec<(String, String)> = sqlx::query_as(
         "SELECT slug, page_type FROM wiki_pages \
          WHERE page_type NOT IN ('index','log','overview') AND library_id = $1",
@@ -56,31 +57,64 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
             .map_err(|e| JobError::Retryable(e.to_string()))?;
 
     let nodes: Vec<String> = pages.iter().map(|(s, _)| s.clone()).collect();
-    let type_of: std::collections::HashMap<&str, &str> = pages
+    let type_of: HashMap<&str, &str> = pages
         .iter()
         .map(|(s, t)| (s.as_str(), t.as_str()))
         .collect();
 
-    // 度数
+    let degree = compute_degree(&edges);
+    let (comms, mut community_info) = compute_communities(&nodes, &edges).await;
+    community_info.sort_by_key(|c| std::cmp::Reverse(c.size));
+
+    let mut insights: Vec<Insight> = Vec::new();
+    insights.extend(orphan_page_insights(&pages, &degree, &dismissed));
+    insights.extend(sparse_community_insights(
+        &community_info,
+        &nodes,
+        &comms,
+        &dismissed,
+    ));
+    insights.extend(bridge_node_insights(&edges, &comms, &dismissed));
+    insights.extend(unexpected_link_insights(
+        &edges, &type_of, &comms, &dismissed,
+    ));
+
+    Ok(InsightsReport {
+        insights,
+        communities: community_info,
+        total_pages: pages.len(),
+    })
+}
+
+/// 度数：无向图按边两端各计一次。
+fn compute_degree(edges: &[(String, String, f64)]) -> std::collections::HashMap<&str, usize> {
     use std::collections::HashMap;
     let mut degree: HashMap<&str, usize> = HashMap::new();
-    for (f, t, _) in &edges {
+    for (f, t, _) in edges {
         *degree.entry(f.as_str()).or_default() += 1;
         *degree.entry(t.as_str()).or_default() += 1;
     }
+    degree
+}
 
+/// 社区划分（Louvain，spawn_blocking 隔离 CPU；超阈值降级为空社区信息）。
+async fn compute_communities(
+    nodes: &[String],
+    edges: &[(String, String, f64)],
+) -> (std::collections::HashMap<String, usize>, Vec<CommunityInfo>) {
+    use std::collections::HashMap;
     // 社区。万页保护（2026-09-20 压测发现，与 graph 路径同类）：Louvain 是纯 CPU 计算，
     // 万级全图分钟级且阻塞 tokio worker（实测 10k 节点洞察请求令实例整体无响应）。
     // 超阈值时降级跳过社区计算（community_info 空 → 少「稀疏社区」一类洞察）；
     // 阈值内也 spawn_blocking 隔离，不占 worker。
-    let (comms, mut community_info): (HashMap<String, usize>, Vec<CommunityInfo>) =
+    let (comms, community_info): (HashMap<String, usize>, Vec<CommunityInfo>) =
         if nodes.len() > crate::community::LOUVAIN_MAX_NODES {
             // 降级：不做社区计算（community_info 空 → 少「稀疏社区」类洞察）
             (HashMap::new(), Vec::new())
         } else {
             let (comms, cohesion) = {
-                let nodes_c = nodes.clone();
-                let edges_c = edges.clone();
+                let nodes_c = nodes.to_vec();
+                let edges_c = edges.to_vec();
                 tokio::task::spawn_blocking(move || {
                     let comms = louvain_communities(&nodes_c, &edges_c);
                     let cohesion = community_cohesion(&nodes_c, &edges_c, &comms);
@@ -92,7 +126,7 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
                 .unwrap_or_default()
             };
             let mut sizes: HashMap<usize, Vec<&str>> = HashMap::new();
-            for n in &nodes {
+            for n in nodes {
                 sizes
                     .entry(comms.get(n.as_str()).copied().unwrap_or(0))
                     .or_default()
@@ -115,18 +149,24 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
                 .collect();
             (comms, info)
         };
-    community_info.sort_by_key(|c| std::cmp::Reverse(c.size));
+    (comms, community_info)
+}
 
-    let mut insights: Vec<Insight> = Vec::new();
-
+/// 洞察① 孤立页（degree ≤ 1）。
+fn orphan_page_insights(
+    pages: &[(String, String)],
+    degree: &std::collections::HashMap<&str, usize>,
+    dismissed: &[String],
+) -> Vec<Insight> {
+    let mut out: Vec<Insight> = Vec::new();
     // 1. 孤立页（degree ≤ 1）
-    for (slug, _) in &pages {
+    for (slug, _) in pages {
         if degree.get(slug.as_str()).copied().unwrap_or(0) <= 1 {
             let key = format!("isolated_page:{slug}");
             if dismissed.iter().any(|d| d == &key) {
                 continue;
             }
-            insights.push(Insight {
+            out.push(Insight {
                 key,
                 kind: "isolated_page".into(),
                 title: format!("孤立页面：{slug}"),
@@ -136,9 +176,19 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
             });
         }
     }
+    out
+}
 
+/// 洞察② 稀疏社区（cohesion < SPARSE_COHESION 且 ≥SPARSE_MIN_SIZE 页）。
+fn sparse_community_insights(
+    community_info: &[CommunityInfo],
+    nodes: &[String],
+    comms: &std::collections::HashMap<String, usize>,
+    dismissed: &[String],
+) -> Vec<Insight> {
+    let mut out: Vec<Insight> = Vec::new();
     // 2. 稀疏社区（cohesion < SPARSE_COHESION 且 ≥SPARSE_MIN_SIZE 页）
-    for c in &community_info {
+    for c in community_info {
         if c.size >= crate::community::SPARSE_MIN_SIZE
             && c.cohesion < crate::community::SPARSE_COHESION
         {
@@ -151,7 +201,7 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
                 .filter(|n| comms.get(n.as_str()) == Some(&{ c.id }))
                 .cloned()
                 .collect();
-            insights.push(Insight {
+            out.push(Insight {
                 key,
                 kind: "sparse_community".into(),
                 title: format!(
@@ -164,10 +214,20 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
             });
         }
     }
+    out
+}
 
+/// 洞察③ 桥节点（连接 3+ 社区）。
+fn bridge_node_insights(
+    edges: &[(String, String, f64)],
+    comms: &std::collections::HashMap<String, usize>,
+    dismissed: &[String],
+) -> Vec<Insight> {
+    use std::collections::HashMap;
+    let mut out: Vec<Insight> = Vec::new();
     // 3. 桥节点（连接 3+ 社区）
     let mut node_communities: HashMap<&str, std::collections::HashSet<usize>> = HashMap::new();
-    for (f, t, _) in &edges {
+    for (f, t, _) in edges {
         if let (Some(&cf), Some(&ct)) = (comms.get(f.as_str()), comms.get(t.as_str()))
             && cf != ct
         {
@@ -183,7 +243,7 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
             if dismissed.iter().any(|d| d == &key) {
                 continue;
             }
-            insights.push(Insight {
+            out.push(Insight {
                 key,
                 kind: "bridge_node".into(),
                 title: format!("桥节点：{slug}（跨 {} 个知识区）", cs.len()),
@@ -193,10 +253,20 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
             });
         }
     }
+    out
+}
 
+/// 洞察④ 意外连接（跨社区 + 跨类型的强边）。
+fn unexpected_link_insights(
+    edges: &[(String, String, f64)],
+    type_of: &std::collections::HashMap<&str, &str>,
+    comms: &std::collections::HashMap<String, usize>,
+    dismissed: &[String],
+) -> Vec<Insight> {
+    let mut out: Vec<Insight> = Vec::new();
     // 4. 意外连接（跨社区 + 跨类型的强边）
     let max_w = edges.iter().map(|(_, _, w)| *w).fold(0.0_f64, f64::max);
-    for (f, t, w) in &edges {
+    for (f, t, w) in edges {
         if let (Some(&cf), Some(&ct)) = (comms.get(f.as_str()), comms.get(t.as_str())) {
             let cross = cf != ct;
             let cross_type = type_of.get(f.as_str()) != type_of.get(t.as_str());
@@ -206,7 +276,7 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
                 if dismissed.iter().any(|d| d == &key) {
                     continue;
                 }
-                insights.push(Insight {
+                out.push(Insight {
                     key,
                     kind: "surprising_connection".into(),
                     title: format!("意外连接：{f} ↔ {t}"),
@@ -219,12 +289,7 @@ pub async fn compute_insights(pool: &PgPool, lib: Uuid) -> Result<InsightsReport
             }
         }
     }
-
-    Ok(InsightsReport {
-        insights,
-        communities: community_info,
-        total_pages: pages.len(),
-    })
+    out
 }
 
 /// dismiss 某库的一条洞察（upsert 复合主键 (library_id, insight_key)——洞察键跨库可同名）。
