@@ -110,9 +110,38 @@ pub async fn enqueue_ingest(
     text: &str,
 ) -> Result<IngestOutcome, JobError> {
     let sha = sha256_hex(text.as_bytes());
-    // 同 sha 去重（D11 + D27 语义细化）：ready=已完成（跳过）/ pending|processing=在途
-    // （返回 InFlight——调用方知道无需重提，也不再误以为丢失）/ failed 才允许重试重入队
-    // 多库：sha 全局唯一已降为 (library_id, sha256)，去重只在库内生效
+
+    // 步骤 1：同 sha 去重（库内 sha256 唯一）——命中即早退
+    if let Some(outcome) = dedup_outcome(queue, lib, &sha).await? {
+        return Ok(outcome);
+    }
+
+    // 步骤 2：落不可变原料副本 + 登记 source 行（冲突时返回既有行 id）
+    let (id, real_id) = store_raw_source(queue, lib, title, text, &sha).await?;
+
+    // 步骤 3：W1 状态感知重入队（analyze 在途 → 秒跳过；analyze 成功 → 直发 generate）
+    if let Some(outcome) = reenqueue_stale_source(queue, lib, real_id, id, title).await? {
+        return Ok(outcome);
+    }
+
+    let job = queue
+        .enqueue(
+            JobTemplate::new("wiki_analyze")
+                .with_payload(json!({"source_id": real_id}))
+                .with_idempotency_key(format!("wiki-analyze-{real_id}")),
+        )
+        .await?;
+    Ok(IngestOutcome::Enqueued(real_id, job.id))
+}
+
+/// 步骤 1：同 sha 去重（D11 + D27 语义细化；库内生效）。
+/// ready → AlreadyReady（跳过）/ pending|processing → InFlight（带在途 job id）/
+/// failed → None（交下游 W1 状态感知重入队）。
+async fn dedup_outcome(
+    queue: &engram_jobs::JobQueue,
+    lib: Uuid,
+    sha: &str,
+) -> Result<Option<IngestOutcome>, JobError> {
     let existing: Option<(Uuid, String)> =
         sqlx::query_as("SELECT id, status FROM wiki_sources WHERE sha256 = $1 AND library_id = $2")
             .bind(&sha)
@@ -122,7 +151,7 @@ pub async fn enqueue_ingest(
             .map_err(|e| JobError::Retryable(e.to_string()))?;
     if let Some((id, status)) = existing {
         match status.as_str() {
-            "ready" => return Ok(IngestOutcome::AlreadyReady(id)),
+            "ready" => return Ok(Some(IngestOutcome::AlreadyReady(id))),
             "pending" | "processing" => {
                 // R8 观察 3：带上在途 job id，调用方可 GET /jobs/{id} 直查进度
                 let job: Option<(Uuid,)> = sqlx::query_as(
@@ -132,12 +161,24 @@ pub async fn enqueue_ingest(
                 .fetch_optional(queue.pool())
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;
-                return Ok(IngestOutcome::InFlight(id, job.map(|(j,)| j)));
+                return Ok(Some(IngestOutcome::InFlight(id, job.map(|(j,)| j))));
             }
             _ => {} // failed → 走下方 W1 状态感知重入队
         }
     }
+    Ok(None)
+}
 
+/// 步骤 2：原料落盘 + source 行 UPSERT（RETURNING id：sha 冲突时返回旧行 id，
+/// payload 必须用它——曾因用新生成 uuid 导致 analyze 读不到原料行 no-rows 死循环）。
+/// 返回 `(新 id, 实际入库 id)`。
+async fn store_raw_source(
+    queue: &engram_jobs::JobQueue,
+    lib: Uuid,
+    title: &str,
+    text: &str,
+    sha: &str,
+) -> Result<(Uuid, Uuid), JobError> {
     // 落不可变原料副本
     let dir = wiki_sources_dir();
     let _ = tokio::fs::create_dir_all(&dir).await; // 有意忽略：目录已存在不算失败；后续写入会二次暴露真错误
@@ -180,7 +221,19 @@ pub async fn enqueue_ingest(
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
     }
+    Ok((id, real_id))
+}
 
+/// 步骤 3：W1 状态感知重入队——analyze 在途则跳过；analyze 已成功则直发 generate
+/// （复用 payload 里的 analysis，省一次 LLM）；否则重跑 analyze。
+/// 返回 Some(outcome) 表示已入队 / None 表示无需重入队（走常规 analyze 入队）。
+async fn reenqueue_stale_source(
+    queue: &engram_jobs::JobQueue,
+    lib: Uuid,
+    real_id: Uuid,
+    id: Uuid,
+    title: &str,
+) -> Result<Option<IngestOutcome>, JobError> {
     // W1 状态感知重入队：source 非 ready 时查两步 job 实况——
     // analyze 已成功而 generate 缺失/终态失败 → 从失败 job 的 payload 取 analysis
     // 重入队 generate（新幂等键）；analyze 在途 → 真正的秒跳过。
@@ -241,7 +294,7 @@ pub async fn enqueue_ingest(
                                 )),
                         )
                         .await
-                        .map(|j| IngestOutcome::Enqueued(real_id, j.id));
+                        .map(|j| Some(IngestOutcome::Enqueued(real_id, j.id)));
                 }
                 // analyze 未成功或 analysis 不可得 → 重跑 analyze（原料文件刚重写过，可读）
                 sqlx::query("UPDATE wiki_sources SET status = 'pending', error = NULL WHERE id = $1 AND status <> 'ready'")
@@ -259,19 +312,11 @@ pub async fn enqueue_ingest(
                             )),
                     )
                     .await
-                    .map(|j| IngestOutcome::Enqueued(real_id, j.id));
+                    .map(|j| Some(IngestOutcome::Enqueued(real_id, j.id)));
             }
         }
     }
-
-    let job = queue
-        .enqueue(
-            JobTemplate::new("wiki_analyze")
-                .with_payload(json!({"source_id": real_id}))
-                .with_idempotency_key(format!("wiki-analyze-{real_id}")),
-        )
-        .await?;
-    Ok(IngestOutcome::Enqueued(real_id, job.id))
+    Ok(None)
 }
 
 /// 第一步：分析。source 全文 + 既有 index → 结构化分析（存 wiki_sources.status + 事件）。
