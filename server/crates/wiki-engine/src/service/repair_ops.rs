@@ -56,18 +56,12 @@ impl WikiService {
     /// 不做（物理删除有内容的独立页——问用户；语义级重复发现留给 lint_deep + AI 处置）。
     /// 全程确定性（不调 LLM）；页面修改一律走 put_page 语义（版本快照 + frontmatter.via="ai"）。
     pub async fn repair(&self, lib: Uuid) -> Result<crate::repair::RepairReport, WikiError> {
-        use crate::repair::{RepairAction, RepairReport, rewrite_links};
+        use crate::repair::{RepairAction, RepairReport};
         use std::collections::{HashMap, HashSet};
-        let mut actions: Vec<RepairAction> = Vec::new();
 
-        // 全库页快照（非 log；slug/title/content 三张 map 是本函数的工作状态）
-        let pages: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type, content FROM wiki_pages \
-         WHERE page_type <> 'log' AND library_id = $1 ORDER BY slug",
-    )
-    .bind(lib)
-    .fetch_all(&self.pool)
-    .await?;
+        let mut actions: Vec<RepairAction> = Vec::new();
+        // 全库页快照（非 log；slug/title/content 三张 map 是本流程的工作状态）
+        let pages = self.repair_pages(lib).await?;
         let checked = pages.len();
         let mut contents: HashMap<String, String> = pages
             .iter()
@@ -75,7 +69,63 @@ impl WikiService {
             .collect();
 
         // ── 1. 同标题重复合并（留痕做，复用 merge_pages 原语）──
-        // primary = 入链最多 → 正文最长（信息最全者为主）。
+        actions.extend(self.repair_merge_duplicates(lib, &pages, &contents).await?);
+
+        // merge_pages 直接落库——从库重载工作状态再进死链段
+        let pages = self.repair_pages(lib).await?;
+        contents = pages
+            .iter()
+            .map(|(s, .., c)| (s.clone(), c.clone()))
+            .collect();
+        let mut titles: HashMap<String, String> = pages
+            .iter()
+            .map(|(s, t, ..)| (s.clone(), t.clone()))
+            .collect();
+        let mut slugs: HashSet<String> = contents.keys().cloned().collect();
+
+        // ── 2. 死链处理（自动做）──
+        actions.extend(
+            self.repair_dead_links(lib, &mut contents, &mut titles, &mut slugs)
+                .await?,
+        );
+
+        // ── 3. 孤页沿出链回挂（自动做）──
+        actions.extend(
+            self.repair_attach_orphans(lib, &mut contents, &titles, &slugs)
+                .await?,
+        );
+        self.rebuild_all_links(lib).await?;
+        Ok(RepairReport {
+            actions,
+            checked_pages: checked,
+        })
+    }
+
+    /// 非 log 页快照（slug / title / page_type / content）——repair 各步骤的统一取数入口。
+    async fn repair_pages(
+        &self,
+        lib: Uuid,
+    ) -> Result<Vec<(String, String, String, String)>, WikiError> {
+        let pages: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type, content FROM wiki_pages \
+         WHERE page_type <> 'log' AND library_id = $1 ORDER BY slug",
+    )
+    .bind(lib)
+    .fetch_all(&self.pool)
+    .await?;
+        Ok(pages)
+    }
+
+    /// 步骤 1：同标题重复合并（primary = 入链最多 → 正文最长；复用 merge_pages 原语，留痕）。
+    async fn repair_merge_duplicates(
+        &self,
+        lib: Uuid,
+        pages: &[(String, String, String, String)],
+        contents: &std::collections::HashMap<String, String>,
+    ) -> Result<Vec<crate::repair::RepairAction>, WikiError> {
+        use crate::repair::RepairAction;
+        use std::collections::HashMap;
+        let mut actions: Vec<RepairAction> = Vec::new();
         let inlinks: Vec<(String, i64)> = sqlx::query_as(
             "SELECT to_slug, count(*) FROM wiki_links WHERE library_id = $1 GROUP BY to_slug",
         )
@@ -84,7 +134,7 @@ impl WikiService {
         .await?;
         let inlink_map: HashMap<String, i64> = inlinks.into_iter().collect();
         let mut by_title: HashMap<String, Vec<String>> = HashMap::new();
-        for (s, t, ..) in &pages {
+        for (s, t, ..) in pages {
             by_title.entry(t.clone()).or_default().push(s.clone());
         }
         for (title, mut group) in by_title {
@@ -107,39 +157,28 @@ impl WikiService {
                 });
             }
         }
-        // merge_pages 直接落库——从库重载工作状态再进死链段
-        let pages: Vec<(String, String, String, String)> = sqlx::query_as(
-        "SELECT slug, COALESCE(frontmatter->>'title', slug), page_type, content FROM wiki_pages \
-         WHERE page_type <> 'log' AND library_id = $1 ORDER BY slug",
-    )
-    .bind(lib)
-    .fetch_all(&self.pool)
-    .await?;
-        contents = pages
-            .iter()
-            .map(|(s, .., c)| (s.clone(), c.clone()))
-            .collect();
-        let mut titles: HashMap<String, String> = pages
-            .iter()
-            .map(|(s, t, ..)| (s.clone(), t.clone()))
-            .collect();
-        let mut slugs: HashSet<String> = contents.keys().cloned().collect();
+        Ok(actions)
+    }
 
-        // ── 2. 死链处理（自动做）──
+    /// 步骤 2：死链处理——slug 变体唯一命中则改写；≥3 页引用建 stub；否则去链接化。
+    async fn repair_dead_links(
+        &self,
+        lib: Uuid,
+        contents: &mut std::collections::HashMap<String, String>,
+        titles: &mut std::collections::HashMap<String, String>,
+        slugs: &mut std::collections::HashSet<String>,
+    ) -> Result<Vec<crate::repair::RepairAction>, WikiError> {
+        use crate::repair::RepairAction;
+        use std::collections::HashMap;
+        let mut actions: Vec<RepairAction> = Vec::new();
         let mut refs: HashMap<String, Vec<String>> = HashMap::new();
-        for (s, c) in &contents {
+        for (s, c) in contents.iter() {
             for link in crate::markup::extract_wikilinks(c) {
                 let (t, _) = crate::repair::split_link(&link);
                 if t != *s {
                     refs.entry(t).or_default().push(s.clone());
                 }
             }
-        }
-        let mut squash_map: HashMap<String, String> = HashMap::new();
-        for s in &slugs {
-            squash_map
-                .entry(crate::repair::squash(s))
-                .or_insert_with(|| s.clone());
         }
         let mut dead: Vec<String> = refs
             .keys()
@@ -155,81 +194,147 @@ impl WikiService {
                 .collect();
             let n_ref = ref_pages.len();
             // a) slug 变体唯一命中 → 全部改写为真实 slug
-            let sq = crate::repair::squash(&target);
-            let variant_matches: Vec<String> = slugs
-                .iter()
-                .filter(|s| crate::repair::squash(s) == sq)
-                .cloned()
-                .collect();
-            if let [real] = &variant_matches[..] {
-                let real = real.clone();
-                let mut n_total = 0usize;
-                for p in &ref_pages {
-                    if let Some(c) = contents.get_mut(p) {
-                        let (nc, n) = rewrite_links(c, &target, Some(&real));
-                        if n > 0 {
-                            *c = nc;
-                            n_total += n;
-                            if let Some(t) = titles.get(p) {
-                                self.put_page(lib, p, t, c, None, Some("ai")).await?;
-                            }
-                        }
-                    }
-                }
-                actions.push(RepairAction {
-                    action: "rewrite_variant_link".into(),
-                    slug: real.clone(),
-                    detail: format!(
-                        "[[{target}]] 为 slug 变体，{n_ref} 页共 {n_total} 处改写为 [[{real}]]"
-                    ),
-                });
+            if let Some(action) = self
+                .repair_fix_variant(lib, contents, titles, slugs, &target, &ref_pages)
+                .await?
+            {
+                actions.push(action);
                 continue;
             }
             // b) ≥3 页引用 → 建 stub（「下架不烧书」的补全起点；slug 不合法则退化为去链）
-            if n_ref >= 3 {
-                let stub_slug = target.to_lowercase().replace(' ', "-");
-                if crate::markup::is_valid_slug(&stub_slug) {
-                    let content = format!(
-                        "# {target}\n\n（stub：repair 自动创建——{n_ref} 个页面引用指向本页但原文缺失，待补全。）"
-                    );
-                    self.put_page(lib, &stub_slug, &target, &content, None, Some("ai"))
-                        .await?;
-                    slugs.insert(stub_slug.clone());
-                    contents.insert(stub_slug.clone(), content);
-                    titles.insert(stub_slug.clone(), target.clone());
-                    actions.push(RepairAction {
-                        action: "create_stub".into(),
-                        slug: stub_slug,
-                        detail: format!(
-                            "{n_ref} 个页面引用「{target}」但页面缺失——已建 stub 待补全"
-                        ),
-                    });
-                    continue;
-                }
+            if let Some(action) = self
+                .repair_create_stub(lib, contents, titles, slugs, &target, n_ref)
+                .await?
+            {
+                actions.push(action);
+                continue;
             }
             // c) 去链接化（保留文本，摘掉链）
-            let mut n_total = 0usize;
-            for p in &ref_pages {
-                if let Some(c) = contents.get_mut(p) {
-                    let (nc, n) = rewrite_links(c, &target, None);
-                    if n > 0 {
-                        *c = nc;
-                        n_total += n;
-                        if let Some(t) = titles.get(p) {
-                            self.put_page(lib, p, t, c, None, Some("ai")).await?;
-                        }
+            actions.push(
+                self.repair_delink(lib, contents, titles, &target, &ref_pages)
+                    .await?,
+            );
+        }
+        Ok(actions)
+    }
+
+    /// 死链分支 a：slug 变体唯一命中 → 把 `[[target]]` 全部改写为真实 slug（无命中返回 None）。
+    async fn repair_fix_variant(
+        &self,
+        lib: Uuid,
+        contents: &mut std::collections::HashMap<String, String>,
+        titles: &std::collections::HashMap<String, String>,
+        slugs: &std::collections::HashSet<String>,
+        target: &str,
+        ref_pages: &[String],
+    ) -> Result<Option<crate::repair::RepairAction>, WikiError> {
+        let sq = crate::repair::squash(target);
+        let variant_matches: Vec<String> = slugs
+            .iter()
+            .filter(|s| crate::repair::squash(s) == sq)
+            .cloned()
+            .collect();
+        let [real] = &variant_matches[..] else {
+            return Ok(None);
+        };
+        let real = real.clone();
+        let mut n_total = 0usize;
+        for p in ref_pages {
+            if let Some(c) = contents.get_mut(p) {
+                let (nc, n) = crate::repair::rewrite_links(c, target, Some(&real));
+                if n > 0 {
+                    *c = nc;
+                    n_total += n;
+                    if let Some(t) = titles.get(p) {
+                        self.put_page(lib, p, t, c, None, Some("ai")).await?;
                     }
                 }
             }
-            actions.push(RepairAction {
-                action: "delink".into(),
-                slug: target.clone(),
-                detail: format!(
-                    "[[{target}]] 无匹配页面且仅 {n_ref} 页引用——已去链接化（{n_total} 处）"
-                ),
-            });
         }
+        Ok(Some(crate::repair::RepairAction {
+            action: "rewrite_variant_link".into(),
+            slug: real.clone(),
+            detail: format!(
+                "[[{target}]] 为 slug 变体，{} 页共 {n_total} 处改写为 [[{real}]]",
+                ref_pages.len()
+            ),
+        }))
+    }
 
+    /// 死链分支 b：≥3 页引用且 slug 合法 → 建 stub（否则返回 None 交给去链接化）。
+    async fn repair_create_stub(
+        &self,
+        lib: Uuid,
+        contents: &mut std::collections::HashMap<String, String>,
+        titles: &mut std::collections::HashMap<String, String>,
+        slugs: &mut std::collections::HashSet<String>,
+        target: &str,
+        n_ref: usize,
+    ) -> Result<Option<crate::repair::RepairAction>, WikiError> {
+        if n_ref < 3 {
+            return Ok(None);
+        }
+        let stub_slug = target.to_lowercase().replace(' ', "-");
+        if !crate::markup::is_valid_slug(&stub_slug) {
+            return Ok(None);
+        }
+        let content = format!(
+            "# {target}\n\n（stub：repair 自动创建——{n_ref} 个页面引用指向本页但原文缺失，待补全。）"
+        );
+        self.put_page(lib, &stub_slug, target, &content, None, Some("ai"))
+            .await?;
+        slugs.insert(stub_slug.clone());
+        contents.insert(stub_slug.clone(), content);
+        titles.insert(stub_slug.clone(), target.to_string());
+        Ok(Some(crate::repair::RepairAction {
+            action: "create_stub".into(),
+            slug: stub_slug,
+            detail: format!("{n_ref} 个页面引用「{target}」但页面缺失——已建 stub 待补全"),
+        }))
+    }
+
+    /// 死链分支 c：无匹配页面 → 去链接化（保留文本，摘掉链）。
+    async fn repair_delink(
+        &self,
+        lib: Uuid,
+        contents: &mut std::collections::HashMap<String, String>,
+        titles: &std::collections::HashMap<String, String>,
+        target: &str,
+        ref_pages: &[String],
+    ) -> Result<crate::repair::RepairAction, WikiError> {
+        let mut n_total = 0usize;
+        for p in ref_pages {
+            if let Some(c) = contents.get_mut(p) {
+                let (nc, n) = crate::repair::rewrite_links(c, target, None);
+                if n > 0 {
+                    *c = nc;
+                    n_total += n;
+                    if let Some(t) = titles.get(p) {
+                        self.put_page(lib, p, t, c, None, Some("ai")).await?;
+                    }
+                }
+            }
+        }
+        Ok(crate::repair::RepairAction {
+            action: "delink".into(),
+            slug: target.to_string(),
+            detail: format!(
+                "[[{target}]] 无匹配页面且仅 {} 页引用——已去链接化（{n_total} 处）",
+                ref_pages.len()
+            ),
+        })
+    }
+
+    /// 步骤 3：孤页沿出链回挂（纯增益：不改不删，只加一行「相关」链接）。
+    async fn repair_attach_orphans(
+        &self,
+        lib: Uuid,
+        contents: &mut std::collections::HashMap<String, String>,
+        titles: &std::collections::HashMap<String, String>,
+        slugs: &std::collections::HashSet<String>,
+    ) -> Result<Vec<crate::repair::RepairAction>, WikiError> {
+        use crate::repair::RepairAction;
+        let mut actions: Vec<RepairAction> = Vec::new();
         // ── 3. 孤页沿出链回挂（自动做）──
         // 先统一重建 wiki_links（合并/改写后的真实出链），再找 0 入链页，
         // 把孤页回挂到它第一个「目标存在的库内出链」页的相关区（纯增益：不改不删只加一行）。
@@ -285,12 +390,7 @@ impl WikiService {
                 detail: format!("孤页无入链——已回挂到其出链目标「{target}」的相关区"),
             });
         }
-
-        self.rebuild_all_links(lib).await?;
-        Ok(RepairReport {
-            actions,
-            checked_pages: checked,
-        })
+        Ok(actions)
     }
 
     // ---------- 版本历史（R 报告建议 #5：列表 + 回滚；快照按 (library_id, slug) 隔离） ----------
