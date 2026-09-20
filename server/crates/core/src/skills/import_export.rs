@@ -46,7 +46,7 @@ impl SkillsService {
                 .to_string()
         });
         let (meta, body) = parse_frontmatter(raw);
-        let name = meta.name.or(fallback_name).unwrap_or_default();
+        let name = meta.name.clone().or(fallback_name).unwrap_or_default();
         let make_err = |e: SkillsError| SkillImportItem {
             index,
             slug: None,
@@ -68,6 +68,75 @@ impl SkillsService {
                 tags.push(t.clone());
             }
         }
+        let exists = repo::exists_slug(&self.pool, &slug).await;
+        self.import_upsert(index, name, slug, meta, body, tags, source, overwrite)
+            .await
+    }
+
+    /// 单技能导出（bundle 整包用）：本体 + 全部附属文件。
+    /// 纯库读（不走 get_skill_with_content）：script 型导出指针元数据（content 恒空、无附属文件），
+    /// 不把本地正文卷进导出——导出的是「库」，不是本地文件系统。
+    pub async fn export_one(&self, slug: &str) -> Result<SkillExportDto, SkillsError> {
+        let skill = repo::get_skill(&self.pool, slug)
+            .await?
+            .or(repo::get_skill_by_name(&self.pool, slug).await?)
+            .ok_or_else(|| {
+                SkillsError::NotFound(format!(
+                    "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"
+                ))
+            })?;
+        let files = if skill.kind == "script" {
+            Vec::new()
+        } else {
+            repo::skill_file_contents(&self.pool, skill.id)
+                .await?
+                .into_iter()
+                .map(|(path, content)| SkillFileEntryDto { path, content })
+                .collect()
+        };
+        Ok(SkillExportDto { skill, files })
+    }
+
+    /// 全量导出（含附属文件——folder 形态整体带走，数据主权）。
+    /// script 型天然只带走元数据（content 恒空、skill_files 无行）——指针与来源随行。
+    pub async fn export_skills(&self) -> Result<Vec<SkillExportDto>, SkillsError> {
+        let mut files_by_skill: std::collections::HashMap<Uuid, Vec<SkillFileEntryDto>> =
+            std::collections::HashMap::new();
+        for (sid, path, content) in repo::skill_files_all(&self.pool).await? {
+            files_by_skill
+                .entry(sid)
+                .or_default()
+                .push(SkillFileEntryDto { path, content });
+        }
+        Ok(repo::export_skills(&self.pool)
+            .await?
+            .into_iter()
+            .map(|skill| SkillExportDto {
+                files: files_by_skill.remove(&skill.id).unwrap_or_default(),
+                skill,
+            })
+            .collect())
+    }
+
+    /// 导入落库分支：已存在 →（overwrite 时）更新；不存在 → 新建。失败统一成 failed 项。
+    #[allow(clippy::too_many_arguments)]
+    async fn import_upsert(
+        &self,
+        index: usize,
+        name: String,
+        slug: String,
+        meta: FrontmatterMeta,
+        body: String,
+        tags: Vec<String>,
+        source: &str,
+        overwrite: bool,
+    ) -> SkillImportItem {
+        let make_err = |e: SkillsError| SkillImportItem {
+            index,
+            slug: None,
+            status: "failed".into(),
+            error: Some(e.to_string()),
+        };
         let exists = repo::exists_slug(&self.pool, &slug).await;
         match exists {
             Err(e) => make_err(e.into()),
@@ -132,50 +201,5 @@ impl SkillsService {
                 Err(e) => make_err(e),
             },
         }
-    }
-
-    /// 单技能导出（bundle 整包用）：本体 + 全部附属文件。
-    /// 纯库读（不走 get_skill_with_content）：script 型导出指针元数据（content 恒空、无附属文件），
-    /// 不把本地正文卷进导出——导出的是「库」，不是本地文件系统。
-    pub async fn export_one(&self, slug: &str) -> Result<SkillExportDto, SkillsError> {
-        let skill = repo::get_skill(&self.pool, slug)
-            .await?
-            .or(repo::get_skill_by_name(&self.pool, slug).await?)
-            .ok_or_else(|| {
-                SkillsError::NotFound(format!(
-                    "技能 {slug:?} 不存在——先 skills_list 确认 slug（可能已删除或抄错）"
-                ))
-            })?;
-        let files = if skill.kind == "script" {
-            Vec::new()
-        } else {
-            repo::skill_file_contents(&self.pool, skill.id)
-                .await?
-                .into_iter()
-                .map(|(path, content)| SkillFileEntryDto { path, content })
-                .collect()
-        };
-        Ok(SkillExportDto { skill, files })
-    }
-
-    /// 全量导出（含附属文件——folder 形态整体带走，数据主权）。
-    /// script 型天然只带走元数据（content 恒空、skill_files 无行）——指针与来源随行。
-    pub async fn export_skills(&self) -> Result<Vec<SkillExportDto>, SkillsError> {
-        let mut files_by_skill: std::collections::HashMap<Uuid, Vec<SkillFileEntryDto>> =
-            std::collections::HashMap::new();
-        for (sid, path, content) in repo::skill_files_all(&self.pool).await? {
-            files_by_skill
-                .entry(sid)
-                .or_default()
-                .push(SkillFileEntryDto { path, content });
-        }
-        Ok(repo::export_skills(&self.pool)
-            .await?
-            .into_iter()
-            .map(|skill| SkillExportDto {
-                files: files_by_skill.remove(&skill.id).unwrap_or_default(),
-                skill,
-            })
-            .collect())
     }
 }

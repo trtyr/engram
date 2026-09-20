@@ -106,30 +106,7 @@ impl PromoteService {
                 _ => project_name,
             };
 
-        // ② 目标库解析（缺省 main）
-        let lib = engram_wiki_engine::libraries::resolve(&self.pool, req.library.as_deref())
-            .await
-            .map_err(|e| PromoteError::NotFound(e.to_string()))?;
-        let lib_slug = promo_repo::library_slug(&self.pool, lib).await?;
-
-        // ③ 登记先行（幂等闸门：重复晋升在写页之前就友好报「已晋升」）
-        promo_repo::insert(
-            &self.pool,
-            lib,
-            &req.slug,
-            project_id,
-            req.doc_id,
-            &req.anchor,
-        )
-        .await
-        .map_err(|e| match e {
-            engram_storage::StoreError::Conflict(_) => PromoteError::Conflict(format!(
-                "已晋升过：文档 {} 的「{}」已登记为 wiki:{}/{}——同一来源同一页只登记一次；\
-                     若要更新提炼内容直接改目标页（write_page）",
-                req.doc_id, req.anchor, lib_slug, req.slug
-            )),
-            other => PromoteError::from(other),
-        })?;
+        let (lib, lib_slug) = self.register_promotion(&req, project_id).await?;
 
         // ④ 写 synthesis 页（wiki-engine 域内：版本快照 + wikilinks 重算同口径）
         let promoted_from = format!("project:{}/{}#{}", project_name, req.doc_id, req.anchor);
@@ -190,5 +167,38 @@ impl PromoteService {
         promo_repo::list_by_project(&self.pool, project_id)
             .await
             .map_err(Into::into)
+    }
+
+    /// ② 目标库解析（缺省 main）+ ③ 登记先行（幂等闸门：重复晋升在写页前友好报「已晋升」）。
+    async fn register_promotion(
+        &self,
+        req: &PromoteRequest,
+        project_id: Uuid,
+    ) -> Result<(Uuid, String), PromoteError> {
+        // ② 目标库解析（缺省 main）
+        let lib = engram_wiki_engine::libraries::resolve(&self.pool, req.library.as_deref())
+            .await
+            .map_err(|e| PromoteError::NotFound(e.to_string()))?;
+        let lib_slug = promo_repo::library_slug(&self.pool, lib).await?;
+
+        // ③ 登记先行（幂等闸门：重复晋升在写页之前就友好报「已晋升」）
+        promo_repo::insert(
+            &self.pool,
+            lib,
+            &req.slug,
+            project_id,
+            req.doc_id,
+            &req.anchor,
+        )
+        .await
+        .map_err(|e| match e {
+            engram_storage::StoreError::Conflict(_) => PromoteError::Conflict(format!(
+                "已晋升过：文档 {} 的「{}」已登记为 wiki:{}/{}——同一来源同一页只登记一次；\
+                     若要更新提炼内容直接改目标页（write_page）",
+                req.doc_id, req.anchor, lib_slug, req.slug
+            )),
+            other => PromoteError::from(other),
+        })?;
+        Ok((lib, lib_slug))
     }
 }

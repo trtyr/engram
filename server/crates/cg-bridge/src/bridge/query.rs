@@ -139,96 +139,10 @@ impl CgBridge {
         }
         let db_str = db_path.to_string_lossy().into_owned();
         let target = target.trim().to_string();
-        let job = tokio::task::spawn_blocking(
-            move || -> Result<Option<serde_json::Value>, CgError> {
-                let conn = rusqlite::Connection::open_with_flags(
-                    &db_str,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-                )
-                .map_err(|e| CgError::Parse(format!("索引库打开失败: {e}")))?;
-                // LIKE 通配符转义（target 是自由文本，% _ 会改变匹配语义）
-                let like = format!(
-                    "%{}%",
-                    target
-                        .replace('\\', "\\\\")
-                        .replace('%', "\\%")
-                        .replace('_', "\\_")
-                );
-                let mut stmt = conn
-                    .prepare(
-                        "SELECT name, kind, file_path, start_line, end_line, signature \
-                 FROM nodes \
-                 WHERE file_path LIKE ?1 ESCAPE '\\' OR name LIKE ?1 ESCAPE '\\' \
-                 ORDER BY file_path, start_line LIMIT 200",
-                    )
-                    .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?;
-                let rows: Vec<(String, String, String, i64, i64, Option<String>)> = stmt
-                    .query_map(rusqlite::params![like], |r| {
-                        Ok((
-                            r.get(0)?,
-                            r.get(1)?,
-                            r.get(2)?,
-                            r.get(3)?,
-                            r.get(4)?,
-                            r.get(5)?,
-                        ))
-                    })
-                    .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?
-                    .collect::<Result<_, _>>()
-                    .map_err(|e| CgError::Parse(format!("索引读取失败: {e}")))?;
-                if rows.is_empty() {
-                    return Ok(None);
-                }
-                let truncate = |s: &str| -> String {
-                    if s.chars().count() <= 120 {
-                        s.to_string()
-                    } else {
-                        s.chars().take(120).collect::<String>() + "…"
-                    }
-                };
-                let symbols: Vec<serde_json::Value> = rows
-                    .iter()
-                    .map(|(name, kind, fp, sl, el, sig)| {
-                        let mut o = serde_json::json!({
-                            "name": name, "kind": kind, "file_path": fp,
-                            "line": sl, "end_line": el,
-                        });
-                        if let Some(s) = sig {
-                            o["signature"] = serde_json::json!(truncate(s));
-                        }
-                        o
-                    })
-                    .collect();
-                // 文件清单（去重保序 + 每文件符号数）
-                let mut files: Vec<(String, usize)> = Vec::new();
-                for (_, _, fp, _, _, _) in &rows {
-                    match files.last_mut() {
-                        Some((p, n)) if p == fp => *n += 1,
-                        _ => files.push((fp.clone(), 1)),
-                    }
-                }
-                let files: Vec<serde_json::Value> = files
-                    .into_iter()
-                    .map(|(p, n)| serde_json::json!({"path": p, "symbols": n}))
-                    .collect();
-                let total_hint = if symbols.len() >= 200 {
-                    "（已达 200 上限——用更具体的目录/符号名缩小范围）"
-                } else {
-                    ""
-                };
-                Ok(Some(serde_json::json!({
-                    "kind": "explore",
-                    "mode": "outline",
-                    "target": target,
-                    "files": files,
-                    "symbols": symbols,
-                    "hint": format!(
-                        "符号大纲（无源码）。看单个符号的源码与调用列表：kind=node；\
-                         看影响面：kind=callers/impact；要完整源码文件：本查询传 include_source=true。{total_hint}"
-                    ),
-                })))
-            },
-        );
+        let job =
+            tokio::task::spawn_blocking(move || -> Result<Option<serde_json::Value>, CgError> {
+                explore_outline_query(&db_str, &target)
+            });
         job.await
             .map_err(|e| CgError::Parse(format!("索引读取线程崩溃: {e}")))?
     }
@@ -348,48 +262,9 @@ impl CgBridge {
         let db_path = self.ensure_ready(&proj)?;
         // 阻塞读小库（<10MB）：spawn_blocking 防占 worker
         let db_str = db_path.to_string_lossy().into_owned();
-        let v = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, CgError> {
-        let conn = rusqlite::Connection::open_with_flags(
-            &db_str,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .map_err(|e| CgError::Parse(format!("索引库打开失败: {e}")))?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT sf.path, tf.path, count(*) AS w FROM edges e                      JOIN nodes ns ON ns.id = e.source JOIN files sf ON sf.path = ns.file_path                      JOIN nodes nt ON nt.id = e.target JOIN files tf ON tf.path = nt.file_path                      WHERE sf.path != tf.path AND e.kind != 'contains'                      GROUP BY sf.path, tf.path ORDER BY w DESC",
-            )
-            .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?;
-        let rows: Vec<(String, String, i64)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?
-            .collect::<Result<_, _>>()
-            .map_err(|e| CgError::Parse(format!("索引读取失败: {e}")))?;
-
-        let file_name = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
-        let mut nodes: Vec<serde_json::Value> = Vec::new();
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut edges = Vec::new();
-        for (from, to, w) in rows {
-            for p in [&from, &to] {
-                if seen.insert(p.clone()) {
-                    nodes.push(serde_json::json!({
-                        "id": p, "name": file_name(p), "kind": "file", "role": "file",
-                    }));
-                }
-            }
-            edges.push(serde_json::json!({
-                "from": from, "to": to, "rel": "imports", "weight": w,
-            }));
-        }
-        Ok(serde_json::json!({
-            "mode": "files",
-            "files": nodes.len(),
-            "nodes": nodes,
-            "edges": edges,
-        }))
-    })
-    .await
-    .map_err(|e| CgError::Parse(format!("索引读取线程崩溃: {e}")))??;
+        let v = tokio::task::spawn_blocking(move || full_graph_query(&db_str))
+            .await
+            .map_err(|e| CgError::Parse(format!("索引读取线程崩溃: {e}")))??;
         Ok(v)
     }
 
@@ -426,4 +301,132 @@ impl CgBridge {
 
         Ok(normalize_callgraph(symbol, &proj.name, &callers, &callees))
     }
+}
+
+/// explore 大纲查询（阻塞段）：LIKE 通配转义 + 200 条上限，产出文件清单与符号大纲。
+fn explore_outline_query(db_str: &str, target: &str) -> Result<Option<serde_json::Value>, CgError> {
+    let conn =
+        rusqlite::Connection::open_with_flags(&db_str, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| CgError::Parse(format!("索引库打开失败: {e}")))?;
+    // LIKE 通配符转义（target 是自由文本，% _ 会改变匹配语义）
+    let like = format!(
+        "%{}%",
+        target
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    );
+    let mut stmt = conn
+        .prepare(
+            "SELECT name, kind, file_path, start_line, end_line, signature \
+                 FROM nodes \
+                 WHERE file_path LIKE ?1 ESCAPE '\\' OR name LIKE ?1 ESCAPE '\\' \
+                 ORDER BY file_path, start_line LIMIT 200",
+        )
+        .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?;
+    let rows: Vec<(String, String, String, i64, i64, Option<String>)> = stmt
+        .query_map(rusqlite::params![like], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        })
+        .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?
+        .collect::<Result<_, _>>()
+        .map_err(|e| CgError::Parse(format!("索引读取失败: {e}")))?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    let truncate = |s: &str| -> String {
+        if s.chars().count() <= 120 {
+            s.to_string()
+        } else {
+            s.chars().take(120).collect::<String>() + "…"
+        }
+    };
+    let symbols: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(name, kind, fp, sl, el, sig)| {
+            let mut o = serde_json::json!({
+                "name": name, "kind": kind, "file_path": fp,
+                "line": sl, "end_line": el,
+            });
+            if let Some(s) = sig {
+                o["signature"] = serde_json::json!(truncate(s));
+            }
+            o
+        })
+        .collect();
+    // 文件清单（去重保序 + 每文件符号数）
+    let mut files: Vec<(String, usize)> = Vec::new();
+    for (_, _, fp, _, _, _) in &rows {
+        match files.last_mut() {
+            Some((p, n)) if p == fp => *n += 1,
+            _ => files.push((fp.clone(), 1)),
+        }
+    }
+    let files: Vec<serde_json::Value> = files
+        .into_iter()
+        .map(|(p, n)| serde_json::json!({"path": p, "symbols": n}))
+        .collect();
+    let total_hint = if symbols.len() >= 200 {
+        "（已达 200 上限——用更具体的目录/符号名缩小范围）"
+    } else {
+        ""
+    };
+    Ok(Some(serde_json::json!({
+        "kind": "explore",
+        "mode": "outline",
+        "target": target,
+        "files": files,
+        "symbols": symbols,
+        "hint": format!(
+            "符号大纲（无源码）。看单个符号的源码与调用列表：kind=node；\
+             看影响面：kind=callers/impact；要完整源码文件：本查询传 include_source=true。{total_hint}"
+        ),
+    })))
+}
+
+/// 文件级依赖图（阻塞段）：按 (源文件,目标文件) 聚合 import 边，产出 nodes/edges。
+fn full_graph_query(db_str: &str) -> Result<serde_json::Value, CgError> {
+    let conn =
+        rusqlite::Connection::open_with_flags(&db_str, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| CgError::Parse(format!("索引库打开失败: {e}")))?;
+    let mut stmt = conn
+            .prepare(
+                "SELECT sf.path, tf.path, count(*) AS w FROM edges e                      JOIN nodes ns ON ns.id = e.source JOIN files sf ON sf.path = ns.file_path                      JOIN nodes nt ON nt.id = e.target JOIN files tf ON tf.path = nt.file_path                      WHERE sf.path != tf.path AND e.kind != 'contains'                      GROUP BY sf.path, tf.path ORDER BY w DESC",
+            )
+            .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?;
+    let rows: Vec<(String, String, i64)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|e| CgError::Parse(format!("索引查询失败: {e}")))?
+        .collect::<Result<_, _>>()
+        .map_err(|e| CgError::Parse(format!("索引读取失败: {e}")))?;
+
+    let file_name = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
+    let mut nodes: Vec<serde_json::Value> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut edges = Vec::new();
+    for (from, to, w) in rows {
+        for p in [&from, &to] {
+            if seen.insert(p.clone()) {
+                nodes.push(serde_json::json!({
+                    "id": p, "name": file_name(p), "kind": "file", "role": "file",
+                }));
+            }
+        }
+        edges.push(serde_json::json!({
+            "from": from, "to": to, "rel": "imports", "weight": w,
+        }));
+    }
+    Ok(serde_json::json!({
+        "mode": "files",
+        "files": nodes.len(),
+        "nodes": nodes,
+        "edges": edges,
+    }))
 }
