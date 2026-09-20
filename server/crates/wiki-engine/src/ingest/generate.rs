@@ -37,9 +37,9 @@ pub async fn generate_job(
     let (created, updated, proposals, all_slugs) =
         upsert_generated_pages(&ctx, pool, lib, source_id, &candidates).await?;
 
-    // 链接图 + 索引/日志/overview 维护
-    rebuild_links(pool, lib, &all_slugs).await?;
-    update_index_and_log(
+    let embedded_pages = finalize_generation(
+        &ctx,
+        &llm,
         pool,
         lib,
         source_id,
@@ -47,17 +47,9 @@ pub async fn generate_job(
         created,
         updated,
         proposals,
+        &all_slugs,
     )
     .await?;
-
-    // 新/变页回读 → tsv（FTS） → 嵌入（失败不阻塞）
-    let stored = read_generated_pages(pool, lib, &all_slugs).await?;
-    write_page_tsv(pool, lib, &stored).await?;
-    let embedded_pages = embed_generated_pages(&ctx, &llm, pool, lib, source_id, &stored).await?;
-
-    mark_source_ready(pool, source_id).await?;
-    // 全局状态更新：overview/权重 + 社区摘要 + 存量页向量回填
-    refresh_after_generate(&ctx, &llm, pool, lib, created + updated).await?;
 
     let thin_hint = if created + updated + proposals == 0 {
         "（0 产物：内容较薄，LLM 未产出页面——status=ready 仅代表处理完成，不代表有产物）"
@@ -390,4 +382,43 @@ pub(super) fn source_failure_msg(
         }
         _ => Ok(()),
     }
+}
+
+/// 生成收尾：链接重建 + 索引/日志维护 + 回读 tsv/嵌入（失败不阻塞）+ 源标 ready + 全局状态刷新。
+/// 返回已嵌入页数。
+#[allow(clippy::too_many_arguments)]
+async fn finalize_generation(
+    ctx: &JobContext,
+    llm: &crate::service::LlmRef,
+    pool: &sqlx::PgPool,
+    lib: Uuid,
+    source_id: Uuid,
+    source_title: &str,
+    created: usize,
+    updated: usize,
+    proposals: usize,
+    all_slugs: &[String],
+) -> Result<usize, JobError> {
+    // 链接图 + 索引/日志/overview 维护
+    rebuild_links(pool, lib, &all_slugs).await?;
+    update_index_and_log(
+        pool,
+        lib,
+        source_id,
+        &source_title,
+        created,
+        updated,
+        proposals,
+    )
+    .await?;
+
+    // 新/变页回读 → tsv（FTS） → 嵌入（失败不阻塞）
+    let stored = read_generated_pages(pool, lib, &all_slugs).await?;
+    write_page_tsv(pool, lib, &stored).await?;
+    let embedded_pages = embed_generated_pages(&ctx, &llm, pool, lib, source_id, &stored).await?;
+
+    mark_source_ready(pool, source_id).await?;
+    // 全局状态更新：overview/权重 + 社区摘要 + 存量页向量回填
+    refresh_after_generate(&ctx, &llm, pool, lib, created + updated).await?;
+    Ok(embedded_pages)
 }

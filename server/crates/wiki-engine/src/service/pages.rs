@@ -281,22 +281,7 @@ impl WikiService {
         let dup_page = self.get_page(lib, &dup).await?;
         let pri_page = self.get_page(lib, &primary).await?;
 
-        // 1) 内容并入（冗余丢弃 / append 章节）；primary 自身引用 dup → 去链接化
-        let dup_c = dup_page.content.trim();
-        let discarded = dup_c.is_empty() || pri_page.content.contains(dup_c);
-        let mut new_primary = if discarded {
-            pri_page.content.clone()
-        } else {
-            format!(
-                "{}\n\n## 合并自〈{}〉（{dup}）\n\n{}",
-                pri_page.content, dup_page.title, dup_c
-            )
-        };
-        let (_, n_self) = crate::repair::rewrite_links(&new_primary, &dup, None);
-        if n_self > 0 {
-            let (nc, _) = crate::repair::rewrite_links(&new_primary, &dup, None);
-            new_primary = nc;
-        }
+        let (mut new_primary, discarded) = merge_content(&pri_page, &dup_page, &dup);
         let rewrite_total = self.rewrite_referencing_links(lib, &dup, &primary).await?;
 
         // 3) primary 落合并内容（内容有变才写）
@@ -490,4 +475,29 @@ impl WikiService {
             Err(e) => Err(e),
         }
     }
+}
+
+/// 1) 内容并入（冗余丢弃 / append 章节）；primary 自身引用 dup → 去链接化。
+fn merge_content(
+    pri: &crate::WikiPageDto,
+    dup_page: &crate::WikiPageDto,
+    dup: &str,
+) -> (String, bool) {
+    // 1) 内容并入（冗余丢弃 / append 章节）；primary 自身引用 dup → 去链接化
+    let dup_c = dup_page.content.trim();
+    let discarded = dup_c.is_empty() || pri.content.contains(dup_c);
+    let mut new_primary = if discarded {
+        pri.content.clone()
+    } else {
+        format!(
+            "{}\n\n## 合并自〈{}〉（{dup}）\n\n{}",
+            pri.content, dup_page.title, dup_c
+        )
+    };
+    let (_, n_self) = crate::repair::rewrite_links(&new_primary, &dup, None);
+    if n_self > 0 {
+        let (nc, _) = crate::repair::rewrite_links(&new_primary, &dup, None);
+        new_primary = nc;
+    }
+    (new_primary, discarded)
 }

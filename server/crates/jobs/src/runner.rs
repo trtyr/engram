@@ -151,27 +151,14 @@ impl Runner {
         let mut shutdown = self.shutdown;
         // 在途任务追踪（RJ-09 修复）：spawn 的任务持有 semaphore permit 至执行完毕——
         // 停机后「拿满全部 permit」即「在途清零」。semaphore 在块外创建以便 RunnerHandle 持有。
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(config.concurrency));
+        let concurrency = config.concurrency;
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
 
         let join = {
             let semaphore = semaphore.clone();
             tokio::spawn(async move {
                 // per-kind 分池（R12）：cap 不超过全局并发；启动日志打印生效配置
-                let mut per_kind_sem: HashMap<String, Arc<tokio::sync::Semaphore>> = HashMap::new();
-                for (kind, cap) in &config.per_kind_concurrency {
-                    let cap = (*cap).min(config.concurrency);
-                    per_kind_sem.insert(kind.clone(), Arc::new(tokio::sync::Semaphore::new(cap)));
-                }
-                if !per_kind_sem.is_empty() {
-                    let mut parts: Vec<String> = per_kind_sem
-                        .iter()
-                        .map(|(k, s)| format!("{k}:{}", s.available_permits()))
-                        .collect();
-                    parts.sort();
-                    tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, per_kind = %parts.join(","), "job runner 启动（per-kind 并发生效）");
-                } else {
-                    tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, "job runner 启动");
-                }
+                let per_kind_sem = build_per_kind_semaphores(&config);
                 let semaphore = semaphore.clone();
                 let mut last_reap = tokio::time::Instant::now();
 
@@ -232,7 +219,7 @@ impl Runner {
             join,
             shutdown_tx: self.shutdown_tx,
             semaphore,
-            concurrency: config.concurrency,
+            concurrency,
         }
     }
 }
@@ -364,4 +351,26 @@ mod per_kind_tests {
         let sem = Arc::new(tokio::sync::Semaphore::new(3));
         assert!(wait_inflight_idle(&sem, 3, Duration::from_millis(100)).await);
     }
+}
+
+/// per-kind 分池（R12）：cap 不超过全局并发；空表 = 与旧行为一致。
+fn build_per_kind_semaphores(
+    config: &RunnerConfig,
+) -> HashMap<String, Arc<tokio::sync::Semaphore>> {
+    let mut per_kind_sem: HashMap<String, Arc<tokio::sync::Semaphore>> = HashMap::new();
+    for (kind, cap) in &config.per_kind_concurrency {
+        let cap = (*cap).min(config.concurrency);
+        per_kind_sem.insert(kind.clone(), Arc::new(tokio::sync::Semaphore::new(cap)));
+    }
+    if !per_kind_sem.is_empty() {
+        let mut parts: Vec<String> = per_kind_sem
+            .iter()
+            .map(|(k, s)| format!("{k}:{}", s.available_permits()))
+            .collect();
+        parts.sort();
+        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, per_kind = %parts.join(","), "job runner 启动（per-kind 并发生效）");
+    } else {
+        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, "job runner 启动");
+    }
+    per_kind_sem
 }
