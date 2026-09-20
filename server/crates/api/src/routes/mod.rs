@@ -94,9 +94,43 @@ use utoipa::OpenApi;
 pub(crate) struct ApiDoc;
 
 pub fn router(state: AppState) -> Router {
-    let metrics_handle = crate::metrics::install();
+    let public = public_routes(&state);
+    let authed = Router::new()
+        .merge(mcp_routes(state.clone()))
+        .merge(account_routes())
+        .merge(jobs_routes())
+        .merge(settings_routes())
+        .merge(llm_routes())
+        .merge(memory_routes())
+        .merge(search_routes())
+        .merge(wiki_routes())
+        .merge(codegraph_routes())
+        .merge(projects_routes())
+        .merge(skills_routes())
+        .merge(todos_routes())
+        .merge(migrate_routes());
 
-    let public = Router::new()
+    Router::new()
+        .merge(public)
+        .merge(authed.layer(from_fn_with_state(state.clone(), crate::auth::bearer_auth)))
+        // 产物上传（P001-4）：codegraph db 经 MCP JSON-RPC base64 直传——
+        // 默认 2MB 不够（db 上限 256MB × base64 膨胀 1.33 ≈ 349MB body）
+        .layer(axum::extract::DefaultBodyLimit::max(384 * 1024 * 1024))
+        // 客户端 IP 注入（活跃会话归因）：XFF 首段优先，直连取对端地址（main 以 connect_info 启动）
+        .layer(axum::middleware::from_fn(
+            crate::client_ip::inject_client_ip,
+        ))
+        // R10：HTTP 指标（请求计数 + 延迟直方图，按路由模板聚合）——放最外层，覆盖全部 API 路由
+        .layer(axum::middleware::from_fn(http_metrics_mw))
+        // SPA 静态资源兜底（API 路由未命中时 → web/dist）
+        .fallback_service(axum::routing::any(crate::web_assets::static_handler))
+        .with_state(state)
+}
+
+/// 无鉴权段：健康检查 / 指标 / OpenAPI / 登录与初始化。
+fn public_routes(state: &AppState) -> Router<AppState> {
+    let metrics_handle = crate::metrics::install();
+    Router::new()
         .route("/health", get(health::health))
         .route("/ready", get(health::ready))
         .route("/metrics", get(crate::metrics::metrics_handler))
@@ -107,9 +141,12 @@ pub fn router(state: AppState) -> Router {
         // 挂 authed 段（RJ-01 深层修复：误挂 public 时 Extension 提取失败整组 500）
         .route("/auth/login", post(auth_api::login_handler))
         .route("/auth/status", get(auth_api::status))
-        .route("/auth/init", post(auth_api::init_account));
+        .route("/auth/init", post(auth_api::init_account))
+}
 
-    let authed = Router::new()
+/// MCP 工具面（nest 进 authed：复用 Bearer；gate 在 Bearer 内、MCP 前）。
+fn mcp_routes(state: AppState) -> Router<AppState> {
+    Router::new()
         // MCP（用户记忆域工具面）：nest 在 authed 内 → 复用 Bearer 中间件，
         // 每个 JSON-RPC 请求独立认证（key 吊销即刻生效，会话保活不能豁免）；
         // gate 在 Bearer 之内、MCP 之前——服务总开关关闭时对已认证客户端也 503
@@ -118,6 +155,11 @@ pub fn router(state: AppState) -> Router {
                 .nest_service("/mcp", engram_mcp::service(state.clone()))
                 .route_layer(from_fn_with_state(state.clone(), engram_mcp::gate)),
         )
+}
+
+/// `/account` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn account_routes() -> Router<AppState> {
+    Router::new()
         // 账号面端点（RJ-01 深层修复 2026-09-18）：需 Principal 的会话/账号操作挂 authed
         // —— 此前误挂 public 段（无 Bearer 注入 Principal），Extension 提取失败整组 500：
         // 「吊销其他设备」「会话列表」「改密码」「用户名」在生产全部不可用。
@@ -137,10 +179,20 @@ pub fn router(state: AppState) -> Router {
             "/auth/sessions/{id}",
             axum::routing::delete(auth_api::revoke_session),
         )
+}
+
+/// `/jobs` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn jobs_routes() -> Router<AppState> {
+    Router::new()
         .route("/jobs", get(jobs_api::list_jobs))
         .route("/jobs/{id}", get(jobs_api::get_job))
         .route("/jobs/{id}/events", get(jobs_api::get_job_events))
         .route("/jobs/{id}/revive", post(jobs_api::revive_job))
+}
+
+/// `/settings` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn settings_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/settings/llm/providers",
             post(llm_api::create_provider).get(llm_api::list_providers),
@@ -189,7 +241,16 @@ pub fn router(state: AppState) -> Router {
             "/settings/mcp",
             get(crate::mcp_admin::settings_mcp).put(crate::mcp_admin::settings_mcp_update),
         )
-        .route("/llm/usage", get(llm_api::usage))
+}
+
+/// `/llm` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn llm_routes() -> Router<AppState> {
+    Router::new().route("/llm/usage", get(llm_api::usage))
+}
+
+/// `/memory` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn memory_routes() -> Router<AppState> {
+    Router::new()
         .route("/memory/sessions/import", post(memory_api::import_session))
         .route(
             "/memory/sessions",
@@ -296,7 +357,16 @@ pub fn router(state: AppState) -> Router {
             "/memory/entities/{id}/relations/{rid}",
             delete(memory_api::delete_entity_relation),
         )
-        .route("/search", post(search_api::search))
+}
+
+/// `/search` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn search_routes() -> Router<AppState> {
+    Router::new().route("/search", post(search_api::search))
+}
+
+/// `/wiki` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn wiki_routes() -> Router<AppState> {
+    Router::new()
         // 文档知识并入 Wiki 前缀（/wiki/documents、/wiki/upload）
         .route(
             "/wiki/documents",
@@ -355,6 +425,11 @@ pub fn router(state: AppState) -> Router {
         .route("/wiki/insights", post(wiki_api::insights))
         .route("/wiki/insights/dismiss", post(wiki_api::dismiss_insight))
         .route("/wiki/insights/reset", post(wiki_api::reset_insights))
+}
+
+/// `/codegraph` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn codegraph_routes() -> Router<AppState> {
+    Router::new()
         .route(
             "/codegraph/projects",
             post(codegraph_api::register_project).get(codegraph_api::list_projects),
@@ -375,6 +450,11 @@ pub fn router(state: AppState) -> Router {
             post(codegraph_api::sync_project),
         )
         .route("/codegraph/projects/{id}/query", post(codegraph_api::query))
+}
+
+/// `/projects` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn projects_routes() -> Router<AppState> {
+    Router::new()
         // 项目记忆域：types 与 batch-delete 先于 {id}，避免被当作 id 解析
         .route("/projects/types", get(project_api::list_types))
         .route(
@@ -421,6 +501,11 @@ pub fn router(state: AppState) -> Router {
                 .put(project_api::update_doc)
                 .delete(project_api::delete_doc),
         )
+}
+
+/// `/skills` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn skills_routes() -> Router<AppState> {
+    Router::new()
         // 技能域：import/export 先于 {slug}，避免被当作 slug 解析
         .route("/skills/import", post(skills_api::import_skills))
         .route("/skills/{slug}/files", get(skills_api::list_files))
@@ -432,22 +517,6 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/skills/export", get(skills_api::export_skills))
         .route("/skills/import-transfer", post(skills_api::import_transfer))
-        .route(
-            "/todos",
-            get(todos_api::list_todos).post(todos_api::create_todo),
-        )
-        .route(
-            "/todos/{id}",
-            get(todos_api::get_todo)
-                .put(todos_api::update_todo)
-                .delete(todos_api::delete_todo),
-        )
-        .route("/todos/{id}/links", get(todos_api::todo_links))
-        .route("/todos/export", get(todos_api::export_todos))
-        .route("/migrate/export", get(migrate_api::export_bundle))
-        .route("/migrate/import", post(migrate_api::import_bundle))
-        .route("/migrate/pull", post(migrate_api::pull))
-        .route("/migrate/sync", post(migrate_api::migrate_sync))
         .route(
             "/skills",
             post(skills_api::create_skill).get(skills_api::list_skills),
@@ -462,23 +531,33 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/skills/{slug}/revisions/{rev_id}/restore",
             post(skills_api::restore_revision),
-        );
+        )
+}
 
+/// `/todos` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn todos_routes() -> Router<AppState> {
     Router::new()
-        .merge(public)
-        .merge(authed.layer(from_fn_with_state(state.clone(), crate::auth::bearer_auth)))
-        // 产物上传（P001-4）：codegraph db 经 MCP JSON-RPC base64 直传——
-        // 默认 2MB 不够（db 上限 256MB × base64 膨胀 1.33 ≈ 349MB body）
-        .layer(axum::extract::DefaultBodyLimit::max(384 * 1024 * 1024))
-        // 客户端 IP 注入（活跃会话归因）：XFF 首段优先，直连取对端地址（main 以 connect_info 启动）
-        .layer(axum::middleware::from_fn(
-            crate::client_ip::inject_client_ip,
-        ))
-        // R10：HTTP 指标（请求计数 + 延迟直方图，按路由模板聚合）——放最外层，覆盖全部 API 路由
-        .layer(axum::middleware::from_fn(http_metrics_mw))
-        // SPA 静态资源兜底（API 路由未命中时 → web/dist）
-        .fallback_service(axum::routing::any(crate::web_assets::static_handler))
-        .with_state(state)
+        .route(
+            "/todos",
+            get(todos_api::list_todos).post(todos_api::create_todo),
+        )
+        .route(
+            "/todos/{id}",
+            get(todos_api::get_todo)
+                .put(todos_api::update_todo)
+                .delete(todos_api::delete_todo),
+        )
+        .route("/todos/{id}/links", get(todos_api::todo_links))
+        .route("/todos/export", get(todos_api::export_todos))
+}
+
+/// `/migrate` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+fn migrate_routes() -> Router<AppState> {
+    Router::new()
+        .route("/migrate/export", get(migrate_api::export_bundle))
+        .route("/migrate/import", post(migrate_api::import_bundle))
+        .route("/migrate/pull", post(migrate_api::pull))
+        .route("/migrate/sync", post(migrate_api::migrate_sync))
 }
 
 /// R10：HTTP 指标中间件——请求计数 + 延迟直方图，route 用匹配模板（非逐 URI，防高基数）。
