@@ -48,6 +48,39 @@ pub async fn cascade_delete_source(
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
+    // 1-3. 页面分类（整页删 / 摘源）+ 死链清理 + 源行与幽灵边删除（同一事务）
+    let delete_slugs = classify_source_pages(&mut *tx, &sid, lib, &mut report).await?;
+    strip_dead_wikilinks(&mut *tx, lib, &delete_slugs, &mut report).await?;
+    delete_source_row_and_ghost_edges(&mut *tx, source_id, lib, &delete_slugs).await?;
+
+    tx.commit()
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    // 4. index.md 同步（派生数据，事务外幂等重建；按库重建）
+    if !delete_slugs.is_empty() {
+        crate::ingest::rebuild_index_page(pool, lib).await?;
+    }
+
+    // 5. W5：无据边清理——摘源后，既无内容 wikilink 又无共享源的边不再成立，删除
+    cleanup_unsupported_edges(pool, lib, &report.updated_shared).await?;
+
+    // 6. W5：权重重算（删除/摘源后剩余边的 4 信号权重修正；按库）
+    if !delete_slugs.is_empty() || !report.updated_shared.is_empty() {
+        crate::relevance::rebuild_weights(pool, lib).await?;
+    }
+
+    Ok(report)
+}
+
+/// 步骤 1：库内引用该源的页面分类处理——单源摘要页整页删、共享页仅摘源引用。
+/// 返回被整页删除的 slug 列表。
+async fn classify_source_pages(
+    tx: &mut sqlx::PgConnection,
+    sid: &str,
+    lib: Uuid,
+    report: &mut CascadeReport,
+) -> Result<Vec<String>, JobError> {
     // 1. 引用了该 source 的全部页面（sources[] 数组包含；库内）
     let linked: Vec<(Uuid, String, String)> = sqlx::query_as(
         "SELECT id, slug, page_type FROM wiki_pages \
@@ -103,7 +136,16 @@ pub async fn cascade_delete_source(
             report.updated_shared.push(slug);
         }
     }
+    Ok(delete_slugs)
+}
 
+/// 步骤 2：清死链——剩余页面中指向已删 slug 的 wikilink 结构化移除（含别名形式）。
+async fn strip_dead_wikilinks(
+    tx: &mut sqlx::PgConnection,
+    lib: Uuid,
+    delete_slugs: &[String],
+    report: &mut CascadeReport,
+) -> Result<(), JobError> {
     // 2. dead wikilink 清理：剩余页面中指向已删 slug 的 [[link]] 移除（库内）
     if !delete_slugs.is_empty() {
         let remaining: Vec<(String, String)> = sqlx::query_as(
@@ -140,7 +182,16 @@ pub async fn cascade_delete_source(
             report.cleaned_links += dead.len();
         }
     }
+    Ok(())
+}
 
+/// 步骤 3：删源行本身 + 幽灵边（指向已删页面的 wiki_links），与页面删除同事务原子。
+async fn delete_source_row_and_ghost_edges(
+    tx: &mut sqlx::PgConnection,
+    source_id: Uuid,
+    lib: Uuid,
+    delete_slugs: &[String],
+) -> Result<(), JobError> {
     // 3. 删 source 行本身（事务内，与页面删除原子）
     sqlx::query("DELETE FROM wiki_sources WHERE id = $1")
         .bind(source_id)
@@ -161,19 +212,18 @@ pub async fn cascade_delete_source(
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
     }
+    Ok(())
+}
 
-    tx.commit()
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
-
-    // 4. index.md 同步（派生数据，事务外幂等重建；按库重建）
-    if !delete_slugs.is_empty() {
-        crate::ingest::rebuild_index_page(pool, lib).await?;
-    }
-
+/// 步骤 5：无据边清理——摘源后既无内容 wikilink 又无共享源的边不再成立，删除。
+async fn cleanup_unsupported_edges(
+    pool: &PgPool,
+    lib: Uuid,
+    updated_shared: &[String],
+) -> Result<(), JobError> {
     // 5. W5：无据边清理——摘源后，既无内容 wikilink 又无共享源的边不再成立，删除
     //    （源重叠补边只在 ingest 时新增，从不回收——摘源后成为无据残留；库内）
-    for slug in report.updated_shared.clone() {
+    for slug in updated_shared {
         let others: Vec<String> = sqlx::query_scalar(
             "SELECT to_slug FROM wiki_links WHERE from_slug = $1 AND library_id = $2 \
              UNION SELECT from_slug FROM wiki_links WHERE to_slug = $1 AND library_id = $2",
@@ -216,13 +266,7 @@ pub async fn cascade_delete_source(
             }
         }
     }
-
-    // 6. W5：权重重算（删除/摘源后剩余边的 4 信号权重修正；按库）
-    if !delete_slugs.is_empty() || !report.updated_shared.is_empty() {
-        crate::relevance::rebuild_weights(pool, lib).await?;
-    }
-
-    Ok(report)
+    Ok(())
 }
 
 #[cfg(test)]
