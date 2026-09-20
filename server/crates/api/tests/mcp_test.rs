@@ -1073,8 +1073,8 @@ async fn wiki_mcp_tools_listed() {
     assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
     assert_eq!(
         wiki_tools[0]["actions"].as_array().unwrap().len(),
-        28,
-        "wiki 域应展示 28 个操作（文档 RAG 三动作 + EN-59 晋升两 action + EN-61 purpose/insights + 收录哲学线 merge）"
+        27,
+        "wiki 域应展示 27 个操作（文档 RAG 三动作 + EN-59 晋升两 action + EN-61 purpose/insights + 收录哲学线 merge；单库终局 2026-09-20 拆除 libraries 后 28→27）"
     );
 
     // instructions 应覆盖 wiki 域

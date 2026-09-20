@@ -20,8 +20,6 @@ import { cn } from '@/lib/utils'
 
 type View = 'tree' | 'graph'
 type Panel = 'none' | 'inbox' | 'ops'
-
-const PAGE_LIMIT = 300
 const TREE_W_MIN = 220
 const TREE_W_MAX = 480
 
@@ -67,7 +65,7 @@ export default function Wiki() {
 
   const load = useCallback(() => {
     return api
-      .get<WikiPage[]>(withLib(`/wiki/pages?limit=${PAGE_LIMIT}`, lib))
+      .get<WikiPage[]>(withLib('/wiki/pages', lib))
       .then((r) => {
         setPages(r)
         setLoadErr('')
@@ -373,9 +371,6 @@ function TreePane({
               />
             </div>
           </nav>
-          {pages.length >= PAGE_LIMIT && (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground/80">已显示前 {PAGE_LIMIT} 条</p>
-          )}
         </div>
       )}
     </Card>

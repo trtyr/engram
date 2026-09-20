@@ -344,15 +344,17 @@ impl WikiService {
         self.ingest(lib, &title, &text).await
     }
 
-    /// 页面列表（D28 keyset 分页，单页上限 300）：cursor = 上一页最后一条的
+    /// 页面列表（D28 keyset 分页）：cursor = 上一页最后一条的
     /// `{updated_at ISO8601}|{id}`，首查不传。ORDER BY 带 id 决稳——
     /// 此前静默截断曾让最老的页面从列表「消失」（graph/lint 却可见）。
-    /// 多库：只列指定库的页面（slug 跨库可重名）。
+    /// 单库终局（2026-09-20）：limit=None = 全量返回（用户拍板不要上限）——
+    /// 原 .min(300) 硬上限随多库时代一起拆除。
+    /// 只列指定库的页面（slug 跨库可重名）。
     pub async fn list_pages(
         &self,
         lib: Uuid,
         page_type: Option<&str>,
-        limit: i64,
+        limit: Option<i64>,
         cursor: Option<&str>,
     ) -> Result<Vec<WikiPageDto>, WikiError> {
         let parse_cursor =
@@ -385,7 +387,7 @@ impl WikiService {
             )
             .bind(lib)
             .bind(page_type)
-            .bind(limit.min(300))
+            .bind(limit)
             .fetch_all(&self.pool)
             .await?),
             Some(raw) => {
@@ -399,7 +401,7 @@ impl WikiService {
                 )
                 .bind(lib)
                 .bind(page_type)
-                .bind(limit.min(300))
+                .bind(limit)
                 .bind(ts)
                 .bind(id)
                 .fetch_all(&self.pool)

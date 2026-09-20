@@ -119,8 +119,8 @@ pub struct WikiListPagesParams {
         description = "可选：keyset 分页游标。取上一页最后一条构造 {updated_at ISO8601}|{id}。首查不传；返回条数恰等于 limit 时说明可能还有下一页。"
     )]
     pub cursor: Option<String>,
-    /// 返回条数（默认 100，单页上限 300——更多结果用 cursor 翻页）
-    #[schemars(description = "返回条数，默认 100，单页上限 300——更多结果用 cursor 翻页。")]
+    /// 可选：返回条数上限；不传 = 全量返回
+    #[schemars(description = "可选：返回条数上限。不传 = 全量返回（2026-09-20 起无上限）。")]
     pub limit: Option<i64>,
 }
 
