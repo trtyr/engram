@@ -49,9 +49,9 @@ pub async fn cascade_delete_source(
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
     // 1-3. 页面分类（整页删 / 摘源）+ 死链清理 + 源行与幽灵边删除（同一事务）
-    let delete_slugs = classify_source_pages(&mut *tx, &sid, lib, &mut report).await?;
-    strip_dead_wikilinks(&mut *tx, lib, &delete_slugs, &mut report).await?;
-    delete_source_row_and_ghost_edges(&mut *tx, source_id, lib, &delete_slugs).await?;
+    let delete_slugs = classify_source_pages(&mut tx, &sid, lib, &mut report).await?;
+    strip_dead_wikilinks(&mut tx, lib, &delete_slugs, &mut report).await?;
+    delete_source_row_and_ghost_edges(&mut tx, source_id, lib, &delete_slugs).await?;
 
     tx.commit()
         .await
@@ -86,7 +86,7 @@ async fn classify_source_pages(
         "SELECT id, slug, page_type FROM wiki_pages \
          WHERE frontmatter->'sources' @> to_jsonb(ARRAY[$1::text]) AND library_id = $2",
     )
-    .bind(&sid)
+    .bind(sid)
     .bind(lib)
     .fetch_all(&mut *tx)
     .await
@@ -128,7 +128,7 @@ async fn classify_source_pages(
                  WHERE id = $1 AND library_id = $3",
             )
             .bind(id)
-            .bind(&sid)
+            .bind(sid)
             .bind(lib)
             .execute(&mut *tx)
             .await
@@ -206,7 +206,7 @@ async fn delete_source_row_and_ghost_edges(
             "DELETE FROM wiki_links \
              WHERE (from_slug = ANY($1) OR to_slug = ANY($1)) AND library_id = $2",
         )
-        .bind(&delete_slugs)
+        .bind(delete_slugs)
         .bind(lib)
         .execute(&mut *tx)
         .await
@@ -228,7 +228,7 @@ async fn cleanup_unsupported_edges(
             "SELECT to_slug FROM wiki_links WHERE from_slug = $1 AND library_id = $2 \
              UNION SELECT from_slug FROM wiki_links WHERE to_slug = $1 AND library_id = $2",
         )
-        .bind(&slug)
+        .bind(slug)
         .bind(lib)
         .fetch_all(pool)
         .await
@@ -249,7 +249,7 @@ async fn cleanup_unsupported_edges(
             }
             let (a, b) = (&pages[0], &pages[1]);
             let direct =
-                extract_wikilinks(&a.1).contains(&other) || extract_wikilinks(&b.1).contains(&slug);
+                extract_wikilinks(&a.1).contains(&other) || extract_wikilinks(&b.1).contains(slug);
             let shared = a.2.iter().any(|s| b.2.contains(s));
             if !direct && !shared {
                 sqlx::query(
@@ -257,8 +257,8 @@ async fn cleanup_unsupported_edges(
                      WHERE library_id = $3 \
                        AND ((from_slug = $1 AND to_slug = $2) OR (from_slug = $2 AND to_slug = $1))",
                 )
-                .bind(&slug)
-                .bind(&other)
+                .bind(slug)
+                .bind(other)
                 .bind(lib)
                 .execute(pool)
                 .await
