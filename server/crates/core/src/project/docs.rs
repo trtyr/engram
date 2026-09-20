@@ -182,70 +182,8 @@ impl ProjectService {
         self.get_project_bare(project_id).await?;
         let docs = repo::list_doc_contents(&self.pool, project_id).await?;
 
-        struct DocHits {
-            doc_id: Uuid,
-            title: String,
-            category: String,
-            doc_score: i64,
-            lines: Vec<(i64, String, i64)>, // (行号, 原文, 行分)
-        }
-        let mut results: Vec<DocHits> = Vec::new();
+        let mut results = score_doc_hits(docs, &terms);
         let cap = limit.clamp(1, 500) as usize;
-
-        for (id, title, category, content) in docs {
-            let title_norm = normalize_for_search(&title);
-            // 文档级：title 命中加权（title 是文档最强信号）
-            let title_score: i64 = terms
-                .iter()
-                .map(|t| {
-                    if title_norm.contains(t.as_str()) {
-                        50
-                    } else {
-                        0
-                    }
-                })
-                .sum();
-            let mut lines: Vec<(i64, String, i64)> = Vec::new();
-            for (i, line) in content.lines().enumerate() {
-                let line_norm = normalize_for_search(line);
-                // 轻归一化版保留标点边界——整词/行首判定用
-                let line_light = light_normalize(line);
-                // 行分：命中词 +3/词；行首命中 +5；整词命中 +4；全词共现 +10
-                let mut hit_terms = 0usize;
-                let mut line_score = 0i64;
-                for t in &terms {
-                    if line_norm.contains(t.as_str()) {
-                        hit_terms += 1;
-                        line_score += 3;
-                        if line_light.starts_with(t.as_str()) {
-                            line_score += 5;
-                        }
-                        if is_whole_word_hit(&line_light, t) {
-                            line_score += 4;
-                        }
-                    }
-                }
-                if hit_terms > 0 {
-                    if hit_terms == terms.len() && terms.len() > 1 {
-                        line_score += 10;
-                    }
-                    lines.push((i as i64 + 1, line.to_string(), line_score));
-                }
-            }
-            if lines.is_empty() {
-                continue;
-            }
-            // 文档分 = title 加权 + 命中密度（行数 × 5）+ 行分总和
-            let doc_score =
-                title_score + lines.len() as i64 * 5 + lines.iter().map(|l| l.2).sum::<i64>();
-            results.push(DocHits {
-                doc_id: id,
-                title,
-                category,
-                doc_score,
-                lines,
-            });
-        }
 
         // 排序：文档按 doc_score 降序，文档内行按行分降序 + 行号升序
         results.sort_by_key(|d| std::cmp::Reverse(d.doc_score));
@@ -359,4 +297,74 @@ impl ProjectService {
         self.update_doc(id, None, None, None, Some(&patched), expected_version)
             .await
     }
+}
+
+/// 文档级命中聚合（内部用）。
+struct DocHits {
+    doc_id: Uuid,
+    title: String,
+    category: String,
+    doc_score: i64,
+    lines: Vec<(i64, String, i64)>, // (行号, 原文, 行分)
+}
+
+/// 文档级打分：title 加权（命中 +50/词）+ 行命中文（词 +3 / 行首 +5 / 整词 +4 / 全词共现 +10）；
+/// 文档分 = title 分 + 行数×5 + 行分总和。仅保留有命中的文档。
+fn score_doc_hits(docs: Vec<(Uuid, String, String, String)>, terms: &[String]) -> Vec<DocHits> {
+    let mut results: Vec<DocHits> = Vec::new();
+    for (id, title, category, content) in docs {
+        let title_norm = normalize_for_search(&title);
+        // 文档级：title 命中加权（title 是文档最强信号）
+        let title_score: i64 = terms
+            .iter()
+            .map(|t| {
+                if title_norm.contains(t.as_str()) {
+                    50
+                } else {
+                    0
+                }
+            })
+            .sum();
+        let mut lines: Vec<(i64, String, i64)> = Vec::new();
+        for (i, line) in content.lines().enumerate() {
+            let line_norm = normalize_for_search(line);
+            // 轻归一化版保留标点边界——整词/行首判定用
+            let line_light = light_normalize(line);
+            // 行分：命中词 +3/词；行首命中 +5；整词命中 +4；全词共现 +10
+            let mut hit_terms = 0usize;
+            let mut line_score = 0i64;
+            for t in terms {
+                if line_norm.contains(t.as_str()) {
+                    hit_terms += 1;
+                    line_score += 3;
+                    if line_light.starts_with(t.as_str()) {
+                        line_score += 5;
+                    }
+                    if is_whole_word_hit(&line_light, t) {
+                        line_score += 4;
+                    }
+                }
+            }
+            if hit_terms > 0 {
+                if hit_terms == terms.len() && terms.len() > 1 {
+                    line_score += 10;
+                }
+                lines.push((i as i64 + 1, line.to_string(), line_score));
+            }
+        }
+        if lines.is_empty() {
+            continue;
+        }
+        // 文档分 = title 加权 + 命中密度（行数 × 5）+ 行分总和
+        let doc_score =
+            title_score + lines.len() as i64 * 5 + lines.iter().map(|l| l.2).sum::<i64>();
+        results.push(DocHits {
+            doc_id: id,
+            title,
+            category,
+            doc_score,
+            lines,
+        });
+    }
+    results
 }
