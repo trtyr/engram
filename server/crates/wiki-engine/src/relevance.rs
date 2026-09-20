@@ -53,16 +53,17 @@ where
 /// 页面集合、现有边、UPDATE/INSERT 全部按 library_id 隔离（多库 0037）。
 pub async fn rebuild_weights(pool: &PgPool, lib: uuid::Uuid) -> Result<usize, JobError> {
     // 页面集合：slug + type + sources[]（库内）
-    let pages: Vec<(String, String, Vec<String>)> =
-        sqlx::query_as::<_, (String, String, Vec<String>)>(
-            "SELECT slug, page_type, \
-            ARRAY(SELECT jsonb_array_elements_text(frontmatter->'sources')) \
-         FROM wiki_pages WHERE page_type NOT IN ('index','log') AND library_id = $1",
-        )
-        .bind(lib)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let pages: Vec<(String, String, Vec<String>)> = sqlx::query_as::<
+        _,
+        (String, String, Vec<String>),
+    >(
+        "SELECT slug, page_type, ARRAY(SELECT jsonb_array_elements_text(frontmatter->'sources')) \
+             FROM wiki_pages WHERE page_type NOT IN ('index','log','overview') AND library_id = $1",
+    )
+    .bind(lib)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
     if pages.is_empty() {
         return Ok(0);
     }
@@ -81,11 +82,35 @@ pub async fn rebuild_weights(pool: &PgPool, lib: uuid::Uuid) -> Result<usize, Jo
             .fetch_all(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
+
+    let (out_neighbors, in_neighbors) = build_neighbor_maps(&links);
+    let mut updated = recompute_direct_weights(
+        pool,
+        lib,
+        &links,
+        &slug_type,
+        &slug_sources,
+        &out_neighbors,
+        &in_neighbors,
+    )
+    .await?;
+    updated += add_source_overlap_edges(pool, lib, &pages, &links).await?;
+
+    Ok(updated)
+}
+
+/// 邻接表：出/入邻居（保留边表原始顺序，供 AA 与度数使用）。
+fn build_neighbor_maps(
+    links: &[(String, String)],
+) -> (
+    std::collections::HashMap<&str, Vec<&str>>,
+    std::collections::HashMap<&str, Vec<&str>>,
+) {
     let mut out_neighbors: std::collections::HashMap<&str, Vec<&str>> =
         std::collections::HashMap::new();
     let mut in_neighbors: std::collections::HashMap<&str, Vec<&str>> =
         std::collections::HashMap::new();
-    for (from, to) in &links {
+    for (from, to) in links {
         out_neighbors
             .entry(from.as_str())
             .or_default()
@@ -95,6 +120,20 @@ pub async fn rebuild_weights(pool: &PgPool, lib: uuid::Uuid) -> Result<usize, Jo
             .or_default()
             .push(from.as_str());
     }
+    (out_neighbors, in_neighbors)
+}
+
+/// 直接链权重重算（直接链 + 源重叠 + AA + 类型），返回更新的边数。
+#[allow(clippy::too_many_arguments)]
+async fn recompute_direct_weights(
+    pool: &PgPool,
+    lib: uuid::Uuid,
+    links: &[(String, String)],
+    slug_type: &std::collections::HashMap<&str, &str>,
+    slug_sources: &std::collections::HashMap<&str, &Vec<String>>,
+    out_neighbors: &std::collections::HashMap<&str, Vec<&str>>,
+    in_neighbors: &std::collections::HashMap<&str, Vec<&str>>,
+) -> Result<usize, JobError> {
     let neighbor_list = |slug: &str| -> Vec<String> {
         let mut v: Vec<String> = out_neighbors
             .get(slug)
@@ -114,7 +153,7 @@ pub async fn rebuild_weights(pool: &PgPool, lib: uuid::Uuid) -> Result<usize, Jo
 
     let mut updated = 0usize;
     // 直接链：重算权重（直接链 + 源重叠 + AA + 类型）
-    for (from, to) in &links {
+    for (from, to) in links {
         let (Some(&ta), Some(&sa), Some(&sb)) = (
             slug_type.get(from.as_str()),
             slug_sources.get(from.as_str()),
@@ -144,7 +183,17 @@ pub async fn rebuild_weights(pool: &PgPool, lib: uuid::Uuid) -> Result<usize, Jo
         .map_err(|e| JobError::Retryable(e.to_string()))?;
         updated += 1;
     }
+    Ok(updated)
+}
 
+/// 源重叠但无直接链的页面对：补边（weight=4+亲和，无直接链信号）。
+async fn add_source_overlap_edges(
+    pool: &PgPool,
+    lib: uuid::Uuid,
+    pages: &[(String, String, Vec<String>)],
+    links: &[(String, String)],
+) -> Result<usize, JobError> {
+    let mut updated = 0usize;
     // 源重叠但无直接链的页面对：补边（weight=4+亲和，无直接链信号）
     for i in 0..pages.len() {
         for j in (i + 1)..pages.len() {
@@ -180,7 +229,6 @@ pub async fn rebuild_weights(pool: &PgPool, lib: uuid::Uuid) -> Result<usize, Jo
             updated += 1;
         }
     }
-
     Ok(updated)
 }
 
