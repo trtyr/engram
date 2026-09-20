@@ -122,44 +122,16 @@ impl MemoryService {
         let want_l3 = all || layers.contains(&"l3");
 
         // 实体：token 命中（名字加权）——主角先行
-        let entities = if want_e {
-            self.entity_hits(query, max_items).await?
-        } else {
-            vec![]
-        };
-        let mut l1 = if want_l1 {
-            search_atoms(
-                &self.pool,
+        let (entities, l1, l2, l3) = self
+            .collect_layers(
                 query,
                 qv.as_deref(),
                 max_items,
-                true, // sensitive 口径放开（2026-09-12）——标记保留、不再隐身
                 from,
                 to,
+                [want_e, want_l1, want_l2, want_l3],
             )
-            .await
-            .map_err(StoreError::from)?
-        } else {
-            vec![]
-        };
-        // ILIKE 补漏与 KV 权威通道（见助手：KV 恒合并置顶、atoms 兜底仅零命中时触发）
-        l1 = self
-            .kv_and_literal_supplement(query, want_l1, max_items, l1)
             .await?;
-
-        let l2 = if want_l2 {
-            search_scenarios(&self.pool, query, qv.as_deref(), max_items)
-                .await
-                .map_err(StoreError::from)?
-        } else {
-            vec![]
-        };
-        // L3：小体量——分词双侧匹配打分排序（见助手）
-        let l3 = if want_l3 {
-            self.persona_hits(query).await?
-        } else {
-            vec![]
-        };
         // B9：命中反馈（异步 best-effort，不阻塞返回）；no_feedback=true 跳过（B6 污染防护）
         if !no_feedback {
             self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
@@ -475,6 +447,66 @@ impl MemoryService {
                 query: query.map(String::from),
             },
         })
+    }
+    /// 分层收集：实体（名字加权）+ L1（atoms，含 KV 权威通道与 ILIKE 补漏）+ L2 场景 + L3 画像。
+    #[allow(clippy::too_many_arguments)]
+    async fn collect_layers(
+        &self,
+        query: &str,
+        qv: Option<&[f32]>,
+        max_items: i64,
+        from: Option<chrono::DateTime<chrono::Utc>>,
+        to: Option<chrono::DateTime<chrono::Utc>>,
+        want: [bool; 4],
+    ) -> Result<
+        (
+            Vec<SearchHit>,
+            Vec<SearchHit>,
+            Vec<SearchHit>,
+            engram_storage::models::memory::PersonaVersion,
+        ),
+        MemoryError,
+    > {
+        let [want_e, want_l1, want_l2, want_l3] = want;
+        let entities = if want_e {
+            self.entity_hits(query, max_items).await?
+        } else {
+            vec![]
+        };
+        let mut l1 = if want_l1 {
+            search_atoms(
+                &self.pool,
+                query,
+                qv.as_deref(),
+                max_items,
+                true, // sensitive 口径放开（2026-09-12）——标记保留、不再隐身
+                from,
+                to,
+            )
+            .await
+            .map_err(StoreError::from)?
+        } else {
+            vec![]
+        };
+        // ILIKE 补漏与 KV 权威通道（见助手：KV 恒合并置顶、atoms 兜底仅零命中时触发）
+        l1 = self
+            .kv_and_literal_supplement(query, want_l1, max_items, l1)
+            .await?;
+
+        let l2 = if want_l2 {
+            search_scenarios(&self.pool, query, qv.as_deref(), max_items)
+                .await
+                .map_err(StoreError::from)?
+        } else {
+            vec![]
+        };
+        // L3：小体量——分词双侧匹配打分排序（见助手）
+        let l3 = if want_l3 {
+            self.persona_hits(query).await?
+        } else {
+            vec![]
+        };
+        Ok((entities, l1, l2, l3))
     }
 }
 

@@ -341,54 +341,7 @@ fn explore_outline_query(db_str: &str, target: &str) -> Result<Option<serde_json
     if rows.is_empty() {
         return Ok(None);
     }
-    let truncate = |s: &str| -> String {
-        if s.chars().count() <= 120 {
-            s.to_string()
-        } else {
-            s.chars().take(120).collect::<String>() + "…"
-        }
-    };
-    let symbols: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|(name, kind, fp, sl, el, sig)| {
-            let mut o = serde_json::json!({
-                "name": name, "kind": kind, "file_path": fp,
-                "line": sl, "end_line": el,
-            });
-            if let Some(s) = sig {
-                o["signature"] = serde_json::json!(truncate(s));
-            }
-            o
-        })
-        .collect();
-    // 文件清单（去重保序 + 每文件符号数）
-    let mut files: Vec<(String, usize)> = Vec::new();
-    for (_, _, fp, _, _, _) in &rows {
-        match files.last_mut() {
-            Some((p, n)) if p == fp => *n += 1,
-            _ => files.push((fp.clone(), 1)),
-        }
-    }
-    let files: Vec<serde_json::Value> = files
-        .into_iter()
-        .map(|(p, n)| serde_json::json!({"path": p, "symbols": n}))
-        .collect();
-    let total_hint = if symbols.len() >= 200 {
-        "（已达 200 上限——用更具体的目录/符号名缩小范围）"
-    } else {
-        ""
-    };
-    Ok(Some(serde_json::json!({
-        "kind": "explore",
-        "mode": "outline",
-        "target": target,
-        "files": files,
-        "symbols": symbols,
-        "hint": format!(
-            "符号大纲（无源码）。看单个符号的源码与调用列表：kind=node；\
-             看影响面：kind=callers/impact；要完整源码文件：本查询传 include_source=true。{total_hint}"
-        ),
-    })))
+    Ok(outline_json(&rows, target)?)
 }
 
 /// 文件级依赖图（阻塞段）：按 (源文件,目标文件) 聚合 import 边，产出 nodes/edges。
@@ -429,4 +382,59 @@ fn full_graph_query(db_str: &str) -> Result<serde_json::Value, CgError> {
         "nodes": nodes,
         "edges": edges,
     }))
+}
+
+/// explore 大纲的 JSON 组装（符号截断 + 文件清单去重保序 + 200 上限提示）。
+fn outline_json(
+    rows: &[(String, String, String, i64, i64, Option<String>)],
+    target: &str,
+) -> Result<Option<serde_json::Value>, CgError> {
+    let truncate = |s: &str| -> String {
+        if s.chars().count() <= 120 {
+            s.to_string()
+        } else {
+            s.chars().take(120).collect::<String>() + "…"
+        }
+    };
+    let symbols: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(name, kind, fp, sl, el, sig)| {
+            let mut o = serde_json::json!({
+                "name": name, "kind": kind, "file_path": fp,
+                "line": sl, "end_line": el,
+            });
+            if let Some(s) = sig {
+                o["signature"] = serde_json::json!(truncate(s));
+            }
+            o
+        })
+        .collect();
+    // 文件清单（去重保序 + 每文件符号数）
+    let mut files: Vec<(String, usize)> = Vec::new();
+    for (_, _, fp, _, _, _) in rows {
+        match files.last_mut() {
+            Some((p, n)) if p == fp => *n += 1,
+            _ => files.push((fp.clone(), 1)),
+        }
+    }
+    let files: Vec<serde_json::Value> = files
+        .into_iter()
+        .map(|(p, n)| serde_json::json!({"path": p, "symbols": n}))
+        .collect();
+    let total_hint = if symbols.len() >= 200 {
+        "（已达 200 上限——用更具体的目录/符号名缩小范围）"
+    } else {
+        ""
+    };
+    Ok(Some(serde_json::json!({
+        "kind": "explore",
+        "mode": "outline",
+        "target": target,
+        "files": files,
+        "symbols": symbols,
+        "hint": format!(
+            "符号大纲（无源码）。看单个符号的源码与调用列表：kind=node；\
+             看影响面：kind=callers/impact；要完整源码文件：本查询传 include_source=true。{total_hint}"
+        ),
+    })))
 }
