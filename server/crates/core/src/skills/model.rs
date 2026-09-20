@@ -231,69 +231,95 @@ fn parse_frontmatter_lines(fm_block: &str) -> FrontmatterMeta {
         let key = key.trim().to_ascii_lowercase();
         let value = value.trim();
         // YAML 块列表（D7）：`tags:` 值为空时收集后续 "- item" 行
-        if key == "tags"
-            && value.is_empty()
-            && i < lines.len()
-            && lines[i].trim_start().starts_with("- ")
-        {
-            let mut items: Vec<String> = Vec::new();
-            while i < lines.len() {
-                let l = lines[i].trim_start();
-                match l.strip_prefix("- ") {
-                    Some(item) => {
-                        items.push(item.trim().trim_matches('"').trim_matches('\'').to_string());
-                        i += 1;
-                    }
-                    None => break,
-                }
-            }
+        if let Some((consumed, items)) = parse_tags_list(&lines, i, &key, value) {
+            i += consumed;
             meta.tags = items;
             continue;
         }
-        if matches!(value, ">" | ">>" | ">-" | ">+" | "|" | "|-" | "|+") && i < lines.len() {
-            // 块标量：收集缩进行（空行不断块，去缩进后折叠或保留）
-            let mut buf: Vec<&str> = Vec::new();
-            let mut indent: Option<usize> = None;
-            while i < lines.len() {
-                let l = lines[i];
-                if l.trim().is_empty() {
-                    buf.push(l);
-                    i += 1;
-                    continue;
-                }
-                let ind = l.len() - l.trim_start().len();
-                if ind == 0 {
-                    break;
-                }
-                match indent {
-                    None => indent = Some(ind),
-                    Some(n) if ind < n => break,
-                    _ => {}
-                }
-                buf.push(l);
-                i += 1;
-            }
-            let min_indent = indent.unwrap_or(2);
-            let mut stripped: Vec<String> = buf
-                .iter()
-                .map(|l| l.get(min_indent..).unwrap_or(l.trim_start()).to_string())
-                .collect();
-            while stripped.last().is_some_and(|l| l.trim().is_empty()) {
-                stripped.pop();
-            }
-            let joined = if value.starts_with('>') {
-                stripped
-                    .iter()
-                    .map(|l| l.trim())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            } else {
-                stripped.join("\n")
-            };
+        if let Some((consumed, joined)) = parse_block_scalar(value, &lines, i) {
+            i += consumed;
             assign_meta(&mut meta, &key, &joined);
         } else {
             assign_meta(&mut meta, &key, value);
         }
     }
     meta
+}
+
+/// YAML 块列表（D7）：`tags:` 值为空时收集后续 "- item" 行。返回 (消费行数, 列表)；
+/// 不满足块列表形态返回 None。
+fn parse_tags_list(
+    lines: &[&str],
+    i: usize,
+    key: &str,
+    value: &str,
+) -> Option<(usize, Vec<String>)> {
+    if key != "tags"
+        || !value.is_empty()
+        || i >= lines.len()
+        || !lines[i].trim_start().starts_with("- ")
+    {
+        return None;
+    }
+    let mut j = i;
+    let mut items: Vec<String> = Vec::new();
+    while j < lines.len() {
+        let l = lines[j].trim_start();
+        match l.strip_prefix("- ") {
+            Some(item) => {
+                items.push(item.trim().trim_matches('"').trim_matches('\'').to_string());
+                j += 1;
+            }
+            None => break,
+        }
+    }
+    Some((j - i, items))
+}
+
+/// 块标量（`>` 折叠 / `|` 保留）：收集缩进行（空行不断块），去缩进 + 去尾部空行。
+/// 返回 (消费行数, 值)；非块标量返回 None。
+fn parse_block_scalar(value: &str, lines: &[&str], i: usize) -> Option<(usize, String)> {
+    if !matches!(value, ">" | ">>" | ">-" | ">+" | "|" | "|-" | "|+") || i >= lines.len() {
+        return None;
+    }
+    let mut j = i;
+    let mut buf: Vec<&str> = Vec::new();
+    let mut indent: Option<usize> = None;
+    while j < lines.len() {
+        let l = lines[j];
+        if l.trim().is_empty() {
+            buf.push(l);
+            j += 1;
+            continue;
+        }
+        let ind = l.len() - l.trim_start().len();
+        if ind == 0 {
+            break;
+        }
+        match indent {
+            None => indent = Some(ind),
+            Some(n) if ind < n => break,
+            _ => {}
+        }
+        buf.push(l);
+        j += 1;
+    }
+    let min_indent = indent.unwrap_or(2);
+    let mut stripped: Vec<String> = buf
+        .iter()
+        .map(|l| l.get(min_indent..).unwrap_or(l.trim_start()).to_string())
+        .collect();
+    while stripped.last().is_some_and(|l| l.trim().is_empty()) {
+        stripped.pop();
+    }
+    let joined = if value.starts_with('>') {
+        stripped
+            .iter()
+            .map(|l| l.trim())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        stripped.join("\n")
+    };
+    Some((j - i, joined))
 }

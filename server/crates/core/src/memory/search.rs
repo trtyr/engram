@@ -463,7 +463,7 @@ impl MemoryService {
             Vec<SearchHit>,
             Vec<SearchHit>,
             Vec<SearchHit>,
-            engram_storage::models::memory::PersonaVersion,
+            Vec<engram_storage::models::memory::PersonaVersion>,
         ),
         MemoryError,
     > {

@@ -344,30 +344,16 @@ impl MemoryService {
             || new_kind != cur.kind
             || confidence.is_some_and(|c| (c - cur.confidence).abs() > f32::EPSILON);
         if rewrite {
-            repo::insert_atom_revision(
-                &self.pool,
-                Uuid::now_v7(),
+            self.record_atom_rewrite(
                 id,
-                &cur.content,
-                &cur.kind,
-                cur.confidence,
+                &cur,
+                &new_content,
+                new_kind,
+                confidence,
+                content_changed,
                 actor,
             )
             .await?;
-            self.audit(
-            "edit_atom",
-            json!({
-                "atom_id": id.to_string(),
-                "by": actor,
-                "old": {"content": cur.content, "kind": cur.kind, "confidence": cur.confidence},
-                "new": {
-                    "content": if content_changed { new_content.clone() } else { cur.content.clone() },
-                    "kind": new_kind,
-                    "confidence": confidence.unwrap_or(cur.confidence),
-                },
-            }),
-        )
-        .await;
         }
         let emb = if content_changed {
             self.try_embed(std::slice::from_ref(&new_content)).await
@@ -416,5 +402,44 @@ impl MemoryService {
     /// 原子改写历史（新→旧）。
     pub async fn atom_revisions(&self, atom_id: Uuid) -> Result<Vec<AtomRevision>, MemoryError> {
         Ok(repo::atom_revisions(&self.pool, atom_id).await?)
+    }
+    /// 改写语义（content / kind / confidence 变化）→ 旧值进 atom_revisions + 审计行。
+    /// AI 走 correction（新原子 + superseded_by）不产生 revision；这条是用户轻量修正路。
+    #[allow(clippy::too_many_arguments)]
+    async fn record_atom_rewrite(
+        &self,
+        id: Uuid,
+        cur: &AtomDto,
+        new_content: &str,
+        new_kind: &str,
+        confidence: Option<f32>,
+        content_changed: bool,
+        actor: &str,
+    ) -> Result<(), MemoryError> {
+        repo::insert_atom_revision(
+            &self.pool,
+            Uuid::now_v7(),
+            id,
+            &cur.content,
+            &cur.kind,
+            cur.confidence,
+            actor,
+        )
+        .await?;
+        self.audit(
+        "edit_atom",
+        json!({
+            "atom_id": id.to_string(),
+            "by": actor,
+            "old": {"content": cur.content, "kind": cur.kind, "confidence": cur.confidence},
+            "new": {
+                "content": if content_changed { new_content.to_string() } else { cur.content.clone() },
+                "kind": new_kind,
+                "confidence": confidence.unwrap_or(cur.confidence),
+            },
+        }),
+    )
+    .await;
+        Ok(())
     }
 }

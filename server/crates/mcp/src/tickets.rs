@@ -171,14 +171,22 @@ impl EngramMcpServer {
             let cfg = load_config(&self.state.pool).await;
             return ok_json(dispatch::render_manual("tickets", &cfg.disabled_tools));
         }
-        match call.action.as_str() {
-            "add" => {
-                self.ticket_add(
-                    ctx,
-                    Parameters(dispatch::from_args("tickets", "add", call.args)?),
-                )
-                .await
+        let action = call.action.clone();
+        match action.as_str() {
+            "list" | "get" | "links" => self.tickets_read_group(ctx, call).await,
+            "add" | "link" | "unlink" | "update" | "delete" => {
+                self.tickets_write_group(ctx, call).await
             }
+            other => Err(dispatch::unknown_action("tickets", other)),
+        }
+    }
+    /// tickets 读类动作分发（分组见 dispatch.rs 动作表）。
+    async fn tickets_read_group(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        call: dispatch::DomainCall,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match call.action.as_str() {
             "list" => {
                 self.ticket_list(
                     ctx,
@@ -197,6 +205,24 @@ impl EngramMcpServer {
                 self.todo_links(
                     ctx,
                     Parameters(dispatch::from_args("tickets", "links", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("tickets", other)),
+        }
+    }
+
+    /// tickets 写类动作分发（分组见 dispatch.rs 动作表）。
+    async fn tickets_write_group(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        call: dispatch::DomainCall,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match call.action.as_str() {
+            "add" => {
+                self.ticket_add(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "add", call.args)?),
                 )
                 .await
             }

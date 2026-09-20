@@ -376,14 +376,22 @@ impl EngramMcpServer {
             let cfg = load_config(&self.state.pool).await;
             return ok_json(dispatch::render_manual("todos", &cfg.disabled_tools));
         }
-        match call.action.as_str() {
-            "add" => {
-                self.todo_add(
-                    ctx,
-                    Parameters(dispatch::from_args("todos", "add", call.args)?),
-                )
-                .await
+        let action = call.action.clone();
+        match action.as_str() {
+            "list" | "get" | "links" => self.todos_read_group(ctx, call).await,
+            "add" | "link" | "unlink" | "done" | "update" | "delete" => {
+                self.todos_write_group(ctx, call).await
             }
+            other => Err(dispatch::unknown_action("todos", other)),
+        }
+    }
+    /// todos 读类动作分发（分组见 dispatch.rs 动作表）。
+    async fn todos_read_group(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        call: dispatch::DomainCall,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match call.action.as_str() {
             "list" => {
                 self.todo_list(
                     ctx,
@@ -402,6 +410,24 @@ impl EngramMcpServer {
                 self.todo_links(
                     ctx,
                     Parameters(dispatch::from_args("todos", "links", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("todos", other)),
+        }
+    }
+
+    /// todos 写类动作分发（分组见 dispatch.rs 动作表）。
+    async fn todos_write_group(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        call: dispatch::DomainCall,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match call.action.as_str() {
+            "add" => {
+                self.todo_add(
+                    ctx,
+                    Parameters(dispatch::from_args("todos", "add", call.args)?),
                 )
                 .await
             }

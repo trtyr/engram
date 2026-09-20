@@ -469,6 +469,21 @@ impl EngramMcpServer {
             let cfg = load_config(&self.state.pool).await;
             return ok_json(dispatch::render_manual("skills", &cfg.disabled_tools));
         }
+        let action = call.action.clone();
+        match action.as_str() {
+            "list" | "get" | "file_get" | "file_put" => self.skills_read_group(ctx, call).await,
+            "create" | "update" | "versions" | "restore" | "delete" | "import" => {
+                self.skills_write_group(ctx, call).await
+            }
+            other => Err(dispatch::unknown_action("skills", other)),
+        }
+    }
+    /// skills 读类动作分发（分组见 dispatch.rs 动作表）。
+    async fn skills_read_group(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        call: dispatch::DomainCall,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
         match call.action.as_str() {
             "list" => {
                 self.skills_list(
@@ -498,6 +513,17 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            other => Err(dispatch::unknown_action("skills", other)),
+        }
+    }
+
+    /// skills 写类动作分发（分组见 dispatch.rs 动作表）。
+    async fn skills_write_group(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        call: dispatch::DomainCall,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match call.action.as_str() {
             "create" => {
                 self.skills_create(
                     ctx,

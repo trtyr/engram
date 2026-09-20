@@ -227,23 +227,7 @@ impl SkillsService {
             )));
         }
         let (local_path, repo_url) = resolve_skill_paths(&current, &patch, &origin)?;
-        let semantic_change = patch.name.is_some()
-            || patch.description.is_some()
-            || patch.content.is_some()
-            || patch.tags.is_some();
-        let is_script = current.kind == "script";
-        let snapshot = if semantic_change && !is_script {
-            Some(repo::SkillSnapshot {
-                skill_id: current.id,
-                name: &current.name,
-                description: &current.description,
-                content: &current.content,
-                tags: &current.tags,
-                origin: "update",
-            })
-        } else {
-            None
-        };
+        let snapshot = skill_snapshot(&current, &patch);
         let patch_data = repo::SkillPatchData {
             name: patch.name.as_deref().map(str::trim),
             description: patch.description.as_deref().map(str::trim),
@@ -318,4 +302,29 @@ fn resolve_skill_paths(
             .or(current.repo_url.clone())
     };
     Ok((local_path, repo_url))
+}
+
+/// 语义变更（name/description/content/tags）且非 script 型 → 落历史快照（origin=update）。
+fn skill_snapshot<'a>(
+    current: &'a SkillDto,
+    patch: &SkillPatch,
+) -> Option<repo::SkillSnapshot<'a>> {
+    let semantic_change = patch.name.is_some()
+        || patch.description.is_some()
+        || patch.content.is_some()
+        || patch.tags.is_some();
+    let is_script = current.kind == "script";
+    let snapshot = if semantic_change && !is_script {
+        Some(repo::SkillSnapshot {
+            skill_id: current.id,
+            name: &current.name,
+            description: &current.description,
+            content: &current.content,
+            tags: &current.tags,
+            origin: "update",
+        })
+    } else {
+        None
+    };
+    snapshot
 }

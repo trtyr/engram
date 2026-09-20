@@ -51,9 +51,35 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     let mut done_atoms = 0usize;
     let mut done_scenarios = 0usize;
 
+    let (done_atoms, done_scenarios) =
+        reembed_missing(pool, &llm, ctx.job.id, &atoms, &scenarios).await?;
+
+    ctx.emit(
+        &format!("重嵌完成：原子 {done_atoms} / 场景 {done_scenarios}"),
+        None,
+    )
+    .await
+    .ok();
+    Ok(serde_json::json!({
+        "atoms": done_atoms,
+        "scenarios": done_scenarios,
+        "total": total
+    }))
+}
+
+/// 分批重嵌缺失向量（BATCH 一批）：全零向量拒绝入库（B2）；返回 (原子数, 场景数)。
+async fn reembed_missing(
+    pool: &sqlx::PgPool,
+    llm: &LlmRef,
+    job_id: Uuid,
+    atoms: &[(Uuid, String)],
+    scenarios: &[(Uuid, String)],
+) -> Result<(usize, usize), JobError> {
+    let mut done_atoms = 0usize;
+    let mut done_scenarios = 0usize;
     for chunk in atoms.chunks(BATCH) {
         let texts: Vec<String> = chunk.iter().map(|(_, c)| c.clone()).collect();
-        let embs = llm.embed(&texts, ctx.job.id).await?;
+        let embs = llm.embed(&texts, job_id).await?;
         for ((id, _), vec) in chunk.iter().zip(embs.iter()) {
             if vec.iter().all(|&x| x == 0.0) {
                 continue; // B2：全零向量拒绝入库
@@ -70,7 +96,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
 
     for chunk in scenarios.chunks(BATCH) {
         let texts: Vec<String> = chunk.iter().map(|(_, c)| c.clone()).collect();
-        let embs = llm.embed(&texts, ctx.job.id).await?;
+        let embs = llm.embed(&texts, job_id).await?;
         for ((id, _), vec) in chunk.iter().zip(embs.iter()) {
             if vec.iter().all(|&x| x == 0.0) {
                 continue;
@@ -84,16 +110,5 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
             done_scenarios += 1;
         }
     }
-
-    ctx.emit(
-        &format!("重嵌完成：原子 {done_atoms} / 场景 {done_scenarios}"),
-        None,
-    )
-    .await
-    .ok();
-    Ok(serde_json::json!({
-        "atoms": done_atoms,
-        "scenarios": done_scenarios,
-        "total": total
-    }))
+    Ok((done_atoms, done_scenarios))
 }

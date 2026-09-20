@@ -8,24 +8,26 @@ use super::*;
 /// 下面的平铺分支保留兜底（防御未来再加非域工具）。
 pub(crate) fn tool_scope(name: &str) -> &'static str {
     match name {
-        // 渐进式发现后的 6 个域工具：名即域（唯一例外 projects → project scope）
         "projects" => "project",
         "memory" => "memory",
         "skills" => "skills",
         "wiki" => "wiki",
-        "todos" => "todos",
-        "tickets" => "todos", // 工单域与待办同 scope（同表同底座，权限不分家）
+        "todos" | "tickets" => "todos", // 工单域与待办同 scope（同表同底座，权限不分家）
         "codegraph" => "codegraph",
-        // 平铺名兜底（防御未来再加非域工具）
-        other => match other.split('_').next() {
-            Some("project") => "project",
-            Some("skills") => "skills",
-            Some("wiki") => "wiki",
-            Some("codegraph") => "codegraph",
-            Some("llm") => "llm",
-            Some("todos") | Some("todo") => "todos",
-            _ => "memory",
-        },
+        other => flat_tool_scope(other),
+    }
+}
+
+/// 平铺名兜底（防御未来再加非域工具）：按前缀归域。
+pub(crate) fn flat_tool_scope(other: &str) -> &'static str {
+    match other.split('_').next() {
+        Some("project") => "project",
+        Some("skills") => "skills",
+        Some("wiki") => "wiki",
+        Some("codegraph") => "codegraph",
+        Some("llm") => "llm",
+        Some("todos") | Some("todo") => "todos",
+        _ => "memory",
     }
 }
 

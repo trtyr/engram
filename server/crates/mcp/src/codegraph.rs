@@ -246,14 +246,7 @@ impl EngramMcpServer {
         require_codegraph(&p)?;
         // full_graph（EN-61）：整张图导出——不需要 target；bridge.full_graph 已存在，这里只是接入口
         if params.0.kind == "full_graph" {
-            let id = cg_resolve(&self.state, &params.0.project).await?;
-            let mut v = cg_svc(&self.state).full_graph(id).await.map_err(from_cg)?;
-            if let Ok(proj) = cg_svc(&self.state).get(id).await
-                && proj.status == "ready"
-            {
-                v["_freshness"] = cg_svc(&self.state).freshness_for(&proj).await;
-            }
-            return ok_json(v);
+            return self.full_graph_reply(&params.0.project).await;
         }
         if params
             .0
@@ -275,26 +268,7 @@ impl EngramMcpServer {
                 ),
             )
         })?;
-        let id = cg_resolve(&self.state, &params.0.project).await?;
-        let mut v = cg_svc(&self.state)
-            .query(
-                id,
-                kind,
-                params.0.target.as_deref().unwrap_or_default(),
-                params.0.depth,
-                params.0.include_source.unwrap_or(false),
-            )
-            .await
-            .map_err(from_cg)?;
-        // 新鲜度提示：索引落后于 HEAD 时显式提醒（避免静默使用旧图）。
-        // 仅 object 响应注入（kind=search 返回数组，不能带键——新鲜度看 codegraph list）
-        if v.is_object()
-            && let Ok(proj) = cg_svc(&self.state).get(id).await
-            && proj.status == "ready"
-        {
-            v["_freshness"] = cg_svc(&self.state).freshness_for(&proj).await;
-        }
-        ok_json(v)
+        self.query_and_freshness(&params.0, kind).await
     }
 
     /// 注销代码图谱项目（删除注册与索引；不可逆——本地路径项目的源码不动）。
@@ -420,19 +394,84 @@ impl EngramMcpServer {
             let cfg = load_config(&self.state.pool).await;
             return ok_json(dispatch::render_manual("codegraph", &cfg.disabled_tools));
         }
+        let action = call.action.clone();
+        match action.as_str() {
+            "list" | "query" => self.codegraph_read_group(ctx, call).await,
+            "register" | "index" | "sync" | "delete" | "upload" | "gc" => {
+                self.codegraph_write_group(ctx, call).await
+            }
+            other => Err(dispatch::unknown_action("codegraph", other)),
+        }
+    }
+    /// full_graph（EN-61）：整张图导出 + 新鲜度注入。
+    async fn full_graph_reply(&self, project: &str) -> Result<CallToolResult, rmcp::ErrorData> {
+        let id = cg_resolve(&self.state, project).await?;
+        let mut v = cg_svc(&self.state).full_graph(id).await.map_err(from_cg)?;
+        if let Ok(proj) = cg_svc(&self.state).get(id).await
+            && proj.status == "ready"
+        {
+            v["_freshness"] = cg_svc(&self.state).freshness_for(&proj).await;
+        }
+        ok_json(v)
+    }
+
+    /// 查询 + 新鲜度注入（索引落后 HEAD 时显式提醒；仅 object 响应注入——search 返回数组不能带键）。
+    async fn query_and_freshness(
+        &self,
+        params: &CgQueryParams,
+        kind: engram_cg_bridge::QueryKind,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let id = cg_resolve(&self.state, &params.project).await?;
+        let mut v = cg_svc(&self.state)
+            .query(
+                id,
+                kind,
+                params.target.as_deref().unwrap_or_default(),
+                params.depth,
+                params.include_source.unwrap_or(false),
+            )
+            .await
+            .map_err(from_cg)?;
+        // 新鲜度提示：索引落后于 HEAD 时显式提醒（避免静默使用旧图）。
+        // 仅 object 响应注入（kind=search 返回数组，不能带键——新鲜度看 codegraph list）
+        if v.is_object()
+            && let Ok(proj) = cg_svc(&self.state).get(id).await
+            && proj.status == "ready"
+        {
+            v["_freshness"] = cg_svc(&self.state).freshness_for(&proj).await;
+        }
+        ok_json(v)
+    }
+    /// codegraph 读类动作分发（分组见 dispatch.rs 动作表）。
+    async fn codegraph_read_group(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        call: dispatch::DomainCall,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
         match call.action.as_str() {
             "list" => self.codegraph_list(ctx).await,
-            "register" => {
-                self.codegraph_register(
-                    ctx,
-                    Parameters(dispatch::from_args("codegraph", "register", call.args)?),
-                )
-                .await
-            }
             "query" => {
                 self.codegraph_query(
                     ctx,
                     Parameters(dispatch::from_args("codegraph", "query", call.args)?),
+                )
+                .await
+            }
+            other => Err(dispatch::unknown_action("codegraph", other)),
+        }
+    }
+
+    /// codegraph 写类动作分发（分组见 dispatch.rs 动作表）。
+    async fn codegraph_write_group(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        call: dispatch::DomainCall,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        match call.action.as_str() {
+            "register" => {
+                self.codegraph_register(
+                    ctx,
+                    Parameters(dispatch::from_args("codegraph", "register", call.args)?),
                 )
                 .await
             }
