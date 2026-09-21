@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 56 份迁移：0056 = 代码图谱落盘方式 dest_mode）
+    // 版本可查（当前 57 份迁移：0057 = 项目场景扩类 dev/ops/research/study/life/create）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(56), "0001-0056 迁移应已应用");
+    assert_eq!(version, Some(57), "0001-0057 迁移应已应用");
 
     // 0056（代码图谱入口收敛）：dest_mode 列形态——NOT NULL + 落库默认 default + 二值 CHECK。
     // 历史行回填 custom 是迁移的语义保证（生产库实测见《代码图谱入口收敛 · roadmap》）；
@@ -41,6 +41,29 @@ async fn migrations_apply_on_clean_pgvector() {
     .execute(&pool)
     .await;
     assert!(bad.is_err(), "越界 dest_mode 应被 CHECK 拒绝");
+
+    // 0057（项目场景扩类）：projects.type 值域 = 六场景；越界被拒（本测试锁干净库上的约束形态）
+    let def: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'projects_type_check'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("projects_type_check 应存在");
+    for t in ["dev", "ops", "research", "study", "life", "create"] {
+        assert!(def.contains(&format!("'{t}'")), "场景值域应含 {t}：{def}");
+    }
+    let ok = sqlx::query(
+        "INSERT INTO projects (id, name, type) VALUES (gen_random_uuid(), 'zz-ops', 'ops')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(ok.is_ok(), "ops 场景应被接受");
+    let bad_type = sqlx::query(
+        "INSERT INTO projects (id, name, type) VALUES (gen_random_uuid(), 'zz-bogus', 'bogus')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(bad_type.is_err(), "越界 type 应被 CHECK 拒绝");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")

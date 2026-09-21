@@ -6,7 +6,18 @@ import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner } from '@/componen
 import { inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-const TYPE_LABEL: Record<string, string> = { dev: '开发', research: '调研' }
+/**
+ * 场景色点（标签文字由 `/projects/types` 提供——场景值域的单一事实源在后端 `PROJECT_TYPES` 常量）。
+ * 未知场景回落灰点，不猜语义。
+ */
+const TYPE_DOT: Record<string, string> = {
+  dev: '#3b82f6', // 开发
+  ops: '#10b981', // 运维
+  research: '#8b5cf6', // 调研
+  study: '#f59e0b', // 学习
+  life: '#06b6d4', // 生活
+  create: '#ec4899', // 创作
+}
 const STATUS_META: Record<string, { label: string; cls: string }> = {
   active: { label: '进行中', cls: 'text-emerald-600' },
   paused: { label: '暂停', cls: 'text-amber-600' },
@@ -231,8 +242,13 @@ export default function Projects() {
                     <Link to={`/projects/${p.id}`} className="truncate font-medium hover:underline">
                       {p.name}
                     </Link>
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                      {TYPE_LABEL[p.type] ?? p.type}
+                    <span className="flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                      <i
+                        className="size-1.5 rounded-full"
+                        style={{ background: TYPE_DOT[p.type] ?? '#6b7280' }}
+                        aria-hidden="true"
+                      />
+                      {types.find((t) => t.type === p.type)?.label ?? p.type}
                     </span>
                     <StatusDot status={p.status} />
                   </div>

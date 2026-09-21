@@ -144,19 +144,35 @@ async fn project_type_template_and_filter() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    // 类型模板：dev 5 分类 + research 6 分类
+    // 场景模板：6 场景，各带预设分类（2026-09-21 扩类——原只有 dev/research，实际什么项目都塞 dev）
     let (st, v) = send(&app, "GET", "/projects/types", &admin, None).await;
     assert_eq!(st, StatusCode::OK);
     let types = v.as_array().unwrap();
-    assert_eq!(types.len(), 2);
-    let dev = types.iter().find(|t| t["type"] == "dev").unwrap();
-    assert_eq!(dev["label"], "开发");
-    assert_eq!(dev["default_categories"].as_array().unwrap().len(), 5);
-    let research = types.iter().find(|t| t["type"] == "research").unwrap();
-    assert_eq!(research["label"], "调研");
-    assert_eq!(research["default_categories"].as_array().unwrap().len(), 6);
+    assert_eq!(types.len(), 6, "六场景：dev/ops/research/study/life/create");
+    for (t, label, n) in [
+        ("dev", "开发", 5),
+        ("ops", "运维", 6),
+        ("research", "调研", 6),
+        ("study", "学习", 5),
+        ("life", "生活", 5),
+        ("create", "创作", 5),
+    ] {
+        let item = types
+            .iter()
+            .find(|x| x["type"] == t)
+            .unwrap_or_else(|| panic!("场景 {t} 应在模板里"));
+        assert_eq!(item["label"], label, "{t} 显示名");
+        assert_eq!(
+            item["default_categories"].as_array().unwrap().len(),
+            n,
+            "{t} 预设分类数"
+        );
+    }
+    // ops 预设内容（生产里「主机清单 / openlist-relay」由迁移 0057 改判到这一类）
+    let ops = types.iter().find(|t| t["type"] == "ops").unwrap();
+    assert_eq!(ops["default_categories"][0], "台账");
 
-    // 建 dev + research 各一
+    // 建 dev + ops 各一
     send(
         &app,
         "POST",
@@ -165,14 +181,37 @@ async fn project_type_template_and_filter() {
         Some(serde_json::json!({"name":"p-dev","type":"dev"})),
     )
     .await;
-    send(
+    let (st, v) = send(
         &app,
         "POST",
         "/projects",
         &admin,
-        Some(serde_json::json!({"name":"p-res","type":"research"})),
+        Some(serde_json::json!({"name":"p-ops","type":"ops"})),
     )
     .await;
+    assert_eq!(st, StatusCode::CREATED);
+    assert_eq!(v["type"], "ops");
+    assert_eq!(
+        v["categories"].as_array().unwrap().len(),
+        6,
+        "ops 项目应继承运维预设分类"
+    );
+
+    // 未知场景被拒，且错误文案列出支持值域（不能写死 dev/research）
+    let (st, v) = send(
+        &app,
+        "POST",
+        "/projects",
+        &admin,
+        Some(serde_json::json!({"name":"p-bad","type":"bogus"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    let msg = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("ops") && msg.contains("create"),
+        "错误文案应列出支持场景：{msg}"
+    );
 
     // 类型筛选
     let (_, v) = send(&app, "GET", "/projects?type=dev", &admin, None).await;
@@ -180,10 +219,10 @@ async fn project_type_template_and_filter() {
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["name"], "p-dev");
 
-    let (_, v) = send(&app, "GET", "/projects?type=research", &admin, None).await;
+    let (_, v) = send(&app, "GET", "/projects?type=ops", &admin, None).await;
     let arr = v.as_array().unwrap();
     assert_eq!(arr.len(), 1);
-    assert_eq!(arr[0]["name"], "p-res");
+    assert_eq!(arr[0]["name"], "p-ops");
 }
 
 #[tokio::test]

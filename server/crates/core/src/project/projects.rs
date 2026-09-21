@@ -42,7 +42,10 @@ impl ProjectService {
             ));
         }
         let categories = Self::default_categories(type_).ok_or_else(|| {
-            ProjectError::BadRequest(format!("未知项目类型: {type_}（支持 dev/research）"))
+            ProjectError::BadRequest(format!(
+                "未知项目类型（场景）: {type_}——支持 {}；先跑 projects types 看各场景的预设分类",
+                super::supported_types()
+            ))
         })?;
         let id = Uuid::now_v7();
         let inserted =

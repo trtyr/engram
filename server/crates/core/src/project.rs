@@ -43,11 +43,15 @@ impl From<StoreError> for ProjectError {
 /// 项目状态枚举（英文存库，Web 层映射中文）：active/paused/done/abandoned。
 pub const PROJECT_STATUSES: &[&str] = &["active", "paused", "done", "abandoned"];
 
-/// 类型显示名（Web 用）。
+/// 类型（场景）显示名（Web 用）。
 pub fn type_label(type_: &str) -> String {
     match type_ {
         "dev" => "开发".into(),
+        "ops" => "运维".into(),
         "research" => "调研".into(),
+        "study" => "学习".into(),
+        "life" => "生活".into(),
+        "create" => "创作".into(),
         other => other.into(),
     }
 }

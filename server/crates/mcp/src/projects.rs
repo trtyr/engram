@@ -9,8 +9,10 @@ pub struct ProjectTypesParams {}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ProjectListParams {
-    /// 可选：按类型过滤（dev=开发 / research=调研）
-    #[schemars(description = "可选：按类型过滤。dev=开发, research=调研。")]
+    /// 可选：按类型（场景）过滤：dev=开发 / ops=运维 / research=调研 / study=学习 / life=生活 / create=创作
+    #[schemars(
+        description = "可选：按类型（场景）过滤。dev=开发, ops=运维, research=调研, study=学习, life=生活, create=创作。"
+    )]
     #[serde(rename = "type")]
     pub type_: Option<String>,
 }
@@ -38,9 +40,9 @@ pub struct ProjectCreateParams {
     /// 项目名（唯一）
     #[schemars(description = "项目名（唯一）。起一个能认出「这是哪件事」的名字。")]
     pub name: String,
-    /// dev=开发 / research=调研
+    /// 场景：dev=开发 / ops=运维 / research=调研 / study=学习 / life=生活 / create=创作
     #[schemars(
-        description = "项目类型：\"dev\"（开发，预置分类 后端/前端/测试/规划）或 \"research\"（调研，预置 待查/线索/资料/结论/疑点/证伪）。类型只决定初始分类，建后可自由增删。"
+        description = "项目**场景**（决定初始文档分类，建后可自由增删）：dev=开发（后端/前端/测试/部署/规划）、ops=运维（台账/部署/网络/备份/故障/巡检）、research=调研（待查/线索/资料/结论/疑点/证伪）、study=学习（大纲/笔记/练习/资源/进度）、life=生活（计划/清单/记录/花销/参考）、create=创作（选题/草稿/素材/成稿/发布）。不确定就先跑 projects types 看模板。"
     )]
     #[serde(rename = "type")]
     pub type_: String,
