@@ -739,6 +739,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "engram-cg-bridge",
  "engram-core",
@@ -753,6 +754,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "mime_guess",
  "rand 0.9.5",
+ "rusqlite",
  "rust-embed",
  "serde",
  "serde_json",

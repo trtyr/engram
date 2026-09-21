@@ -48,3 +48,6 @@ tower.workspace = true
 tempfile = "3"
 # 测试夹具直连 PG 造数（src 层零 SQL；持久化收口 engram-storage::repo）
 sqlx.workspace = true
+# 测试夹具造「最小合法 codegraph 产物」（R3 版本校验要真读 project_metadata）＋ base64 编码上传
+rusqlite = { version = "0.32", features = ["bundled"] }
+base64 = "0.22"

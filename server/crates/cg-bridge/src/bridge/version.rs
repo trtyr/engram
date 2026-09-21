@@ -125,17 +125,31 @@ impl CgBridge {
     }
 
     /// CLI 可用性（前端状态条）：版本探测失败 = 不可用。
+    /// `hint`（R5，task-5）：不可用 / 版本不符都给可照抄的「装 + 锁版」指引；正常为 None。
     pub async fn cli_status(&self) -> CliStatus {
         match self.detect_version().await {
-            Ok(v) => CliStatus {
-                available: true,
-                version: Some(v),
-                pin: CG_VERSION_PIN.into(),
-            },
+            Ok(v) => {
+                // 兼容 "1.5.0" 与 "codegraph 1.5.0" 形态（与 ensure_version 同口径）；
+                // 取 owned String——否则 `ver` 借用 `v` 与后面把 `v` move 进 version 冲突（E0505）
+                let ver = v.split_whitespace().last().unwrap_or(&v).to_string();
+                let mismatch = ver != CG_VERSION_PIN;
+                CliStatus {
+                    available: true,
+                    version: Some(v),
+                    pin: CG_VERSION_PIN.into(),
+                    hint: mismatch.then(|| {
+                        format!(
+                            "本机 CLI 版本 {ver} ≠ pin {CG_VERSION_PIN}——{}",
+                            cli_fix_hint(CG_VERSION_PIN)
+                        )
+                    }),
+                }
+            }
             Err(e) => CliStatus {
                 available: false,
                 version: None,
-                pin: format!("{}（不可用: {e}）", CG_VERSION_PIN),
+                pin: CG_VERSION_PIN.into(),
+                hint: Some(format!("{e}——{}", cli_fix_hint(CG_VERSION_PIN))),
             },
         }
     }

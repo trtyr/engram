@@ -166,12 +166,12 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
         "codegraph" => action_docs![
             "list", false, "列出已注册代码库（注册状态/索引规模/当下可用性 usable）" => crate::CgNoParams;
             "gc", false, "失效条目对账（路径已不存在/索引产物已丢失的条目标为 error；可重新 index 恢复）" => crate::CgNoParams;
-            "register", false, "注册代码库（本地绝对路径按服务端文件系统校验，或 git URL）" => crate::CgRegisterParams;
+            "register", false, "注册代码库（**只接受 git 仓库地址**，如 https://github.com/you/repo）——注册即 git clone 到默认 <数据根>/codegraph/<项目名>/（可用 dest_parent 指定父目录，须在白名单根内）并**自动入队建索引**；本地路径已不支持（本机源码改用 upload）" => crate::CgRegisterParams;
             "query", false, "代码图谱查询（search/explore大纲/node/callers/callees/impact/full_graph全图）" => crate::CgQueryParams;
             "index", false, "建索引/重建索引（异步 job）" => crate::CgNameParams;
             "sync", false, "增量同步索引（小改动后刷新）" => crate::CgNameParams;
             "upload", true, "产物上传（公网模型）——客户端本机 codegraph index 后上传 db(base64)+HEAD；服务端只存+声明式新鲜度，无代码无 git 凭证" => crate::CgUploadParams;
-            "delete", true, "注销代码图谱项目（删注册与索引；源码不动）" => crate::CgNameParams
+            "delete", true, "注销代码图谱项目（删注册与产物；默认落盘的服务端自建目录连目录清，自定义落盘目录保留、需手动清理）" => crate::CgNameParams
         ],
         "jobs" => action_docs![
             "list", false, "列出异步任务（可按 kind/status 过滤——codegraph index/sync 与 gc 自愈的 job 都在这）" => crate::jobs::JobsListParams;

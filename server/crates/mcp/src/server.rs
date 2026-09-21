@@ -187,6 +187,14 @@ impl ServerHandler for EngramMcpServer {
     }
 }
 
+/// MCP 请求体上限（字节）。
+///
+/// 产物上传通道（codegraph db 经 JSON-RPC base64 直传）需要：db 上限 256MB × base64 膨胀 1.33
+/// ≈ 341MB，留余量到 384MB。rmcp 默认仅 **4MB** —— 2026-09-21 活体实测：真实 24.7MB 产物
+/// → 32MB body 被 **413 Payload Too Large / 连接重置** 掐断（push 通道实际不可用）。
+/// api 路由上的 `DefaultBodyLimit` 同用本常量（单一事实源）。
+pub const MAX_REQUEST_BODY_BYTES: usize = 384 * 1024 * 1024;
+
 /// 构造挂载到 axum 的 MCP 服务（Streamable HTTP，会话保存在进程内存）。
 ///
 /// Host 白名单：SDK 默认只放行 loopback（防 DNS rebinding）；远程部署用
@@ -197,6 +205,8 @@ pub fn service(state: AppState) -> StreamableHttpService<EngramMcpServer, LocalS
     // 每个请求独立认证、独立应答，无会话句柄依赖
     config.legacy_session_mode = false;
     config.json_response = true;
+    // 大 body 放行（产物上传）：rmcp 默认 4MB 会把 codegraph 产物上传掐成 413/连接重置
+    config.max_request_body_bytes = MAX_REQUEST_BODY_BYTES;
     if let Ok(hosts) = std::env::var("AGENT_MEMORY_MCP_ALLOWED_HOSTS") {
         let list: Vec<String> = hosts
             .split(',')

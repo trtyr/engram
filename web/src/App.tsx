@@ -38,6 +38,7 @@ const Memory = lazy(() => import('@/features/Memory'))
 const Circle = lazy(() => import('@/features/Circle'))
 const Wiki = lazy(() => import('@/features/Wiki'))
 const CodeGraph = lazy(() => import('@/features/CodeGraph'))
+const CodeGraphImport = lazy(() => import('@/features/CodeGraphImport'))
 const Projects = lazy(() => import('@/features/Projects'))
 const ProjectDetail = lazy(() => import('@/features/ProjectDetail'))
 const Skills = lazy(() => import('@/features/Skills'))
@@ -326,6 +327,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/knowledge" element={<Navigate to="/wiki" replace />} />
               <Route path="/wiki" element={<Wiki />} />
               <Route path="/codegraph" element={<CodeGraph />} />
+              <Route path="/codegraph/import" element={<CodeGraphImport />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/skills" element={<Skills />} />

@@ -119,9 +119,23 @@ pub(crate) fn from_cg(e: engram_cg_bridge::CgError) -> rmcp::ErrorData {
     use engram_cg_bridge::CgError;
     match e {
         CgError::NotFound(m) => rmcp::ErrorData::resource_not_found(m, None),
-        CgError::BadRequest(m) | CgError::VersionMismatch { need: m, got: _ } => {
-            rmcp::ErrorData::invalid_params(m, None)
-        }
+        CgError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
+        // R5 提示可见（2026-09-21 task-5）：版本不符 / CLI 缺失都补可照抄的「装 + 锁版」指引，
+        // 否则云端看不到 CLI 的部署者只能看到一句「版本不匹配」而无从下手
+        CgError::VersionMismatch { need, got } => rmcp::ErrorData::invalid_params(
+            format!(
+                "版本不匹配：需要 {need}，实际 {got}——{}",
+                engram_cg_bridge::cli_fix_hint(&need)
+            ),
+            None,
+        ),
+        CgError::CliUnavailable(m) => rmcp::ErrorData::internal_error(
+            format!(
+                "{m}——{}",
+                engram_cg_bridge::cli_fix_hint(engram_cg_bridge::CG_VERSION_PIN)
+            ),
+            None,
+        ),
         other => rmcp::ErrorData::internal_error(other.to_string(), None),
     }
 }

@@ -27,6 +27,18 @@
                                                         # ssh -L 17654:127.0.0.1:17654 user@cloud
                                                         # 后目标填 http://127.0.0.1:17654
 
+    python3 scripts/engramctl.py codegraph push|pull <目标地址> --project <项目名>
+                                        [--path <本地仓库>] [--token <codegraph_key>]
+                                        [--local <本机实例>] [--dry-run] [--allow-insecure]
+                                                          # codegraph 产物同步（手动触发，非定期）：
+                                                          # push=本地产物→目标；pull=目标产物→本地。
+                                                          # 目标侧凭证用 codegraph scope 的 API key
+                                                          # （--token 或 ENGRAM_CODEGRAPH_TOKEN；
+                                                          # admin 密码不过公网）。push 走目标 MCP
+                                                          # codegraph.upload；pull 走目标产物下载端点
+                                                          # 后按同一份声明投给本地实例（等价一次 upload）。
+                                                          # 安全口径与 sync 同（非 loopback 强制 https）
+
 配置源：~/.engram/.env（KEY=VALUE）——需含：
   AGENT_MEMORY_ADMIN_PASSWORD / AGENT_MEMORY_MASTER_KEY
   ENGRAM_DATABASE_URL（宿主 PG 连接串，如 postgres://trtyr@127.0.0.1:5432/engram）
@@ -452,6 +464,269 @@ def cmd_sync(args: list[str]) -> int:
     return 0
 
 
+def _mcp_call(
+    base: str, token: str, tool: str, arguments: dict, timeout: int = 1800
+) -> tuple[int, dict]:
+    """MCP JSON-RPC tools/call（纯标准库）：返回 (status, body)。
+
+    传输是 Streamable HTTP：响应可能是 JSON，也可能是 text/event-stream（每行 `data: {...}`）。
+    两种都要吃下——否则会「调用成功却解析不出结果」。Accept 头也必须声明两种，否则 406。
+    """
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": tool, "arguments": arguments},
+    }
+    req = urllib.request.Request(f"{base}/mcp", method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json, text/event-stream")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    data = json.dumps(payload).encode()
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=timeout) as resp:
+            raw, ctype, status = resp.read().decode(), resp.headers.get("Content-Type", ""), resp.status
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode() or "{}")
+        except Exception:
+            return e.code, {}
+    except Exception as e:
+        print(f"❌ MCP 调用失败 {base}/mcp: {e}")
+        return 0, {}
+    if "text/event-stream" in ctype:
+        for line in raw.splitlines():
+            if line.startswith("data:"):
+                try:
+                    return status, json.loads(line[5:].strip())
+                except Exception:
+                    continue
+        return status, {}
+    try:
+        return status, json.loads(raw or "{}")
+    except Exception:
+        return status, {}
+
+
+def _mcp_json_result(body: dict) -> dict:
+    """取 tools/call 里的业务 JSON 载荷（structuredContent 或 content[].text）。"""
+    result = body.get("result") or {}
+    sc = result.get("structuredContent")
+    if isinstance(sc, dict) and sc:
+        return sc
+    for item in result.get("content") or []:
+        if isinstance(item, dict) and item.get("type") == "text":
+            try:
+                return json.loads(item.get("text") or "{}")
+            except Exception:
+                continue
+    return {}
+
+
+def _mcp_ok(body: dict) -> tuple[bool, str]:
+    """tools/call 结果判定：JSON-RPC error / isError 都算失败。"""
+    if body.get("error"):
+        return False, json.dumps(body["error"], ensure_ascii=False)
+    result = body.get("result") or {}
+    if result.get("isError"):
+        content = result.get("content") or []
+        text = content[0].get("text") if content and isinstance(content[0], dict) else ""
+        return False, text or "工具返回 isError"
+    return True, ""
+
+
+def _http_bytes(url: str, token: str, timeout: int = 1800) -> tuple[int, bytes, dict]:
+    """原始字节 GET（产物下载用）：返回 (status, bytes, headers)。"""
+    req = urllib.request.Request(url, method="GET")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read(), dict(resp.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, b"", dict(e.headers or {})
+    except Exception as e:
+        print(f"❌ 请求失败 GET {url}: {e}")
+        return 0, b"", {}
+
+
+def _codegraph_local_db(repo: str) -> tuple[str, str]:
+    """定位本地仓库的产物与 HEAD：返回 (db 路径, head)。
+
+    仓库根由 `git rev-parse --show-toplevel` 反查——CLI 的产物落在**仓库根**的
+    `.codegraph/codegraph.db`（子目录注册也命中同一个产物；与 cg-bridge 的 index_db_path 同口径）。
+    """
+    try:
+        root = subprocess.run(
+            ["git", "-C", repo, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", repo, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except Exception as e:
+        print(f"❌ {repo} 不是 git 仓库或 git 不可用: {e}")
+        return "", ""
+    return os.path.join(root, ".codegraph", "codegraph.db"), head
+
+
+def cmd_codegraph(args: list[str]) -> int:
+    """codegraph 产物同步（手动触发，非定期）：push=本地产物→目标；pull=目标产物→本地。
+
+    凭证：目标侧 codegraph scope 的 API key（--token / ENGRAM_CODEGRAPH_TOKEN；admin 密码不过公网）；
+         本机侧本地 admin（~/.engram/.env 自动登录，仅 loopback）。
+    通道：push 走目标 MCP `codegraph.upload`（base64，与 pi 侧扩展同通道）；pull 走目标
+         `GET /codegraph/projects/{id}/artifact`（原始字节 + 元数据响应头），拿到后按**同一份声明**
+         投给本地实例（等价于一次 upload）——两个方向都不新增服务端组件。
+    安全口径：与 sync 同（非 loopback 强制 https；--allow-insecure 逃生；ssh 隧道写法同前）。
+    """
+    usage = (
+        "用法：engramctl codegraph push|pull <目标地址> --project <项目名> "
+        "[--path <本地仓库>] [--token <codegraph_key>] [--local <本机实例>] "
+        "[--dry-run] [--allow-insecure]"
+    )
+    if len(args) < 2 or args[0] not in ("push", "pull"):
+        print(usage)
+        return 2
+    direction, target = args[0], args[1]
+
+    def opt(flag: str, default: str | None = None) -> str | None:
+        if flag in args:
+            i = args.index(flag)
+            if i + 1 >= len(args):
+                print(f"❌ {flag} 后面要跟值")
+                return None
+            return args[i + 1]
+        return default
+
+    project = opt("--project")
+    if not project:
+        print("❌ 缺 --project <项目名>（两侧同名；upload 通道的 name 即项目名）")
+        return 2
+    path = opt("--path", os.getcwd()) or os.getcwd()
+    local = opt("--local", f"http://127.0.0.1:{PORT}") or f"http://127.0.0.1:{PORT}"
+    dry_run = "--dry-run" in args
+    token = opt("--token") or os.environ.get("ENGRAM_CODEGRAPH_TOKEN")
+    if not token:
+        print("❌ 缺目标侧凭证——用 codegraph scope 的 API key（目标机 /account 页创建）")
+        print("   传入：--token <key> 或环境变量 ENGRAM_CODEGRAPH_TOKEN（不要拿 admin 密码过公网）")
+        return 2
+
+    base = _sync_check_target(target, "--allow-insecure" in args)
+    if base is None:
+        return 1
+
+    if direction == "push":
+        db, head = _codegraph_local_db(path)
+        if not db:
+            return 1
+        if not os.path.isfile(db):
+            print(f"❌ 本地产物不存在：{db}")
+            print("   先在本机对 {path} 跑 `codegraph index`（首建用 init）生成产物再推")
+            return 1
+        size = os.path.getsize(db)
+        print(f"[push] 项目 {project} → {base}")
+        print(f"       产物 {db}（{size / 1024 / 1024:.1f} MB）head {head[:12]}")
+        if dry_run:
+            print("       --dry-run：只探明来源，不发起推送 ✅")
+            return 0
+        # 大 body 前的轻量鉴权预检：服务端在读写完 body 之前就拒（401/403）时，客户端只会看到
+        # 连接重置（写 body 撞上对端关闭）——先探一次，失败路径文案才可行动
+        st_probe, _ = _http_json(f"{base}/codegraph/projects", "GET", token, timeout=30)
+        if st_probe in (401, 403):
+            print(f"❌ 目标侧凭证被拒（HTTP {st_probe}）——codegraph scope 的 API key 无效或已吊销")
+            print("   到目标机 /account 页重建一把带 codegraph scope 的 key，或确认 --token 是不是那把")
+            return 1
+        if st_probe != 200:
+            print(f"❌ 目标 codegraph 面不可达（HTTP {st_probe}）——先 curl {base}/health 确认服务正常")
+            return 1
+        import base64 as _b64
+
+        with open(db, "rb") as f:
+            db_b64 = _b64.b64encode(f.read()).decode()
+        st, body = _mcp_call(
+            base,
+            token,
+            "codegraph",
+            {"action": "upload", "name": project, "head": head, "db_b64": db_b64},
+        )
+        ok, why = _mcp_ok(body)
+        if st not in (200, 202) or not ok:
+            print(f"❌ 推送失败（HTTP {st}）：{why or json.dumps(body, ensure_ascii=False)[:400]}")
+            return 1
+        res = _mcp_json_result(body)
+        print(
+            f"       ✅ 已推送：status={res.get('status', '?')} "
+            f"source_kind={res.get('source_kind', '?')} "
+            f"built_with_version={res.get('built_with_version', '?')}"
+        )
+        return 0
+
+    # pull：远端产物 → 本地实例（按同一份声明投本地，等价一次 upload）
+    st, projects = _http_json(f"{base}/codegraph/projects", "GET", token, timeout=60)
+    if st in (401, 403):
+        print(f"❌ 目标侧凭证被拒（HTTP {st}）——codegraph scope 的 API key 无效或已吊销")
+        print("   到目标机 /account 页重建一把带 codegraph scope 的 key，或确认 --token 是不是那把")
+        return 1
+    if st != 200:
+        print(f"❌ 读目标项目列表失败（HTTP {st}）")
+        return 1
+    row = next((p for p in projects if p.get("name") == project), None)
+    if row is None:
+        names = "、".join(p.get("name", "?") for p in projects) or "（空）"
+        print(f"❌ 目标没有项目 {project}——已注册：{names}")
+        return 1
+    st, blob, headers = _http_bytes(f"{base}/codegraph/projects/{row['id']}/artifact", token)
+    if st != 200:
+        print(f"❌ 下载产物失败（HTTP {st}）：{blob[:200].decode(errors='replace')}")
+        return 1
+    rhead = headers.get("x-codegraph-head", "")
+    print(f"[pull] {base} 项目 {project} → 本地 {local}")
+    print(
+        f"       产物 {len(blob) / 1024 / 1024:.1f} MB head {rhead[:12] or '（未声明）'} "
+        f"source_kind={headers.get('x-codegraph-source-kind', '?')}"
+    )
+    if not rhead:
+        print("❌ 远端该条目没有 head 声明——upload 通道要求 head，无法原样投给本地")
+        print("   （云端自建条目请先在目标机 index/sync，让它带上 head 再 pull）")
+        return 1
+    if dry_run:
+        print("       --dry-run：只探明来源，不发起落库 ✅")
+        return 0
+    local_token = _local_admin_token(local)
+    if local_token is None:
+        return 1
+    import base64 as _b64
+
+    st, body = _mcp_call(
+        local,
+        local_token,
+        "codegraph",
+        {
+            "action": "upload",
+            "name": project,
+            "head": rhead,
+            "db_b64": _b64.b64encode(blob).decode(),
+        },
+    )
+    ok, why = _mcp_ok(body)
+    if st not in (200, 202) or not ok:
+        print(f"❌ 落库失败（HTTP {st}）：{why or json.dumps(body, ensure_ascii=False)[:400]}")
+        return 1
+    res = _mcp_json_result(body)
+    print(
+        f"       ✅ 已落库到本地：status={res.get('status', '?')} "
+        f"source_kind={res.get('source_kind', '?')}"
+    )
+    return 0
+
+
 def main() -> int:
     args = sys.argv[1:]
     cmd = args[0] if args else "status"
@@ -468,6 +743,8 @@ def main() -> int:
         return cmd_install()
     if cmd == "sync":
         return cmd_sync(args[1:])
+    if cmd == "codegraph":
+        return cmd_codegraph(args[1:])
     if cmd == "logs":
         n = int(args[1]) if len(args) > 1 else 50
         return cmd_logs(n)

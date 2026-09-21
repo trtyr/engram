@@ -14,6 +14,48 @@ async fn setup() -> (sqlx::PgPool, CgBridge, support::TestPg) {
     (pool, bridge, container)
 }
 
+/// 反向亦然（R1「后到者覆盖 + 完整留痕」，迁移 0055）：`client_upload` 记录被**云自建**刷新时，
+/// 来源标注改判 `cloud_index`、投递者记为 `cloud_index`，且被覆盖那份压进 `stats.previous`。
+/// 不走 CLI（直接调元数据回写原语）——CLI 路径的端到端由 cg_upload/查询集成测试覆盖。
+#[tokio::test]
+async fn cloud_index_overwrites_client_upload_with_trace() {
+    let (pool, bridge, _pg) = setup().await;
+    let id = uuid::Uuid::now_v7();
+    let head = "a1b2c3d4e5";
+    sqlx::query(
+        "INSERT INTO cg_projects (id, name, path, source_uri, status, source_kind, head, \
+         produced_at, built_with_version, last_producer) \
+         VALUES ($1, 'up-then-cloud', '/tmp/up-then-cloud', $2, 'ready', 'client_upload', $3, \
+         now(), '1.5.0', 'client:test-key')",
+    )
+    .bind(id)
+    .bind(format!("upload://{head}"))
+    .bind(head)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    bridge.mark_cloud_artifact(id).await.unwrap();
+
+    let row = bridge.get(id).await.unwrap();
+    assert_eq!(row.source_kind, "cloud_index", "云自建刷新后来源标注应改判");
+    assert_eq!(
+        row.last_producer.as_deref(),
+        Some("cloud_index"),
+        "投递者应为 cloud_index"
+    );
+    let prev = row
+        .stats
+        .as_ref()
+        .and_then(|s| s.get("previous"))
+        .expect("被覆盖那份应留痕在 stats.previous");
+    assert_eq!(prev["head"], head, "留痕应含上一份 head：{prev}");
+    assert_eq!(
+        prev["source_kind"], "client_upload",
+        "留痕应含上一份来源：{prev}"
+    );
+}
+
 /// 版本探测 + 不匹配路径（注入假 pin 验证分类）。
 #[tokio::test]
 async fn version_guard_rejects_mismatch() {
@@ -67,12 +109,12 @@ async fn version_guard_rejects_mismatch() {
     assert!(matches!(e, CgError::VersionMismatch { .. }), "{e:?}");
 }
 
-/// 注册校验：不存在路径 / 重名。
+/// 注册校验（入口收敛 2026-09-21）：只收 git 仓库地址——普通路径一律拒。
 #[tokio::test]
 async fn register_validation() {
     let (_pool, bridge, _pg) = setup().await;
     let e = bridge
-        .register("t1", "/definitely/not/exists")
+        .register("t1", "/definitely/not/exists", None)
         .await
         .unwrap_err();
     assert!(matches!(e, CgError::BadRequest(_)), "{e:?}");
@@ -95,7 +137,7 @@ async fn index_and_query_real_repo() {
         .to_path_buf(); // 仓库根（crates/cg-bridge → crates → server → 根）
     let repo = repo.canonicalize().unwrap();
     let proj = bridge
-        .register("self", repo.to_str().unwrap())
+        .register("self", &format!("file://{}", repo.to_str().unwrap()), None)
         .await
         .unwrap();
     assert_eq!(proj.status, "registered");
@@ -176,13 +218,21 @@ fn eprintln_no_cli() {
 async fn lost_artifact_detected_by_list_query_and_gc() {
     let (pool, bridge, _pg) = setup().await;
 
-    // 造一个「已索引好」的项目：目录在、产物在（判存在性用一个空文件就够）
+    // 造一个「已索引好」的项目：目录在、产物在（判存在性用一个空文件就够）。
+    // 直接落库造状态（不经 register）——register 已收敛为 URI-only + clone，本用例测的是产物丢失层。
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".git")).unwrap(); // 界标：仓库根（产物查找不越界上溯）
-    let proj = bridge
-        .register("victim", dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    let proj_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO cg_projects (id, name, path, source_uri, status, source_kind) \
+         VALUES ($1, 'victim', $2, 'file:///fixture/victim', 'registered', 'cloud_index')",
+    )
+    .bind(proj_id)
+    .bind(dir.path().to_str().unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let proj = bridge.get(proj_id).await.unwrap();
     std::fs::create_dir_all(dir.path().join(".codegraph")).unwrap();
     std::fs::write(dir.path().join(".codegraph").join("codegraph.db"), b"").unwrap();
     sqlx::query("UPDATE cg_projects SET status = 'ready' WHERE id = $1")
@@ -242,10 +292,17 @@ async fn lost_artifact_detected_by_list_query_and_gc() {
     // ⑤ 另一类幽灵：路径整个不存在（容器形态注册、宿主上不可见的条目）
     let ghost_dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(ghost_dir.path().join(".git")).unwrap();
-    let ghost = bridge
-        .register("ghost", ghost_dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    let ghost_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO cg_projects (id, name, path, source_uri, status, source_kind) \
+         VALUES ($1, 'ghost', $2, 'file:///fixture/ghost', 'registered', 'cloud_index')",
+    )
+    .bind(ghost_id)
+    .bind(ghost_dir.path().to_str().unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let ghost = bridge.get(ghost_id).await.unwrap();
     sqlx::query("UPDATE cg_projects SET status = 'ready' WHERE id = $1")
         .bind(ghost.id)
         .execute(&pool)
@@ -275,4 +332,85 @@ async fn lost_artifact_detected_by_list_query_and_gc() {
             .contains("项目路径不存在"),
         "幽灵病因要写「路径不存在」而非「产物丢失」"
     );
+}
+
+/// t4：graph 响应带初布局坐标——有 `layout.json` 就带 `x`/`y`，没有就不带字段（前端据此自收敛）。
+/// 三态都验：无布局 / 有布局 / 版本不认识的布局（视作没有）。
+#[tokio::test]
+async fn graph_nodes_carry_layout_positions() {
+    let (pool, bridge, _pg) = setup().await;
+    let root = tempfile::tempdir().unwrap();
+    let cgdir = root.path().join(".codegraph");
+    std::fs::create_dir_all(&cgdir).unwrap();
+    let db = cgdir.join("codegraph.db");
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE files(path TEXT PRIMARY KEY); \
+         CREATE TABLE nodes(id TEXT PRIMARY KEY, file_path TEXT); \
+         CREATE TABLE edges(source TEXT, target TEXT, kind TEXT); \
+         INSERT INTO files(path) VALUES ('a.rs'), ('b.rs'); \
+         INSERT INTO nodes(id, file_path) VALUES ('n1','a.rs'), ('n2','b.rs'); \
+         INSERT INTO edges(source, target, kind) VALUES ('n1','n2','calls');",
+    )
+    .unwrap();
+    drop(conn);
+
+    let id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO cg_projects (id, name, path, source_uri, status, source_kind, dest_mode) \
+         VALUES ($1, 'layout-proj', $2, 'git://example.com/layout-proj', 'ready', 'cloud_index', 'custom')",
+    )
+    .bind(id)
+    .bind(root.path().to_string_lossy().to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // ① 没有 layout.json → 节点一律不带坐标
+    let g = bridge.full_graph(id).await.unwrap();
+    assert_eq!(g["mode"], "files");
+    for n in g["nodes"].as_array().unwrap() {
+        assert!(
+            n.get("x").is_none() && n.get("y").is_none(),
+            "无布局不该冒充坐标: {n}"
+        );
+    }
+
+    // ② 落一份布局 → 坐标随响应带出（键就是文件路径）
+    let mut positions = std::collections::HashMap::new();
+    positions.insert("a.rs".to_string(), [1.5, -2.0]);
+    positions.insert("b.rs".to_string(), [3.5, 4.0]);
+    let lf = engram_cg_bridge::layout::LayoutFile {
+        version: engram_cg_bridge::layout::LAYOUT_VERSION,
+        algorithm: engram_cg_bridge::layout::LAYOUT_ALGORITHM.to_string(),
+        iterations: 1,
+        nodes: 2,
+        edges: 1,
+        generated_at: chrono::Utc::now(),
+        positions,
+    };
+    std::fs::write(cgdir.join("layout.json"), serde_json::to_vec(&lf).unwrap()).unwrap();
+
+    let g2 = bridge.full_graph(id).await.unwrap();
+    let nodes = g2["nodes"].as_array().unwrap();
+    let a = nodes
+        .iter()
+        .find(|n| n["id"] == "a.rs")
+        .expect("a.rs 应在节点里");
+    assert_eq!(a["x"], 1.5, "有布局时带 x");
+    assert_eq!(a["y"], -2.0, "有布局时带 y");
+    let b = nodes
+        .iter()
+        .find(|n| n["id"] == "b.rs")
+        .expect("b.rs 应在节点里");
+    assert_eq!(b["x"], 3.5);
+
+    // ③ 版本不认识 → 当没有布局：不报错、不带坐标
+    let mut bad = lf.clone();
+    bad.version = 999;
+    std::fs::write(cgdir.join("layout.json"), serde_json::to_vec(&bad).unwrap()).unwrap();
+    let g3 = bridge.full_graph(id).await.unwrap();
+    for n in g3["nodes"].as_array().unwrap() {
+        assert!(n.get("x").is_none(), "版本不认的布局应被忽略: {n}");
+    }
 }

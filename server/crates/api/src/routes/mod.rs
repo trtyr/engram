@@ -71,11 +71,12 @@ use utoipa::OpenApi;
         wiki_api::archive_query, wiki_api::list_sources, wiki_api::delete_source,
         wiki_api::promote, wiki_api::promotions, wiki_api::rebuild_tsv,
         wiki_api::insights, wiki_api::dismiss_insight, wiki_api::reset_insights,
-        codegraph_api::register_project, codegraph_api::list_projects,
+        codegraph_api::register_project, codegraph_api::upload_artifact,
+        codegraph_api::list_projects,
         codegraph_api::get_project, codegraph_api::delete_project,
         codegraph_api::index_project, codegraph_api::sync_project,
         codegraph_api::query, codegraph_api::status, codegraph_api::graph,
-        codegraph_api::gc,
+        codegraph_api::gc, codegraph_api::project_artifact,
         migrate_api::export_bundle, migrate_api::import_bundle, migrate_api::pull,
     migrate_api::migrate_sync,
         todos_api::list_todos, todos_api::create_todo, todos_api::get_todo,
@@ -117,8 +118,13 @@ pub fn router(state: AppState) -> Router {
         .merge(public)
         .merge(authed.layer(from_fn_with_state(state.clone(), crate::auth::bearer_auth)))
         // 产物上传（P001-4）：codegraph db 经 MCP JSON-RPC base64 直传——
-        // 默认 2MB 不够（db 上限 256MB × base64 膨胀 1.33 ≈ 349MB body）
-        .layer(axum::extract::DefaultBodyLimit::max(384 * 1024 * 1024))
+        // 默认 2MB 不够（db 上限 256MB × base64 膨胀 1.33 ≈ 349MB body）。
+        // 注意：MCP 大 body **真正生效的那道在 rmcp 里**（StreamableHttpService 的
+        // max_request_body_bytes，默认 4MB）——此处与 engram_mcp::MAX_REQUEST_BODY_BYTES
+        // 同口径（单一事实源）；2026-09-21 活体实测抓出两者不同步会让 push 全挂。
+        .layer(axum::extract::DefaultBodyLimit::max(
+            engram_mcp::MAX_REQUEST_BODY_BYTES,
+        ))
         // 客户端 IP 注入（活跃会话归因）：XFF 首段优先，直连取对端地址（main 以 connect_info 启动）
         .layer(axum::middleware::from_fn(
             crate::client_ip::inject_client_ip,
@@ -334,6 +340,14 @@ fn codegraph_routes() -> Router<AppState> {
             "/codegraph/projects",
             post(codegraph_api::register_project).get(codegraph_api::list_projects),
         )
+        // 产物上传（2026-09-21 入口收敛）：multipart name+file(+head)——
+        // 上限用产物口径（257MB），不用全局那道 MCP base64 的 349MB（对 multipart 过宽）。
+        .route(
+            "/codegraph/artifacts",
+            post(codegraph_api::upload_artifact).layer(axum::extract::DefaultBodyLimit::max(
+                codegraph_api::MAX_ARTIFACT_BODY_BYTES,
+            )),
+        )
         .route("/codegraph/status", get(codegraph_api::status))
         .route("/codegraph/gc", post(codegraph_api::gc))
         .route(
@@ -350,6 +364,10 @@ fn codegraph_routes() -> Router<AppState> {
             post(codegraph_api::sync_project),
         )
         .route("/codegraph/projects/{id}/query", post(codegraph_api::query))
+        .route(
+            "/codegraph/projects/{id}/artifact",
+            get(codegraph_api::project_artifact),
+        )
 }
 
 /// `/projects` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。

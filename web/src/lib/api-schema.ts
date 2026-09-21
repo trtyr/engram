@@ -157,6 +157,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/codegraph/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 产物上传入口（2026-09-21 入口收敛）：Web/脚本用 multipart 传本机
+         *     `.codegraph/codegraph.db` 本体——与 MCP `codegraph_upload` 走**同一道**入库校验
+         *     （SQLite 魔数 / CLI 版本硬拒 / extraction 版本仅告警 / 256MB 上限 / 同名覆盖留痕）。
+         * @description 字段：`name`（项目名，必填）、`file`（db 二进制，必填）、`head`（commit hash，可留空 = 未声明）。
+         */
+        post: operations["upload_artifact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/codegraph/gc": {
         parameters: {
             query?: never;
@@ -188,7 +210,10 @@ export interface paths {
         };
         get: operations["list_projects"];
         put?: never;
-        /** 注册项目（本地路径或 git URL；同源只许注册一次）。 */
+        /**
+         * 注册项目（入口收敛 2026-09-21）：**只接受 git 仓库地址**；注册即 `git clone --depth 1`
+         *     到默认/自定义目录，并**自动入队建索引**（一步到 ready）。
+         */
         post: operations["register_project"];
         delete?: never;
         options?: never;
@@ -206,8 +231,33 @@ export interface paths {
         get: operations["get_project"];
         put?: never;
         post?: never;
-        /** 删除项目（git clone 的工作目录一并清理；本地路径项目不动源码）。 */
+        /**
+         * 删除项目（入口收敛 2026-09-21）：默认落盘（服务端自建目录）连目录清；
+         *     自定义落盘只删注册与产物、**目录保留**——响应 `note` 说明。
+         */
         delete: operations["delete_codegraph_project"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/codegraph/projects/{id}/artifact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 导出当前产物字节（R2 推送/拉取通道的「拉」侧；`engramctl codegraph pull` 消费）。
+         * @description 走 HTTP 直接传字节本体（不做 base64——避免 33% 膨胀；MCP 侧才需要 base64）。附带元数据响应头
+         *     （name / head / built-with-version / source-kind / artifact-path），使拉取端能把同一份「声明」
+         *     原样投给本地实例——等价于一次 upload，无需再问远端要状态。
+         */
+        get: operations["project_artifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2534,18 +2584,36 @@ export interface components {
         };
         /** @description 项目 DTO。 */
         CgProjectDto: {
+            /** @description 产出该产物的 CLI 版本（上传侧自 db 内 project_metadata 读出校验） */
+            built_with_version?: string | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * @description 落盘方式（入口收敛 2026-09-21，迁移 0056）：`default` = 服务端自建目录
+             *     （`<数据根>/codegraph/<项目名>`，删条目**连目录清**）| `custom` = 用户指定父目录
+             *     （删条目**只删注册与产物、目录保留**）。历史行一律 `custom`（保护既有目录）。
+             */
+            dest_mode: string;
             error?: string | null;
             /** @description 上传型：客户端声明的 commit hash（声明式新鲜度——服务端不读代码，只存声明） */
             head?: string | null;
             /** Format: uuid */
             id: string;
+            /** @description 本次投递者：`cloud_index` 或 `client:<key 名>` */
+            last_producer?: string | null;
             /** Format: date-time */
             last_synced_at?: string | null;
             name: string;
             path: string;
-            /** @description 条目来源：repo（服务端路径/git clone，本机索引）| upload（客户端推产物，公网模型） */
+            /**
+             * Format: date-time
+             * @description 产物产出时间（云自建 = 索引完成时刻；上传 = 入库时刻）
+             */
+            produced_at?: string | null;
+            /**
+             * @description 条目来源标注（**不是项目身份**，0055 值域语义化）：cloud_index（服务端路径/git clone，云端自建索引）
+             *     | client_upload（客户端本机 index 后推产物）。两入口都可刷新同一记录的当前产物。
+             */
             source_kind: string;
             source_uri: string;
             stats?: Record<string, never> | null;
@@ -2606,6 +2674,8 @@ export interface components {
         /** @description CLI 可用性（GET /codegraph/status 响应）。 */
         CliStatus: {
             available: boolean;
+            /** @description 可行动提示（R5，task-5）：不可用 / 版本不符时给「装 + 锁版」命令；一切正常为 None。 */
+            hint?: string | null;
             pin: string;
             version?: string | null;
         };
@@ -3323,9 +3393,21 @@ export interface components {
             status: string;
         };
         RegisterProjectRequest: {
+            /** @description 可选：自定义落盘父目录（绝对路径，须在白名单根内）；留空 = 默认 `<数据根>/codegraph/<项目名>` */
+            dest_parent?: string | null;
             name: string;
-            /** @description 本地绝对路径或 git URL */
+            /** @description git 仓库地址（如 https://github.com/you/repo）——本地路径已退场 */
             source_uri: string;
+        };
+        /**
+         * @description 注册回调体（入口收敛 2026-09-21）：注册成功后**自动入队建索引**（一步到位）。
+         *     入队失败不算注册失败（clone 已落盘）——`warning` 说明原因，前端可手动重试。
+         */
+        RegisterProjectResponse: {
+            /** Format: uuid */
+            index_job_id?: string | null;
+            project: components["schemas"]["CgProjectDto"];
+            warning?: string | null;
         };
         /** @description 单条修复动作（人话明细，供报告与汇报）。 */
         RepairAction: {
@@ -3755,6 +3837,31 @@ export interface components {
             /** Format: int32 */
             version: number;
         };
+        /**
+         * @description 列表行（元数据，**不含正文**）——规模化 2026-09-20：万页下正文合计 18MB，目录树
+         *     只需要元数据；正文走 `get_page`。`content_chars` 保留原 P1-7 语义（len 由 SQL
+         *     char_length 计算，不经网络），供调用方判断「值不值得拉全文」。
+         */
+        WikiPageMetaDto: {
+            /**
+             * Format: int32
+             * @description 正文字符数（SQL char_length，不含正文本体）
+             */
+            content_chars: number;
+            /** @description 目录树层级（/ 分隔多级，Obsidian 式文件夹） */
+            folder: string;
+            frontmatter: Record<string, never>;
+            /** Format: uuid */
+            id: string;
+            origin: string;
+            page_type: string;
+            slug: string;
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: int32 */
+            version: number;
+        };
         WikiPromotionDto: {
             anchor: string;
             /** Format: date-time */
@@ -4015,6 +4122,29 @@ export interface operations {
             };
         };
     };
+    upload_artifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": number[];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     gc: {
         parameters: {
             query?: never;
@@ -4071,7 +4201,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CgProjectDto"];
+                    "application/json": components["schemas"]["RegisterProjectResponse"];
                 };
             };
         };
@@ -4098,6 +4228,27 @@ export interface operations {
         };
     };
     delete_codegraph_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    project_artifact: {
         parameters: {
             query?: never;
             header?: never;
@@ -7338,6 +7489,11 @@ export interface operations {
         parameters: {
             query?: {
                 page_type?: string | null;
+                /**
+                 * @description 目录子树过滤：folder 精确等于该路径或其下级（folder LIKE '路径/%'）——
+                 *     规模化（2026-09-20）：前端树按 folder 懒加载，不再一次拉全库。
+                 */
+                folder?: string | null;
                 /** @description keyset 分页游标：{updated_at ISO8601}|{id}（上一页最后一条） */
                 cursor?: string | null;
                 /** @description 返回条数上限；不传 = 全量（2026-09-20 单库终局：不要截断） */
@@ -7354,7 +7510,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WikiPageDto"][];
+                    "application/json": components["schemas"]["WikiPageMetaDto"][];
                 };
             };
         };

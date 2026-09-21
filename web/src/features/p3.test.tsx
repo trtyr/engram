@@ -237,14 +237,14 @@ describe('Memory 检索面板（?tab=search 深链直达，tab 条已收敛入�
   })
 })
 
-describe('人审队列', () => {
+describe('待审队列', () => {
   it('通过清 needs_review 后行消失；批量通过逐条 PATCH', async () => {
     mockState.atoms = [
       { id: 'r1', kind: 'fact', content: '低置信事实甲', confidence: 0.5, status: 'candidate', superseded_by: null, needs_review: true, hit_count: 0, scenario_id: null, source_refs: [], created_at: new Date().toISOString() },
       { id: 'r2', kind: 'fact', content: '低置信事实乙', confidence: 0.52, status: 'candidate', superseded_by: null, needs_review: true, hit_count: 0, scenario_id: null, source_refs: [], created_at: new Date().toISOString() },
     ]
     render(wrap(<Memory />))
-    fireEvent.click(screen.getByRole('button', { name: '人审' }))
+    fireEvent.click(screen.getByRole('button', { name: '待审' }))
     await screen.findByText('2 待审')
     // 单条通过
     fireEvent.click(screen.getAllByRole('button', { name: '通过' })[0])

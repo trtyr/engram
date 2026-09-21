@@ -19,12 +19,23 @@ pub struct CgProjectDto {
     pub stats: Option<serde_json::Value>,
     pub error: Option<String>,
     pub last_synced_at: Option<chrono::DateTime<chrono::Utc>>,
-    /// 条目来源：repo（服务端路径/git clone，本机索引）| upload（客户端推产物，公网模型）
+    /// 条目来源标注（**不是项目身份**，0055 值域语义化）：cloud_index（服务端路径/git clone，云端自建索引）
+    /// | client_upload（客户端本机 index 后推产物）。两入口都可刷新同一记录的当前产物。
     pub source_kind: String,
     /// 上传型：客户端声明的 commit hash（声明式新鲜度——服务端不读代码，只存声明）
     pub head: Option<String>,
     /// 上传型：最近一次产物上传时间
     pub uploaded_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// 产物产出时间（云自建 = 索引完成时刻；上传 = 入库时刻）
+    pub produced_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// 产出该产物的 CLI 版本（上传侧自 db 内 project_metadata 读出校验）
+    pub built_with_version: Option<String>,
+    /// 本次投递者：`cloud_index` 或 `client:<key 名>`
+    pub last_producer: Option<String>,
+    /// 落盘方式（入口收敛 2026-09-21，迁移 0056）：`default` = 服务端自建目录
+    /// （`<数据根>/codegraph/<项目名>`，删条目**连目录清**）| `custom` = 用户指定父目录
+    /// （删条目**只删注册与产物、目录保留**）。历史行一律 `custom`（保护既有目录）。
+    pub dest_mode: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -34,6 +45,19 @@ pub struct CliStatus {
     pub available: bool,
     pub version: Option<String>,
     pub pin: String,
+    /// 可行动提示（R5，task-5）：不可用 / 版本不符时给「装 + 锁版」命令；一切正常为 None。
+    pub hint: Option<String>,
+}
+
+/// 删除条目的结果（入口收敛 2026-09-21）：目录是否被清 + 可读说明。
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct DeleteOutcome {
+    /// 被删除的条目 id
+    pub deleted: Uuid,
+    /// 工作目录是否被服务端一并删除（仅 `dest_mode=default` 的服务端自建目录会清）
+    pub workdir_removed: bool,
+    /// 可读说明（自定义落盘会提示目录保留、需手动清理）
+    pub note: String,
 }
 
 /// callers/callees --json 的条目（真实 schema 探测自 CLI 1.5.0；camelCase 原样映射）。
@@ -156,6 +180,37 @@ pub(crate) fn classify(e: CgError) -> engram_jobs::types::JobError {
         CgError::Timeout(_, _) | CgError::CliUnavailable(_) => JobError::Retryable(e.to_string()),
         CgError::Storage(m) => JobError::Retryable(format!("存储暂时不可用: {m}")),
         other => JobError::Permanent(other.to_string()),
+    }
+}
+
+/// 把被覆盖的那份产物元数据压进 `stats.previous`（R1「后到者覆盖 + 完整留痕」，迁移 0055）。
+///
+/// 保留原有 stats 字段（如云自建的 fileCount/nodeCount 与 head），只新增/覆盖 `previous` 一键；
+/// `prev` 从未产出过产物（无 head）时原样返回。
+pub(crate) fn with_previous_trace(
+    mut stats: Option<serde_json::Value>,
+    prev: Option<&CgProjectDto>,
+) -> Option<serde_json::Value> {
+    let Some(p) = prev else { return stats };
+    let Some(head) = p.head.as_deref() else {
+        return stats;
+    };
+    let trace = serde_json::json!({
+        "head": head,
+        "source_kind": p.source_kind,
+        "path": p.path,
+        "built_with_version": p.built_with_version,
+        "produced_at": p.produced_at,
+        "uploaded_at": p.uploaded_at,
+        "last_producer": p.last_producer,
+        "replaced_at": chrono::Utc::now(),
+    });
+    match stats.as_mut().and_then(|v| v.as_object_mut()) {
+        Some(obj) => {
+            obj.insert("previous".to_string(), trace);
+            stats
+        }
+        None => Some(serde_json::json!({ "previous": trace })),
     }
 }
 

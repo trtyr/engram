@@ -10,7 +10,7 @@
         "readOnlyHint": false,
         "title": "代码图谱域"
       },
-      "description": "代码图谱域（单一入口）：注册代码库 → 建索引 → 图谱查询\n（search/explore/node/callers/callees/impact），读懂陌生代码库的调用关系。\n操作全景：action=\"help\"。\n\n【本域操作 8 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- list：列出已注册代码库（注册状态/索引规模/当下可用性 usable）\n- gc：失效条目对账（路径已不存在/索引产物已丢失的条目标为 error；可重新 index 恢复）\n- register：注册代码库（本地绝对路径按服务端文件系统校验，或 git URL）\n- query：代码图谱查询（search/explore大纲/node/callers/callees/impact/full_graph全图）\n- index：建索引/重建索引（异步 job）\n- sync：增量同步索引（小改动后刷新）\n- upload：【破坏性】产物上传（公网模型）——客户端本机 codegraph index 后上传 db(base64)+HEAD；服务端只存+声明式新鲜度，无代码无 git 凭证\n- delete：【破坏性】注销代码图谱项目（删注册与索引；源码不动）",
+      "description": "代码图谱域（单一入口）：注册代码库 → 建索引 → 图谱查询\n（search/explore/node/callers/callees/impact），读懂陌生代码库的调用关系。\n操作全景：action=\"help\"。\n\n【本域操作 8 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- list：列出已注册代码库（注册状态/索引规模/当下可用性 usable）\n- gc：失效条目对账（路径已不存在/索引产物已丢失的条目标为 error；可重新 index 恢复）\n- register：注册代码库（**只接受 git 仓库地址**，如 https://github.com/you/repo）——注册即 git clone 到默认 <数据根>/codegraph/<项目名>/（可用 dest_parent 指定父目录，须在白名单根内）并**自动入队建索引**；本地路径已不支持（本机源码改用 upload）\n- query：代码图谱查询（search/explore大纲/node/callers/callees/impact/full_graph全图）\n- index：建索引/重建索引（异步 job）\n- sync：增量同步索引（小改动后刷新）\n- upload：【破坏性】产物上传（公网模型）——客户端本机 codegraph index 后上传 db(base64)+HEAD；服务端只存+声明式新鲜度，无代码无 git 凭证\n- delete：【破坏性】注销代码图谱项目（删注册与产物；默认落盘的服务端自建目录连目录清，自定义落盘目录保留、需手动清理）",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,

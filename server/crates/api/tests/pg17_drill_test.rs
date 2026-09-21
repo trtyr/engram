@@ -21,18 +21,18 @@ async fn pg17_full_migrations_and_schema() {
         .await
         .expect("连接 PG17 干净库");
 
-    // 全部迁移（0001-0051，编译期嵌入）
+    // 全部迁移（0001-0054，编译期嵌入）
     engram_storage::run_migrations(&pool)
         .await
         .expect("PG17 全量迁移应通过");
 
-    // 迁移版本 = 最新（0051）
+    // 迁移版本 = 最新（0054）
     let version = engram_storage::current_version(&pool)
         .await
         .expect("读迁移版本");
-    assert_eq!(version, Some(51), "PG17 迁移应推进到 0051");
+    assert_eq!(version, Some(54), "PG17 迁移应推进到 0054");
 
-    // 关键表抽查：五域 + 公网加固新列。
+    // 关键表抽查：各域表 + 公网加固 / 收录哲学线新表。
     // 例外：wiki_libraries 的 main 库由 0046 迁移幂等补建——干净库迁移后恰 1 行是正确行为。
     for table in [
         "admin_sessions",
@@ -43,6 +43,7 @@ async fn pg17_full_migrations_and_schema() {
         "project_docs",
         "wiki_pages",
         "wiki_promotions",
+        "wiki_query_log",
         "skills",
         "todos",
         "cg_projects",
@@ -60,13 +61,18 @@ async fn pg17_full_migrations_and_schema() {
         .expect("wiki_libraries 应存在");
     assert_eq!(lib_count, 1, "0046 迁移应幂等补建默认 main 库恰 1 行");
 
-    // 0049 会话身份列 + 0051 codegraph 上传列
+    // 0049 会话身份列 / 0050 文档乐观锁 / 0051 codegraph 上传列 / 0052 会话上下文列
     for (table, col) in [
         ("raw_sessions", "api_key_id"),
         ("raw_sessions", "client_ref"),
         ("project_docs", "version"),
         ("cg_projects", "source_kind"),
         ("cg_projects", "head"),
+        ("cg_projects", "produced_at"),
+        ("cg_projects", "built_with_version"),
+        ("cg_projects", "last_producer"),
+        ("admin_sessions", "ip"),
+        ("admin_sessions", "user_agent"),
     ] {
         let ok: bool = sqlx::query_scalar(&format!(
             "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
@@ -77,6 +83,28 @@ async fn pg17_full_migrations_and_schema() {
         .expect("information_schema 查询");
         assert!(ok, "列应存在：{table}.{col}");
     }
+
+    // 0053 常识边层级模型：source 约束须已把 world_knowledge 纳入
+    let src_check: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint \
+         WHERE conname = 'entity_relations_source_check'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("0053 应重建 entity_relations_source_check");
+    assert!(
+        src_check.contains("world_knowledge"),
+        "0053 应把 world_knowledge 纳入 source 约束：{src_check}"
+    );
+
+    // 0054 查询日志表：唯一键 (library_id, query) 与缺口索引须已建
+    let qlog_idx: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_wiki_query_log_gaps')",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("pg_indexes 查询");
+    assert!(qlog_idx, "0054 应建 idx_wiki_query_log_gaps");
 
     let pgver: String = sqlx::query_scalar("SHOW server_version")
         .fetch_one(&pool)

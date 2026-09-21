@@ -35,3 +35,16 @@ if (typeof globalThis.HTMLCanvasElement !== 'undefined' && !HTMLCanvasElement.pr
   (HTMLCanvasElement.prototype as unknown as { getContext: (id: string) => unknown }).getContext = (id: string) =>
     id.startsWith('webgl') ? (new WebGL2ContextStub() as unknown as WebGL2RenderingContext) : null
 }
+
+// jsdom 无 ResizeObserver：ClampText（web/src/components/ClampText.tsx）用它做溢出检测，
+// 不 stub 会在 useLayoutEffect 里抛 ReferenceError，导致依赖它的用例整片崩。
+// 这里给空实现：初次 check() 仍会执行，只是不再跟随尺寸变化重测（jsdom 无真实布局，
+// scrollHeight/clientHeight 恒为 0 → 判为未溢出，符合测试预期）。
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = ResizeObserverStub
+}

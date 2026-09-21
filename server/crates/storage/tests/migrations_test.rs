@@ -13,9 +13,34 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 50 份迁移：0050 = 项目文档乐观锁，公网多Agent P001 步骤2）
+    // 版本可查（当前 56 份迁移：0056 = 代码图谱落盘方式 dest_mode）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(54), "0001-0054 迁移应已应用");
+    assert_eq!(version, Some(56), "0001-0056 迁移应已应用");
+
+    // 0056（代码图谱入口收敛）：dest_mode 列形态——NOT NULL + 落库默认 default + 二值 CHECK。
+    // 历史行回填 custom 是迁移的语义保证（生产库实测见《代码图谱入口收敛 · roadmap》）；
+    // 本测试锁的是「干净库上的列形态」，防止后续迁移把它改回去。
+    let (not_null, default_expr): (bool, Option<String>) = sqlx::query_as(
+        "SELECT a.attnotnull, pg_get_expr(d.adbin, d.adrelid) FROM pg_attribute a \
+         LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum \
+         WHERE a.attrelid = 'cg_projects'::regclass AND a.attname = 'dest_mode'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("cg_projects.dest_mode 应存在");
+    assert!(not_null, "dest_mode 应 NOT NULL");
+    assert_eq!(
+        default_expr.as_deref(),
+        Some("'default'::text"),
+        "新注册不传值时落 default"
+    );
+    let bad = sqlx::query(
+        "INSERT INTO cg_projects (id, name, path, source_uri, dest_mode) \
+         VALUES (gen_random_uuid(), 'zz-bad', '/tmp/zz', 'file:///zz', 'bogus')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(bad.is_err(), "越界 dest_mode 应被 CHECK 拒绝");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")

@@ -324,6 +324,23 @@ export interface CgProject {
   error: string | null
   created_at: string
   last_synced_at: string | null
+  /** 当前产物来源（0055 语义化值域）：cloud_index（服务端 clone/自建索引）| client_upload（客户端上传产物） */
+  source_kind?: string
+  /** 落盘方式（0056）：default = 服务端自建目录（删条目连目录清）| custom = 自定义父目录（删条目保留目录） */
+  dest_mode?: string
+  /** 声明式新鲜度：客户端声明的 commit hash；未声明（Web 入口只选文件）为 null */
+  head?: string | null
+  uploaded_at?: string | null
+  produced_at?: string | null
+  built_with_version?: string | null
+  last_producer?: string | null
+  /** list 注入的新鲜度（EN-26）：stale=null 表示「无法比对」（路径失效或未声明 head） */
+  freshness?: {
+    head?: string | null
+    snapshot_head?: string | null
+    stale?: boolean | null
+    hint?: string | null
+  }
 }
 export interface CgStats {
   files?: number
@@ -337,6 +354,8 @@ export interface CgCliStatus {
   available: boolean
   version: string | null
   pin: string
+  /** R5 可行动提示（不可用/版本不符时为「装 + 锁版」命令；正常为 null） */
+  hint: string | null
 }
 /** 待办（第七域，GET /todos） */
 export interface Todo {
@@ -381,7 +400,18 @@ export interface CgGraph {
   callers?: number
   callees?: number
   files?: number
-  nodes: { id: string; name: string; kind: string; role: string; filePath?: string; line?: number }[]
+  // x/y：服务端预计算初布局（`<项目落盘>/.codegraph/layout.json`，index/sync 收尾时算好）。
+  // 全量档才带；大图没有布局时省略，前端照旧自行收敛。
+  nodes: {
+    id: string
+    name: string
+    kind: string
+    role: string
+    filePath?: string
+    line?: number
+    x?: number
+    y?: number
+  }[]
   edges: { from: string; to: string; rel: string; weight?: number }[]
 }
 export interface Provider {

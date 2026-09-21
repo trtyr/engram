@@ -1,11 +1,16 @@
 //! CLI 子进程桥 + 项目生命周期 + 查询代理。
 
+mod dest;
 mod index;
 mod model;
+mod precompute;
 mod query;
 mod version;
+pub(crate) use dest::*;
 pub use index::*;
 pub use model::*;
+// attach_positions（初布局坐标注入）在 query.rs 里以 `use super::*` 取用，故此处再导出
+pub(crate) use precompute::attach_positions;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -14,6 +19,25 @@ use uuid::Uuid;
 
 /// pin 的 codegraph 版本（D0005：上游 breaking change 防护）。
 pub const CG_VERSION_PIN: &str = "1.5.0";
+
+/// CLI 修复提示（可照抄：装 + 锁版）——服务端错误文案与前端状态条共用同一事实源。
+/// 出处：《codegraph 上云 · README》§上游与安装（2026-09-21 核实）。
+pub fn cli_fix_hint(pin: &str) -> String {
+    format!(
+        "CLI 修复（可照抄）：装并锁到 {pin} —— \
+         `curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh` \
+         或 `npm i -g @colbymchenry/codegraph@{pin}`；已装但版本不符 → \
+         `codegraph upgrade {pin}`（升级后产物 schema 会变：需重新 `codegraph index` 并重传 upload 型条目）"
+    )
+}
+
+/// 本服务在 pin 版本（1.5.0）下**实测**的 extraction 版本
+/// （`project_metadata.indexed_with_extraction_version`，实测 24）。
+///
+/// **不是硬门**：CLI 版本不变、上游抽取逻辑也会升级（同一个 db 的图语义随之变化），而服务端无法
+/// 稳定持有「期望值」（服务端 CLI 未同步升级时会误拒）——故只做**告警**（写
+/// `stats.extraction_warning`），不阻断入库（R3 已定口径，2026-09-21）。
+pub const CG_EXTRACTION_VERSION_SEEN: &str = "24";
 
 /// 超时矩阵（topics/codegraph-bridge.md）。
 const TIMEOUT_INIT: Duration = Duration::from_secs(600);
@@ -252,9 +276,13 @@ mod tests {
             stats: Some(stats),
             error: None,
             last_synced_at: None,
-            source_kind: "repo".into(),
+            source_kind: "cloud_index".into(),
+            dest_mode: "custom".into(),
             head: None,
             uploaded_at: None,
+            produced_at: None,
+            built_with_version: None,
+            last_producer: None,
             created_at: chrono::Utc::now(),
         };
 
@@ -351,9 +379,13 @@ mod tests {
             stats: Some(stats),
             error: None,
             last_synced_at: None,
-            source_kind: "repo".into(),
+            source_kind: "cloud_index".into(),
+            dest_mode: "custom".into(),
             head: None,
             uploaded_at: None,
+            produced_at: None,
+            built_with_version: None,
+            last_producer: None,
             created_at: chrono::Utc::now(),
         };
 
@@ -437,9 +469,13 @@ mod tests {
             stats: None,
             error: None,
             last_synced_at: None,
-            source_kind: "repo".into(),
+            source_kind: "cloud_index".into(),
+            dest_mode: "custom".into(),
             head: None,
             uploaded_at: None,
+            produced_at: None,
+            built_with_version: None,
+            last_producer: None,
             created_at: chrono::Utc::now(),
         };
 
@@ -481,9 +517,13 @@ mod tests {
             stats: None,
             error: None,
             last_synced_at: None,
-            source_kind: "repo".into(),
+            source_kind: "cloud_index".into(),
+            dest_mode: "custom".into(),
             head: None,
             uploaded_at: None,
+            produced_at: None,
+            built_with_version: None,
+            last_producer: None,
             created_at: chrono::Utc::now(),
         };
         assert!(index_usable(&p), "子目录注册也应认仓库根的索引产物");
@@ -528,9 +568,13 @@ mod tests {
             stats: None,
             error: None,
             last_synced_at: None,
-            source_kind: "repo".into(),
+            source_kind: "cloud_index".into(),
+            dest_mode: "custom".into(),
             head: None,
             uploaded_at: None,
+            produced_at: None,
+            built_with_version: None,
+            last_producer: None,
             created_at: chrono::Utc::now(),
         };
         let tmp = std::env::temp_dir();

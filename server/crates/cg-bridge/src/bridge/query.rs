@@ -119,6 +119,28 @@ impl CgBridge {
         Ok(row)
     }
 
+    /// 导出当前产物字节（R2 推送/拉取通道的「拉」侧）：返回 `(db 字节, 产物路径)`。
+    ///
+    /// 产物恒在 `index_db_path(proj.path)`（两入口一致：云自建 = 仓库 `.codegraph/codegraph.db`；
+    /// 上传型 = 上传工作根）。不在盘 → NotFound（附可行动文案：该重新 index 还是重新 upload）。
+    pub async fn artifact_bytes(&self, id: Uuid) -> Result<(Vec<u8>, String), CgError> {
+        let proj = self.get(id).await?;
+        let path = index_db_path(Path::new(&proj.path));
+        let bytes = tokio::fs::read(&path).await.map_err(|e| {
+            let how = if proj.source_kind == "client_upload" {
+                "upload 型条目服务端无源码，请客户端本机重新 upload 产物"
+            } else {
+                "请先执行 codegraph index 生成产物"
+            };
+            CgError::NotFound(format!(
+                "项目 {} 的索引产物不在盘（{}）: {e}——{how}",
+                proj.name,
+                path.display()
+            ))
+        })?;
+        Ok((bytes, path.to_string_lossy().into_owned()))
+    }
+
     /// explore 符号大纲（R 报告 P0-3）：直接读索引库（.codegraph/codegraph.db，
     /// 只读——与 full_graph 同哲学），按「路径/文件名含 target 或符号名含 target」取
     /// 符号清单（name/kind/行号/签名截断），不返回任何源码正文。
@@ -179,10 +201,12 @@ impl CgBridge {
         Self::format_query_result(kind, &stdout)
     }
 
-    /// 删除项目：移除注册行；工作目录在本桥 root 之下（git clone 的）连目录一起清，
-    /// 本地路径项目不动用户的源码。返回是否删除了工作目录。
-    pub async fn delete(&self, id: Uuid) -> Result<bool, CgError> {
+    /// 删除项目（入口收敛 2026-09-21）：**默认落盘**（服务端自建目录）连目录清；
+    /// **自定义落盘**（用户指定父目录）只删注册与产物、**目录保留**——避免删到用户自己的东西；
+    /// 上传型（client_upload）服务端本就没有源码目录，只清注册与产物。
+    pub async fn delete(&self, id: Uuid) -> Result<DeleteOutcome, CgError> {
         let proj = self.get(id).await?;
+        let workdir = PathBuf::from(&proj.path);
         let removed = sqlx::query("DELETE FROM cg_projects WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
@@ -191,18 +215,36 @@ impl CgBridge {
         if removed == 0 {
             return Err(CgError::NotFound(format!("项目 {id} 不存在")));
         }
-        let workdir = Path::new(&proj.path);
-        let ours = self
-            .root
-            .canonicalize()
-            .ok()
-            .and_then(|root| workdir.canonicalize().ok().map(|w| w.starts_with(&root)))
-            .unwrap_or(false);
-        if ours {
-            let _ = tokio::fs::remove_dir_all(workdir).await; // 有意忽略：工作目录清理 best-effort
-            return Ok(true);
-        }
-        Ok(false)
+        // 只有「服务端自建」的目录才清；同时仍要求目录确在本桥 root 之下（纵深防御：
+        // 自建目录理论上必在 root 下，真出现异常宁可留目录也不误删）
+        let ours = proj.dest_mode == "default"
+            && self
+                .root
+                .canonicalize()
+                .ok()
+                .and_then(|root| workdir.canonicalize().ok().map(|w| w.starts_with(&root)))
+                .unwrap_or(false);
+        let workdir_removed = if ours {
+            let _ = tokio::fs::remove_dir_all(&workdir).await; // 有意忽略：目录清理 best-effort
+            true
+        } else {
+            false
+        };
+        let note = if proj.source_kind == "client_upload" {
+            "上传型条目：仅移除注册与产物（服务端本就没有源码目录）".to_string()
+        } else if proj.dest_mode == "default" {
+            "服务端自建的 clone 目录已一并删除".to_string()
+        } else {
+            format!(
+                "自定义落盘目录**保留**：{}——需要时请手动清理（服务端不删用户指定位置的目录）",
+                proj.path
+            )
+        };
+        Ok(DeleteOutcome {
+            deleted: id,
+            workdir_removed,
+            note,
+        })
     }
 
     /// 文件级全图：把全部跨文件依赖边按文件聚合（imports/calls/instantiates/references，
@@ -213,9 +255,17 @@ impl CgBridge {
         let db_path = self.ensure_ready(&proj)?;
         // 阻塞读小库（<10MB）：spawn_blocking 防占 worker
         let db_str = db_path.to_string_lossy().into_owned();
-        let v = tokio::task::spawn_blocking(move || full_graph_query(&db_str))
-            .await
-            .map_err(|e| CgError::Parse(format!("索引读取线程崩溃: {e}")))??;
+        // 初布局（t4）：有 layout.json 就带坐标（前端首帧就位）；没有就**不给字段**（前端自收敛）
+        let layout_file = crate::layout::layout_path(&db_path);
+        let v = tokio::task::spawn_blocking(move || {
+            let mut v = full_graph_query(&db_str)?;
+            if let Some(l) = crate::layout::read_layout(&layout_file) {
+                attach_positions(&mut v, &l);
+            }
+            Ok::<serde_json::Value, CgError>(v)
+        })
+        .await
+        .map_err(|e| CgError::Parse(format!("索引读取线程崩溃: {e}")))??;
         Ok(v)
     }
 
@@ -250,7 +300,15 @@ impl CgBridge {
             )));
         }
 
-        Ok(normalize_callgraph(symbol, &proj.name, &callers, &callees))
+        let mut v = normalize_callgraph(symbol, &proj.name, &callers, &callees);
+        // 初布局（t4）：符号级图按节点 filePath 沾文件坐标——同一文件的符号因此天然聚在一起；
+        // 没有布局（或中心符号没有文件路径）就不带字段，交给前端自收敛。
+        if let Some(l) =
+            crate::layout::read_layout(&crate::layout::layout_path(&index_db_path(path)))
+        {
+            attach_positions(&mut v, &l);
+        }
+        Ok(v)
     }
     /// 结果格式化：explore/node 取截断文本，其余按 JSON 归一。
     fn format_query_result(kind: QueryKind, stdout: &str) -> Result<serde_json::Value, CgError> {

@@ -3,6 +3,7 @@
 //! 索引/同步走平台 job 队列（返回 202 + job_id，异步执行）——不再阻塞 HTTP 10 分钟。
 
 use axum::Json;
+use axum::extract::multipart::Multipart;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use engram_core::codegraph::{CgBridge, CgError, CgProjectDto, CliStatus, QueryKind};
@@ -24,15 +25,19 @@ fn ce(e: CgError) -> ApiError {
     match e {
         CgError::NotFound(m) => ApiError::NotFound(m),
         CgError::BadRequest(m) => ApiError::BadRequest(m),
-        CgError::VersionMismatch { need, got } => {
-            ApiError::BadRequest(format!("CodeGraph 版本不匹配：需要 {need}，实际 {got}"))
-        }
+        CgError::VersionMismatch { need, got } => ApiError::BadRequest(format!(
+            "CodeGraph 版本不匹配：需要 {need}，实际 {got}——{}",
+            engram_core::codegraph::cli_fix_hint(&need)
+        )),
         CgError::Timeout(s, cmd) => ApiError::Unavailable(format!("CodeGraph {cmd} 超时（{s}s）")),
         CgError::Failed(code, msg) => {
             ApiError::Unavailable(format!("CodeGraph 失败（exit {code}）: {msg}"))
         }
         CgError::Parse(m) => ApiError::Unavailable(m),
-        CgError::CliUnavailable(m) => ApiError::Unavailable(m),
+        CgError::CliUnavailable(m) => ApiError::Unavailable(format!(
+            "{m}——{}",
+            engram_core::codegraph::cli_fix_hint(engram_core::codegraph::CG_VERSION_PIN)
+        )),
         CgError::Storage(m) => ApiError::Unavailable(m),
     }
 }
@@ -56,25 +61,142 @@ async fn enqueue(
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct RegisterProjectRequest {
     pub name: String,
-    /// 本地绝对路径或 git URL
+    /// git 仓库地址（如 https://github.com/you/repo）——本地路径已退场
     pub source_uri: String,
+    /// 可选：自定义落盘父目录（绝对路径，须在白名单根内）；留空 = 默认 `<数据根>/codegraph/<项目名>`
+    pub dest_parent: Option<String>,
 }
 
-/// 注册项目（本地路径或 git URL；同源只许注册一次）。
+/// 注册回调体（入口收敛 2026-09-21）：注册成功后**自动入队建索引**（一步到位）。
+/// 入队失败不算注册失败（clone 已落盘）——`warning` 说明原因，前端可手动重试。
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct RegisterProjectResponse {
+    pub project: CgProjectDto,
+    pub index_job_id: Option<Uuid>,
+    pub warning: Option<String>,
+}
+
+/// 注册项目（入口收敛 2026-09-21）：**只接受 git 仓库地址**；注册即 `git clone --depth 1`
+/// 到默认/自定义目录，并**自动入队建索引**（一步到 ready）。
 #[utoipa::path(post, path = "/codegraph/projects",
     request_body = RegisterProjectRequest,
-    responses((status = 201, body = CgProjectDto)))]
+    responses((status = 201, body = RegisterProjectResponse)))]
 pub async fn register_project(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Json(req): Json<RegisterProjectRequest>,
-) -> Result<(StatusCode, Json<CgProjectDto>), ApiError> {
+) -> Result<(StatusCode, Json<RegisterProjectResponse>), ApiError> {
     require_cg(&principal)?;
-    let p = bridge(&state)
-        .register(&req.name, &req.source_uri)
+    let project = bridge(&state)
+        .register(&req.name, &req.source_uri, req.dest_parent.as_deref())
         .await
         .map_err(ce)?;
-    Ok((StatusCode::CREATED, Json(p)))
+    // 一步到位：注册成功即入队建索引。入队失败**不算注册失败**（clone 已落盘、条目已建）——
+    // 返回 warning 让前端可见并可手动点「建索引」重试，避免「明明 clone 好了却报注册失败」。
+    match enqueue(&state, "cg_index", project.id).await {
+        Ok(job) => Ok((
+            StatusCode::CREATED,
+            Json(RegisterProjectResponse {
+                project,
+                index_job_id: Some(job.id),
+                warning: None,
+            }),
+        )),
+        Err(e) => {
+            tracing::warn!(error = ?e, "注册成功后自动入队建索引失败——注册本身已生效");
+            Ok((
+                StatusCode::CREATED,
+                Json(RegisterProjectResponse {
+                    project,
+                    index_job_id: None,
+                    warning: Some(
+                        "已 clone 落盘并建好条目，但自动建索引入队失败——可手动点「建索引」重试"
+                            .to_string(),
+                    ),
+                }),
+            ))
+        }
+    }
+}
+
+/// 上传体上限（MB）：产物本体 256MB（与桥层同一口径）+ 1MB multipart 开销余量。
+/// 路由级 `DefaultBodyLimit` 用它——全局那道是 MCP base64 口径（约 349MB），对 multipart 过宽，
+/// 会让「超限」在缓冲完整个 body 之后才拒。
+pub const MAX_ARTIFACT_BODY_MB: usize = 257;
+pub const MAX_ARTIFACT_BODY_BYTES: usize = MAX_ARTIFACT_BODY_MB * 1024 * 1024;
+
+/// multipart 读取错误 → 可行动文案（超限单独分型，其余按解析失败）。
+fn multipart_err(e: axum::extract::multipart::MultipartError) -> ApiError {
+    let msg = e.to_string();
+    if msg.contains("length limit") || msg.contains("too large") || msg.contains("body limit") {
+        ApiError::BadRequest(format!(
+            "上传体超限（上限 {MAX_ARTIFACT_BODY_MB}MB）——产物 db 本体上限 256MB：更大的仓库请改用\
+             「git 仓库地址」入口（服务端自己 clone 后索引，不受此限）"
+        ))
+    } else {
+        ApiError::BadRequest(format!("multipart 解析失败: {msg}"))
+    }
+}
+
+/// 产物上传入口（2026-09-21 入口收敛）：Web/脚本用 multipart 传本机
+/// `.codegraph/codegraph.db` 本体——与 MCP `codegraph_upload` 走**同一道**入库校验
+/// （SQLite 魔数 / CLI 版本硬拒 / extraction 版本仅告警 / 256MB 上限 / 同名覆盖留痕）。
+///
+/// 字段：`name`（项目名，必填）、`file`（db 二进制，必填）、`head`（commit hash，可留空 = 未声明）。
+#[utoipa::path(post, path = "/codegraph/artifacts",
+    request_body(content = Vec<u8>, content_type = "multipart/form-data"),
+    responses((status = 201, body = serde_json::Value)))]
+pub async fn upload_artifact(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    require_cg(&principal)?;
+    let mut name: Option<String> = None;
+    let mut head: Option<String> = None;
+    let mut file: Option<axum::body::Bytes> = None;
+    while let Some(field) = multipart.next_field().await.map_err(multipart_err)? {
+        match field.name() {
+            Some("name") => name = Some(field.text().await.map_err(multipart_err)?),
+            Some("head") => head = Some(field.text().await.map_err(multipart_err)?),
+            Some("file") => file = Some(field.bytes().await.map_err(multipart_err)?),
+            // 未知字段必须消费掉（否则迭代卡住），内容本身不使用
+            _ => {
+                let _ = field.bytes().await;
+            }
+        }
+    }
+    let name = name.unwrap_or_default().trim().to_string();
+    if name.is_empty() {
+        return Err(ApiError::BadRequest(
+            "multipart 缺字段 name——上传产物要指定项目名（同名即覆盖产物并留痕 stats.previous）"
+                .into(),
+        ));
+    }
+    let bytes = file.ok_or_else(|| {
+        ApiError::BadRequest(
+            "multipart 缺字段 file——请上传本机 `codegraph index` 产出的 `.codegraph/codegraph.db` \
+             本体（原始二进制，不要压缩/文本化）"
+                .into(),
+        )
+    })?;
+    // 投递者留痕（与 MCP 同口径）：API key 记 `client:<key 名>`，管理员会话记 `client:admin`
+    let producer = match &principal.0 {
+        Principal::ApiKey { name, .. } => format!("client:{name}"),
+        Principal::Admin => "client:admin".to_string(),
+    };
+    let proj = bridge(&state)
+        .upload_artifact(&name, head.as_deref().unwrap_or(""), &producer, &bytes)
+        .await
+        .map_err(ce)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "project": proj,
+            "db_bytes": bytes.len(),
+            "hint": "产物已就位，codegraph 查询即查即用；同名再传即覆盖产物并留痕（stats.previous）",
+        })),
+    ))
 }
 
 #[utoipa::path(get, path = "/codegraph/projects", responses((status = 200, body = [CgProjectDto])))]
@@ -106,7 +228,8 @@ pub async fn get_project(
     Ok(Json(bridge(&state).get(id).await.map_err(ce)?))
 }
 
-/// 删除项目（git clone 的工作目录一并清理；本地路径项目不动源码）。
+/// 删除项目（入口收敛 2026-09-21）：默认落盘（服务端自建目录）连目录清；
+/// 自定义落盘只删注册与产物、**目录保留**——响应 `note` 说明。
 #[utoipa::path(delete, path = "/codegraph/projects/{id}", operation_id = "delete_codegraph_project", responses((status = 200, body = Object)))]
 pub async fn delete_project(
     principal: axum::Extension<Principal>,
@@ -114,10 +237,12 @@ pub async fn delete_project(
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_cg(&principal)?;
-    let workdir_removed = bridge(&state).delete(id).await.map_err(ce)?;
-    Ok(Json(
-        json!({ "deleted": id, "workdir_removed": workdir_removed }),
-    ))
+    let out = bridge(&state).delete(id).await.map_err(ce)?;
+    Ok(Json(json!({
+        "deleted": out.deleted,
+        "workdir_removed": out.workdir_removed,
+        "note": out.note,
+    })))
 }
 
 /// 建索引/重建索引：入队 cg_index job 异步执行（202 + job_id；进度看 jobs 与项目状态）。
@@ -266,4 +391,36 @@ pub async fn graph(
         None => bridge(&state).full_graph(id).await.map_err(ce)?,
     };
     Ok(Json(v))
+}
+
+/// 导出当前产物字节（R2 推送/拉取通道的「拉」侧；`engramctl codegraph pull` 消费）。
+///
+/// 走 HTTP 直接传字节本体（不做 base64——避免 33% 膨胀；MCP 侧才需要 base64）。附带元数据响应头
+/// （name / head / built-with-version / source-kind / artifact-path），使拉取端能把同一份「声明」
+/// 原样投给本地实例——等价于一次 upload，无需再问远端要状态。
+#[utoipa::path(get, path = "/codegraph/projects/{id}/artifact", responses((status = 200, body = Object)))]
+pub async fn project_artifact(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<axum::response::Response, ApiError> {
+    require_cg(&principal)?;
+    let b = bridge(&state);
+    let proj = b.get(id).await.map_err(ce)?;
+    let (bytes, path) = b.artifact_bytes(id).await.map_err(ce)?;
+    let mut builder = axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
+        .header(axum::http::header::CONTENT_LENGTH, bytes.len().to_string())
+        .header("x-codegraph-name", proj.name.clone())
+        .header("x-codegraph-artifact-path", path)
+        .header("x-codegraph-source-kind", proj.source_kind.clone());
+    if let Some(h) = proj.head.clone() {
+        builder = builder.header("x-codegraph-head", h);
+    }
+    if let Some(v) = proj.built_with_version.clone() {
+        builder = builder.header("x-codegraph-built-with-version", v);
+    }
+    builder
+        .body(axum::body::Body::from(bytes))
+        .map_err(|e| ApiError::Unavailable(format!("构造产物响应失败: {e}")))
 }

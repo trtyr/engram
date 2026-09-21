@@ -35,9 +35,19 @@ pub struct CgRegisterParams {
     /// 项目名（唯一，如 engram-server）
     #[schemars(description = "项目名（唯一，如 engram-server）。")]
     pub name: String,
-    /// 本地绝对路径或 git URL
-    #[schemars(description = "本地绝对路径（如 D:\\Code\\Rust\\engram）或 git URL。")]
+    /// git 仓库地址
+    #[schemars(
+        description = "git 仓库地址（如 https://github.com/you/repo）。**本地路径已不支持**——\
+本机已有源码要在服务端建图，请改用 upload 入口（本机 codegraph index 后传 .codegraph/codegraph.db）。"
+    )]
     pub source_uri: String,
+    /// 可选：自定义落盘父目录
+    #[schemars(
+        description = "可选：自定义落盘父目录（**服务端视角**的绝对路径，须在白名单根内、默认只允许数据根）——\
+实际克隆到 `<父目录>/<仓库名>/`；留空 = 默认 `<数据根>/codegraph/<项目名>/`。\
+删除条目时默认落盘连目录清、自定义落盘只删注册与产物。"
+    )]
+    pub dest_parent: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -54,9 +64,9 @@ pub struct CgNoParams {}
 /// 产物上传（公网模型 P001-4）：客户端本机 CLI index 后推 codegraph.db+HEAD。
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CgUploadParams {
-    /// 项目名（不存在则新建 upload 型条目；repo 型拒绝——本机索引不归上传通道管）
+    /// 项目名（不存在则新建 client_upload 条目；已存在则覆盖当前产物——两入口都可刷新同一记录）
     #[schemars(
-        description = "项目名（不存在则新建 upload 型条目；已存在且为 upload 型则覆盖产物并更新 head；repo 型条目拒绝——本机索引不归上传通道管，请换名或先 delete）。"
+        description = "项目名（不存在则新建 client_upload 条目；已存在则覆盖当前产物并更新 head，不论其来源是云端自建还是客户端上传——被覆盖那份的元数据留在 stats.previous）。"
     )]
     pub name: String,
     /// commit hash（7~40 位 hex；声明式新鲜度）
@@ -166,10 +176,11 @@ impl EngramMcpServer {
         ok_json(serde_json::Value::Array(out))
     }
 
-    /// 注册代码图谱项目（本地绝对路径或 git URL）。
+    /// 注册代码图谱项目（入口收敛 2026-09-21）：**只接受 git 仓库地址**——注册即 clone 到
+    /// 默认/自定义目录并**自动入队建索引**（一步到位），无需再手动 codegraph_index。
     ///
-    /// 何时用：想让 AI 理解某个代码库的结构与调用关系时。注册后须 codegraph_index
-    /// 建索引（异步 job，稍等片刻再 codegraph_list 确认 ready）。
+    /// 何时用：想让 AI 理解某个 **git 仓库**的结构与调用关系时。本机已有源码（服务端看不到路径）
+    /// → 改用 codegraph_upload 传产物。
     pub(crate) async fn codegraph_register(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -178,10 +189,35 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         require_codegraph(&p)?;
         let row = cg_svc(&self.state)
-            .register(&params.0.name, &params.0.source_uri)
+            .register(
+                &params.0.name,
+                &params.0.source_uri,
+                params.0.dest_parent.as_deref(),
+            )
             .await
             .map_err(from_cg)?;
-        ok_json(serde_json::to_value(&row).unwrap_or(serde_json::json!({})))
+        // 一步到位：注册成功即入队建索引。入队失败**不算注册失败**（clone 已落盘）——
+        // 用 warning 说明，AI/用户可再调 codegraph_index 重试。
+        let mut v = serde_json::to_value(&row).unwrap_or(serde_json::json!({}));
+        match engram_jobs::JobQueue::new(self.state.pool.clone())
+            .enqueue(
+                engram_jobs::JobTemplate::new("cg_index")
+                    .with_payload(serde_json::json!({"project_id": row.id})),
+            )
+            .await
+        {
+            Ok(job) => {
+                v["index_job_id"] = serde_json::json!(job.id);
+                v["warning"] = serde_json::Value::Null;
+            }
+            Err(e) => {
+                v["index_job_id"] = serde_json::Value::Null;
+                v["warning"] = serde_json::json!(format!(
+                    "已 clone 落盘并建好条目，但自动建索引入队失败（{e}）——可调 codegraph_index 重试"
+                ));
+            }
+        }
+        ok_json(v)
     }
 
     /// 建索引/重建索引（异步 job——返回 job_id，稍后 codegraph_list 看状态）。
@@ -271,7 +307,8 @@ impl EngramMcpServer {
         self.query_and_freshness(&params.0, kind).await
     }
 
-    /// 注销代码图谱项目（删除注册与索引；不可逆——本地路径项目的源码不动）。
+    /// 注销代码图谱项目（入口收敛 2026-09-21）：删注册与产物；**默认落盘**（服务端自建 clone 目录）
+    /// 连目录清，**自定义落盘**目录保留（响应 `note` 说明，需手动清理）。
     ///
     /// 何时用：项目已完结/注册错了。按 name 或 id 注销。
     pub(crate) async fn codegraph_delete(
@@ -282,11 +319,11 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         require_codegraph(&p)?;
         let id = cg_resolve(&self.state, &params.0.project).await?;
-        let workdir_removed = cg_svc(&self.state).delete(id).await.map_err(from_cg)?;
+        let out = cg_svc(&self.state).delete(id).await.map_err(from_cg)?;
         ok_json(serde_json::json!({
             "deleted": params.0.project,
-            "workdir_removed": workdir_removed,
-            "note": "git clone 的工作目录已一并删除；本地路径项目仅移除注册，源码未动",
+            "workdir_removed": out.workdir_removed,
+            "note": out.note,
         }))
     }
 
@@ -313,8 +350,13 @@ impl EngramMcpServer {
                     format!("db_b64 不是合法 base64: {e}"),
                 )
             })?;
+        // 投递者留痕（R1）：API key 记 `client:<key 名>`，管理员会话记 `client:admin`
+        let producer = match &p {
+            engram_core::auth::Principal::ApiKey { name, .. } => format!("client:{name}"),
+            engram_core::auth::Principal::Admin => "client:admin".to_string(),
+        };
         let proj = cg_svc(&self.state)
-            .upload_artifact(&dp.name, &dp.head, &db_bytes)
+            .upload_artifact(&dp.name, &dp.head, &producer, &db_bytes)
             .await
             .map_err(from_cg)?;
         ok_json(serde_json::json!({
@@ -322,7 +364,11 @@ impl EngramMcpServer {
             "source_kind": proj.source_kind, "head": proj.head,
             "uploaded_at": proj.uploaded_at, "db_bytes": db_bytes.len(),
             "path": proj.path,
-            "hint": "产物已就位，codegraph query/list 即查即用；重复 upload 同名覆盖产物并更新 head"
+            "produced_at": proj.produced_at,
+            "built_with_version": proj.built_with_version,
+            "last_producer": proj.last_producer,
+            "stats": proj.stats,
+            "hint": "产物已就位，codegraph query/list 即查即用；重复 upload 同名覆盖产物并更新 head（旧产物元数据留在 stats.previous）"
         }))
     }
 

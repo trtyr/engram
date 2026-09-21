@@ -5,7 +5,10 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 pub mod bridge;
+/// 文件级初布局（d3-force 同款力律 + Barnes-Hut；index/sync 收尾算好落 layout.json）
+pub mod layout;
 
 pub use bridge::{
-    CgBridge, CgError, CgProjectDto, CliStatus, QueryKind, index_usable, register_handlers,
+    CG_VERSION_PIN, CgBridge, CgError, CgProjectDto, CliStatus, QueryKind, cli_fix_hint,
+    index_usable, register_handlers,
 };

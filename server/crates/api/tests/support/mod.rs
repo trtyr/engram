@@ -101,6 +101,22 @@ pub async fn app() -> (Router, TestPg) {
     (routes::router(state), container)
 }
 
+/// 同 `app()`，但把**数据根**指到临时目录。
+///
+/// 涉及**落盘**的测试（codegraph 克隆目录、产物上传）必须用它——否则 `AppState::new` 的测试默认
+/// 数据根是 cwd 相对的 `./data`（甚至更糟：解析到真数据根），会污染本机真实数据。
+pub async fn app_with_data_dir(data_dir: impl Into<std::path::PathBuf>) -> (Router, TestPg) {
+    let container = start_pgvector().await.expect("测试库");
+    let url = connection_url(&container).await.unwrap();
+    let pool = connect_with_retry(&url).await.expect("连接");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
+    let state = AppState::new(pool)
+        .with_data_dir(data_dir)
+        .with_admin_password(Some("test-admin-pw".into()))
+        .with_master_key(Some("ab".repeat(32)));
+    (routes::router(state), container)
+}
+
 /// 管理员登录拿会话 token。
 pub async fn login_token(app: &Router) -> String {
     let resp = app
