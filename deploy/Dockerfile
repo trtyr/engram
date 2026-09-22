@@ -36,17 +36,11 @@ COPY server/ .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
-# crates.io 用 rsproxy 镜像（同上：稳定直连不依赖代理）
-RUN cat > /usr/local/cargo/config.toml <<'EOF'
-[source.crates-io]
-replace-with = 'rsproxy-sparse'
-[source.rsproxy-sparse]
-registry = "sparse+https://rsproxy.cn/index/"
-[registries.rsproxy]
-index = "sparse+https://rsproxy.cn/index/"
-[net]
-git-fetch-with-cli = true
-EOF
+# crates.io 镜像源（可换：--build-arg CARGO_MIRROR=sparse+https://mirrors.ustc.edu.cn/crates.io-index/）。
+# 注：`RUN cat > f <<EOF` 形式的 heredoc 在本项目实测会写出**空文件**（BuildKit 没把 heredoc
+# 喂给 cat），于是镜像源配置长期静默失效、构建直连 crates.io——改用单行 printf 并回显自证。
+ARG CARGO_MIRROR="sparse+https://rsproxy.cn/index/"
+RUN printf '[source.crates-io]\nreplace-with = "mirror"\n[source.mirror]\nregistry = "%s"\n[net]\ngit-fetch-with-cli = true\n' "$CARGO_MIRROR" > /usr/local/cargo/config.toml && cat /usr/local/cargo/config.toml
 # rust-embed 需要编译期可见 web/dist（哪怕占位）
 COPY --from=web-build /build/web/dist /web/dist
 COPY server/ .
