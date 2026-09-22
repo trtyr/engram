@@ -45,6 +45,8 @@ services:
       AGENT_MEMORY_ADMIN_PASSWORD: ${AGENT_MEMORY_ADMIN_PASSWORD:?AGENT_MEMORY_ADMIN_PASSWORD 未设置}
       AGENT_MEMORY_MASTER_KEY: ${AGENT_MEMORY_MASTER_KEY:?AGENT_MEMORY_MASTER_KEY 未设置}
       RUST_LOG: ${RUST_LOG:-info}
+      # MCP Host 白名单（远程部署必配：SDK 默认只放行 loopback，反代后会被 403）
+      AGENT_MEMORY_MCP_ALLOWED_HOSTS: ${AGENT_MEMORY_MCP_ALLOWED_HOSTS:-}
       # 运行时出网代理（LLM API / URL 摄取）：宿主 Clash TUN fake-ip 会污染容器直连。
       # ~/.engram/.env 里配 HTTPS_PROXY=http://host.docker.internal:<宿主代理端口>，常规环境留空即可。
       HTTP_PROXY: ${HTTPS_PROXY:-}
