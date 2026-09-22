@@ -43,8 +43,26 @@ pub struct ProjectLocationDto {
     pub path: String,
     pub purpose: Option<String>,
     pub sort_order: i32,
+    /// 指向资产台账条目的**真引用**（0058；NULL = 尚未归一到资产）。
+    /// 唯一事实源铁律：`host` 是显示用文本，身份以 `assets` 为准（见《项目与资产模型 · README》§2.4）。
+    pub asset_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct ProjectLinkDto {
+    pub id: Uuid,
+    /// 关联起点（`part_of` 语义下 = 子方）
+    pub from_project: Uuid,
+    pub from_name: String,
+    /// 关联终点（`part_of` 语义下 = 母方）
+    pub to_project: Uuid,
+    pub to_name: String,
+    /// `part_of` 隶属 / `related` 相关（值域事实源 = core 的 `PROJECT_LINK_KINDS`）
+    pub kind: String,
+    pub note: String,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]

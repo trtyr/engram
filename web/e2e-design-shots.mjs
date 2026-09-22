@@ -1,5 +1,5 @@
 /**
- * 设计审计截图：登录 + 七域页 + Wiki 全量渲染页 + 图谱。
+ * 设计审计截图：登录 + 各域页 + Wiki 全量渲染页 + 图谱。
  * 用法：E2E_BASE=http://127.0.0.1:19180 E2E_ADMIN_PW=design-audit-pw node e2e-design-shots.mjs
  */
 import { chromium } from '@playwright/test'

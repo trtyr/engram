@@ -7,13 +7,15 @@ use uuid::Uuid;
 
 use crate::PgPool;
 use crate::error::StoreResult;
-use crate::models::project::{ProjectDocDto, ProjectDto, ProjectFileDto, ProjectLocationDto};
+use crate::models::project::{
+    ProjectDocDto, ProjectDto, ProjectFileDto, ProjectLinkDto, ProjectLocationDto,
+};
 use chrono::{DateTime, Utc};
 
 const PROJECT_COLS: &str =
     "id, name, type, status, description, categories, frontmatter, created_at, updated_at";
 const LOCATION_COLS: &str =
-    "id, project_id, ip, host, os, path, purpose, sort_order, created_at, updated_at";
+    "id, project_id, ip, host, os, path, purpose, sort_order, asset_id, created_at, updated_at";
 const DOC_COLS: &str = "id, project_id, category, folder, title, content, frontmatter, version, created_at, updated_at";
 
 pub async fn insert_project(
@@ -161,10 +163,11 @@ pub async fn insert_location(
     os: &str,
     path: &str,
     purpose: Option<&str>,
+    asset_id: Option<Uuid>,
 ) -> StoreResult<()> {
     sqlx::query(
-        "INSERT INTO project_locations (id, project_id, ip, host, os, path, purpose) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "INSERT INTO project_locations (id, project_id, ip, host, os, path, purpose, asset_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(id)
     .bind(project_id)
@@ -173,11 +176,13 @@ pub async fn insert_location(
     .bind(os)
     .bind(path)
     .bind(purpose)
+    .bind(asset_id)
     .execute(pool)
     .await?;
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn update_location(
     pool: &PgPool,
     id: Uuid,
@@ -186,10 +191,11 @@ pub async fn update_location(
     os: &str,
     path: &str,
     purpose: Option<&str>,
+    asset_id: Option<Uuid>,
 ) -> StoreResult<u64> {
     let res = sqlx::query(
-        "UPDATE project_locations SET ip = $2, host = $3, os = $4, path = $5, purpose = $6, updated_at = now() \
-         WHERE id = $1",
+        "UPDATE project_locations SET ip = $2, host = $3, os = $4, path = $5, purpose = $6, \
+         asset_id = $7, updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(ip)
@@ -197,6 +203,7 @@ pub async fn update_location(
     .bind(os)
     .bind(path)
     .bind(purpose)
+    .bind(asset_id)
     .execute(pool)
     .await?;
     Ok(res.rows_affected())
@@ -454,4 +461,92 @@ pub async fn mark_doc_promoted(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+// ---------- 项目关联（project_links，0058） ----------
+
+/// 关联查询的公共 SELECT（两侧项目名一起带出，前端/CLI 免二次查询）。
+const LINK_SELECT: &str = "SELECT l.id, l.from_project, f.name AS from_name, l.to_project, \
+     t.name AS to_name, l.kind, l.note, l.created_at \
+     FROM project_links l \
+     JOIN projects f ON f.id = l.from_project \
+     JOIN projects t ON t.id = l.to_project";
+
+/// 建关联（同向同类重复由唯一索引兜底；调用方先查后写）。
+pub async fn insert_link(
+    pool: &PgPool,
+    id: Uuid,
+    from_project: Uuid,
+    to_project: Uuid,
+    kind: &str,
+    note: &str,
+) -> StoreResult<u64> {
+    let res = sqlx::query(
+        "INSERT INTO project_links (id, from_project, to_project, kind, note) \
+         VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (from_project, to_project, kind) DO NOTHING",
+    )
+    .bind(id)
+    .bind(from_project)
+    .bind(to_project)
+    .bind(kind)
+    .bind(note)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
+pub async fn get_link(pool: &PgPool, id: Uuid) -> StoreResult<Option<ProjectLinkDto>> {
+    sqlx::query_as::<_, ProjectLinkDto>(&format!("{LINK_SELECT} WHERE l.id = $1"))
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
+}
+
+/// 某项目的全部关联（**两向合并**：它作为起点或终点的都回，按 kind/项目名排序）。
+pub async fn list_links(pool: &PgPool, project_id: Uuid) -> StoreResult<Vec<ProjectLinkDto>> {
+    sqlx::query_as::<_, ProjectLinkDto>(&format!(
+        "{LINK_SELECT} WHERE l.from_project = $1 OR l.to_project = $1 \
+         ORDER BY l.kind, f.name, t.name"
+    ))
+    .bind(project_id)
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
+}
+
+/// 全量关联（关系图谱用——一次取全，前端不跑 N+1）。
+pub async fn list_all_links(pool: &PgPool) -> StoreResult<Vec<ProjectLinkDto>> {
+    sqlx::query_as::<_, ProjectLinkDto>(&format!("{LINK_SELECT} ORDER BY l.kind, f.name, t.name"))
+        .fetch_all(pool)
+        .await
+        .map_err(Into::into)
+}
+
+/// 同向同类是否已存在（冲突预检）。
+pub async fn find_link(
+    pool: &PgPool,
+    from_project: Uuid,
+    to_project: Uuid,
+    kind: &str,
+) -> StoreResult<Option<Uuid>> {
+    sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM project_links \
+          WHERE from_project = $1 AND to_project = $2 AND kind = $3 LIMIT 1",
+    )
+    .bind(from_project)
+    .bind(to_project)
+    .bind(kind)
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
+}
+
+pub async fn delete_link(pool: &PgPool, id: Uuid) -> StoreResult<u64> {
+    let res = sqlx::query("DELETE FROM project_links WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected())
 }

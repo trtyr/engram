@@ -1,5 +1,5 @@
 /**
- * 技能域（第六域）：Wiki 式双栏浏览——左侧技能目录（独立滚动）+ 右侧 Markdown 阅读与治理。
+ * 技能域：Wiki 式双栏浏览——左侧技能目录（独立滚动）+ 右侧 Markdown 阅读与治理。
  * 顶部菜单栏：搜索 / 状态筛选 / 导出 / 导入 / 新建。
  * folder 形态：skill = 文件夹（SKILL.md 本体 + scripts/ references/ 等附属文件），
  * 云部署语义——文件按路径寻址随库走，客户端取走后本地执行。
@@ -431,7 +431,7 @@ export default function Skills() {
   return (
     <div className={cn('flex flex-col gap-4', bounded && 'lg:h-[calc(100vh-3rem)]')}>
       <div className="shrink-0">
-        <PageHeader title="技能" desc="技能第六域：文件夹形态的可复用指令包（SKILL.md + 脚本/参考资料），MCP 八工具对 AI 开放。">
+        <PageHeader title="技能" desc="技能域：文件夹形态的可复用指令包（SKILL.md + 脚本/参考资料），MCP 工具面对 AI 开放。">
           <input
             className={`${inputCls} w-48`}
             placeholder="搜名称/描述…"

@@ -43,6 +43,33 @@ impl From<StoreError> for ProjectError {
 /// 项目状态枚举（英文存库，Web 层映射中文）：active/paused/done/abandoned。
 pub const PROJECT_STATUSES: &[&str] = &["active", "paused", "done", "abandoned"];
 
+/// 项目关联类型值域事实源（与迁移 0058 的 CHECK 一一对应；改值域 = 改此处 + 一条迁移）：
+/// `part_of` = from 隶属 to（子 → 母）；`related` = 相关（语义无向，存一行）。
+pub const PROJECT_LINK_KINDS: &[(&str, &str)] = &[("part_of", "隶属"), ("related", "相关")];
+
+/// 关联类型显示名。
+pub fn link_kind_label(kind: &str) -> String {
+    PROJECT_LINK_KINDS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .map(|(_, l)| (*l).to_string())
+        .unwrap_or_else(|| kind.to_string())
+}
+
+/// 关联类型值域是否合法。
+pub fn is_valid_link_kind(kind: &str) -> bool {
+    PROJECT_LINK_KINDS.iter().any(|(k, _)| *k == kind)
+}
+
+/// 支持值域文案（错误文案共用同一事实源）。
+pub fn supported_link_kinds() -> String {
+    PROJECT_LINK_KINDS
+        .iter()
+        .map(|(k, _)| *k)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// 类型（场景）显示名（Web 用）。
 pub fn type_label(type_: &str) -> String {
     match type_ {
@@ -56,10 +83,11 @@ pub fn type_label(type_: &str) -> String {
     }
 }
 
+pub use engram_storage::repo::asset::ProjectAssetRow;
 // ---------- DTO（持久化模型在 storage，此处 re-export 保持路径兼容） ----------
 
 pub use engram_storage::models::project::{
-    ProjectDocDto, ProjectDto, ProjectFileDto, ProjectLocationDto,
+    ProjectDocDto, ProjectDto, ProjectFileDto, ProjectLinkDto, ProjectLocationDto,
 };
 
 // ---------- Service ----------

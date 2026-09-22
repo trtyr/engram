@@ -1,5 +1,6 @@
 //! 路由注册与中间件装配。
 
+pub mod assets_api;
 pub mod auth_api;
 pub mod codegraph_api;
 pub mod health;
@@ -82,12 +83,16 @@ use utoipa::OpenApi;
         todos_api::list_todos, todos_api::create_todo, todos_api::get_todo,
         todos_api::update_todo, todos_api::delete_todo, todos_api::export_todos,
         project_api::list_types, project_api::create_project, project_api::list_projects,
+        project_api::graph,
         project_api::get_project, project_api::update_project, project_api::delete_project,
         project_api::batch_delete_projects,
         project_api::add_location, project_api::get_location, project_api::update_location, project_api::delete_location,
+        project_api::add_link, project_api::list_links, project_api::delete_link,
         project_api::add_doc, project_api::get_doc, project_api::update_doc, project_api::delete_doc,
         project_api::upsert_file, project_api::list_files, project_api::get_file, project_api::delete_file,
         project_api::list_file_versions, project_api::get_file_version,
+        assets_api::list_kinds, assets_api::list_assets, assets_api::create_asset,
+        assets_api::get_asset, assets_api::update_asset, assets_api::delete_asset,
         skills_api::list_skills, skills_api::create_skill, skills_api::import_skills,
         skills_api::export_skills, skills_api::get_skill, skills_api::update_skill,
         skills_api::delete_skill, skills_api::list_revisions, skills_api::restore_revision,
@@ -110,6 +115,7 @@ pub fn router(state: AppState) -> Router {
         .merge(wiki_routes())
         .merge(codegraph_routes())
         .merge(projects_routes())
+        .merge(assets_routes())
         .merge(skills_routes())
         .merge(todos_routes())
         .merge(migrate_routes());
@@ -371,10 +377,27 @@ fn codegraph_routes() -> Router<AppState> {
 }
 
 /// `/projects` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
+/// 资产台账域路由（2026-09-21 新增）：`types` 先于 `{id}`，避免被当作 id 解析。
+fn assets_routes() -> Router<AppState> {
+    Router::new()
+        .route("/assets/types", get(assets_api::list_kinds))
+        .route(
+            "/assets",
+            post(assets_api::create_asset).get(assets_api::list_assets),
+        )
+        .route(
+            "/assets/{id}",
+            get(assets_api::get_asset)
+                .put(assets_api::update_asset)
+                .delete(assets_api::delete_asset),
+        )
+}
+
 fn projects_routes() -> Router<AppState> {
     Router::new()
         // 项目记忆域：types 与 batch-delete 先于 {id}，避免被当作 id 解析
         .route("/projects/types", get(project_api::list_types))
+        .route("/projects/graph", get(project_api::graph))
         .route(
             "/projects/batch-delete",
             post(project_api::batch_delete_projects),
@@ -395,6 +418,15 @@ fn projects_routes() -> Router<AppState> {
             get(project_api::get_location)
                 .put(project_api::update_location)
                 .delete(project_api::delete_location),
+        )
+        // 项目关联（project_links，0058）：一层有向边（part_of 隶属 / related 相关）
+        .route(
+            "/projects/{id}/links",
+            post(project_api::add_link).get(project_api::list_links),
+        )
+        .route(
+            "/projects/{id}/links/{link_id}",
+            delete(project_api::delete_link),
         )
         .route(
             "/projects/{id}/files",

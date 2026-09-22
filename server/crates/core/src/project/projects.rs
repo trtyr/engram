@@ -68,6 +68,8 @@ impl ProjectService {
     pub async fn get_project(&self, id: Uuid) -> Result<ProjectDetailDto, ProjectError> {
         let project = self.get_project_bare(id).await?;
         let locations = repo::list_locations(&self.pool, id).await?;
+        let assets = engram_storage::repo::asset::assets_used_by_project(&self.pool, id).await?;
+        let links = repo::list_links(&self.pool, id).await?;
         let docs = repo::list_docs(&self.pool, id).await?;
         Ok(ProjectDetailDto {
             id: project.id,
@@ -80,6 +82,8 @@ impl ProjectService {
             created_at: project.created_at,
             updated_at: project.updated_at,
             locations,
+            assets,
+            links,
             docs,
         })
     }
@@ -165,6 +169,7 @@ impl ProjectService {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn add_location(
         &self,
         project_id: Uuid,
@@ -173,13 +178,19 @@ impl ProjectService {
         os: &str,
         path: &str,
         purpose: Option<&str>,
+        asset_id: Option<Uuid>,
     ) -> Result<ProjectLocationDto, ProjectError> {
         self.get_project_bare(project_id).await?;
+        self.ensure_asset_exists(asset_id).await?;
         let id = Uuid::now_v7();
-        repo::insert_location(&self.pool, id, project_id, ip, host, os, path, purpose).await?;
+        repo::insert_location(
+            &self.pool, id, project_id, ip, host, os, path, purpose, asset_id,
+        )
+        .await?;
         self.get_location(id).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_location(
         &self,
         id: Uuid,
@@ -188,14 +199,33 @@ impl ProjectService {
         os: &str,
         path: &str,
         purpose: Option<&str>,
+        asset_id: Option<Uuid>,
     ) -> Result<ProjectLocationDto, ProjectError> {
-        let updated = repo::update_location(&self.pool, id, ip, host, os, path, purpose).await?;
+        self.ensure_asset_exists(asset_id).await?;
+        let updated =
+            repo::update_location(&self.pool, id, ip, host, os, path, purpose, asset_id).await?;
         if updated == 0 {
             return Err(ProjectError::NotFound(format!(
                 "位置 {id} 不存在——先 project-get <项目> 看 locations 列表取 id"
             )));
         }
         self.get_location(id).await
+    }
+
+    /// 引用校验：给定的 asset_id 必须真实存在（唯一事实源铁律——引用不许悬空）。
+    async fn ensure_asset_exists(&self, asset_id: Option<Uuid>) -> Result<(), ProjectError> {
+        let Some(aid) = asset_id else {
+            return Ok(());
+        };
+        if engram_storage::repo::asset::get_asset(&self.pool, aid)
+            .await?
+            .is_none()
+        {
+            return Err(ProjectError::BadRequest(format!(
+                "资产 {aid} 不存在——先 assets list 定位台账条目（或跑 assets add 建档）"
+            )));
+        }
+        Ok(())
     }
 
     pub async fn delete_location(&self, id: Uuid) -> Result<bool, ProjectError> {
@@ -213,6 +243,80 @@ impl ProjectService {
             ProjectError::NotFound(format!(
                 "位置 {id} 不存在——先 project-get <项目> 看 locations 列表取 id"
             ))
+        })
+    }
+
+    // ---------- 项目关联（project_links，0058） ----------
+
+    /// 建关联：`part_of` = from 隶属 to（子 → 母）；`related` = 相关。
+    /// 自环与同向同类重复被拒（纪律写进表约束，服务层给可行动报错）。
+    pub async fn add_link(
+        &self,
+        from_project: Uuid,
+        to_project: Uuid,
+        kind: &str,
+        note: &str,
+    ) -> Result<ProjectLinkDto, ProjectError> {
+        if !is_valid_link_kind(kind) {
+            return Err(ProjectError::BadRequest(format!(
+                "未知关联类型: {kind}——支持 {}",
+                supported_link_kinds()
+            )));
+        }
+        if from_project == to_project {
+            return Err(ProjectError::BadRequest(
+                "不能把项目关联到自己（自环无意义）——隶属/相关都要指向另一个项目".into(),
+            ));
+        }
+        self.get_project_bare(from_project).await?;
+        self.get_project_bare(to_project).await?;
+        if repo::find_link(&self.pool, from_project, to_project, kind)
+            .await?
+            .is_some()
+        {
+            return Err(ProjectError::Conflict(format!(
+                "这两条工作线之间已有 {kind} 关联——先 links 看现状，要改就 unlink 再建"
+            )));
+        }
+        let id = Uuid::now_v7();
+        let n =
+            repo::insert_link(&self.pool, id, from_project, to_project, kind, note.trim()).await?;
+        if n == 0 {
+            return Err(ProjectError::Conflict("关联已存在（并发写入）".into()));
+        }
+        repo::get_link(&self.pool, id)
+            .await?
+            .ok_or_else(|| ProjectError::Storage("插入后读回失败".into()))
+    }
+
+    /// 解绑一条关联（按关联 id）。
+    pub async fn remove_link(&self, id: Uuid) -> Result<bool, ProjectError> {
+        let n = repo::delete_link(&self.pool, id).await?;
+        if n == 0 {
+            return Err(ProjectError::NotFound(format!(
+                "关联 {id} 不存在——先 links 看现状（id 从 links 或 project-get 的 links 取）"
+            )));
+        }
+        Ok(true)
+    }
+
+    /// 某项目的全部关联（两向合并；前端按 kind 分「隶属 / 下属 / 相关」）。
+    pub async fn list_links(&self, project_id: Uuid) -> Result<Vec<ProjectLinkDto>, ProjectError> {
+        self.get_project_bare(project_id).await?;
+        Ok(repo::list_links(&self.pool, project_id).await?)
+    }
+
+    /// 工作线 ↔ 资产关系图（一次取全：项目 + 资产 + 全量关联，前端不跑 N+1）。
+    pub async fn graph(&self) -> Result<ProjectGraphDto, ProjectError> {
+        let projects = repo::list_projects(&self.pool, None).await?;
+        let assets = engram_storage::repo::asset::list_assets(&self.pool, None, None).await?;
+        let links = repo::list_all_links(&self.pool).await?;
+        let usages = engram_storage::repo::asset::all_project_asset_pairs(&self.pool).await?;
+        Ok(ProjectGraphDto {
+            projects,
+            assets,
+            links,
+            usages,
         })
     }
 

@@ -699,8 +699,8 @@ async fn project_tools_admin_info_and_toggle() {
     assert_eq!(project_tools.len(), 1, "projects 域应为 1 个域工具");
     assert_eq!(
         project_tools[0]["actions"].as_array().unwrap().len(),
-        20,
-        "projects 域应展示 20 个操作（含 doc_patch + file 四动作）：{tools:?}"
+        23,
+        "projects 域应展示 23 个操作（含 doc_patch + file 四动作 + link/unlink/links 三动作）：{tools:?}"
     );
 
     // 停用 projects.delete：目录隐身 + call 拒绝

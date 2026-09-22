@@ -1,4 +1,4 @@
-/** 工单页（第七域·工单形态）：传统工单——列表 + 详情面板，结构化问题跟踪。
+/** 工单页（工单形态）：传统工单——列表 + 详情面板，结构化问题跟踪。
  *  与待办页（Todos.tsx）同表不同心智：severity、状态机流转、症状/复现/验收/解决记录。 */
 import { useEffect, useMemo, useState } from 'react'
 import { appConfirm } from '@/components/confirm'

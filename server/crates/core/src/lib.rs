@@ -5,6 +5,7 @@
 //! 本 crate 同时承载跨适配器（HTTP / MCP）共用的身份与装配类型（auth / state）。
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
+pub mod assets;
 pub mod auth;
 pub mod codegraph;
 pub mod memory;
@@ -18,6 +19,10 @@ pub mod unified;
 pub mod wiki;
 pub mod wiki_docs;
 
+pub use assets::{
+    ASSET_KINDS, AssetDetailDto, AssetDto, AssetError, AssetKindDto, AssetService, AssetUsageRow,
+    kind_label, supported_kinds,
+};
 pub use auth::{Principal, SCOPES};
 pub use codegraph::{CgBridge, CgError, CgProjectDto, QueryKind};
 pub use memory::{

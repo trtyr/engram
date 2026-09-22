@@ -21,12 +21,40 @@ vi.mock('@/lib/api', () => {
       {
         id: 'l1',
         project_id: 'p1',
+        ip: '100.74.134.42',
         host: 'MacBook Pro',
+        os: 'macOS',
         path: '~/Documents/Code/Rust/engram',
         purpose: '开发',
         sort_order: 0,
+        asset_id: 'a1',
         created_at: '2026-09-04T00:00:00Z',
         updated_at: '2026-09-04T00:00:00Z',
+      },
+    ],
+    assets: [
+      {
+        asset_id: 'a1',
+        kind: 'host',
+        name: 'MacBook Air M1',
+        ip: '100.74.134.42',
+        os: 'macOS 26.3',
+        location_id: 'l1',
+        host: 'MacBook Pro',
+        path: '~/Documents/Code/Rust/engram',
+        purpose: '开发',
+      },
+    ],
+    links: [
+      {
+        id: 'k1',
+        from_project: 'p1',
+        from_name: 'engram',
+        to_project: 'p9',
+        to_name: '母项目',
+        kind: 'part_of',
+        note: '属于大项目',
+        created_at: '2026-09-04T00:00:00Z',
       },
     ],
     docs: [
@@ -134,5 +162,19 @@ describe('ProjectDetail 详情页', () => {
     // 再点 → 重新展开
     fireEvent.click(screen.getAllByText(/📁 审计/)[0])
     await waitFor(() => expect(screen.getAllByText(/📁 wiki/).length).toBeGreaterThan(0))
+  })
+
+  it('关系区渲染用到的资产与隶属边', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByText('🔗 关系')).toBeTruthy())
+
+    // 用到的资产（台账名来自 assets 行，不是项目里重抄的 host 文本）
+    expect(screen.getByText('用到的资产（1）')).toBeTruthy()
+    expect(screen.getByText('MacBook Air M1')).toBeTruthy()
+
+    // 隶属（我属于）→ 指向母项目
+    expect(screen.getByText('隶属（我属于）（1）')).toBeTruthy()
+    expect(screen.getByText('母项目')).toBeTruthy()
+    expect(screen.getByText(/属于大项目/)).toBeTruthy()
   })
 })

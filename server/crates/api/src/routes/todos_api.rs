@@ -1,4 +1,4 @@
-//! 待办域端点（第七域）：不绑定项目的临时任务/灵感速记。
+//! 待办域端点：不绑定项目的临时任务/灵感速记。
 
 use axum::Json;
 use axum::extract::{Path, Query, State};

@@ -22,7 +22,7 @@ pub struct SearchAllParams {
 
 #[tool_router(router = search_all_router)]
 impl EngramMcpServer {
-    // ---------- 跨域全局检索（第七个常驻工具；不属单一 scope，按 key 实际 scope 分域执行） ----------
+    // ---------- 跨域全局检索（常驻工具之一；不属单一 scope，按 key 实际 scope 分域执行） ----------
 
     /// 全局检索（R 报告 P1-8）：一次查询并发打 memory/wiki/skills/todos/projects 五域，
     /// 各返回 top-k 摘要（含命中域标注）——「6 次单域搜索」压成 1 次。

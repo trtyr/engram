@@ -92,6 +92,16 @@ pub struct DocLineHitDto {
     pub doc_hit_count: i64,
 }
 
+/// 工作线 ↔ 资产关系图（前端图谱一次取全：节点 = 项目 + 资产，边 = 隶属/相关 + 用到）。
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct ProjectGraphDto {
+    pub projects: Vec<ProjectDto>,
+    pub assets: Vec<engram_storage::models::asset::AssetDto>,
+    pub links: Vec<ProjectLinkDto>,
+    /// 项目 → 资产的引用对（图谱的 `uses` 边）。
+    pub usages: Vec<engram_storage::repo::asset::ProjectAssetPair>,
+}
+
 /// 项目详情（本体 + 位置 + 文档），Web 详情页左树右内容用。
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ProjectDetailDto {
@@ -106,5 +116,9 @@ pub struct ProjectDetailDto {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub locations: Vec<ProjectLocationDto>,
+    /// 本项目用到的资产（项目 → 资产方向；由位置登记的真引用聚合）。
+    pub assets: Vec<ProjectAssetRow>,
+    /// 本项目的关系（**两向合并**：它作为起点或终点的关联都回；前端按 kind 分「隶属 / 下属 / 相关」）。
+    pub links: Vec<ProjectLinkDto>,
     pub docs: Vec<ProjectDocDto>,
 }

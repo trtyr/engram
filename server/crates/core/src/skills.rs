@@ -1,4 +1,4 @@
-//! 技能域服务（第六域）：AI 技能（SKILL.md 形态）的资产化管理。
+//! 技能域服务：AI 技能（SKILL.md 形态）的资产化管理。
 //!
 //! 技能 = slug 唯一 + frontmatter（name/description/tags）+ markdown 正文的可复用指令包。
 //! 语义字段每次变更前留版本快照（skill_revisions，保留最近 50 版），可回滚。

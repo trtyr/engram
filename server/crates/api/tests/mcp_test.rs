@@ -1,5 +1,5 @@
 //! MCP 端点集成测试：JSON-RPC 全链路（initialize → tools/list → tools/call）。
-//! 工具面为渐进式发现：六域各一个入口工具，域内操作经 action 分发
+//! 工具面为渐进式发现：九域各一个入口工具，域内操作经 action 分发
 //! （调用形态 {"name":"todos","arguments":{"action":"add",...}}）。
 //! 全链路：真 PG + 完整 router + Bearer 中间件 + rmcp Streamable HTTP 服务。
 
@@ -441,8 +441,8 @@ async fn mcp_admin_info_endpoint() {
     let tools = info["tools"].as_array().expect("工具清单");
     assert_eq!(
         tools.len(),
-        9,
-        "应为八个域工具（含 jobs/tickets）+ search_all：{}",
+        10,
+        "应为九个域工具（含 jobs/tickets/assets）+ search_all：{}",
         tools.len()
     );
     let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();

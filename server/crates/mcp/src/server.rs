@@ -40,6 +40,47 @@ impl EngramMcpServer {
         engram_core::project::ProjectService::new(self.state.pool.clone())
     }
 
+    /// 资产台账域服务（2026-09-21 新增）。
+    pub(crate) fn svc_asset(&self) -> engram_core::assets::AssetService {
+        engram_core::assets::AssetService::new(self.state.pool.clone())
+    }
+
+    /// 位置登记的资产引用解析（资产 id / 台账名 / 别名三态）+ 身份字段带出。
+    /// 传了 asset 且 ip/host/os 为空时用台账值补齐——唯一事实源：身份在台账，项目里只引用不重抄。
+    pub(crate) async fn resolve_location_asset(
+        &self,
+        asset: Option<&str>,
+        ip: Option<&str>,
+        host: Option<&str>,
+        os: Option<&str>,
+    ) -> Result<(Option<Uuid>, String, String, String), rmcp::ErrorData> {
+        let mut ip = ip.unwrap_or("").trim().to_string();
+        let mut host = host.unwrap_or("").trim().to_string();
+        let mut os = os.unwrap_or("").trim().to_string();
+        let Some(key) = asset.map(str::trim).filter(|s| !s.is_empty()) else {
+            return Ok((None, ip, host, os));
+        };
+        let a = match Uuid::parse_str(key) {
+            Ok(id) => self.svc_asset().get(id).await.map_err(from_asset)?.asset,
+            Err(_) => self
+                .svc_asset()
+                .get_by_name_or_alias(key)
+                .await
+                .map_err(from_asset)?,
+        };
+        if ip.is_empty() {
+            ip = a.ip.clone();
+        }
+        if host.is_empty() {
+            host = a.name.clone();
+        }
+        if os.is_empty() {
+            os = a.os.clone();
+        }
+        Ok((Some(a.id), ip, host, os))
+    }
+
+    /// skills service（域服务构造器集中在此，便于测试替换与依赖收口）。
     pub(crate) fn skills_svc(&self) -> engram_core::skills::SkillsService {
         engram_core::skills::SkillsService::new(self.state.pool.clone())
     }

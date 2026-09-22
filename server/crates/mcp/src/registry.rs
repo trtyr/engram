@@ -3,12 +3,13 @@
 use super::*;
 
 /// 工具名 → 所需 scope（域名前缀即 scope 名；管理台按同一前缀分域）。
-/// 渐进式发现后常规工具就是 6 个域工具 + 跨域 search_all（scope 检查在 list_tools/
+/// 渐进式发现后常规工具就是 9 个域工具 + 跨域 search_all（scope 检查在 list_tools/
 /// handler 内按"任一域"特判，不进本表；projects 的 scope 叫 project）；
 /// 下面的平铺分支保留兜底（防御未来再加非域工具）。
 pub(crate) fn tool_scope(name: &str) -> &'static str {
     match name {
         "projects" => "project",
+        "assets" => "assets", // 资产台账域：独立一等对象（2026-09-21 新增）
         "memory" => "memory",
         "skills" => "skills",
         "wiki" => "wiki",
@@ -33,8 +34,8 @@ pub(crate) fn flat_tool_scope(other: &str) -> &'static str {
 
 /// MCP instructions：initialize 时返回给调用方 AI 的顶层使用说明。
 pub(crate) const SERVER_INSTRUCTIONS: &str = "\
-Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：七个领域各一个入口工具\
-（memory 用户记忆 / projects 项目记忆 / skills 技能 / wiki 知识库 / todos 待办 / tickets 工单 / codegraph 代码图谱），\
+Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：九个领域各一个入口工具\
+（memory 用户记忆 / projects 工作线 / assets 资产台账 / skills 技能 / wiki 知识库 / todos 待办 / tickets 工单 / codegraph 代码图谱 / jobs 任务），\
 外加跨域全局检索 search_all（一次查询并发五域，各回 top-k 摘要）。\
 域工具调用形态 {\"action\":\"<操作名>\", ...参数}；每个工具的描述里带操作目录（常驻可见），\
 参数细节用 {\"action\":\"help\"} 一轮取回全域操作手册。

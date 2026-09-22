@@ -6,8 +6,8 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use engram_core::project::{
-    ProjectDetailDto, ProjectDocDto, ProjectDto, ProjectError, ProjectFileDto, ProjectLocationDto,
-    ProjectService, ProjectTypeDto,
+    ProjectDetailDto, ProjectDocDto, ProjectDto, ProjectError, ProjectFileDto, ProjectGraphDto,
+    ProjectLinkDto, ProjectLocationDto, ProjectService, ProjectTypeDto,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -95,6 +95,10 @@ pub struct LocationRequest {
     pub os: String,
     pub path: String,
     pub purpose: Option<String>,
+    /// 关联资产台账条目（0058 真引用）。PUT 是整体替换语义：不传 = 解除引用（与 MCP 的三态不同，
+    /// MCP 侧 `asset` 不传 = 不动、空串 = 解绑）。
+    #[serde(default)]
+    pub asset_id: Option<Uuid>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -117,6 +121,17 @@ pub struct ListProjectsParams {
 }
 
 // ---------- 项目 ----------
+
+/// 工作线 ↔ 资产关系图（图谱页一次取全：项目 + 资产 + 全量关联）。
+#[utoipa::path(get, path = "/projects/graph",
+    responses((status = 200, body = ProjectGraphDto)))]
+pub async fn graph(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<ProjectGraphDto>, ApiError> {
+    require_project(&principal)?;
+    Ok(Json(svc(&state).graph().await.map_err(pe)?))
+}
 
 /// 类型模板（Web 建项目时选择类型）。
 #[utoipa::path(get, path = "/projects/types", responses((status = 200, body = [ProjectTypeDto])))]
@@ -257,6 +272,7 @@ pub async fn add_location(
             &req.os,
             &req.path,
             req.purpose.as_deref(),
+            req.asset_id,
         )
         .await
         .map_err(pe)?;
@@ -298,6 +314,7 @@ pub async fn update_location(
             &req.os,
             &req.path,
             req.purpose.as_deref(),
+            req.asset_id,
         )
         .await
         .map_err(pe)?,
@@ -507,4 +524,67 @@ pub async fn get_file_version(
         created_at: cur.created_at,
         updated_at: cur.updated_at,
     }))
+}
+
+// ---------- 项目关联（project_links，0058） ----------
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct LinkRequest {
+    /// 终点项目（`part_of` 语义下 = 母方）
+    pub to_project: Uuid,
+    /// 关联类型：part_of 隶属 / related 相关
+    pub kind: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// 建关联（路径里的项目作为起点；`part_of` 语义下它是子方）。
+#[utoipa::path(post, path = "/projects/{id}/links",
+    request_body = LinkRequest,
+    responses((status = 201, body = ProjectLinkDto)))]
+pub async fn add_link(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<LinkRequest>,
+) -> Result<(StatusCode, Json<ProjectLinkDto>), ApiError> {
+    require_project(&principal)?;
+    let link = svc(&state)
+        .add_link(id, req.to_project, &req.kind, &req.note)
+        .await
+        .map_err(pe)?;
+    Ok((StatusCode::CREATED, Json(link)))
+}
+
+/// 列某项目的关系（两向合并：隶属 / 下属 / 相关）。
+#[utoipa::path(get, path = "/projects/{id}/links",
+    responses((status = 200, body = [ProjectLinkDto])))]
+pub async fn list_links(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<ProjectLinkDto>>, ApiError> {
+    require_project(&principal)?;
+    Ok(Json(svc(&state).list_links(id).await.map_err(pe)?))
+}
+
+/// 解绑一条关联。
+#[utoipa::path(delete, path = "/projects/{id}/links/{link_id}",
+    responses((status = 204, description = "已解绑")))]
+pub async fn delete_link(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((id, link_id)): Path<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    require_project(&principal)?;
+    let s = svc(&state);
+    // 归属校验：关联必须有一端是这个项目（与位置/文档同口径，不泄露他处 id）
+    let links = s.list_links(id).await.map_err(pe)?;
+    if !links.iter().any(|l| l.id == link_id) {
+        return Err(ApiError::NotFound(
+            "关联不存在或不属于该项目——先 GET /projects/{id}/links 取 id".into(),
+        ));
+    }
+    s.remove_link(link_id).await.map_err(pe)?;
+    Ok(StatusCode::NO_CONTENT)
 }

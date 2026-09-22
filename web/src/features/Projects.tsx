@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type ProjectDto, type ProjectTypeDto } from '@/lib/api'
+import ProjectAssetGraph from '@/components/ProjectAssetGraph'
 import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,8 @@ export default function Projects() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  /** 列表 / 图谱（共享引擎第四位住户：项目 ↔ 资产关系网） */
+  const [tab, setTab] = useState<'list' | 'graph'>('list')
 
   // 新建表单
   const [name, setName] = useState('')
@@ -151,9 +154,26 @@ export default function Projects() {
   if (err && !rows) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
 
+  // 场景分组（未筛选时）：同一场景的项目聚在一起，边界看得见（README §2.5「混杂病在展示层治」）
+  const grouped: [string, ProjectDto[]][] = (() => {
+    const order = types.map((t) => t.type)
+    const bucket = new Map<string, ProjectDto[]>()
+    for (const p of rows) {
+      const list = bucket.get(p.type) ?? []
+      list.push(p)
+      bucket.set(p.type, list)
+    }
+    const keys = [...bucket.keys()].sort((a, b) => {
+      const ia = order.indexOf(a)
+      const ib = order.indexOf(b)
+      return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib)
+    })
+    return keys.map((k) => [k, bucket.get(k) ?? []] as [string, ProjectDto[]])
+  })()
+
   return (
     <div className="space-y-5">
-      <PageHeader title="项目" desc="项目记忆第五域：跨会话的工作上下文——类型驱动分类，位置 + 文档 + 规划。">
+      <PageHeader title="项目" desc="项目记忆域：跨会话的工作上下文——类型驱动分类，位置 + 文档 + 规划。">
         <select className={selectCls} value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="">全部类型</option>
           {types.map((t) => (
@@ -164,7 +184,34 @@ export default function Projects() {
         </select>
       </PageHeader>
 
-      {/* 新建 + 全选（同一行） */}
+      {/* 列表 / 图谱 切换（图谱 = 共享引擎第四位住户：项目 ↔ 资产关系网） */}
+      <div className="flex items-center gap-1 border-b border-border">
+        {(
+          [
+            ['list', '列表'],
+            ['graph', '图谱'],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setTab(k)}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-sm transition-colors ${
+              tab === k
+                ? 'border-foreground font-medium text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'graph' ? (
+        <ProjectAssetGraph />
+      ) : (
+        <>
+          {/* 新建 + 全选（同一行） */}
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-3">
           {rows.length > 1 && (
@@ -227,8 +274,19 @@ export default function Projects() {
       {rows.length === 0 ? (
         <Empty text="暂无项目" />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2">
-          {rows.map((p) => (
+        <div className="space-y-6">
+          {grouped.map(([t, items]) => (
+            <section key={t} className="space-y-2">
+              <h2 className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <i
+                  className="size-2 rounded-full"
+                  style={{ background: TYPE_DOT[t] ?? '#6b7280' }}
+                  aria-hidden="true"
+                />
+                {types.find((x) => x.type === t)?.label ?? t}（{items.length}）
+              </h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                {items.map((p) => (
             <Card key={p.id} className="p-4">
               <div className="flex items-start gap-3">
                 <Checkbox
@@ -321,8 +379,13 @@ export default function Projects() {
                 </div>
               )}
             </Card>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
+      )}
+        </>
       )}
     </div>
   )

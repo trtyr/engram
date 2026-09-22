@@ -1,5 +1,5 @@
 /**
- * 应用壳：登录守卫 + 侧边栏七域导航。
+ * 应用壳：登录守卫 + 侧边栏导航。
  * Engram：近黑/近白侧栏，选中态整行反转；域页 lazy（路由级分割）。
  * 侧栏四件套（frontend-polish R2）：收缩（localStorage）/ 分区 / 状态徽章 / 全局检索面板。
  */
@@ -8,6 +8,7 @@ import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
 import {
   Brain,
   FolderKanban,
+  HardDrive,
   LayoutDashboard,
   ListChecks,
   ListTodo,
@@ -41,6 +42,7 @@ const CodeGraph = lazy(() => import('@/features/CodeGraph'))
 const CodeGraphImport = lazy(() => import('@/features/CodeGraphImport'))
 const Projects = lazy(() => import('@/features/Projects'))
 const ProjectDetail = lazy(() => import('@/features/ProjectDetail'))
+const Assets = lazy(() => import('@/features/Assets'))
 const Skills = lazy(() => import('@/features/Skills'))
 const Todos = lazy(() => import('@/features/Todos'))
 const Tickets = lazy(() => import('@/features/Tickets'))
@@ -72,6 +74,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
       { to: '/wiki', label: 'Wiki', icon: Network },
       { to: '/codegraph', label: '代码图谱', icon: Waypoints },
       { to: '/projects', label: '项目', icon: FolderKanban },
+      { to: '/assets', label: '资产', icon: HardDrive },
       { to: '/skills', label: '技能', icon: Puzzle },
       { to: '/todos', label: '待办', icon: ListTodo },
       { to: '/tickets', label: '工单', icon: Ticket },
@@ -88,7 +91,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
   },
 ]
 
-/** 已登录的主壳：桌面侧边栏（可收缩）/ 移动端顶部导航条 + 七域路由。 */
+/** 已登录的主壳：桌面侧边栏（可收缩）/ 移动端顶部导航条 + 工作区路由。 */
 function Shell({ onLogout }: { onLogout: () => void }) {
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -330,6 +333,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/codegraph/import" element={<CodeGraphImport />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetail />} />
+              <Route path="/assets" element={<Assets />} />
               <Route path="/skills" element={<Skills />} />
               <Route path="/todos" element={<Todos />} />
               <Route path="/tickets" element={<Tickets />} />

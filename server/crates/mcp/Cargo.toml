@@ -1,6 +1,6 @@
 [package]
 name = "engram-mcp"
-description = "MCP 适配器：四域工具面（用户记忆/项目记忆/技能/Wiki），与 HTTP API 平级"
+description = "MCP 适配器：九域工具面（memory/projects/assets/skills/wiki/todos/tickets/codegraph/jobs），与 HTTP API 平级"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

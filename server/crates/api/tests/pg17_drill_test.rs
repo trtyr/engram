@@ -26,11 +26,11 @@ async fn pg17_full_migrations_and_schema() {
         .await
         .expect("PG17 全量迁移应通过");
 
-    // 迁移版本 = 最新（0057）
+    // 迁移版本 = 最新（0058：资产域 + 位置真引用 + 项目关联）
     let version = engram_storage::current_version(&pool)
         .await
         .expect("读迁移版本");
-    assert_eq!(version, Some(57), "PG17 迁移应推进到 0057");
+    assert_eq!(version, Some(58), "PG17 迁移应推进到 0058");
 
     // 关键表抽查：各域表 + 公网加固 / 收录哲学线新表。
     // 例外：wiki_libraries 的 main 库由 0046 迁移幂等补建——干净库迁移后恰 1 行是正确行为。

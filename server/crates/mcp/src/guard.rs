@@ -29,6 +29,16 @@ pub(crate) fn from_project(e: engram_core::project::ProjectError) -> rmcp::Error
     }
 }
 
+pub(crate) fn from_asset(e: engram_core::assets::AssetError) -> rmcp::ErrorData {
+    use engram_core::assets::AssetError;
+    match e {
+        AssetError::NotFound(m) => rmcp::ErrorData::resource_not_found(m, None),
+        AssetError::Conflict(m) => rmcp::ErrorData::new(ErrorCode::INVALID_REQUEST, m, None),
+        AssetError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
+        AssetError::Storage(m) => rmcp::ErrorData::internal_error(m, None),
+    }
+}
+
 pub(crate) fn require_memory(principal: &Principal) -> Result<(), rmcp::ErrorData> {
     match principal.domain_access("memory") {
         DomainAccess::None => Err(mcp_err(
@@ -70,6 +80,17 @@ pub(crate) fn require_erase(principal: &Principal) -> Result<(), rmcp::ErrorData
             ErrorCode::INVALID_REQUEST,
             "擦除需要 erase scope（不可逆操作，与读写分权）——void 模式无需 erase",
         ))
+    }
+}
+
+/// 资产台账域（2026-09-21 新增）：scope 名同域名，叫 assets。
+pub(crate) fn require_assets(principal: &Principal) -> Result<(), rmcp::ErrorData> {
+    match principal.domain_access("assets") {
+        DomainAccess::None => Err(mcp_err(
+            ErrorCode::INVALID_REQUEST,
+            "缺少 assets scope——请用带 assets scope 的 amk_ key 连接 MCP",
+        )),
+        _ => Ok(()),
     }
 }
 

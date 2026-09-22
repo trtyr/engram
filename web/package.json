@@ -9,8 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest run",
-    "gen:api": "openapi-typescript ${OPENAPI_URL:-http://127.0.0.1:8090/openapi.json} -o src/lib/api-schema.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

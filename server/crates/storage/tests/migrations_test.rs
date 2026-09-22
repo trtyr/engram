@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 57 份迁移：0057 = 项目场景扩类 dev/ops/research/study/life/create）
+    // 版本可查（当前 58 份迁移：0058 = 资产域 assets + 位置真引用 + 项目关联 project_links）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(57), "0001-0057 迁移应已应用");
+    assert_eq!(version, Some(58), "0001-0058 迁移应已应用");
 
     // 0056（代码图谱入口收敛）：dest_mode 列形态——NOT NULL + 落库默认 default + 二值 CHECK。
     // 历史行回填 custom 是迁移的语义保证（生产库实测见《代码图谱入口收敛 · roadmap》）；
@@ -64,6 +64,107 @@ async fn migrations_apply_on_clean_pgvector() {
     .execute(&pool)
     .await;
     assert!(bad_type.is_err(), "越界 type 应被 CHECK 拒绝");
+
+    // 0058（资产域）：assets 表形态 + project_locations.asset_id 真引用（RESTRICT 而非 CASCADE）
+    let def: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'assets_kind_check'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("assets_kind_check 应存在");
+    for k in ["host", "cloud", "domain", "account", "device", "other"] {
+        assert!(
+            def.contains(&format!("'{k}'")),
+            "资产类型值域应含 {k}：{def}"
+        );
+    }
+    let ok_asset = sqlx::query(
+        "INSERT INTO assets (id, kind, name, aliases, ip, os) \
+         VALUES (gen_random_uuid(), 'host', 'zz-asset', ARRAY['zz-alias'], '10.0.0.1', 'testOS')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(ok_asset.is_ok(), "合法资产应可写入");
+    let dup_asset = sqlx::query(
+        "INSERT INTO assets (id, kind, name) VALUES (gen_random_uuid(), 'host', 'zz-asset')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(dup_asset.is_err(), "同名资产应撞唯一索引");
+    let bad_kind = sqlx::query(
+        "INSERT INTO assets (id, kind, name) VALUES (gen_random_uuid(), 'bogus', 'zz-bad')",
+    )
+    .execute(&pool)
+    .await;
+    assert!(bad_kind.is_err(), "越界 asset kind 应被 CHECK 拒绝");
+
+    // 引用列：RESTRICT——删还被项目引用的资产必须显式解绑，不许静默断链
+    let (fk_def, del_action): (String, String) = sqlx::query_as(
+        "SELECT pg_get_constraintdef(c.oid), c.confdeltype::text FROM pg_constraint c \
+          WHERE c.conrelid = 'project_locations'::regclass AND c.contype = 'f' \
+            AND pg_get_constraintdef(c.oid) LIKE '%assets%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("project_locations → assets 外键应存在");
+    assert!(fk_def.contains("asset_id"), "{fk_def}");
+    assert_eq!(del_action, "r", "删除动作应为 RESTRICT（confdeltype='r'）");
+
+    // 0058（项目关联）：project_links 形态——kind 二值 CHECK、自环被拒、同向同类唯一
+    let link_def: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'project_links_kind_check'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("project_links_kind_check 应存在");
+    for k in ["part_of", "related"] {
+        assert!(
+            link_def.contains(&format!("'{k}'")),
+            "关联值域应含 {k}：{link_def}"
+        );
+    }
+    sqlx::query("DELETE FROM projects WHERE name IN ('zz-link-a', 'zz-link-b')")
+        .execute(&pool)
+        .await
+        .expect("清残留项目");
+    sqlx::query(
+        "INSERT INTO projects (id, name, type) \
+         VALUES (gen_random_uuid(), 'zz-link-a', 'dev'), (gen_random_uuid(), 'zz-link-b', 'dev')",
+    )
+    .execute(&pool)
+    .await
+    .expect("造两条关联测试项目");
+    let link_ok = sqlx::query(
+        "INSERT INTO project_links (id, from_project, to_project, kind) \
+         SELECT gen_random_uuid(), a.id, b.id, 'part_of' FROM projects a, projects b \
+          WHERE a.name = 'zz-link-a' AND b.name = 'zz-link-b'",
+    )
+    .execute(&pool)
+    .await;
+    assert!(link_ok.is_ok(), "合法关联应可写入");
+    let link_dup = sqlx::query(
+        "INSERT INTO project_links (id, from_project, to_project, kind) \
+         SELECT gen_random_uuid(), a.id, b.id, 'part_of' FROM projects a, projects b \
+          WHERE a.name = 'zz-link-a' AND b.name = 'zz-link-b'",
+    )
+    .execute(&pool)
+    .await;
+    assert!(link_dup.is_err(), "同向同类重复应撞唯一索引");
+    let link_self = sqlx::query(
+        "INSERT INTO project_links (id, from_project, to_project, kind) \
+         SELECT gen_random_uuid(), a.id, a.id, 'part_of' FROM projects a WHERE a.name = 'zz-link-a'",
+    )
+    .execute(&pool)
+    .await;
+    assert!(link_self.is_err(), "自环应被 CHECK 拒绝");
+    let link_bad_kind = sqlx::query(
+        "INSERT INTO project_links (id, from_project, to_project, kind) \
+         SELECT gen_random_uuid(), a.id, b.id, 'bogus' FROM projects a, projects b \
+          WHERE a.name = 'zz-link-a' AND b.name = 'zz-link-b'",
+    )
+    .execute(&pool)
+    .await;
+    assert!(link_bad_kind.is_err(), "越界 kind 应被 CHECK 拒绝");
 
     // pgvector 扩展真实可用
     let v: String = sqlx::query_scalar("SELECT '[1,2,3]'::vector::text")

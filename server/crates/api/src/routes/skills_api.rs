@@ -1,4 +1,4 @@
-//! 技能域端点（skills scope，第六域）。
+//! 技能域端点（skills scope）。
 //!
 //! 技能 = SKILL.md 形态的 AI 指令资产：slug 唯一、版本快照、批量导入、全量导出。
 

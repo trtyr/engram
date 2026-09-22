@@ -1698,6 +1698,9 @@ async fn openapi_snapshot() {
     assert_eq!(
         paths,
         vec![
+            "/assets",
+            "/assets/types",
+            "/assets/{id}",
             "/auth/account",
             "/auth/init",
             "/auth/login",
@@ -1768,6 +1771,7 @@ async fn openapi_snapshot() {
             "/migrate/sync",
             "/projects",
             "/projects/batch-delete",
+            "/projects/graph",
             "/projects/types",
             "/projects/{id}",
             "/projects/{id}/docs",
@@ -1776,6 +1780,8 @@ async fn openapi_snapshot() {
             "/projects/{id}/files/{name}",
             "/projects/{id}/files/{name}/versions",
             "/projects/{id}/files/{name}/versions/{version}",
+            "/projects/{id}/links",
+            "/projects/{id}/links/{link_id}",
             "/projects/{id}/locations",
             "/projects/{id}/locations/{loc_id}",
             "/ready",

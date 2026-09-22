@@ -29,12 +29,15 @@ export default defineConfig({
   // 开发时后端在 :8080（compose 或 cargo run）；实际端口用 VITE_PROXY_TARGET 覆盖
   server: {
     proxy: Object.fromEntries(
-      ['/api', '/auth', '/jobs', '/memory', '/mcp', '/wiki', '/codegraph', '/settings', '/llm', '/skills', '/projects', '/search', '/todos', '/todos/export'].map(
+      ['/api', '/auth', '/jobs', '/memory', '/mcp', '/wiki', '/codegraph', '/settings', '/llm', '/skills', '/projects', '/assets', '/search', '/todos', '/todos/export'].map(
         (p) => [p, process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080'],
       ),
     ),
   },
   build: {
+    // ⚠️ 产物目录**不能**用默认的 `assets`：/assets 已是资产台账 API 前缀（2026-09-21 新增的资产域），
+    // 两者相撞会让静态 chunk（/assets/index-*.js）被 API 路由截住 → 整个 SPA 401（2026-09-22 活体抓到）。
+    assetsDir: 'static',
     // mermaid 主入口（~662kB）是发布产物固有体积，仅在渲染 mermaid 图时按需加载
     // （各图表类型已自动分 chunk；域页已路由级 lazy——初始 bundle ~280kB）。故放宽阈值。
     chunkSizeWarningLimit: 800,

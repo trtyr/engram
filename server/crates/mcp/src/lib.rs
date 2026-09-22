@@ -1,9 +1,9 @@
-//! MCP（Model Context Protocol）适配器：渐进式发现工具面（六域 + 跨域 search_all）。
+//! MCP（Model Context Protocol）适配器：渐进式发现工具面（九域 + 跨域 search_all）。
 //!
 //! 官方 Rust SDK（rmcp）Streamable HTTP 传输，由 api 装配到 engram-server 的 `/mcp` 端点。
 //! 与 HTTP 路由平级的第二适配器：同一套 core 服务与 scope 分权，独立成 crate。
-//! 渐进式发现（progressive disclosure）：六个领域各一个入口工具
-//! （memory/projects/skills/wiki/todos/codegraph），域内操作经 action 分发
+//! 渐进式发现（progressive disclosure）：九个领域各一个入口工具
+//! （memory/projects/assets/skills/wiki/todos/tickets/codegraph/jobs），域内操作经 action 分发
 //! （历史 53 个扁平工具全部收编，R 测试报告后又扩至 60+ 个：remember/doc_patch/
 //! versions/restore/sources 等；action 表在 dispatch 模块，三级发现同源）。
 //! 各域工具在调用时检查各自 scope。鉴权复用 Bearer 中间件（amk_ key / ams_ 会话）：
@@ -13,6 +13,7 @@
 //! key 吊销即刻生效（每个请求独立认证，会话保活也不能豁免）。
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
+mod assets;
 mod codegraph;
 pub mod dispatch;
 mod guard;
@@ -40,6 +41,7 @@ mod wiki_ops;
 
 // 架构治理 2026-09-20：lib.rs 只留 crate 装配（类型/构造/router 合并/再导出），
 // 各域工具面在各自模块内（`#[tool_router(router = <mod>_router)]` + `routes_<mod>()`）。
+pub(crate) use assets::*;
 pub(crate) use codegraph::*;
 pub(crate) use guard::*;
 pub(crate) use memory::*;
@@ -90,6 +92,7 @@ impl EngramMcpServer {
         tool_router.merge(crate::skills::routes_skills());
         tool_router.merge(crate::wiki_ops::routes_wiki_ops());
         tool_router.merge(crate::projects::routes_projects());
+        tool_router.merge(crate::assets::routes_assets());
         tool_router.merge(crate::codegraph::routes_codegraph());
         tool_router.merge(crate::todos::routes_todos());
         tool_router.merge(crate::memory::routes_memory());

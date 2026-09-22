@@ -10,17 +10,26 @@ pub struct ProjectLocationAddParams {
     /// 定位项目：项目名
     #[schemars(description = "项目名（唯一）。与 project_id 至少给一个。")]
     pub project_name: Option<String>,
+    /// 关联资产（台账条目：id / 名称 / 别名三态）
+    #[schemars(
+        description = "可选但**推荐**：关联的资产（资产 id / 台账名 / 别名三态，先 assets list 看台账）。填了它就是「真引用」——host/ip/os 不填会自动从资产带出（身份以台账为准，别在项目里重抄一遍）。"
+    )]
+    pub asset: Option<String>,
     /// 主机 IP（内网/公网/IPv6 均可，仅登记不校验格式）
     #[schemars(
-        description = "主机 IP（内网/公网/IPv6 均可，仅登记不校验格式；本机可填 127.0.0.1）。"
+        description = "主机 IP（内网/公网/IPv6 均可，仅登记不校验格式；本机可填 127.0.0.1）。给了 asset 且这里为空时自动取资产值。"
     )]
-    pub ip: String,
+    pub ip: Option<String>,
     /// 主机名
-    #[schemars(description = "主机名（如 MacBook Pro / tencent-beijing）。")]
-    pub host: String,
+    #[schemars(
+        description = "主机名（如 MacBook Pro / tencent-beijing）。给了 asset 且这里为空时自动取资产台账名。"
+    )]
+    pub host: Option<String>,
     /// 操作系统
-    #[schemars(description = "操作系统（macOS / Ubuntu / Windows…）。")]
-    pub os: String,
+    #[schemars(
+        description = "操作系统（macOS / Ubuntu / Windows…）。给了 asset 且这里为空时自动取资产值。"
+    )]
+    pub os: Option<String>,
     /// 项目在主机上的文件夹路径
     #[schemars(description = "项目在该主机上的文件夹路径（纯登记，服务端不会读取该路径）。")]
     pub path: String,
@@ -49,6 +58,11 @@ pub struct ProjectLocationUpdateParams {
     /// 新用途
     #[schemars(description = "可选：新用途。不传不改。")]
     pub purpose: Option<String>,
+    /// 改关联资产
+    #[schemars(
+        description = "可选：改关联资产（资产 id / 台账名 / 别名；传空字符串 `\"\"` = 显式解绑为纯文本位置）。不传则不动现有引用。"
+    )]
+    pub asset: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -75,15 +89,24 @@ impl EngramMcpServer {
         let id = self
             .resolve_project(&lp.project_id, &lp.project_name)
             .await?;
+        let (asset_id, ip, host, os) = self
+            .resolve_location_asset(
+                lp.asset.as_deref(),
+                lp.ip.as_deref(),
+                lp.host.as_deref(),
+                lp.os.as_deref(),
+            )
+            .await?;
         let loc = self
             .svc_project()
             .add_location(
                 id,
-                &lp.ip,
-                &lp.host,
-                &lp.os,
+                &ip,
+                &host,
+                &os,
                 &lp.path,
                 lp.purpose.as_deref(),
+                asset_id,
             )
             .await
             .map_err(from_project)?;
@@ -108,6 +131,16 @@ impl EngramMcpServer {
             .get_location(id)
             .await
             .map_err(from_project)?;
+        // asset 三态：给值 = 改引用；空串 = 显式解绑；不传 = 不动现有引用
+        let asset_id = match lp.asset.as_deref() {
+            Some("") => None,
+            Some(k) => {
+                self.resolve_location_asset(Some(k), None, None, None)
+                    .await?
+                    .0
+            }
+            None => current.asset_id,
+        };
         let loc = self
             .svc_project()
             .update_location(
@@ -117,6 +150,7 @@ impl EngramMcpServer {
                 &lp.os.unwrap_or(current.os),
                 &lp.path.unwrap_or(current.path),
                 lp.purpose.or(current.purpose).as_deref(),
+                asset_id,
             )
             .await
             .map_err(from_project)?;

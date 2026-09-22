@@ -73,40 +73,11 @@ jobs:
       - run: pnpm test
       - run: pnpm run build
 
-  api-types:
-    name: OpenAPI 类型同步检查
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.20.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: server
-      # 从代码提取 openapi.json（不起服务）：编译一个 dump 工具
-      - name: dump openapi
-        working-directory: server
-        run: |
-          mkdir -p ../web/dist
-          cargo run -q -p engram-api --bin openapi-dump > /tmp/openapi.json
-          python3 -c "import json; d=json.load(open('/tmp/openapi.json')); print('paths:', len(d['paths']))"
-      - name: generate types + drift check
-        working-directory: web
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm exec openapi-typescript /tmp/openapi.json -o src/lib/api-schema.ts
-          if ! git diff --quiet -- src/lib/api-schema.ts; then
-            echo "::error::api-schema.ts 与后端 OpenAPI 漂移——运行 pnpm run gen:api 后提交"
-            git diff -- src/lib/api-schema.ts | head -40
-            exit 1
-          fi
+
+  # 注（2026-09-22）：原 `api-types` job（openapi-dump → openapi-typescript 生成
+  # web/src/lib/api-schema.ts → git diff 漂移检查）已撤除——该生成物是死文件（无任何 import，
+  # 前端类型一律手写在 web/src/lib/api.ts）。OpenAPI 契约守护保留在后端 job：
+  # `server/crates/api/tests/auth_test.rs::openapi_snapshot` 逐条断言 144 条 path（跑在 test 里）。
 
   docker:
     name: Docker 镜像构建

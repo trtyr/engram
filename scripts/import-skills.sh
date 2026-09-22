@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 批量导入技能目录到 Engram 技能域（第六域）。
+# 批量导入技能目录到 Engram 技能域。
 #
 # 用法：
 #   ./scripts/import-skills.sh <skills 目录> <API base> <Bearer token> [extra tag]

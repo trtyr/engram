@@ -357,7 +357,7 @@ export interface CgCliStatus {
   /** R5 可行动提示（不可用/版本不符时为「装 + 锁版」命令；正常为 null） */
   hint: string | null
 }
-/** 待办（第七域，GET /todos） */
+/** 待办（GET /todos） */
 export interface Todo {
   id: string
   /** 全局单调短号（显示为 EN-<n>，人类可读引用） */
@@ -496,7 +496,7 @@ export interface WikiSearchResponse {
   pages: WikiPage[]
 }
 
-// ---- 项目记忆域（第五域） ----
+// ---- 项目记忆域 ----
 export interface ProjectDto {
   id: string
   name: string
@@ -517,6 +517,8 @@ export interface ProjectLocationDto {
   path: string
   purpose: string | null
   sort_order: number
+  /** 指向资产台账条目的**真引用**（0058；null = 尚未归一）。身份以 assets 台账为准。 */
+  asset_id: string | null
   created_at: string
   updated_at: string
 }
@@ -534,7 +536,76 @@ export interface ProjectDocDto {
 }
 export interface ProjectDetailDto extends ProjectDto {
   locations: ProjectLocationDto[]
+  /** 本项目用到的资产（项目 → 资产方向，由位置真引用聚合）。 */
+  assets: ProjectAssetRow[]
+  /** 本项目的关系（两向合并；前端按 kind 分「隶属 / 下属 / 相关」）。 */
+  links: ProjectLinkDto[]
   docs: ProjectDocDto[]
+}
+/** 项目用到的资产（位置真引用带出的台账字段）。 */
+export interface ProjectAssetRow {
+  asset_id: string
+  kind: string
+  name: string
+  ip: string
+  os: string
+  location_id: string
+  host: string
+  path: string
+  purpose: string
+}
+/** 项目关联：part_of = from 隶属 to（子 → 母）；related = 相关（无向语义）。 */
+export interface ProjectLinkDto {
+  id: string
+  from_project: string
+  from_name: string
+  to_project: string
+  to_name: string
+  kind: string
+  note: string
+  created_at: string
+}
+
+// ---- 资产台账域（2026-09-21 新增） ----
+
+export interface AssetKindDto {
+  kind: string
+  label: string
+}
+export interface AssetDto {
+  id: string
+  /** host 主机 / cloud 云实例 / domain 域名 / account 账号 / device 设备 / other 其他 */
+  kind: string
+  name: string
+  /** 别名（主机名 / ssh 别名 / 历史写法）——引用匹配与历史归一的依据 */
+  aliases: string[]
+  ip: string
+  os: string
+  note: string
+  fields: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+/** 资产 → 项目反查行（谁在用它）。 */
+export interface AssetUsageRow {
+  location_id: string
+  project_id: string
+  project_name: string
+  host: string
+  path: string
+  purpose: string
+}
+export interface AssetDetailDto extends AssetDto {
+  used_by: AssetUsageRow[]
+}
+
+/** 工作线 ↔ 资产关系图（一次取全；节点 = 项目 + 资产，边 = 隶属/相关 + 用到）。 */
+export interface ProjectGraphDto {
+  projects: ProjectDto[]
+  assets: AssetDto[]
+  links: ProjectLinkDto[]
+  /** 项目 → 资产引用对（图谱的 uses 边）。 */
+  usages: { project_id: string; asset_id: string }[]
 }
 /** 项目文件（非 markdown 制品：架构图 HTML/配置等；0045）。 */
 export interface ProjectFileDto {
@@ -555,7 +626,7 @@ export interface ProjectTypeDto {
   default_categories: string[]
 }
 
-// ---- 技能域（第六域） ----
+// ---- 技能域 ----
 
 /** 技能附属文件索引条目（folder 形态：scripts/ / references/…，不含内容） */
 export interface SkillFileInfoDto {

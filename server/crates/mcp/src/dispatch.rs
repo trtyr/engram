@@ -90,6 +90,9 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "location_add", false, "登记项目在主机上的位置（多主机登记制）" => crate::ProjectLocationAddParams;
             "location_update", false, "编辑已登记的位置" => crate::ProjectLocationUpdateParams;
             "location_delete", true, "删除一条位置登记" => crate::ProjectLocationDeleteParams;
+            "link", false, "建工作线关联（part_of 隶属 / related 相关；自环与同向同类重复被拒）" => crate::ProjectLinkAddParams;
+            "unlink", true, "解绑一条工作线关联（按 link_id）" => crate::ProjectLinkRefParams;
+            "links", false, "列某项目的关系（两向合并：隶属 / 下属 / 相关）" => crate::ProjectLinksParams;
             "doc_add", false, "项目下新增分类文档（Markdown）" => crate::ProjectDocAddParams;
             "doc_get", false, "读项目文档（全文或按行区间精读）" => crate::ProjectDocGetParams;
             "doc_search", false, "grep 式跨文档按行检索（需 project_id/project_name 定位项目，先 list；定位到哪篇哪行）" => crate::ProjectDocSearchParams;
@@ -100,6 +103,14 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "file_get", false, "读项目文件（当前或指定版本；支持 project_id/project_name 定位）" => crate::ProjectFileRefParams;
             "file_list", false, "列出项目文件（name/mime/version/大小；不含内容）" => crate::ProjectFileListParams;
             "file_delete", true, "删除项目文件（历史快照级联删，不可逆）" => crate::ProjectFileDeleteParams
+        ],
+        "assets" => action_docs![
+            "kinds", false, "列出资产类型（建档选 kind 用）：host=主机 / cloud=云实例 / domain=域名 / account=账号 / device=设备 / other=其他" => crate::AssetKindsParams;
+            "list", false, "列出资产台账（可按类型过滤 / 按 名称·别名·IP 检索）" => crate::AssetListParams;
+            "get", false, "读资产详情（本体 + 被哪些项目位置引用）" => crate::AssetGetParams;
+            "add", false, "建档一台资产（主机/云实例/域名/账号/设备；别名收历史写法，引用匹配也认它）" => crate::AssetAddParams;
+            "update", false, "编辑资产（补丁式；aliases 传了就整体替换）" => crate::AssetUpdateParams;
+            "delete", true, "删除资产（被项目位置引用的会被拒绝——先解绑，不可逆）" => crate::AssetDeleteParams
         ],
         "skills" => action_docs![
             "list", false, "列出技能（q/tag/enabled 过滤，不含正文；kind=script 的条目带 local_path 指针）" => crate::SkillsListParams;
@@ -187,6 +198,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
 pub const DOMAIN_TOOLS: &[&str] = &[
     "memory",
     "projects",
+    "assets",
     "skills",
     "wiki",
     "todos",
@@ -262,33 +274,39 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "location_add"
                 | "location_update"
                 | "location_delete"
+                | "link"
+                | "unlink"
                 | "doc_add"
                 | "doc_patch"
                 | "doc_update"
                 | "doc_delete"
                 | "file_put"
                 | "file_delete"
-        ) | (
-            "skills",
-            "create" | "update" | "import" | "restore" | "delete" | "file_put"
-        ) | (
-            "wiki",
-            "write_page"
-                | "ingest"
-                | "archive_query"
-                | "restore_version"
-                | "delete_source"
-                | "lint_deep"
-                | "document_add"
-                | "review_resolve"
-                | "archive"
-                | "promote"
-                | "delete_page"
-                | "merge"
-        ) | (
-            "todos",
-            "add" | "link" | "unlink" | "done" | "update" | "delete"
-        ) | ("tickets", "add" | "link" | "unlink" | "update" | "delete")
+        ) | ("assets", "add" | "update" | "delete")
+            | (
+                "skills",
+                "create" | "update" | "import" | "restore" | "delete" | "file_put"
+            )
+            | (
+                "wiki",
+                "write_page"
+                    | "ingest"
+                    | "archive_query"
+                    | "restore_version"
+                    | "delete_source"
+                    | "lint_deep"
+                    | "document_add"
+                    | "review_resolve"
+                    | "archive"
+                    | "promote"
+                    | "delete_page"
+                    | "merge"
+            )
+            | (
+                "todos",
+                "add" | "link" | "unlink" | "done" | "update" | "delete"
+            )
+            | ("tickets", "add" | "link" | "unlink" | "update" | "delete")
             | (
                 "codegraph",
                 "register" | "index" | "sync" | "gc" | "delete" | "upload"
@@ -315,8 +333,16 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                 | "entities"
         ) | (
             "projects",
-            "types" | "list" | "get" | "doc_get" | "doc_search" | "file_get" | "file_list"
-        ) | ("skills", "list" | "get" | "file_get" | "versions")
+            "types"
+                | "list"
+                | "get"
+                | "doc_get"
+                | "doc_search"
+                | "file_get"
+                | "file_list"
+                | "links"
+        ) | ("assets", "kinds" | "list" | "get")
+            | ("skills", "list" | "get" | "file_get" | "versions")
             | (
                 "wiki",
                 "search"
@@ -458,7 +484,7 @@ mod tests {
         assert_eq!(parsed.priority.as_deref(), Some("high"));
     }
 
-    /// 六域全表自检：action 非空、schema 可序列化、无重复 action 名。
+    /// 全表自检：action 非空、schema 可序列化、无重复 action 名。
     #[test]
     fn all_domains_have_consistent_docs() {
         for domain in DOMAIN_TOOLS {

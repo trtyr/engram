@@ -5,7 +5,14 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, type ProjectDetailDto, type ProjectDocDto, type ProjectFileDto, type ProjectLocationDto } from '@/lib/api'
+import {
+  api,
+  type AssetDto,
+  type ProjectDetailDto,
+  type ProjectDocDto,
+  type ProjectFileDto,
+  type ProjectLocationDto,
+} from '@/lib/api'
 import { Card, ErrorBox, Spinner } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls } from '@/lib/ui'
 import { cn } from '@/lib/utils'
@@ -320,6 +327,7 @@ const NEW_LOC: ProjectLocationDto = {
   path: '',
   purpose: null,
   sort_order: 0,
+  asset_id: null,
   created_at: '',
   updated_at: '',
 }
@@ -410,6 +418,93 @@ function OverviewPane({
         )}
       </Card>
 
+      {/* 关系：用到的资产 + 工作线关联（隶属 / 下属 / 相关）——资产身份在台账，这里只展示引用 */}
+      <Card className="p-4">
+        <h3 className="text-sm font-semibold">🔗 关系</h3>
+        <div className="mt-2 space-y-3">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">
+              用到的资产（{detail.assets.length}）
+            </p>
+            {detail.assets.length === 0 ? (
+              <p className="mt-1 text-xs text-muted-foreground/70">
+                还没有引用资产——登记位置时选一条资产台账条目（身份以台账为准，别在这儿重抄）。
+              </p>
+            ) : (
+              <ul className="mt-1 space-y-1">
+                {detail.assets.map((a) => (
+                  <li key={a.location_id} className="text-sm">
+                    <Link to="/assets" className="text-info hover:underline">
+                      {a.name}
+                    </Link>
+                    <span className="text-xs text-muted-foreground">
+                      {' '}
+                      · {a.host}
+                      {a.path && ` · ${a.path}`}
+                      {a.purpose && ` · ${a.purpose}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {(() => {
+            const belongs = detail.links.filter(
+              (l) => l.kind === 'part_of' && l.from_project === detail.id,
+            )
+            const owns = detail.links.filter(
+              (l) => l.kind === 'part_of' && l.to_project === detail.id,
+            )
+            const related = detail.links.filter((l) => l.kind === 'related')
+            const row = (label: string, items: { id: string; name: string; note: string }[]) =>
+              items.length > 0 && (
+                <div key={label}>
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {label}（{items.length}）
+                  </p>
+                  <ul className="mt-1 space-y-1">
+                    {items.map((x) => (
+                      <li key={x.id} className="text-sm">
+                        <Link to={`/projects/${x.id}`} className="text-info hover:underline">
+                          {x.name}
+                        </Link>
+                        {x.note && (
+                          <span className="text-xs text-muted-foreground"> · {x.note}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            return (
+              <>
+                {row(
+                  '隶属（我属于）',
+                  belongs.map((l) => ({ id: l.to_project, name: l.to_name, note: l.note })),
+                )}
+                {row(
+                  '下属（属于我的）',
+                  owns.map((l) => ({ id: l.from_project, name: l.from_name, note: l.note })),
+                )}
+                {row(
+                  '相关',
+                  related.map((l) => ({
+                    id: l.from_project === detail.id ? l.to_project : l.from_project,
+                    name: l.from_project === detail.id ? l.to_name : l.from_name,
+                    note: l.note,
+                  })),
+                )}
+                {detail.links.length === 0 && (
+                  <p className="text-xs text-muted-foreground/70">
+                    没有关联的工作线——只有真有独立推进节奏的子工作线才挂「隶属」（判据见《项目与资产模型 · README》§2.2）。
+                  </p>
+                )}
+              </>
+            )
+          })()}
+        </div>
+      </Card>
+
       <Card className="p-4">
         <h3 className="text-sm font-semibold">📄 文档（{detail.docs.length}）</h3>
         {detail.categories.map((cat) => {
@@ -458,12 +553,27 @@ function LocationPane({
   const [purpose, setPurpose] = useState(loc.purpose ?? '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // 资产引用（0058 真引用）：选中即写 asset_id；选「无」= 纯文本位置
+  const [assetId, setAssetId] = useState(loc.asset_id ?? '')
+  const [assets, setAssets] = useState<AssetDto[]>([])
+  useEffect(() => {
+    api.get<AssetDto[]>('/assets').then(setAssets).catch(() => {})
+  }, [])
 
   async function save() {
-    if (!ip.trim() || !host.trim() || !os.trim() || !path.trim()) return
+    if (!path.trim()) return
+    if (!assetId && (!ip.trim() || !host.trim() || !os.trim())) return
     setBusy(true)
     try {
-      const body = { ip: ip.trim(), host: host.trim(), os: os.trim(), path: path.trim(), purpose: purpose.trim() || null }
+      const body = {
+        ip: ip.trim(),
+        host: host.trim(),
+        os: os.trim(),
+        path: path.trim(),
+        purpose: purpose.trim() || null,
+        // PUT 是整体替换：不带上它就会把已有引用抹掉（后端 LocationRequest.asset_id 语义）
+        asset_id: assetId || null,
+      }
       if (isNew) {
         await api.post(`/projects/${projectId}/locations`, body)
       } else {
@@ -493,6 +603,31 @@ function LocationPane({
   return (
     <Card className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 [scrollbar-gutter:stable]">
       <h3 className="text-sm font-semibold">{isNew ? '新增位置' : '编辑位置'}</h3>
+      <select
+        className={selectCls}
+        value={assetId}
+        onChange={(e) => {
+          const v = e.target.value
+          setAssetId(v)
+          const a = assets.find((x) => x.id === v)
+          if (a) {
+            // 身份以台账为准：空着的字段从资产带出（已有值不覆盖）
+            if (!ip.trim()) setIp(a.ip)
+            if (!host.trim()) setHost(a.name)
+            if (!os.trim()) setOs(a.os)
+          }
+        }}
+        title="关联资产台账条目（身份以台账为准；选「不关联」= 纯文本位置）"
+        data-testid="loc-asset-picker"
+      >
+        <option value="">不关联资产（纯文本位置）</option>
+        {assets.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name}
+            {a.ip ? ` · ${a.ip}` : ''}
+          </option>
+        ))}
+      </select>
       <input className={`${inputCls} w-full`} placeholder="IP（内网/公网/IPv6，如 192.168.1.5 / 82.157.147.224）" value={ip} onChange={(e) => setIp(e.target.value)} />
       <input className={`${inputCls} w-full`} placeholder="主机名（如 tencent-beijing / MacBook Pro）" value={host} onChange={(e) => setHost(e.target.value)} />
       <input className={`${inputCls} w-full`} placeholder="操作系统（macOS / Ubuntu / Windows…）" value={os} onChange={(e) => setOs(e.target.value)} />

@@ -138,7 +138,7 @@ pub struct TodoUpdateParams {
 
 #[tool_router(router = todos_router)]
 impl EngramMcpServer {
-    // ---------- 待办域工具（todos scope；第七域） ----------
+    // ---------- 待办域工具（todos scope） ----------
 
     /// 快速记一条待办（灵感/学习计划/系统操作——不绑定项目）。
     pub(crate) async fn todo_add(
