@@ -40,12 +40,19 @@ FROM chef AS builder
 # 注：`RUN cat > f <<EOF` 形式的 heredoc 在本项目实测会写出**空文件**（BuildKit 没把 heredoc
 # 喂给 cat），于是镜像源配置长期静默失效、构建直连 crates.io——改用单行 printf 并回显自证。
 ARG CARGO_MIRROR="sparse+https://rsproxy.cn/index/"
-RUN printf '[source.crates-io]\nreplace-with = "mirror"\n[source.mirror]\nregistry = "%s"\n[net]\ngit-fetch-with-cli = true\n' "$CARGO_MIRROR" > /usr/local/cargo/config.toml && cat /usr/local/cargo/config.toml
+# 空值 / 官方 index 时**不替换**（cargo 不允许把某 source 定义成已存在的 crates-io registry）。
+RUN if [ -n "$CARGO_MIRROR" ] && [ "$CARGO_MIRROR" != "sparse+https://index.crates.io/" ]; then \
+      printf '[source.crates-io]\nreplace-with = "mirror"\n[source.mirror]\nregistry = "%s"\n' "$CARGO_MIRROR" > /usr/local/cargo/config.toml; \
+    fi; \
+    printf '[net]\ngit-fetch-with-cli = true\n' >> /usr/local/cargo/config.toml; \
+    cat /usr/local/cargo/config.toml
 # rust-embed 需要编译期可见 web/dist（哪怕占位）
 COPY --from=web-build /build/web/dist /web/dist
 COPY server/ .
-# -j 3：8GB 宿主 / ~4GB VM 下 release 编译（thin LTO）并发全开会 OOM 杀掉 buildkit（EOF 中断）
-RUN cargo build --release -j 3 -p engram-api
+# -j 并发可调：默认 3（8GB 宿主 / ~4GB VM 下 release 编译 thin LTO 并发全开会 OOM 杀掉 buildkit）。
+# 2 核小机建议 CARGO_JOBS=2，并给宿主配 swap 兜底。
+ARG CARGO_JOBS=3
+RUN cargo build --release -j "$CARGO_JOBS" -p engram-api
 
 ########## Stage 3: 运行时 ##########
 # debian trixie：glibc 2.41 ≥ builder（cargo-chef rust 1.97 基于 trixie），

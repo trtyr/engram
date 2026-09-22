@@ -27,8 +27,11 @@ services:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,db}
-        # crates.io 镜像（默认 rsproxy；国内云机建议 USTC：sparse+https://mirrors.ustc.edu.cn/crates.io-index/）
-        CARGO_MIRROR: ${CARGO_MIRROR:-sparse+https://rsproxy.cn/index/}
+        # crates.io 镜像（默认 rsproxy；国内云机建议 USTC：sparse+https://mirrors.ustc.edu.cn/crates.io-index/；
+        # 海外机留空即直连官方 index）
+        CARGO_MIRROR: ${CARGO_MIRROR-sparse+https://rsproxy.cn/index/}
+        # release 编译并发（2 核小机建议 2）
+        CARGO_JOBS: ${CARGO_JOBS:-3}
     depends_on:
       db:
         condition: service_healthy
