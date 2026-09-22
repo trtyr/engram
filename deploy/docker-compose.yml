@@ -48,7 +48,8 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,db}
     ports:
-      - "${AGENT_MEMORY_PORT:-8080}:8080"
+      # 绑定地址可调：云机放 Caddy/Nginx 前置时设 AGENT_MEMORY_BIND=127.0.0.1（默认 0.0.0.0）
+      - "${AGENT_MEMORY_BIND:-0.0.0.0}:${AGENT_MEMORY_PORT:-8080}:8080"
     volumes:
       # 数据存宿主本地：uploads / wiki-sources / codegraph
       - ${ENGRAM_DATA_HOME:-~/.engram}/app:/app/data
