@@ -175,9 +175,15 @@ pub async fn import_project(pool: &PgPool, v: &Value) -> StoreResult<bool> {
 }
 
 pub async fn import_project_location(pool: &PgPool, v: &Value) -> StoreResult<bool> {
+    // asset_id 解析（2026-09-22 上云补齐）：先按导出包里的 id 认；目标库没这条 id 时
+    // 退回按「台账名 / 别名」匹配（与 0058 存量清洗同规则）——两者都落空则留 NULL（不炸 FK）。
     let res = sqlx::query(
-        "INSERT INTO project_locations (id, project_id, ip, host, os, path, purpose, sort_order) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO project_locations (id, project_id, ip, host, os, path, purpose, sort_order, asset_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, \
+                 COALESCE( \
+                   (SELECT a.id FROM assets a WHERE a.id = $9), \
+                   (SELECT a.id FROM assets a WHERE $4 <> '' AND (a.name = $4 OR $4 = ANY (a.aliases)) LIMIT 1))) \
+         ON CONFLICT (id) DO NOTHING",
     )
     .bind(id_of(v, "id"))
     .bind(id_of(v, "project_id"))
@@ -187,6 +193,58 @@ pub async fn import_project_location(pool: &PgPool, v: &Value) -> StoreResult<bo
     .bind(str_of(v, "path", ""))
     .bind(v.get("purpose").and_then(|x| x.as_str()))
     .bind(v.get("sort_order").and_then(|x| x.as_i64()).unwrap_or(0) as i32)
+    .bind(id_of(v, "asset_id"))
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// 资产台账（0058；2026-09-22 上云补齐）。主键或台账名冲突都跳过（catch-all ON CONFLICT）。
+pub async fn import_asset(pool: &PgPool, v: &Value) -> StoreResult<bool> {
+    let aliases: Vec<String> = v
+        .get("aliases")
+        .and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| t.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let res = sqlx::query(
+        "INSERT INTO assets (id, kind, name, aliases, ip, os, note, fields, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4::text[], $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(str_of(v, "kind", "other"))
+    .bind(str_of(v, "name", ""))
+    .bind(&aliases)
+    .bind(str_of(v, "ip", ""))
+    .bind(str_of(v, "os", ""))
+    .bind(str_of(v, "note", ""))
+    .bind(
+        v.get("fields")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({})),
+    )
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .bind(ts(v, "updated_at").unwrap_or_else(Utc::now))
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// 工作线关联（0058 二部）：主键或 (from,to,kind) 重复均跳过。
+pub async fn import_project_link(pool: &PgPool, v: &Value) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO project_links (id, from_project, to_project, kind, note, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(id_of(v, "from_project"))
+    .bind(id_of(v, "to_project"))
+    .bind(str_of(v, "kind", "related"))
+    .bind(str_of(v, "note", ""))
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
     .execute(pool)
     .await?;
     Ok(res.rows_affected() > 0)

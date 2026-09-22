@@ -40,6 +40,9 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
     let wiki_libraries = repo::export_wiki_libraries(pool).await?;
     let wiki_pages = repo::export_wiki_pages(pool).await?;
     let (projects, locations, docs) = repo::export_projects(pool).await?;
+    // 资产与工作线关联（0058；2026-09-22 上云补齐——资产是唯一事实源，不随包会丢）
+    let assets = repo::export_assets(pool).await?;
+    let project_links = repo::export_project_links(pool).await?;
     let todos = repo::export_todos(pool).await?;
     let kv_entries = repo::export_kv_entries(pool).await?;
     let wiki_promotions = repo::export_wiki_promotions(pool).await?;
@@ -63,6 +66,7 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
             "skills": skills_json.len(), "wiki_libraries": wiki_libraries.len(),
     "wiki_pages": wiki_pages.len(),
             "projects": projects.len(), "locations": locations.len(), "docs": docs.len(),
+            "assets": assets.len(), "project_links": project_links.len(),
             "todos": todos.len(), "kv_entries": kv_entries.len(),
             "wiki_promotions": wiki_promotions.len(),
         },
@@ -73,6 +77,8 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
         "skills": skills_json,
         "wiki": { "libraries": wiki_libraries, "pages": wiki_pages },
         "projects": { "projects": projects, "locations": locations, "docs": docs },
+        "assets": assets,
+        "project_links": project_links,
         "todos": todos,
         "kv_entries": kv_entries,
         "wiki_promotions": wiki_promotions,
@@ -127,7 +133,11 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
     let mem = import_memory_domain(pool, data).await?;
     let (c_skill, files_imported) = import_skills_domain(pool, data).await?;
     let (c_wikilib, c_wiki) = import_wiki_domain(pool, data).await?;
+    // 资产先于项目位置（project_locations.asset_id → assets，外键序）
+    let c_asset = import_asset_domain(pool, data).await?;
     let (c_project, c_location, c_doc) = import_projects_domain(pool, data).await?;
+    // 工作线关联：两端项目须已在库（外键 → projects）
+    let c_link = import_project_links(pool, data).await?;
     let (t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip) = import_tail_domains(pool, data).await?;
     let (c_session, c_atom, c_scenario, c_persona, c_entity, c_relation) = (
         mem.sessions,
@@ -151,6 +161,8 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
             "projects": c_project.to_json(), "locations": c_location.to_json(),
             "docs": c_doc.to_json(),
         },
+        "assets": c_asset.to_json(),
+        "project_links": c_link.to_json(),
         "todos": { "imported": t_imp, "skipped": t_skip },
         "kv_entries": { "imported": kv_imp, "skipped": kv_skip },
         "wiki_promotions": { "imported": p_imp, "skipped": p_skip },
@@ -353,6 +365,26 @@ async fn import_projects_domain(
         ));
     }
     Ok((c_project, c_location, c_doc))
+}
+
+/// 资产域导入（0058；2026-09-22 上云补齐）——必须在项目位置之前（外键 → assets）。
+async fn import_asset_domain(pool: &PgPool, data: &Value) -> Result<DomainCount> {
+    let mut c = DomainCount::default();
+    for it in each(Some(data), "assets") {
+        c.merge(DomainCount::bump(repo::import_asset(pool, &it).await?));
+    }
+    Ok(c)
+}
+
+/// 工作线关联导入（0058 二部）——两端项目须已在库（外键 → projects）。
+async fn import_project_links(pool: &PgPool, data: &Value) -> Result<DomainCount> {
+    let mut c = DomainCount::default();
+    for it in each(Some(data), "project_links") {
+        c.merge(DomainCount::bump(
+            repo::import_project_link(pool, &it).await?,
+        ));
+    }
+    Ok(c)
 }
 
 /// todos / kv / promotions 三域导入（t9 补齐 v1 覆盖缺口）。

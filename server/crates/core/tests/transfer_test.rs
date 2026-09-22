@@ -67,6 +67,24 @@ async fn transfer_roundtrip_and_idempotency() {
     sqlx::query("INSERT INTO project_docs (id, project_id, category, title, content) VALUES ($1,$2,'规划','迁移文档','内容')")
         .bind(uuid::Uuid::now_v7()).bind(prj).execute(&pool).await.unwrap();
 
+    // 资产台账 + 位置真引用 + 工作线关联（0058；2026-09-22 上云补齐的覆盖面）
+    let asset = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO assets (id, kind, name, aliases, ip, os, note) VALUES ($1,'host','迁移主机',$2,'10.0.0.9','linux','')")
+        .bind(asset)
+        .bind(vec!["old-name".to_string()])
+        .execute(&pool).await.unwrap();
+    sqlx::query("UPDATE project_locations SET asset_id = $1 WHERE project_id = $2")
+        .bind(asset)
+        .bind(prj)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let prj2 = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO projects (id, name, type, status, description, categories) VALUES ($1,'母项目','dev','active','往返测试',$2)")
+        .bind(prj2).bind(serde_json::json!(["规划"])).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO project_links (id, from_project, to_project, kind, note) VALUES ($1,$2,$3,'part_of','子→母')")
+        .bind(uuid::Uuid::now_v7()).bind(prj).bind(prj2).execute(&pool).await.unwrap();
+
     // ---------- 导出 ----------
     let bundle = engram_core::transfer::export_bundle(&pool)
         .await
@@ -76,7 +94,12 @@ async fn transfer_roundtrip_and_idempotency() {
     assert_eq!(bundle["counts"]["atoms"], 1);
     assert_eq!(bundle["counts"]["skills"], 1);
     assert_eq!(bundle["counts"]["wiki_pages"], 1);
-    assert_eq!(bundle["counts"]["projects"], 1);
+    assert_eq!(bundle["counts"]["projects"], 2);
+    assert_eq!(
+        bundle["counts"]["assets"], 1,
+        "资产台账须随包（2026-09-22 上云补齐）"
+    );
+    assert_eq!(bundle["counts"]["project_links"], 1, "工作线关联须随包");
     // 派生列不在包里
     assert!(bundle["memory"]["atoms"][0].get("embedding").is_none());
     assert!(
@@ -88,7 +111,7 @@ async fn transfer_roundtrip_and_idempotency() {
     );
 
     // ---------- 清库（模拟一台空 B 机） ----------
-    sqlx::query("TRUNCATE raw_sessions, atoms, scenarios, persona_aspects, entities, entity_relations, skills, skill_files, wiki_pages, projects, project_locations, project_docs CASCADE")
+    sqlx::query("TRUNCATE raw_sessions, atoms, scenarios, persona_aspects, entities, entity_relations, skills, skill_files, wiki_pages, projects, project_locations, project_docs, assets, project_links CASCADE")
         .execute(&pool).await.unwrap();
 
     // ---------- 导入 ----------
@@ -110,9 +133,11 @@ async fn transfer_roundtrip_and_idempotency() {
     assert_eq!(imported(&["memory", "relations"]), 1);
     assert_eq!(imported(&["skills", "skills"]), 1);
     assert_eq!(imported(&["wiki", "pages"]), 1);
-    assert_eq!(imported(&["projects", "projects"]), 1);
+    assert_eq!(imported(&["projects", "projects"]), 2);
     assert_eq!(imported(&["projects", "locations"]), 1);
     assert_eq!(imported(&["projects", "docs"]), 1);
+    assert_eq!(imported(&["assets"]), 1, "资产台账须能导入");
+    assert_eq!(imported(&["project_links"]), 1, "工作线关联须能导入");
 
     // ---------- 内容抽验（跨域引用与派生列重建） ----------
     let (content, refs): (String, Value) =
@@ -148,6 +173,30 @@ async fn transfer_roundtrip_and_idempotency() {
     .unwrap();
     assert!(wiki_ok);
 
+    // 位置 → 资产的真引用必须随包保留（0058；缺 asset_id 列会静默丢引用）
+    let loc_asset: Option<uuid::Uuid> =
+        sqlx::query_scalar("SELECT asset_id FROM project_locations WHERE project_id = $1")
+            .bind(prj)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(loc_asset, Some(asset), "位置对资产的真引用应在导入后仍在");
+    let (asset_name, asset_kind): (String, String) =
+        sqlx::query_as("SELECT name, kind FROM assets WHERE id = $1")
+            .bind(asset)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (asset_name.as_str(), asset_kind.as_str()),
+        ("迁移主机", "host")
+    );
+    let link_n: i64 = sqlx::query_scalar("SELECT count(*) FROM project_links")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(link_n, 1, "工作线关联应随迁移进");
+
     // ---------- 幂等：重复导入全 skipped ----------
     let report2 = engram_core::transfer::import_bundle(&pool, &bundle)
         .await
@@ -159,6 +208,8 @@ async fn transfer_roundtrip_and_idempotency() {
     assert!(all_skipped);
     assert_eq!(report2["skills"]["skills"]["skipped"], 1);
     assert_eq!(report2["memory"]["sessions"]["skipped"], 1);
+    assert_eq!(report2["assets"]["skipped"], 1, "资产重复导入应跳过");
+    assert_eq!(report2["project_links"]["skipped"], 1, "关联重复导入应跳过");
 }
 
 #[tokio::test]
@@ -259,4 +310,62 @@ async fn transfer_script_skill_metadata_only() {
     assert_eq!((kind.as_str(), origin.as_str()), ("script", "both"));
     assert_eq!(lp.as_deref(), Some("/opt/skills/remote-tool"));
     assert_eq!(ru.as_deref(), Some("https://github.com/x/remote-tool"));
+}
+
+/// 位置 → 资产引用的**自愈**：包里 asset_id 在目标库不存在时，按「台账名 / 别名」重新解析
+/// （与 0058 存量清洗同规则）——跨实例迁移后引用不会静默落空。
+#[tokio::test]
+async fn location_asset_ref_self_heals_by_name() {
+    let pg = support::start_pgvector().await.expect("测试库");
+    let url = support::connection_url(&pg).await.expect("连接串");
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
+
+    // 目标库先有一条同名资产（id 与「源包」里的不同）+ 备一个项目
+    let real_asset = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO assets (id, kind, name, aliases) VALUES ($1,'host','MacBook Air M1',$2)",
+    )
+    .bind(real_asset)
+    .bind(vec!["trtyr-mac".to_string()])
+    .execute(&pool)
+    .await
+    .unwrap();
+    let prj = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO projects (id, name, type, status) VALUES ($1,'自愈项目','dev','active')",
+    )
+    .bind(prj)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 包里带一个目标库不存在的 asset_id（模拟另一次导入产生的不同 UUID），host 用别名写法
+    let bundle = serde_json::json!({
+        "format": "engram-transfer",
+        "projects": {
+            "projects": [{"id": prj, "name": "自愈项目", "type": "dev", "status": "active", "categories": []}],
+            "locations": [{
+                "id": uuid::Uuid::now_v7(), "project_id": prj, "ip": "", "host": "trtyr-mac",
+                "os": "", "path": "/x", "purpose": null, "sort_order": 0,
+                "asset_id": uuid::Uuid::now_v7()
+            }],
+            "docs": []
+        }
+    });
+    engram_core::transfer::import_bundle(&pool, &bundle)
+        .await
+        .expect("导入");
+
+    let got: Option<uuid::Uuid> =
+        sqlx::query_scalar("SELECT asset_id FROM project_locations WHERE project_id = $1")
+            .bind(prj)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        got,
+        Some(real_asset),
+        "asset_id 落空时应按别名回落到目标库同名资产"
+    );
 }

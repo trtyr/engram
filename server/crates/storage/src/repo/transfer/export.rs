@@ -79,6 +79,24 @@ pub async fn export_skills_with_files(pool: &PgPool) -> StoreResult<Vec<(Value, 
         .collect())
 }
 
+/// 资产台账全量（0058；2026-09-22 上云补齐——资产是「我拥有的东西」的唯一事实源，须随包走）。
+pub async fn export_assets(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> = sqlx::query_scalar("SELECT to_jsonb(a) FROM assets a ORDER BY a.name")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows)
+}
+
+/// 工作线关联全量（0058 二部：part_of / related）。
+pub async fn export_project_links(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(l) FROM project_links l ORDER BY l.from_project, l.to_project, l.kind",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// wiki_promotions 全量导出（0047）。
 pub async fn export_wiki_promotions(pool: &PgPool) -> StoreResult<Vec<Value>> {
     let rows: Vec<Value> = sqlx::query_scalar(
