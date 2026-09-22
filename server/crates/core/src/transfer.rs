@@ -43,6 +43,18 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
     // 资产与工作线关联（0058；2026-09-22 上云补齐——资产是唯一事实源，不随包会丢）
     let assets = repo::export_assets(pool).await?;
     let project_links = repo::export_project_links(pool).await?;
+    // 2026-09-22 上云核账补齐（第二轮）：真实内容但先前不在包里的 10 张表——项目文件 + 版本历史、
+    // atom↔entity 边、技能历史、工单关联、wiki 文档/分块/来源/复核项/页间链接。
+    // （codegraph 索引仍是派生数据不迁移：B 机对同源仓库重新建索引即可。）
+    let (project_files, project_file_versions) = repo::export_project_files(pool).await?;
+    let atom_entities = repo::export_atom_entities(pool).await?;
+    let skill_revisions = repo::export_skill_revisions(pool).await?;
+    let todo_links = repo::export_todo_links(pool).await?;
+    let wiki_documents = repo::export_wiki_documents(pool).await?;
+    let wiki_chunks = repo::export_wiki_chunks(pool).await?;
+    let wiki_sources = repo::export_wiki_sources(pool).await?;
+    let wiki_review_items = repo::export_wiki_review_items(pool).await?;
+    let wiki_links = repo::export_wiki_links(pool).await?;
     let todos = repo::export_todos(pool).await?;
     let kv_entries = repo::export_kv_entries(pool).await?;
     let wiki_promotions = repo::export_wiki_promotions(pool).await?;
@@ -67,19 +79,35 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
     "wiki_pages": wiki_pages.len(),
             "projects": projects.len(), "locations": locations.len(), "docs": docs.len(),
             "assets": assets.len(), "project_links": project_links.len(),
+            "project_files": project_files.len(),
+            "project_file_versions": project_file_versions.len(),
+            "atom_entities": atom_entities.len(), "skill_revisions": skill_revisions.len(),
+            "todo_links": todo_links.len(), "wiki_documents": wiki_documents.len(),
+            "wiki_chunks": wiki_chunks.len(), "wiki_sources": wiki_sources.len(),
+            "wiki_review_items": wiki_review_items.len(), "wiki_links": wiki_links.len(),
             "todos": todos.len(), "kv_entries": kv_entries.len(),
             "wiki_promotions": wiki_promotions.len(),
         },
         "memory": {
             "sessions": sessions, "atoms": atoms, "scenarios": scenarios,
             "persona": persona, "entities": entities, "relations": relations,
+            "atom_entities": atom_entities,
         },
         "skills": skills_json,
-        "wiki": { "libraries": wiki_libraries, "pages": wiki_pages },
+        "skill_revisions": skill_revisions,
+        "wiki": {
+            "libraries": wiki_libraries, "pages": wiki_pages,
+            "documents": wiki_documents, "chunks": wiki_chunks,
+            "sources": wiki_sources, "review_items": wiki_review_items,
+            "links": wiki_links,
+        },
         "projects": { "projects": projects, "locations": locations, "docs": docs },
+        "project_files": project_files,
+        "project_file_versions": project_file_versions,
         "assets": assets,
         "project_links": project_links,
         "todos": todos,
+        "todo_links": todo_links,
         "kv_entries": kv_entries,
         "wiki_promotions": wiki_promotions,
     }))
@@ -131,14 +159,25 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
     }
 
     let mem = import_memory_domain(pool, data).await?;
+    // atom↔entity 边须在 atoms/entities 之后（外键 → 两表）
+    let c_atom_entity = import_atom_entities_domain(pool, data).await?;
     let (c_skill, files_imported) = import_skills_domain(pool, data).await?;
-    let (c_wikilib, c_wiki) = import_wiki_domain(pool, data).await?;
+    // 技能历史须在 skills 之后（外键 → skills）
+    let c_skill_rev = import_skill_revisions_domain(pool, data).await?;
+    let (lib_map, c_wikilib, c_wiki) = import_wiki_domain(pool, data).await?;
+    // wiki 关联五表（文档/分块/来源/复核项/页间链接）复用库映射
+    let (c_wdoc, c_wchunk, c_wsrc, c_wrev, c_wlink) =
+        import_wiki_extras_domain(pool, data, &lib_map).await?;
     // 资产先于项目位置（project_locations.asset_id → assets，外键序）
     let c_asset = import_asset_domain(pool, data).await?;
     let (c_project, c_location, c_doc) = import_projects_domain(pool, data).await?;
+    // 项目文件 + 版本历史（外键 → projects / project_files）
+    let (c_pfile, c_pver) = import_project_files_domain(pool, data).await?;
     // 工作线关联：两端项目须已在库（外键 → projects）
     let c_link = import_project_links(pool, data).await?;
     let (t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip) = import_tail_domains(pool, data).await?;
+    // 工单/待办关联须在 todos 之后（两端 id 都要在库）
+    let c_todo_link = import_todo_links_domain(pool, data).await?;
     let (c_session, c_atom, c_scenario, c_persona, c_entity, c_relation) = (
         mem.sessions,
         mem.atoms,
@@ -154,16 +193,27 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
             "sessions": c_session.to_json(), "atoms": c_atom.to_json(),
             "scenarios": c_scenario.to_json(), "persona": c_persona.to_json(),
             "entities": c_entity.to_json(), "relations": c_relation.to_json(),
+            "atom_entities": c_atom_entity.to_json(),
         },
-        "skills": { "skills": c_skill.to_json(), "files": { "imported": files_imported } },
-        "wiki": { "libraries": c_wikilib.to_json(), "pages": c_wiki.to_json() },
+        "skills": {
+            "skills": c_skill.to_json(), "files": { "imported": files_imported },
+            "revisions": c_skill_rev.to_json(),
+        },
+        "wiki": {
+            "libraries": c_wikilib.to_json(), "pages": c_wiki.to_json(),
+            "documents": c_wdoc.to_json(), "chunks": c_wchunk.to_json(),
+            "sources": c_wsrc.to_json(), "review_items": c_wrev.to_json(),
+            "links": c_wlink.to_json(),
+        },
         "projects": {
             "projects": c_project.to_json(), "locations": c_location.to_json(),
             "docs": c_doc.to_json(),
+            "files": c_pfile.to_json(), "file_versions": c_pver.to_json(),
         },
         "assets": c_asset.to_json(),
         "project_links": c_link.to_json(),
         "todos": { "imported": t_imp, "skipped": t_skip },
+        "todo_links": c_todo_link.to_json(),
         "kv_entries": { "imported": kv_imp, "skipped": kv_skip },
         "wiki_promotions": { "imported": p_imp, "skipped": p_skip },
         "note": "冲突（id/slug/name 已存在）按跳过处理；embedding 未迁移——\
@@ -301,12 +351,18 @@ async fn import_skills_domain(pool: &PgPool, data: &Value) -> Result<(DomainCoun
     Ok((c_skill, files_imported))
 }
 
+/// 包内 library_id → 目标库 id 的映射（多库迁移用）。
+type LibMap = std::collections::HashMap<String, uuid::Uuid>;
+
 /// wiki 域导入（库 + 页面，库先于页——页面外键指向库）。
-async fn import_wiki_domain(pool: &PgPool, data: &Value) -> Result<(DomainCount, DomainCount)> {
+/// 返回 (库映射, 库计数, 页计数)——映射同时喂给 wiki 关联五表导入复用。
+async fn import_wiki_domain(
+    pool: &PgPool,
+    data: &Value,
+) -> Result<(LibMap, DomainCount, DomainCount)> {
     // wiki 多库迁移（2026-09-18 数据同步线补齐）：先导库行建「包内 library_id → 目标库 id」
     // 映射，页面按映射挂原库；旧包无 libraries 字段时页面 fallback main（v1 包兼容）。
-    let mut lib_map: std::collections::HashMap<String, uuid::Uuid> =
-        std::collections::HashMap::new();
+    let mut lib_map: LibMap = std::collections::HashMap::new();
     let mut c_wikilib = DomainCount::default();
     for it in each(data.get("wiki"), "libraries") {
         let src_id = it
@@ -340,7 +396,121 @@ async fn import_wiki_domain(pool: &PgPool, data: &Value) -> Result<(DomainCount,
             repo::import_wiki_page(pool, &it, &tsv_text, target_lib).await?,
         ));
     }
-    Ok((c_wikilib, c_wiki))
+    Ok((lib_map, c_wikilib, c_wiki))
+}
+
+/// wiki 关联五表导入（2026-09-22 上云核账补齐）：文档 → 分块 → 来源 → 复核项 → 页间链接。
+/// 分块须在文档之后（FK document_id）；复核项须在来源之后（FK source_id）。
+/// 分块的 tsv 与摄取侧同口径（`tsv_text`，非页面的 `page_tsv_text`）；embedding 不迁移。
+async fn import_wiki_extras_domain(
+    pool: &PgPool,
+    data: &Value,
+    lib_map: &LibMap,
+) -> Result<(
+    DomainCount,
+    DomainCount,
+    DomainCount,
+    DomainCount,
+    DomainCount,
+)> {
+    let main_lib = repo::main_library_id(pool).await?;
+    let lib_of = |v: &Value| -> uuid::Uuid {
+        v.get("library_id")
+            .and_then(|x| x.as_str())
+            .and_then(|s| lib_map.get(s).copied())
+            .unwrap_or(main_lib)
+    };
+
+    let mut c_doc = DomainCount::default();
+    for it in each(data.get("wiki"), "documents") {
+        let lib = lib_of(&it);
+        c_doc.merge(DomainCount::bump(
+            repo::import_wiki_document(pool, &it, lib).await?,
+        ));
+    }
+    let mut c_chunk = DomainCount::default();
+    for it in each(data.get("wiki"), "chunks") {
+        let lib = lib_of(&it);
+        let tsv_text = engram_search::tokenize::tsv_text(
+            it.get("content").and_then(|x| x.as_str()).unwrap_or(""),
+        );
+        c_chunk.merge(DomainCount::bump(
+            repo::import_wiki_chunk(pool, &it, &tsv_text, lib).await?,
+        ));
+    }
+    let mut c_source = DomainCount::default();
+    for it in each(data.get("wiki"), "sources") {
+        let lib = lib_of(&it);
+        c_source.merge(DomainCount::bump(
+            repo::import_wiki_source(pool, &it, lib).await?,
+        ));
+    }
+    let mut c_review = DomainCount::default();
+    for it in each(data.get("wiki"), "review_items") {
+        let lib = lib_of(&it);
+        c_review.merge(DomainCount::bump(
+            repo::import_wiki_review_item(pool, &it, lib).await?,
+        ));
+    }
+    let mut c_link = DomainCount::default();
+    for it in each(data.get("wiki"), "links") {
+        let lib = lib_of(&it);
+        c_link.merge(DomainCount::bump(
+            repo::import_wiki_link(pool, &it, lib).await?,
+        ));
+    }
+    Ok((c_doc, c_chunk, c_source, c_review, c_link))
+}
+
+/// atom↔entity 边导入（2026-09-22 补齐；须在 atoms 与 entities 之后）。
+async fn import_atom_entities_domain(pool: &PgPool, data: &Value) -> Result<DomainCount> {
+    let mut c = DomainCount::default();
+    for it in each(data.get("memory"), "atom_entities") {
+        c.merge(DomainCount::bump(
+            repo::import_atom_entity(pool, &it).await?,
+        ));
+    }
+    Ok(c)
+}
+
+/// 技能版本历史导入（须在 skills 之后）。
+async fn import_skill_revisions_domain(pool: &PgPool, data: &Value) -> Result<DomainCount> {
+    let mut c = DomainCount::default();
+    for it in each(Some(data), "skill_revisions") {
+        c.merge(DomainCount::bump(
+            repo::import_skill_revision(pool, &it).await?,
+        ));
+    }
+    Ok(c)
+}
+
+/// 项目文件 + 版本历史导入（2026-09-22 补齐；须在 projects 之后，版本再在文件之后）。
+async fn import_project_files_domain(
+    pool: &PgPool,
+    data: &Value,
+) -> Result<(DomainCount, DomainCount)> {
+    let mut c_file = DomainCount::default();
+    for it in each(Some(data), "project_files") {
+        c_file.merge(DomainCount::bump(
+            repo::import_project_file(pool, &it).await?,
+        ));
+    }
+    let mut c_ver = DomainCount::default();
+    for it in each(Some(data), "project_file_versions") {
+        c_ver.merge(DomainCount::bump(
+            repo::import_project_file_version(pool, &it).await?,
+        ));
+    }
+    Ok((c_file, c_ver))
+}
+
+/// 工单/待办关联导入（2026-09-22 补齐；须在 todos 之后——两端 id 都要在库）。
+async fn import_todo_links_domain(pool: &PgPool, data: &Value) -> Result<DomainCount> {
+    let mut c = DomainCount::default();
+    for it in each(Some(data), "todo_links") {
+        c.merge(DomainCount::bump(repo::import_todo_link(pool, &it).await?));
+    }
+    Ok(c)
 }
 
 /// 项目域导入（项目 → 位置 → 文档）。

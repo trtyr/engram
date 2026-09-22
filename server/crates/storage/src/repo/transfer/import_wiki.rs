@@ -99,3 +99,114 @@ pub async fn import_wiki_promotions(pool: &PgPool, items: &[Value]) -> StoreResu
     }
     Ok((imported, skipped))
 }
+
+/// opt 文本列：源行缺失/为 null 时落 NULL（区别于 str_of 的默认空串）。
+fn opt_str(v: &Value, key: &str) -> Option<String> {
+    v.get(key).and_then(|x| x.as_str()).map(|s| s.to_string())
+}
+
+/// wiki 源文档行（2026-09-22 上云核账补齐；library 由调用方按 slug 映射）。
+pub async fn import_wiki_document(pool: &PgPool, v: &Value, target_lib: Uuid) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO wiki_documents (id, title, source_uri, mime, raw_path, sha256, status, error, created_at, updated_at, library_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(str_of(v, "title", ""))
+    .bind(str_of(v, "source_uri", ""))
+    .bind(str_of(v, "mime", "text/plain"))
+    .bind(str_of(v, "raw_path", ""))
+    .bind(str_of(v, "sha256", ""))
+    .bind(str_of(v, "status", "ready"))
+    .bind(opt_str(v, "error"))
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .bind(ts(v, "updated_at").unwrap_or_else(Utc::now))
+    .bind(target_lib)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// wiki 分块（须在文档之后导入）。embedding **不迁移**（派生数据）→ embed_failed=true 落库，
+/// 等 cloud 配好 provider 跑 re-embed 补齐；tsv 由调用方按 simple 口径现算（storage 不依赖分词器）。
+pub async fn import_wiki_chunk(
+    pool: &PgPool,
+    v: &Value,
+    tsv_text: &str,
+    target_lib: Uuid,
+) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO wiki_chunks (id, document_id, seq, content, embed_failed, tsv, created_at, library_id) \
+         VALUES ($1, $2, $3, $4, true, to_tsvector('simple', $5), $6, $7) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(id_of(v, "document_id"))
+    .bind(v.get("seq").and_then(|x| x.as_i64()).unwrap_or(0) as i32)
+    .bind(str_of(v, "content", ""))
+    .bind(tsv_text)
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .bind(target_lib)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// wiki 来源行（sha256 幂等键；(library_id, sha256) 冲突跳过）。
+pub async fn import_wiki_source(pool: &PgPool, v: &Value, target_lib: Uuid) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO wiki_sources (id, sha256, raw_path, title, status, last_ingested_at, created_at, error, library_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(str_of(v, "sha256", ""))
+    .bind(str_of(v, "raw_path", ""))
+    .bind(str_of(v, "title", ""))
+    .bind(str_of(v, "status", "pending"))
+    .bind(ts(v, "last_ingested_at"))
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .bind(opt_str(v, "error"))
+    .bind(target_lib)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// wiki 复核项（须在 sources 之后——source_id 外键指向它）。
+pub async fn import_wiki_review_item(
+    pool: &PgPool,
+    v: &Value,
+    target_lib: Uuid,
+) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO wiki_review_items (id, kind, payload, action, search_queries, source_id, status, created_at, resolved_at, library_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(str_of(v, "kind", "flag"))
+    .bind(v.get("payload").cloned().unwrap_or_else(|| serde_json::json!({})))
+    .bind(str_of(v, "action", ""))
+    .bind(v.get("search_queries").cloned().unwrap_or_else(|| serde_json::json!([])))
+    .bind(id_of(v, "source_id"))
+    .bind(str_of(v, "status", "open"))
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .bind(ts(v, "resolved_at"))
+    .bind(target_lib)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// wiki 页间链接图（(library_id, from_slug, to_slug) 冲突跳过）——图谱页的数据源。
+pub async fn import_wiki_link(pool: &PgPool, v: &Value, target_lib: Uuid) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO wiki_links (from_slug, to_slug, weight, library_id) \
+         VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+    )
+    .bind(str_of(v, "from_slug", ""))
+    .bind(str_of(v, "to_slug", ""))
+    .bind(v.get("weight").and_then(|x| x.as_f64()).unwrap_or(1.0) as f32)
+    .bind(target_lib)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}

@@ -280,3 +280,84 @@ pub type TodoExportRow = (
     DateTime<Utc>,
     DateTime<Utc>,
 );
+
+/// 项目文件（2026-09-22 上云核账补齐）：项目工作线里的真实产物内容（HTML/报告/设计稿）——
+/// 派生不出来，必须随包。主键或 (project_id, name) 冲突均跳过（catch-all ON CONFLICT）。
+pub async fn import_project_file(pool: &PgPool, v: &Value) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO project_files (id, project_id, name, mime, content, version, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(id_of(v, "project_id"))
+    .bind(str_of(v, "name", ""))
+    .bind(str_of(v, "mime", "text/plain"))
+    .bind(str_of(v, "content", ""))
+    .bind(v.get("version").and_then(|x| x.as_i64()).unwrap_or(1) as i32)
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .bind(ts(v, "updated_at").unwrap_or_else(Utc::now))
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// 项目文件版本历史（外键 → project_files，须在其后导入）。
+pub async fn import_project_file_version(pool: &PgPool, v: &Value) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO project_file_versions (id, file_id, version, content, created_at) \
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(id_of(v, "file_id"))
+    .bind(v.get("version").and_then(|x| x.as_i64()).unwrap_or(1) as i32)
+    .bind(str_of(v, "content", ""))
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// 技能版本历史（外键 → skills，须在其后导入）。
+pub async fn import_skill_revision(pool: &PgPool, v: &Value) -> StoreResult<bool> {
+    let tags: Vec<String> = v
+        .get("tags")
+        .and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| t.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let res = sqlx::query(
+        "INSERT INTO skill_revisions (id, skill_id, rev, name, description, content, tags, origin, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(id_of(v, "skill_id"))
+    .bind(v.get("rev").and_then(|x| x.as_i64()).unwrap_or(1) as i32)
+    .bind(str_of(v, "name", ""))
+    .bind(str_of(v, "description", ""))
+    .bind(str_of(v, "content", ""))
+    .bind(&tags)
+    .bind(str_of(v, "origin", "create"))
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
+/// 工单/待办关联（两端 todo 须已在库；(from_id, to_id, kind) 冲突跳过）。
+pub async fn import_todo_link(pool: &PgPool, v: &Value) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO todo_links (id, from_id, to_id, kind, created_at) \
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "id"))
+    .bind(id_of(v, "from_id"))
+    .bind(id_of(v, "to_id"))
+    .bind(str_of(v, "kind", "relates_to"))
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}

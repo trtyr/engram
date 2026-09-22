@@ -129,6 +129,21 @@ pub async fn import_entity_relation(pool: &PgPool, v: &Value) -> StoreResult<boo
     Ok(res.rows_affected() > 0)
 }
 
+/// atom↔entity 关联（2026-09-22 上云核账补齐）：圈子图的边，重建要重跑 LLM 抽取——
+/// 必须随包（本机 296 行 vs 云机 0）。须在 atoms 与 entities 都入库后调用。
+pub async fn import_atom_entity(pool: &PgPool, v: &Value) -> StoreResult<bool> {
+    let res = sqlx::query(
+        "INSERT INTO atom_entities (atom_id, entity_id, created_at) \
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+    )
+    .bind(id_of(v, "atom_id"))
+    .bind(id_of(v, "entity_id"))
+    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
+}
+
 /// KV 导入（key 唯一冲突跳过；tsv 由生成列自算）。
 pub async fn import_kv_entries(pool: &PgPool, items: &[Value]) -> StoreResult<(usize, usize)> {
     let mut imported = 0usize;

@@ -106,3 +106,93 @@ pub async fn export_wiki_promotions(pool: &PgPool) -> StoreResult<Vec<Value>> {
     .await?;
     Ok(rows)
 }
+
+/// 项目文件 + 版本历史（2026-09-22 上云核账补齐）：项目文件是真实产物内容（HTML/报告），
+/// 派生重建不了——不随包走就是丢数据（本机 79 行 / 33 版本 vs 云机 0）。
+pub async fn export_project_files(pool: &PgPool) -> StoreResult<(Vec<Value>, Vec<Value>)> {
+    let files: Vec<Value> =
+        sqlx::query_scalar("SELECT to_jsonb(f) FROM project_files f ORDER BY f.project_id, f.name")
+            .fetch_all(pool)
+            .await?;
+    let versions: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(v) FROM project_file_versions v ORDER BY v.file_id, v.version",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok((files, versions))
+}
+
+/// atom↔entity 关联（圈子图的边；重建要重跑 LLM 抽取，随包走）。
+pub async fn export_atom_entities(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(ae) FROM atom_entities ae ORDER BY ae.atom_id, ae.entity_id",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// 技能版本历史（skill_revisions；当前内容在 skills/skill_files，这里补历史）。
+pub async fn export_skill_revisions(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> =
+        sqlx::query_scalar("SELECT to_jsonb(r) FROM skill_revisions r ORDER BY r.skill_id, r.rev")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows)
+}
+
+/// 工单/待办关联（同根因 link 成组的边）。
+pub async fn export_todo_links(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(l) FROM todo_links l ORDER BY l.from_id, l.to_id, l.kind",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// wiki 源文档行（摄取台账的文档侧；分块挂在它下面）。
+pub async fn export_wiki_documents(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> =
+        sqlx::query_scalar("SELECT to_jsonb(d) FROM wiki_documents d ORDER BY d.created_at")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows)
+}
+
+/// wiki 分块（剔除派生列 embedding/tsv——向量空缺由 re-embed 补，导入时落 embed_failed=true）。
+pub async fn export_wiki_chunks(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(c) - 'embedding' - 'tsv' FROM wiki_chunks c ORDER BY c.document_id, c.seq",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// wiki 来源行（sha256 幂等键 + 原始路径 + 摄取状态）。
+pub async fn export_wiki_sources(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> =
+        sqlx::query_scalar("SELECT to_jsonb(s) FROM wiki_sources s ORDER BY s.created_at")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows)
+}
+
+/// wiki 复核项（ingest 时 LLM 标的「建议建页/深度检索/需人判断」队列）。
+pub async fn export_wiki_review_items(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> =
+        sqlx::query_scalar("SELECT to_jsonb(r) FROM wiki_review_items r ORDER BY r.created_at")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows)
+}
+
+/// wiki 页间链接图（5007 行 / 本机；页面的 markdown 链接抽出物，是图谱页的数据源）。
+pub async fn export_wiki_links(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> =
+        sqlx::query_scalar("SELECT to_jsonb(l) FROM wiki_links l ORDER BY l.from_slug, l.to_slug")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows)
+}
