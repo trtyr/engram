@@ -92,25 +92,22 @@ async fn build_runner(
     if let Ok(v) = std::env::var("AGENT_MEMORY_JOB_CONCURRENCY") {
         runner_config.per_kind_concurrency = engram_jobs::runner::parse_per_kind_concurrency(&v);
     }
+    let distill_llm = engram_distill::gateway_llm(pool.clone(), {
+        // 未配置 = 全零占位（纯 chat 场景不碰密钥加密也不出错）；配了坏值则响亮拒绝，
+        // 并告诉 AI/人「怎么生成正确的」——此前 expect("主密钥格式恒合法") 在坏值下
+        // 打出自相矛盾的日志（恒合法 + NotConfigured + 必须是 64 hex 三信息打架）。
+        let master_key_hex = cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32));
+        engram_llm::KeyCipher::from_hex_master(&master_key_hex).map_err(|e| {
+                anyhow::anyhow!(
+                    "AGENT_MEMORY_MASTER_KEY 非法（{e}）——必须是 64 个 hex 字符（生成：openssl rand -hex 32）；\
+                     请修正 ~/.engram/.env 后重启。当前值前 8 字符：{}",
+                    &master_key_hex[..master_key_hex.len().min(8)]
+                )
+            })?
+    });
     let runner = engram_distill::register_handlers(
         engram_jobs::Runner::new(pool.clone(), runner_config),
-        engram_distill::gateway_llm(
-            pool.clone(),
-            {
-                // 未配置 = 全零占位（纯 chat 场景不碰密钥加密也不出错）；配了坏值则响亮拒绝，
-                // 并告诉 AI/人「怎么生成正确的」——此前 expect("主密钥格式恒合法") 在坏值下
-                // 打出自相矛盾的日志（恒合法 + NotConfigured + 必须是 64 hex 三信息打架）。
-                let master_key_hex =
-                    cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32));
-                engram_llm::KeyCipher::from_hex_master(&master_key_hex).map_err(|e| {
-                    anyhow::anyhow!(
-                        "AGENT_MEMORY_MASTER_KEY 非法（{e}）——必须是 64 个 hex 字符（生成：openssl rand -hex 32）；\
-                         请修正 ~/.engram/.env 后重启。当前值前 8 字符：{}",
-                        &master_key_hex[..master_key_hex.len().min(8)]
-                    )
-                })?
-            },
-        ),
+        distill_llm.clone(),
     )
     .register("deep_purge", move |_ctx| {
         let pool = pool_for_purge.clone();
@@ -159,6 +156,12 @@ async fn build_runner(
         // 织入尾部的自愈入口）依赖它；此前缺失导致补嵌静默跳过（Ok(0)）
         .with_llm(wiki_llm),
     );
+    // 内置节律（roadmap v3）：自续任务 handler + 启动自检补建（幂等键命中即复用，重复启动安全）
+    let runner = engram_distill::rhythm::register_rhythm(runner, distill_llm);
+    let rhythm_queue = engram_jobs::JobQueue::new(pool.clone());
+    if let Err(e) = engram_distill::rhythm::bootstrap(&rhythm_queue, pool).await {
+        tracing::warn!("内置节律启动自检失败（不影响启动，下次重启重试）: {e}");
+    }
     let runner_handle = runner.start();
     Ok(runner_handle)
 }

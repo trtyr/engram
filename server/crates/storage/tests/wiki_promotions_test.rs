@@ -9,12 +9,14 @@ use engram_storage::repo::wiki_promotions as repo;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-async fn setup() -> PgPool {
+async fn setup() -> (PgPool, support::TestPg) {
     let container = support::start_pgvector().await.expect("测试库");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
-    pool
+    // 守卫必须活满测试期：TestPg::drop 会异步 DROP DATABASE ... WITH (FORCE)，
+    // 早丢会中途掐断连接（2026-09-23 两次全量各挂一条同文件测试的根因）。
+    (pool, container)
 }
 
 /// 造最小 project + project_doc，返回 (project_id, doc_id)。
@@ -51,7 +53,7 @@ async fn main_lib(pool: &PgPool) -> Uuid {
 
 #[tokio::test]
 async fn promote_register_insert_list_and_unique_guard() {
-    let pool = setup().await;
+    let (pool, _container) = setup().await;
     let lib = main_lib(&pool).await;
     let (project_id, doc_id) = mk_project_doc(&pool, "晋升源项目").await;
 
@@ -103,7 +105,7 @@ async fn promote_register_insert_list_and_unique_guard() {
 
 #[tokio::test]
 async fn doc_delete_cascades_registration() {
-    let pool = setup().await;
+    let (pool, _container) = setup().await;
     let lib = main_lib(&pool).await;
     let (project_id, doc_id) = mk_project_doc(&pool, "待删项目").await;
     repo::insert(&pool, lib, "some-page", project_id, doc_id, "§锚点")
@@ -134,7 +136,7 @@ async fn doc_delete_cascades_registration() {
 
 #[tokio::test]
 async fn delete_by_page_clears_registrations() {
-    let pool = setup().await;
+    let (pool, _container) = setup().await;
     let lib = main_lib(&pool).await;
     let (project_id, doc_id) = mk_project_doc(&pool, "页删除场景").await;
     repo::insert(&pool, lib, "doomed-page", project_id, doc_id, "§锚点")

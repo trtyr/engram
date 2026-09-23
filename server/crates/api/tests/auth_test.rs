@@ -1751,8 +1751,6 @@ async fn openapi_snapshot() {
             "/memory/persona/rollback",
             "/memory/purge",
             "/memory/reembed",
-            "/memory/rhythm/heartbeat",
-            "/memory/rhythm/status",
             "/memory/scenarios",
             "/memory/scenarios/{id}",
             "/memory/search",
@@ -1798,6 +1796,7 @@ async fn openapi_snapshot() {
             "/settings/llm/routing",
             "/settings/llm/routing/suggest",
             "/settings/mcp",
+            "/settings/rhythm",
             "/skills",
             "/skills/export",
             "/skills/import",
@@ -1972,10 +1971,10 @@ async fn routing_suggest_reports_no_provider() {
     );
 }
 
-/// memory-rhythm 分权：cron 通道与心跳只能由 cron scope 的 key 走——防 AI 伪造
-/// via:"cron" 审计行、伪造心跳掩盖 cron 失联。status 则 memory scope 可读（AI 健康观察线）。
+/// memory-rhythm 分权：cron 通道只能由 cron scope 的 key 走——防 AI 伪造 via:"cron" 审计行。
+/// （内置节律线 2026-09-23：外部 cron 退役，heartbeat/status 端点已删，原 3/4/4b/5 步随之移除）
 #[tokio::test]
-async fn cron_scope_gates_distill_channel_and_heartbeat() {
+async fn cron_scope_gates_distill_channel() {
     let (app, _pg) = app().await;
     let token = login_token(&app).await;
     let mem_key = create_key(&app, &token, &["memory"]).await;
@@ -2016,75 +2015,6 @@ async fn cron_scope_gates_distill_channel_and_heartbeat() {
         StatusCode::ACCEPTED,
         "cron key 标 cron 应 202"
     );
-
-    // 3. memory-only key 发 heartbeat → 403（AI 不能伪造在役）
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/memory/rhythm/heartbeat")
-                .header("authorization", format!("Bearer {mem_key}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN, "AI 发心跳应 403");
-
-    // 4. cron key 带 via=cron 发 heartbeat → 200（crontab 命令模板自带 via）
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/memory/rhythm/heartbeat?via=cron")
-                .header("authorization", format!("Bearer {cron_key}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::OK,
-        "cron key + via=cron 心跳应 200"
-    );
-
-    // 4b. cron key 不带 via → 403（R-1 加固：scope 是软挡，via 是显式声明——
-    //     即使管理员误签了含 cron 的 key 给 AI，误调用也过不了）
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/memory/rhythm/heartbeat")
-                .header("authorization", format!("Bearer {cron_key}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::FORBIDDEN,
-        "不带 via=cron 的心跳应 403（防 AI 无声伪造 cron 在役）"
-    );
-
-    // 5. memory-only key 读 status → 200（AI 健康观察线保留）
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/memory/rhythm/status")
-                .header("authorization", format!("Bearer {mem_key}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "AI 读 status 应 200");
 }
 
 /// 提案聚合端点：一条 SQL 取每 job 最新一条提案事件（替代前端 N+1）。

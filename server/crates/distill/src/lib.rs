@@ -15,7 +15,9 @@ pub mod organize;
 pub mod persona;
 pub mod prompts;
 pub mod reembed;
+pub mod rhythm;
 pub mod scenario_converge;
 
 pub use chain::{gateway_llm, register_handlers, trigger_auto_extract};
 pub use llm_port::{DistillLlm, GatewayLlm};
+pub use rhythm::{RhythmConfig, bootstrap, load_config, register_rhythm, save_config};

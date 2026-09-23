@@ -123,7 +123,7 @@ pub struct ListProjectsParams {
 // ---------- 项目 ----------
 
 /// 工作线 ↔ 资产关系图（图谱页一次取全：项目 + 资产 + 全量关联）。
-#[utoipa::path(get, path = "/projects/graph",
+#[utoipa::path(get, path = "/projects/graph", operation_id = "projects_graph",
     responses((status = 200, body = ProjectGraphDto)))]
 pub async fn graph(
     principal: axum::Extension<Principal>,

@@ -8,6 +8,7 @@ pub mod error;
 pub mod login_throttle;
 pub mod mcp_admin;
 pub mod metrics;
+pub mod rhythm_admin;
 pub mod routes;
 pub mod state;
 pub mod web_assets;

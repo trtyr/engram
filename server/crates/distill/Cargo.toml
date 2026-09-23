@@ -10,6 +10,7 @@ metrics.workspace = true
 engram-jobs = { path = "../jobs" }
 engram-llm = { path = "../llm" }
 engram-search = { path = "../search" }
+engram-storage = { path = "../storage" }
 
 sqlx.workspace = true
 tokio.workspace = true

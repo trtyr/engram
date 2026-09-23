@@ -4,7 +4,6 @@ import { appConfirm } from '@/components/confirm'
 import { api, type Job, type Provider } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls, relTime } from '@/lib/ui'
-import { cn, copyText } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
 type Tab = 'providers' | 'routing' | 'rhythm' | 'danger' | 'migrate'
@@ -841,191 +840,158 @@ function DeepPurgePane() {
   )
 }
 
-// ---------- 节律（memory-rhythm：外部 cron 的观察面） ----------
-// cron 住在外部（crontab），server 只观察不控制：心跳逾期、积压年龄、
-// 安装向导与节律事件全部从既有数据面（jobs 表 + rhythm/status）读出。
+// ---------- 节律（内置节律线 roadmap v3：jobs 基建自续任务） ----------
+// 蒸馏节律住在 server 内部：任务「先续期再干活」——跑完自动排下一期（周期桶幂等键防重），
+// 启动自检补建；设置页只管配置（GET/PUT /settings/rhythm）与观察（读 jobs 表）。
 
-type RhythmStatus = {
-  last_heartbeat?: string | null
-  last_heartbeat_by?: string | null
-  pending_sessions: number
-  oldest_pending_age_secs?: number | null
+type RhythmConfig = {
+  enabled: boolean
+  extract_every_hours: number
+  consolidate_hour_local: number
 }
 
-const EXPECTED_KEY = 'engram-rhythm-expected'
-const EXPECTED_OPTIONS = [
-  { value: '3600', label: '每小时' },
-  { value: '21600', label: '每 6 小时' },
-  { value: '86400', label: '每天' },
-]
-
-function humanAge(secs: number): string {
-  if (secs < 3600) return `${Math.round(secs / 60)} 分钟`
-  if (secs < 86400) return `${(secs / 3600).toFixed(1)} 小时`
-  return `${(secs / 86400).toFixed(1)} 天`
-}
+const EXTRACT_HOURS = [1, 2, 4, 6, 8, 12, 24]
 
 function RhythmPane() {
-  const [status, setStatus] = useState<RhythmStatus | null>(null)
-  const [events, setEvents] = useState<Job[] | null>(null)
+  const [cfg, setCfg] = useState<RhythmConfig | null>(null)
+  const [jobs, setJobs] = useState<Job[] | null>(null)
   const [err, setErr] = useState('')
-  const [copied, setCopied] = useState(false)
-  const [copyFailed, setCopyFailed] = useState(false)
-  const [expected, setExpected] = useState(() => {
-    // 期望周期持久化在首帧读取（此前 effect 里同步 setState 触发级联渲染告警）
-    try {
-      return localStorage.getItem(EXPECTED_KEY) ?? '86400'
-    } catch {
-      return '86400'
-    }
-  })
-  // 页面加载时刻快照——逾期判定基于它（避免 render 期间调用 Date.now 非纯函数）
-  const [nowTs] = useState(() => Date.now())
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const loadJobs = () =>
+    api
+      .get<Job[]>('/jobs?kind=rhythm_extract,rhythm_consolidate&limit=50')
+      .then(setJobs)
+      .catch(() => setJobs([]))
 
   useEffect(() => {
     api
-      .get<RhythmStatus>('/memory/rhythm/status')
-      .then(setStatus)
+      .get<RhythmConfig>('/settings/rhythm')
+      .then(setCfg)
       .catch((e) => setErr(e.message))
-    api
-      .get<Job[]>('/jobs?limit=100')
-      .then((rows) =>
-        setEvents(
-          rows
-            .filter((j) => j.kind === 'rhythm_heartbeat' || (j.payload as Record<string, unknown>)?.reason === 'cron')
-            .slice(0, 12),
-        ),
-      )
-      .catch(() => setEvents([]))
+    loadJobs()
   }, [])
 
-  const onExpected = (v: string) => {
-    setExpected(v)
-    localStorage.setItem(EXPECTED_KEY, v)
-  }
-
-  // 逾期判定：超过期望周期 1.5 倍没有心跳 = cron 没来报到
-  const expectedSecs = Number(expected)
-  const overdue =
-    !status?.last_heartbeat
-      ? status === null
-        ? null
-        : 'never'
-      : nowTs - new Date(status.last_heartbeat).getTime() > expectedSecs * 1500
-        ? 'overdue'
-        : 'ok'
-
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:19180'
-  const crontab = [
-    '# Engram 记忆节律（外部 cron）——AM 换成本站地址，KEY 换成专用 amk_（设置→API 密钥，memory scope）',
-    `AM=${origin}`,
-    'KEY="amk_专用密钥"',
-    '# 心跳：每次运行报到（设置页据此判定逾期）——via=cron 是防 AI 伪造的显式声明',
-    '25 3 * * * curl -s -X POST "$AM/memory/rhythm/heartbeat?via=cron" -H "authorization: Bearer $KEY"',
-    '# 每日 full：全量蒸馏 + 整理（consolidate 日桶幂等，重跑安全）',
-    `30 3 * * * curl -s -X POST "$AM/memory/distill" -H "authorization: Bearer $KEY" -H 'content-type: application/json' -d '{"full":true,"via":"cron"}'`,
-    '# 每 6 小时兜底：扫 pending 会话（AI 写了没蒸馏的由这里接走）',
-    `0 */6 * * * curl -s -X POST "$AM/memory/distill" -H "authorization: Bearer $KEY" -H 'content-type: application/json' -d '{"via":"cron"}'`,
-  ].join('\n')
-
-  const copy = async () => {
-    if (await copyText(crontab)) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } else {
-      setCopyFailed(true)
-      setTimeout(() => setCopyFailed(false), 2000)
+  const save = async () => {
+    if (!cfg || busy) return
+    setBusy(true)
+    try {
+      setCfg(await api.put<RhythmConfig>('/settings/rhythm', cfg))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+      await loadJobs()
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
     }
   }
 
   if (err) return <ErrorBox msg={err} />
-  if (!status) return <Spinner />
+  if (!cfg) return <Spinner />
+
+  const pending = (jobs ?? []).filter((j) => j.status === 'pending')
+  const finished = (jobs ?? []).filter((j) => j.status !== 'pending' && j.status !== 'running')
+  const okCount = (jobs ?? []).filter((j) => j.status === 'succeeded').length
+  const rate = jobs !== null && jobs.length > 0 ? Math.round((okCount / jobs.length) * 100) : null
+  const nextDue = (kind: string) => {
+    const j = pending.find((p) => p.kind === kind)
+    return j ? fmtTime(j.due_at) : '—（停用中，或保存后即入队）'
+  }
 
   return (
     <div className="space-y-6">
       <Card className="p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">cron 心跳</h2>
+        <h2 className="text-sm font-semibold">节律配置</h2>
+        <p className="text-xs text-muted-foreground">
+          蒸馏节律住在 server 内部：任务跑完自动排下一期，重启自恢复——无需外部 crontab。
+        </p>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={cfg.enabled}
+            onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })}
+          />
+          启用节律（停用后在队的最后一期跑完即自然停止）
+        </label>
+        <div className="flex flex-wrap items-center gap-4">
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            期望周期
+            增量蒸馏周期
             <select
-              className={selectCls + ' h-8 w-28'}
-              value={expected}
-              onChange={(e) => onExpected(e.target.value)}
-              aria-label="期望心跳周期"
+              className={selectCls + ' h-8 w-32'}
+              value={cfg.extract_every_hours}
+              onChange={(e) => setCfg({ ...cfg, extract_every_hours: Number(e.target.value) })}
+              aria-label="增量蒸馏周期"
             >
-              {EXPECTED_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
+              {EXTRACT_HOURS.map((h) => (
+                <option key={h} value={h}>
+                  每 {h} 小时
                 </option>
               ))}
             </select>
           </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            每日全量整理（服务器时区）
+            <select
+              className={selectCls + ' h-8 w-24'}
+              value={cfg.consolidate_hour_local}
+              onChange={(e) => setCfg({ ...cfg, consolidate_hour_local: Number(e.target.value) })}
+              aria-label="每日整理钟点"
+            >
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>
+                  {String(h).padStart(2, '0')}:00
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button variant="outline" className="h-8" onClick={save} disabled={busy}>
+            {busy ? '保存中…' : saved ? '已保存' : '保存'}
+          </Button>
         </div>
-        {overdue === 'ok' && (
-          <p className="text-sm text-success">
-            ● 在役——最近心跳 {relTime(status.last_heartbeat!)}
-            {status.last_heartbeat_by ? `（${status.last_heartbeat_by}）` : ''}
-          </p>
+        {!cfg.enabled && (
+          <p className="text-sm text-warning">● 已停用——重新打开并保存后，下一期自动入队接上。</p>
         )}
-        {overdue === 'overdue' && (
-          <p className="text-sm text-destructive">
-            ● 逾期——最近心跳 {relTime(status.last_heartbeat!)}
-            {status.last_heartbeat_by ? `（${status.last_heartbeat_by}）` : ''}，超过期望周期 1.5 倍。检查
-            crontab 是否在跑（crontab -l）与本站可达性。
-          </p>
-        )}
-        {overdue === 'never' && (
-          <p className="text-sm text-warning">● 未装——还没有任何心跳记录。按下方安装向导配置外部 cron。</p>
-        )}
-      </Card>
-
-      <Card className="p-5 space-y-3">
-        <h2 className="text-sm font-semibold">会话积压（cron 兜底对象）</h2>
-        <p className="text-sm">
-          pending 会话 <span className="font-mono tabular-nums">{status.pending_sessions}</span> 条
-          {status.oldest_pending_age_secs != null && status.pending_sessions > 0 && (
-            <>
-              ，最老的已等 <span className="font-mono">{humanAge(status.oldest_pending_age_secs)}</span>
-            </>
-          )}
-          {status.pending_sessions > 0 && (
-            <span className="text-muted-foreground">（AI 写入但未蒸馏——cron 会接走；也可手动触发蒸馏）</span>
-          )}
-        </p>
       </Card>
 
       <Card className="p-5 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">安装向导（crontab 片段）</h2>
-          <Button
-            variant="outline"
-            className={cn('h-8', copyFailed && 'border-destructive/40 text-destructive')}
-            onClick={copy}
-          >
-            {copied ? '已复制' : copyFailed ? '复制失败' : '复制'}
-          </Button>
+          <h2 className="text-sm font-semibold">运行面（读 jobs 表）</h2>
+          {rate !== null && (
+            <span className="text-xs text-muted-foreground">
+              成功率 <span className="font-mono tabular-nums">{rate}%</span>（{okCount}/{jobs!.length}）
+            </span>
+          )}
         </div>
-        <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-relaxed">{crontab}</pre>
-        <p className="text-xs text-muted-foreground">
-          建议签发专用 key（名称如 cron，memory scope）——心跳与触发源都会标记 by，事件流可区分谁在跑。
-        </p>
-      </Card>
-
-      <Card className="p-5 space-y-3">
-        <h2 className="text-sm font-semibold">节律事件（近 12 条）</h2>
-        {events === null ? (
+        <div className="grid gap-2 text-sm sm:grid-cols-2">
+          <div className="rounded-md bg-muted/40 p-3">
+            <p className="text-xs text-muted-foreground">下次增量蒸馏</p>
+            <p className="font-mono text-xs">{nextDue('rhythm_extract')}</p>
+          </div>
+          <div className="rounded-md bg-muted/40 p-3">
+            <p className="text-xs text-muted-foreground">下次每日整理</p>
+            <p className="font-mono text-xs">{nextDue('rhythm_consolidate')}</p>
+          </div>
+        </div>
+        {jobs === null ? (
           <Spinner />
-        ) : events.length === 0 ? (
-          <Empty text="还没有节律事件——装好 cron 后这里会出现心跳与触发记录" />
+        ) : finished.length === 0 ? (
+          <Empty text="还没有执行记录——第一期到期后这里会出现" />
         ) : (
           <ul className="divide-y divide-border/60 text-sm">
-            {events.map((j) => (
+            {finished.slice(0, 12).map((j) => (
               <li key={j.id} className="flex items-center gap-3 py-2">
                 <StatusBadge status={j.status} />
-                <span className="font-mono text-xs">{j.kind}</span>
-                <span className="ml-auto text-xs text-muted-foreground" title={fmtTime(j.created_at)}>
-                  {relTime(j.created_at)}
+                <span className="font-mono text-xs">
+                  {j.kind === 'rhythm_extract' ? '增量蒸馏' : '每日整理'}
+                </span>
+                <span
+                  className="ml-auto text-xs text-muted-foreground"
+                  title={fmtTime(j.finished_at ?? j.created_at)}
+                >
+                  {relTime(j.finished_at ?? j.created_at)}
                 </span>
               </li>
             ))}

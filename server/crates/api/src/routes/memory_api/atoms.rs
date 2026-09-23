@@ -38,49 +38,6 @@ pub async fn trigger_distill(
     Ok((StatusCode::ACCEPTED, Json(jobs)))
 }
 
-#[derive(Deserialize, utoipa::IntoParams)]
-pub struct HeartbeatParams {
-    /// 调用方声明：仅 `cron` 值合法——crontab 命令模板自带，防 AI 误报心跳
-    pub via: Option<String>,
-}
-
-/// 节律心跳（memory-rhythm）：外部 cron 每次运行时报到——设置页据此判定逾期。
-/// 落 jobs 审计行（kind=rhythm_heartbeat），不新建表。
-#[utoipa::path(post, path = "/memory/rhythm/heartbeat", params(HeartbeatParams),
-    responses((status = 200, body = serde_json::Value)))]
-pub async fn rhythm_heartbeat(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-    Query(p): Query<HeartbeatParams>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    require_cron(&principal)?;
-    // 防伪第二道（2026-09-03 测试报告 R-1）：scope 是软挡（取决于签 key 纪律，
-    // 管理员可能给 AI 签出含 cron 的 key）；via=cron 是显式声明——普通 AI 误调用
-    // （不带 via）直接 403，不再可能无声伪造「cron 在役」状态。
-    if p.via.as_deref() != Some("cron") {
-        return Err(ApiError::Forbidden(
-            "heartbeat 仅限 crontab 报到（需 via=cron）——AI 请勿调用：会伪造「cron 在役」状态，掩盖真实 cron 失联".into(),
-        ));
-    }
-    let by = actor_of(&principal);
-    svc(&state)
-        .audit("rhythm_heartbeat", serde_json::json!({ "by": by }))
-        .await;
-    Ok(Json(serde_json::json!({ "ok": true, "by": by })))
-}
-
-/// 节律状态：最近心跳 + pending 会话积压年龄（cron 兜底的对象面）。
-#[utoipa::path(get, path = "/memory/rhythm/status",
-    responses((status = 200, body = serde_json::Value)))]
-pub async fn rhythm_status(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    require_memory(&principal)?;
-    let st = svc(&state).rhythm_status().await.map_err(me)?;
-    Ok(Json(st))
-}
-
 #[derive(Deserialize, IntoParams)]
 pub struct ListAtomsParams {
     pub kind: Option<String>,

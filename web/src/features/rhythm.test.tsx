@@ -1,23 +1,23 @@
-/** RhythmPane（设置→节律）：逾期警示 / 积压年龄 / 安装向导片段。 */
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+/** RhythmPane（设置→节律）：内置节律面板——配置回显 / 保存 / 运行面（读 jobs 表）。 */
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiGet = vi.fn()
+const apiPut = vi.fn()
 
 vi.mock('@/lib/api', () => ({
   api: {
     get: (...a: unknown[]) => apiGet(...a),
     post: vi.fn(),
     patch: vi.fn(),
+    put: (...a: unknown[]) => apiPut(...a),
     del: vi.fn(),
   },
 }))
 
 import Settings from './Settings'
 
-const DAY = 86_400_000
-
-describe('Settings 节律分区', () => {
+describe('Settings 节律分区（内置节律）', () => {
   beforeEach(() => {
     // Node 实验版 localStorage 抢注（--localstorage-file 警告）导致 jsdom 的不可用——stub 掉
     vi.stubGlobal('localStorage', {
@@ -27,60 +27,86 @@ describe('Settings 节律分区', () => {
       clear: vi.fn(),
     })
     apiGet.mockReset()
+    apiPut.mockReset()
   })
   afterEach(cleanup)
 
   const openPane = async () => {
     render(<Settings />)
     screen.getByRole('button', { name: '节律' }).click()
-    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/memory/rhythm/status'))
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith('/settings/rhythm'))
   }
 
-  it('心跳逾期渲染警示（超过期望周期 1.5 倍）', async () => {
+  const mockJobs = [
+    {
+      id: 'a',
+      kind: 'rhythm_extract',
+      status: 'pending',
+      due_at: '2030-01-01T06:00:00Z',
+      created_at: '2026-01-01T00:00:00Z',
+    },
+    {
+      id: 'b',
+      kind: 'rhythm_extract',
+      status: 'succeeded',
+      created_at: '2026-01-01T00:00:00Z',
+      finished_at: '2026-01-01T00:05:00Z',
+    },
+    {
+      id: 'c',
+      kind: 'rhythm_consolidate',
+      status: 'failed',
+      created_at: '2026-01-01T00:00:00Z',
+      finished_at: '2026-01-01T00:06:00Z',
+    },
+  ]
+
+  it('配置回显 + 下次触发 + 成功率（读 jobs 表）', async () => {
     apiGet.mockImplementation((url: string) => {
-      if (url === '/memory/rhythm/status')
-        return Promise.resolve({
-          last_heartbeat: new Date(Date.now() - 3 * DAY).toISOString(),
-          last_heartbeat_by: 'key:cron',
-          pending_sessions: 2,
-          oldest_pending_age_secs: 9000,
-        })
-      if (url === '/jobs?limit=100') return Promise.resolve([])
+      if (url === '/settings/rhythm')
+        return Promise.resolve({ enabled: true, extract_every_hours: 6, consolidate_hour_local: 3 })
+      if (url.startsWith('/jobs?kind=rhythm')) return Promise.resolve(mockJobs)
       return Promise.resolve([])
     })
     await openPane()
-    expect(await screen.findByText(/● 逾期/)).toBeTruthy()
-    expect(screen.getByText(/key:cron/)).toBeTruthy()
-    // 积压对象面
-    expect(screen.getByText('2')).toBeTruthy()
-    expect(screen.getByText(/2\.5 小时/)).toBeTruthy()
+    // 成功率 1/3 = 33%
+    expect(await screen.findByText(/33%/)).toBeTruthy()
+    // 下次触发展示 pending 的到期时间
+    expect(screen.getByText(/下次增量蒸馏/)).toBeTruthy()
+    expect(screen.getByText(/下次每日整理/)).toBeTruthy()
+    // 缺省配置回显：每 6 小时
+    expect(
+      (screen.getByLabelText('增量蒸馏周期') as HTMLSelectElement).value === '6',
+    ).toBeTruthy()
   })
 
-  it('未装状态渲染引导（无心跳记录）', async () => {
+  it('保存按钮把配置 PUT 上去并刷新运行面', async () => {
     apiGet.mockImplementation((url: string) => {
-      if (url === '/memory/rhythm/status')
-        return Promise.resolve({ last_heartbeat: null, pending_sessions: 0 })
-      if (url === '/jobs?limit=100') return Promise.resolve([])
+      if (url === '/settings/rhythm')
+        return Promise.resolve({ enabled: true, extract_every_hours: 6, consolidate_hour_local: 3 })
+      if (url.startsWith('/jobs?kind=rhythm')) return Promise.resolve([])
       return Promise.resolve([])
     })
+    apiPut.mockResolvedValue({ enabled: false, extract_every_hours: 6, consolidate_hour_local: 3 })
     await openPane()
-    expect(await screen.findByText(/未装/)).toBeTruthy()
+    fireEvent.click(screen.getByLabelText(/启用节律/))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith(
+        '/settings/rhythm',
+        expect.objectContaining({ enabled: false }),
+      ),
+    )
   })
 
-  it('安装向导 crontab 片段含端点与幂等说明', async () => {
+  it('停用状态显示自然停止提示', async () => {
     apiGet.mockImplementation((url: string) => {
-      if (url === '/memory/rhythm/status')
-        return Promise.resolve({
-          last_heartbeat: new Date().toISOString(),
-          pending_sessions: 0,
-        })
-      if (url === '/jobs?limit=100') return Promise.resolve([])
+      if (url === '/settings/rhythm')
+        return Promise.resolve({ enabled: false, extract_every_hours: 6, consolidate_hour_local: 3 })
+      if (url.startsWith('/jobs?kind=rhythm')) return Promise.resolve([])
       return Promise.resolve([])
     })
     await openPane()
-    const pre = await screen.findByText(/\/memory\/rhythm\/heartbeat/, { selector: 'pre' })
-    expect(pre.textContent).toContain('/memory/distill')
-    expect(pre.textContent).toContain('"full":true,"via":"cron"')
-    expect(pre.textContent).toContain('amk_')
+    expect(await screen.findByText(/已停用/)).toBeTruthy()
   })
 })

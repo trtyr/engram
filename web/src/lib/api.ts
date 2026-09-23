@@ -193,6 +193,9 @@ export interface Job {
   progress: unknown
   payload?: Record<string, unknown>
   created_at: string
+  started_at: string | null
+  finished_at: string | null
+  due_at: string
 }
 export interface JobEvent {
   id: number

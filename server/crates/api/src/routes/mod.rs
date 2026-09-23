@@ -40,6 +40,7 @@ use utoipa::OpenApi;
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
         llm_api::batch_revoke_api_keys, llm_api::update_api_key, llm_api::fetch_models,
         crate::mcp_admin::settings_mcp, crate::mcp_admin::settings_mcp_update,
+ crate::rhythm_admin::get_rhythm_config, crate::rhythm_admin::put_rhythm_config,
         memory_api::write_session, memory_api::list_sessions, memory_api::get_session,
         memory_api::erase_session, memory_api::append_session, memory_api::import_session, memory_api::void_session, memory_api::restore_session, memory_api::batch_restore_sessions, memory_api::batch_erase_sessions, memory_api::trigger_distill, memory_api::purge_agent, memory_api::export_memory,
         memory_api::list_atoms, memory_api::create_atom, memory_api::update_atom,
@@ -47,7 +48,7 @@ use utoipa::OpenApi;
         memory_api::get_persona, memory_api::persona_edit, memory_api::persona_history,
         memory_api::persona_rollback, memory_api::atom_revisions,
         memory_api::search, memory_api::context, memory_api::embedding_status, memory_api::reembed_memory,
-        memory_api::rhythm_heartbeat, memory_api::rhythm_status, memory_api::list_kv, memory_api::get_kv,
+        memory_api::list_kv, memory_api::get_kv,
         memory_api::timeline,
         memory_api::list_entities, memory_api::entity_graph, memory_api::search_entities_handler, memory_api::create_entity,
         memory_api::batch_entities, memory_api::export_entities,
@@ -255,6 +256,10 @@ fn settings_routes() -> Router<AppState> {
         .route(
             "/settings/mcp",
             get(crate::mcp_admin::settings_mcp).put(crate::mcp_admin::settings_mcp_update),
+        )
+        .route(
+            "/settings/rhythm",
+            get(crate::rhythm_admin::get_rhythm_config).put(crate::rhythm_admin::put_rhythm_config),
         )
 }
 

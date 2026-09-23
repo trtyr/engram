@@ -178,28 +178,6 @@ pub async fn unvoid_session_update(pool: &PgPool, id: Uuid) -> StoreResult<Optio
     Ok(row)
 }
 
-/// 节律积压：pending（排除 off）会话数 + 最老一条的创建时间。
-pub async fn session_backlog(pool: &PgPool) -> StoreResult<(i64, Option<DateTime<Utc>>)> {
-    let pending: (i64, Option<DateTime<Utc>>) = sqlx::query_as(
-        "SELECT count(*), min(created_at) FROM raw_sessions WHERE distill_status = 'pending' \
-         AND COALESCE(metadata->>'distill','') <> 'off'",
-    )
-    .fetch_one(pool)
-    .await?;
-    Ok(pending)
-}
-
-/// 节律心跳：复用 jobs 审计行（kind=rhythm_heartbeat）取最近一条。
-pub async fn rhythm_last_heartbeat(pool: &PgPool) -> StoreResult<Option<(DateTime<Utc>, String)>> {
-    let heartbeat: Option<(DateTime<Utc>, String)> = sqlx::query_as(
-        "SELECT created_at, payload->>'by' AS by FROM jobs \
-         WHERE kind = 'rhythm_heartbeat' ORDER BY created_at DESC LIMIT 1",
-    )
-    .fetch_optional(pool)
-    .await?;
-    Ok(heartbeat)
-}
-
 /// P2 进程崩溃自愈：上次运行中被认领（processing）的会话退回 pending。
 /// 返回受影响行数。
 pub async fn reset_processing_sessions(pool: &PgPool) -> StoreResult<u64> {

@@ -86,21 +86,6 @@ impl MemoryService {
         }))
     }
 
-    /// 节律状态（memory-rhythm）：外部 cron 的心跳与积压年龄，供设置页判定逾期。
-    /// last_heartbeat 复用 jobs 审计行（kind=rhythm_heartbeat）；pending 统计扫
-    /// raw_sessions 积压（cron 兜底蒸馏的对象）。
-    pub async fn rhythm_status(&self) -> Result<serde_json::Value, MemoryError> {
-        let heartbeat = repo::rhythm_last_heartbeat(&self.pool).await?;
-        let (count, oldest) = repo::session_backlog(&self.pool).await?;
-        let age_secs = oldest.map(|t| (Utc::now() - t).num_seconds());
-        Ok(serde_json::json!({
-            "last_heartbeat": heartbeat.as_ref().map(|h| h.0),
-            "last_heartbeat_by": heartbeat.as_ref().map(|h| h.1.clone()),
-            "pending_sessions": count,
-            "oldest_pending_age_secs": age_secs,
-        }))
-    }
-
     // ---------- KV 值保值通道（蒸馏零介入——value 逐字保存） ----------
 
     /// 写入/更新一个结构化值。同 key 就地覆盖（可变状态不产生取代链）。
