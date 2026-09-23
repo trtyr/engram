@@ -123,13 +123,14 @@ impl MemoryService {
             )));
         }
         let text = content.trim();
-        // 输入校验：空内容 + 超长（对齐蒸馏链的 1~120 字契约）
+        // 输入校验：空内容 + 超长（对齐蒸馏链的 1~ATOM_MAX_CHARS 字契约；2026-09-23 用户拍板 120→500）
         if text.is_empty() {
             return Err(MemoryError::BadRequest("原子内容不能为空".into()));
         }
-        if text.chars().count() > 120 {
+        if text.chars().count() > crate::memory::ATOM_MAX_CHARS {
             return Err(MemoryError::BadRequest(format!(
-                "原子内容超长：最多 120 字，当前 {} 字——原子只收一句话；成段内容走 write_session（蒸馏自动切分），remember 用默认蒸馏路径（不带 strength=fact）",
+                "原子内容超长：最多 {} 字，当前 {} 字——原子只收一句话；成段内容走 write_session（蒸馏自动切分），remember 用默认蒸馏路径（不带 strength=fact）",
+                crate::memory::ATOM_MAX_CHARS,
                 text.chars().count()
             )));
         }
@@ -188,9 +189,10 @@ impl MemoryService {
         if t.is_empty() {
             return Err(MemoryError::BadRequest("更正内容不能为空".into()));
         }
-        if t.chars().count() > 120 {
+        if t.chars().count() > crate::memory::ATOM_MAX_CHARS {
             return Err(MemoryError::BadRequest(format!(
-                "更正内容超长：最多 120 字，当前 {} 字",
+                "更正内容超长：最多 {} 字，当前 {} 字",
+                crate::memory::ATOM_MAX_CHARS,
                 t.chars().count()
             )));
         }

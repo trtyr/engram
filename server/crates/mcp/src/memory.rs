@@ -213,7 +213,7 @@ impl EngramMcpServer {
     /// 用户记忆域（单一入口）。记忆四层：L0 会话 →（蒸馏）→ L1 原子 → L2 场景 → L3 画像，
     /// 实体坐标系横向串联。开场用 action="context" 装载，定向回忆用 "search"，
     /// 收尾用 "write_session" 写入；遗忘用 "forget"。
-    /// 速记：remember 正文字段名是 text；strength=fact 直写原话限 120 字，默认蒸馏路径成段内容也可，更长走 write_session。操作全景：action="help"。
+    /// 速记：remember 正文字段名是 text；strength=fact 直写原话限 500 字，默认蒸馏路径成段内容也可，更长走 write_session。操作全景：action="help"。
     #[tool(
         name = "memory",
         annotations(

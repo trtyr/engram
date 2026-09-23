@@ -65,7 +65,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "kv_get", false, "读取结构化精确值（按 key）" => crate::MemoryKvGetParams;
             "kv_list", false, "列出全部 KV 值（按 updated_at 倒序）" => crate::MemoryKvListParams;
             "kv_search", false, "字面量直查 KV（key/value/context ILIKE——精确值不依赖分词）" => crate::MemoryKvSearchParams;
-            "remember", false, "一句话记忆（正文字段 text；strength=fact 直写限 120 字；缺省走 auto 蒸馏，产物默认 inference；strength=fact 显式声明用户明示事实则直写落库原话保真）" => crate::RememberParams;
+            "remember", false, "一句话记忆（正文字段 text；strength=fact 直写限 500 字；缺省走 auto 蒸馏，产物默认 inference；strength=fact 显式声明用户明示事实则直写落库原话保真）" => crate::RememberParams;
             "correct", false, "更正记忆（快路径取代链）：用户说「你记错了」时用——先 search 定位旧原子，再 correct(target_id, text)；旧原子 superseded 指向新条目，仅 active 非敏感可更正" => crate::CorrectParams;
             "confirm", false, "待审复核通过：摘掉 needs_review 标记（仅 needs_review=true 可处置；AI 代管复核）" => crate::ReviewActionParams;
             "discard", false, "待审复核丢弃：归档该条（仅 needs_review=true 可处置；AI 代管复核）" => crate::ReviewActionParams;

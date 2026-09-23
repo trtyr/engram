@@ -12,8 +12,9 @@ use uuid::Uuid;
 /// 分段字符预算（B1 覆盖率）：段内拼多轮，超预算开新段；单段一次 LLM 调用。
 pub const SEGMENT_CHARS: usize = 6000;
 
-/// 单条候选原子内容上限（字符数）。
-const ATOM_MAX_CHARS: usize = 120;
+/// 单条候选原子内容上限（字符数）。2026-09-23 用户拍板 120 → 500；
+/// 与 engram-core::memory::ATOM_MAX_CHARS 配对（distill 不依赖 core，两处人工同步）。
+const ATOM_MAX_CHARS: usize = 500;
 /// 实体名上限（字符数）。
 const ENTITY_NAME_MAX_CHARS: usize = 60;
 /// 关系类型白名单（与 consolidate 同表）。
@@ -350,7 +351,7 @@ mod tests {
             {"kind": "preference", "content": " 喜欢 Rust ", "confidence": 1.7,
              "turn_refs": [1], "strength": "fact"},
             {"kind": "fact", "content": "", "turn_refs": [1]},                    // 空内容 → 丢
-            {"kind": "fact", "content": "x".repeat(121), "turn_refs": [1]},       // 超长 → 丢
+            {"kind": "fact", "content": "x".repeat(501), "turn_refs": [1]},       // 超长 → 丢
             {"kind": "fact", "content": "第二轮说的", "turn_refs": [2]},
         ]});
         let got = parse_atoms(&out, &turn_map, &sensitive);

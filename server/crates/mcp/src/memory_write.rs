@@ -5,9 +5,9 @@ use super::*;
 /// 一句话记忆（R 报告 P1-9）：记条小事实不必手搓 turns 数组。
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct RememberParams {
-    /// 要记住的一句话（字段名 text，≤120 字）
+    /// 要记住的一句话（字段名 text，≤500 字）
     #[schemars(
-        description = "要记住的事实/偏好/事件，一句话 ≤120 字（如「用户的猫叫墨鱼，喜欢趴键盘上睡觉」）。字段名是 text。等价于单轮 write_session + auto 蒸馏；成段内容请走 write_session。"
+        description = "要记住的事实/偏好/事件，一句话 ≤500 字（如「用户的猫叫墨鱼，喜欢趴键盘上睡觉」）。字段名是 text。等价于单轮 write_session + auto 蒸馏；成段内容请走 write_session。"
     )]
     pub text: Option<String>,
     /// 会话级敏感标记
@@ -34,9 +34,9 @@ pub struct CorrectParams {
         description = "要更正的旧原子 id——先 search 定位。仅 active 且非敏感原子可被取代；更正后旧原子标记 superseded 并指向本条新事实（取代链留痕）。"
     )]
     pub target_id: String,
-    /// 更正后的新事实（一句话，≤120 字）
+    /// 更正后的新事实（一句话，≤500 字）
     #[schemars(
-        description = "更正后的新事实，一句话 ≤120 字（如「用户现居杭州」）。新原子 active，旧原子自动 superseded。"
+        description = "更正后的新事实，一句话 ≤500 字（如「用户现居杭州」）。新原子 active，旧原子自动 superseded。"
     )]
     pub text: String,
 }
@@ -119,8 +119,9 @@ impl EngramMcpServer {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
                 format!(
-                    "remember 需要正文字段 text（上限 {} 字）——注意字段名是 text 不是 content；strength=fact 直写原话时内容需 ≤120 字；成段内容走默认蒸馏路径或 write_session",
-                    engram_core::memory::TURN_TEXT_MAX_CHARS
+                    "remember 需要正文字段 text（上限 {} 字）——注意字段名是 text 不是 content；strength=fact 直写原话时内容需 ≤{} 字；成段内容走默认蒸馏路径或 write_session",
+                    engram_core::memory::TURN_TEXT_MAX_CHARS,
+                    engram_core::memory::ATOM_MAX_CHARS
                 ),
             ));
         };
@@ -138,9 +139,10 @@ impl EngramMcpServer {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
                 format!(
-                    "text 超长（当前 {} 字，上限 {} 字）——remember text 自身可到上限；但 strength=fact 直写原话限 120 字，超长请去掉 strength=fact 走默认蒸馏或用 write_session",
+                    "text 超长（当前 {} 字，上限 {} 字）——remember text 自身可到上限；但 strength=fact 直写原话限 {} 字，超长请去掉 strength=fact 走默认蒸馏或用 write_session",
                     text.chars().count(),
-                    engram_core::memory::TURN_TEXT_MAX_CHARS
+                    engram_core::memory::TURN_TEXT_MAX_CHARS,
+                    engram_core::memory::ATOM_MAX_CHARS
                 ),
             ));
         }

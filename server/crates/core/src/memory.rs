@@ -172,6 +172,10 @@ pub const PURGE_CONFIRM_PHRASE: &str = "清空记忆库";
 /// 长文档应走 wiki 文档域 /wiki/upload 分块摄取。
 pub const TURN_TEXT_MAX_CHARS: usize = 50_000;
 
+/// 单条原子内容上限（字符数）。2026-09-23 用户拍板 120 → 500（一句话事实的长度口径放宽）；
+/// distill 的 extract_model.rs 同名常量与本值配对（distill 不依赖 core，两处人工同步）。
+pub const ATOM_MAX_CHARS: usize = 500;
+
 /// M-1/SEC-B（2026-09-03）：轮次逐条校验——speaker 合法、text 非空且有上限。
 /// 此前空 text 轮次被原样落库（进蒸馏浪费 LLM 调用）、超长轮次无界 accepted。
 fn validate_turns(arr: &[serde_json::Value]) -> Result<(), MemoryError> {
