@@ -8,12 +8,16 @@ use engram_core::todos::{TodoDto, TodoError, TodoService};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::auth::{Principal, require_scope};
+use crate::auth::{Principal, require_scope, require_scope_read};
 use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_todos(p: &Principal) -> Result<(), ApiError> {
     require_scope(p, "todos")
+}
+/// 读语义变体：:ro 只读 key 放行（RJ-20，对齐 MCP 读动作口径）。
+fn require_todos_read(p: &Principal) -> Result<(), ApiError> {
+    require_scope_read(p, "todos")
 }
 
 fn te(e: TodoError) -> ApiError {
@@ -98,7 +102,7 @@ pub async fn list_todos(
     State(state): State<AppState>,
     Query(p): Query<ListTodosParams>,
 ) -> Result<Json<Vec<TodoDto>>, ApiError> {
-    require_todos(&principal)?;
+    require_todos_read(&principal)?;
     Ok(Json(
         svc(&state)
             .list(
@@ -160,7 +164,7 @@ pub async fn get_todo(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TodoDto>, ApiError> {
-    require_todos(&principal)?;
+    require_todos_read(&principal)?;
     Ok(Json(svc(&state).get(id).await.map_err(te)?))
 }
 
@@ -173,7 +177,7 @@ pub async fn todo_links(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
-    require_todos(&principal)?;
+    require_todos_read(&principal)?;
     let raw = svc(&state).links(id).await.map_err(te)?;
     let items: Vec<serde_json::Value> = raw
         .iter()
@@ -237,6 +241,6 @@ pub async fn export_todos(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<TodoDto>>, ApiError> {
-    require_todos(&principal)?;
+    require_todos_read(&principal)?;
     Ok(Json(svc(&state).export_all().await.map_err(te)?))
 }

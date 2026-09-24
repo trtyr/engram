@@ -363,7 +363,7 @@ function DocReader({ doc, libSlug, onDeleted }: { doc: Document; libSlug: string
                     setBusy(true)
                     setMsg('')
                     try {
-                      await api.post(`/wiki/documents/${doc.id}/re-embed?lib=${encodeURIComponent(libSlug)}`)
+                      await api.post(`/wiki/documents/${doc.id}/re-embed`)
                       setMsg('重嵌任务已入队')
                     } catch (ex) {
                       setMsg(ex instanceof Error ? ex.message : '重嵌失败')

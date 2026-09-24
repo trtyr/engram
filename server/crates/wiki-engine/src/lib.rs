@@ -1,7 +1,7 @@
 //! Wiki 引擎：两步 ingest（analysis→generation）、wikilink 解析、
 //! index/log/overview 维护、lint、链接图、多库（library）管理。
 //!
-//! 设计文档：docs/plantree/plans/engram-platform/topics/wiki-engine.md
+//! 设计文档：engram projects 域（主题：wiki-engine）
 //! 模式：Karpathy LLM-wiki（原料不可变，LLM 增量维护，人负责纠偏）。
 //! 多库（0037）：库是一级命名空间，页面/双链/原料/审查/洞察/purpose 全部挂库。
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）

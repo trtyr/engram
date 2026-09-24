@@ -1,9 +1,10 @@
 //! 持久化层：sqlx PgPool 装配、迁移执行、领域仓储与持久化模型。
 //!
-//! 分层约定（见 docs/plantree/baseline/module-map.md）：
+//! 分层约定（见 engram projects 域架构篇）：
 //! - `server/migrations/` 是 schema 唯一定义处，启动时自动执行。
-//! - 领域表的业务面读写**唯一**收口在 `repo::*`：core 服务与 api/mcp 经由本 crate
-//!   访问数据，本 crate 之外不再出现领域表的裸 SQL。
+//! - 领域表的业务面读写收口在 `repo::*`：core 服务与 api/mcp 经由本 crate
+//!   访问数据（ADR-19 改约：不再宣称全仓「唯一收口」；新代码的领域表业务面
+//!   必须走 repo，存量渐进收敛，不追改）。
 //! - 持久化模型（sqlx::FromRow 行类型）在 `models::*`；core 将其 re-export 保持
 //!   `engram_core::<域>::<Dto>` 路径兼容。
 //! - 边界：流水线型 crate（distill / wiki-engine / llm / search）按既有设计拥有

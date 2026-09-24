@@ -5,7 +5,7 @@ use super::*;
 #[derive(Deserialize, ToSchema)]
 pub struct CreateApiKeyRequest {
     pub name: String,
-    /// scope 全量集合（EN-62：显式必填——不传请求直接 400，不再有任何隐式默认；
+    /// scope 全量集合（EN-62：显式必填——缺字段由 serde 拒绝为 422；未知 scope 值 400，不再有任何隐式默认；
     /// 常见误写「projects」自动归一为「project」）
     pub scopes: Vec<String>,
     /// 可选：过期时间（RFC3339，如 2027-01-01T00:00:00Z）——缺省永不过期；到期后该 key 返回 401（带到期说明）（EN-62）

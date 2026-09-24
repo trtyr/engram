@@ -66,6 +66,13 @@ pub struct ProjectLocationUpdateParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProjectLocationGetParams {
+    /// 位置 id（UUID）
+    #[schemars(description = "位置 id（UUID，来自 project_get 返回的 locations 列表）。")]
+    pub location_id: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ProjectLocationDeleteParams {
     /// 位置 id（UUID）
     #[schemars(description = "位置 id（UUID，来自 project_get 返回的 locations 列表）。")]
@@ -152,6 +159,24 @@ impl EngramMcpServer {
                 lp.purpose.or(current.purpose).as_deref(),
                 asset_id,
             )
+            .await
+            .map_err(from_project)?;
+        ok_json(serde_json::to_value(&loc).unwrap_or(serde_json::json!({})))
+    }
+
+    /// 读单个项目位置（详情核对：host/ip/os/path/用途/关联资产）。
+    pub(crate) async fn project_location_get(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<ProjectLocationGetParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_project(&p)?;
+        let id = Uuid::parse_str(&params.0.location_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "location_id 不是合法 UUID"))?;
+        let loc = self
+            .svc_project()
+            .get_location(id)
             .await
             .map_err(from_project)?;
         ok_json(serde_json::to_value(&loc).unwrap_or(serde_json::json!({})))

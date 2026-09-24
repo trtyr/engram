@@ -230,9 +230,6 @@ pub struct WikiMergeParams {
     /// 被合并页 slug（内容并入 primary 后删除，留版本快照——下架不烧书）。
     #[schemars(description = "被合并页 slug（内容并入 primary 后删除，留版本快照——下架不烧书）。")]
     pub duplicate: String,
-    /// 可选：库 slug（缺省 main 主库）。
-    #[schemars(description = "可选：库 slug（缺省 main 主库）。")]
-    pub library: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -359,9 +356,6 @@ pub struct WikiPromoteParams {
         description = "提炼后的通用知识正文（markdown，可带 [[wikilink]]）——提炼由调用方完成，服务端不做 LLM 提炼。"
     )]
     pub content: String,
-    /// 可选：目标库 slug（缺省 main 主库）
-    #[schemars(description = "可选：目标库 slug（缺省 main 主库）。")]
-    pub library: Option<String>,
 }
 
 /// 晋升登记列表参数。

@@ -54,7 +54,7 @@ pub async fn list_atoms(
     State(state): State<AppState>,
     Query(p): Query<ListAtomsParams>,
 ) -> Result<Json<Vec<AtomDto>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(
         svc(&state)
             .list_atoms(
@@ -197,7 +197,7 @@ pub async fn atom_revisions(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<engram_core::AtomRevision>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(svc(&state).atom_revisions(id).await.map_err(me)?))
 }
 
@@ -264,7 +264,7 @@ pub async fn context(
     State(state): State<AppState>,
     Query(p): Query<ContextParams>,
 ) -> Result<Json<ContextPack>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(
         svc(&state)
             .context_pack(
@@ -285,7 +285,7 @@ pub async fn embedding_status(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<EmbeddingStatus>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(svc(&state).embedding_status().await.map_err(me)?))
 }
 

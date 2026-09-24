@@ -14,7 +14,9 @@ use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 
-pub use engram_core::auth::{Principal, SCOPES, normalize_scope, unknown_scope_message};
+pub use engram_core::auth::{
+    DomainAccess, Principal, SCOPES, normalize_scope, unknown_scope_message,
+};
 
 fn sha256_hex(input: &str) -> String {
     let mut h = Sha256::new();
@@ -179,12 +181,26 @@ async fn authenticate(pool: &PgPool, token: &str) -> Result<Option<Principal>, A
     Ok(None)
 }
 
-/// scope 检查辅助（handler 用）。
+/// scope 检查辅助（handler 用）——判定唯一收口到 `Principal::domain_access`（RJ-20/A2：
+/// 与 MCP `check_action_access`、迁移面 `require_migrate` 同一判定源）。
+/// 本函数 = **写语义**：要求全量 scope（ReadOnly 拒绝，与 MCP 写动作拒绝同语义）。
 pub fn require_scope(principal: &Principal, scope: &str) -> Result<(), ApiError> {
-    if principal.has_scope(scope) {
-        Ok(())
-    } else {
-        Err(ApiError::Forbidden(format!("缺少 scope: {scope}")))
+    match principal.domain_access(scope) {
+        DomainAccess::Full => Ok(()),
+        _ => Err(ApiError::Forbidden(format!(
+            "缺少 {scope} scope 的全量授权（只读变体 :ro 不能执行写操作）"
+        ))),
+    }
+}
+
+/// 读语义 scope 检查：全量 scope 或 `<scope>:ro` 只读变体都放行
+/// （对齐 MCP 侧「只读 key 可调读动作」的行为；GET/HEAD 类 handler 用这个）。
+pub fn require_scope_read(principal: &Principal, scope: &str) -> Result<(), ApiError> {
+    match principal.domain_access(scope) {
+        DomainAccess::Full | DomainAccess::ReadOnly => Ok(()),
+        DomainAccess::None => Err(ApiError::Forbidden(format!(
+            "缺少 scope: {scope}（只读变体应写 {scope}:ro）"
+        ))),
     }
 }
 
@@ -220,4 +236,45 @@ fn auth_error(message: &str) -> Response {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod ro_unify_tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn key(scopes: Vec<String>) -> Principal {
+        Principal::ApiKey {
+            key_id: Uuid::nil(),
+            name: "t".into(),
+            scopes,
+        }
+    }
+
+    #[test]
+    fn ro_key_reads_ok_writes_rejected_http() {
+        let ro = key(vec!["wiki:ro".into()]);
+        assert!(require_scope_read(&ro, "wiki").is_ok(), ":ro 应放行读端点");
+        assert!(require_scope(&ro, "wiki").is_err(), ":ro 应被写端点拒绝");
+    }
+
+    #[test]
+    fn full_key_passes_both() {
+        let full = key(vec!["wiki".into()]);
+        assert!(require_scope_read(&full, "wiki").is_ok());
+        assert!(require_scope(&full, "wiki").is_ok());
+    }
+
+    #[test]
+    fn no_scope_rejected_both() {
+        let none = key(vec!["memory".into()]);
+        assert!(require_scope_read(&none, "wiki").is_err());
+        assert!(require_scope(&none, "wiki").is_err());
+    }
+
+    #[test]
+    fn admin_passes_both() {
+        assert!(require_scope_read(&Principal::Admin, "wiki").is_ok());
+        assert!(require_scope(&Principal::Admin, "wiki").is_ok());
+    }
 }

@@ -88,6 +88,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "delete", true, "删除项目（级联删除位置与文档，不可逆）" => crate::ProjectDeleteParams;
             "batch_delete", true, "批量删除项目（不可逆）" => crate::ProjectBatchDeleteParams;
             "location_add", false, "登记项目在主机上的位置（多主机登记制）" => crate::ProjectLocationAddParams;
+            "location_get", false, "读单个位置登记（详情：host/ip/os/path/用途/关联资产）" => crate::ProjectLocationGetParams;
             "location_update", false, "编辑已登记的位置" => crate::ProjectLocationUpdateParams;
             "location_delete", true, "删除一条位置登记" => crate::ProjectLocationDeleteParams;
             "link", false, "建工作线关联（part_of 隶属 / related 相关；自环与同向同类重复被拒）" => crate::ProjectLinkAddParams;
@@ -341,6 +342,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                 | "file_get"
                 | "file_list"
                 | "links"
+                | "location_get"
         ) | ("assets", "kinds" | "list" | "get")
             | ("skills", "list" | "get" | "file_get" | "versions")
             | (
@@ -545,5 +547,44 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod ro_unify_tests {
+    use super::*;
+    use engram_core::auth::Principal;
+    use uuid::Uuid;
+
+    /// RJ-20/A2 验收：同一把 `memory:ro` key 在 MCP 侧读动作放行、写动作拒绝
+    /// （与 HTTP 侧 require_scope_read / require_scope 语义一致）。
+    #[test]
+    fn ro_key_reads_ok_writes_rejected_mcp() {
+        let ro = Principal::ApiKey {
+            key_id: Uuid::nil(),
+            name: "t".into(),
+            scopes: vec!["memory:ro".into()],
+        };
+        let actions: Vec<String> = action_docs("memory")
+            .expect("memory 域应有 action 文档表")
+            .iter()
+            .map(|d| d.action.to_string())
+            .collect();
+        let write = actions
+            .iter()
+            .find(|a| is_write_action("memory", a))
+            .expect("memory 应有写动作");
+        let read = actions
+            .iter()
+            .find(|a| !is_write_action("memory", a))
+            .expect("memory 应有读动作");
+        assert!(
+            check_action_access(&ro, "memory", read).is_ok(),
+            ":ro 读动作应放行：{read}"
+        );
+        assert!(
+            check_action_access(&ro, "memory", write).is_err(),
+            ":ro 写动作应拒绝：{write}"
+        );
     }
 }

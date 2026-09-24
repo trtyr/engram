@@ -132,7 +132,7 @@ pub async fn export_memory(
     State(state): State<AppState>,
     axum::extract::Query(p): axum::extract::Query<ExportParams>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(
         svc(&state)
             .export(p.include_sensitive.unwrap_or(true)) // 敏感口径放开（2026-09-12）——默认全量
@@ -155,7 +155,7 @@ pub async fn timeline(
     State(state): State<AppState>,
     Query(p): Query<TimelineParams>,
 ) -> Result<Json<Vec<engram_core::TimelineEvent>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(
         svc(&state)
             .timeline(p.limit.unwrap_or(100))

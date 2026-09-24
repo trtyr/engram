@@ -11,12 +11,16 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
-use crate::auth::{Principal, require_scope};
+use crate::auth::{Principal, require_scope, require_scope_read};
 use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_assets(p: &Principal) -> Result<(), ApiError> {
     require_scope(p, "assets")
+}
+/// 读语义变体：:ro 只读 key 放行（RJ-20，对齐 MCP 读动作口径）。
+fn require_assets_read(p: &Principal) -> Result<(), ApiError> {
+    require_scope_read(p, "assets")
 }
 
 fn ae(e: AssetError) -> ApiError {
@@ -72,7 +76,7 @@ pub struct AssetPatchRequest {
 pub async fn list_kinds(
     principal: axum::Extension<Principal>,
 ) -> Result<Json<Vec<AssetKindDto>>, ApiError> {
-    require_assets(&principal)?;
+    require_assets_read(&principal)?;
     Ok(Json(AssetService::list_kinds()))
 }
 
@@ -85,7 +89,7 @@ pub async fn list_assets(
     State(state): State<AppState>,
     Query(params): Query<ListAssetsParams>,
 ) -> Result<Json<Vec<AssetDto>>, ApiError> {
-    require_assets(&principal)?;
+    require_assets_read(&principal)?;
     let q = params.q.as_deref();
     Ok(Json(
         svc(&state)
@@ -127,7 +131,7 @@ pub async fn get_asset(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<AssetDetailDto>, ApiError> {
-    require_assets(&principal)?;
+    require_assets_read(&principal)?;
     Ok(Json(svc(&state).get(id).await.map_err(ae)?))
 }
 

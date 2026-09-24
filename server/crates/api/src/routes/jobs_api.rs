@@ -10,7 +10,7 @@ use engram_jobs::JobQueue;
 use engram_jobs::types::{Job, JobEvent, JobStatus};
 use utoipa::IntoParams;
 
-use crate::auth::{Principal, require_scope};
+use crate::auth::Principal;
 use crate::error::ApiError;
 use crate::state::AppState;
 
@@ -18,28 +18,16 @@ use crate::state::AppState;
 pub struct ListJobsParams {
     /// 任务种类过滤（逗号分隔）
     pub kind: Option<String>,
-    /// 状态过滤（逗号分隔: pending,running,succeeded,failed,dead）
+    /// 状态过滤（逗号分隔: pending,running,succeeded,failed,dead,cancelled；非法值报 400）
     pub status: Option<String>,
     /// 游标（上一页最后一条的 created_at）
     pub cursor: Option<chrono::DateTime<chrono::Utc>>,
     pub limit: Option<i64>,
 }
 
-fn parse_statuses(s: &Option<String>) -> Vec<JobStatus> {
-    s.as_deref()
-        .map(|v| {
-            v.split(',')
-                .filter_map(|p| match p.trim() {
-                    "pending" => Some(JobStatus::Pending),
-                    "running" => Some(JobStatus::Running),
-                    "succeeded" => Some(JobStatus::Succeeded),
-                    "failed" => Some(JobStatus::Failed),
-                    "dead" => Some(JobStatus::Dead),
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+/// 唯一解析收口在 `JobStatus::parse_filter`（六态含 cancelled；非法值报错不静默退化，RJ-02）。
+fn parse_statuses(s: &Option<String>) -> Result<Vec<JobStatus>, ApiError> {
+    JobStatus::parse_filter(s.as_deref()).map_err(ApiError::BadRequest)
 }
 
 /// 任务列表。
@@ -59,7 +47,7 @@ pub async fn list_jobs(
     let jobs = queue
         .list(
             &kinds,
-            &parse_statuses(&params.status),
+            &parse_statuses(&params.status)?,
             params.cursor,
             params.limit.unwrap_or(50).min(200),
         )
@@ -122,8 +110,22 @@ pub async fn revive_job(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// require_scope 引用（未来按域拆 jobs 权限时启用）
-#[allow(unused)]
-fn _scope_helper(p: &Principal, scope: &str) -> Result<(), ApiError> {
-    require_scope(p, scope)
+#[cfg(test)]
+mod parse_statuses_tests {
+    use super::*;
+
+    #[test]
+    fn cancelled_filter_parses() {
+        let got = parse_statuses(&Some("cancelled".into())).unwrap();
+        assert_eq!(got, vec![JobStatus::Cancelled]);
+    }
+
+    #[test]
+    fn illegal_value_maps_to_400() {
+        let err = parse_statuses(&Some("nope".into())).unwrap_err();
+        assert!(
+            matches!(err, ApiError::BadRequest(_)),
+            "非法值必须 400，实际：{err:?}"
+        );
+    }
 }

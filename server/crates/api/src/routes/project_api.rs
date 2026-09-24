@@ -1,6 +1,6 @@
 //! 项目记忆域端点（project scope）。
 //!
-//! 设计：docs/plantree/plans/project-memory/（0005 三表模型，双入口平等）。
+//! 设计：engram projects 域（folder=project-memory）（0005 三表模型，双入口平等）。
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -13,12 +13,16 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
-use crate::auth::{Principal, require_scope};
+use crate::auth::{Principal, require_scope, require_scope_read};
 use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_project(p: &Principal) -> Result<(), ApiError> {
     require_scope(p, "project")
+}
+/// 读语义变体：:ro 只读 key 放行（RJ-20，对齐 MCP 读动作口径）。
+fn require_project_read(p: &Principal) -> Result<(), ApiError> {
+    require_scope_read(p, "project")
 }
 
 fn pe(e: ProjectError) -> ApiError {
@@ -129,7 +133,7 @@ pub async fn graph(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<ProjectGraphDto>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     Ok(Json(svc(&state).graph().await.map_err(pe)?))
 }
 
@@ -138,7 +142,7 @@ pub async fn graph(
 pub async fn list_types(
     principal: axum::Extension<Principal>,
 ) -> Result<Json<Vec<ProjectTypeDto>>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     Ok(Json(ProjectService::list_types()))
 }
 
@@ -168,7 +172,7 @@ pub async fn list_projects(
     State(state): State<AppState>,
     Query(p): Query<ListProjectsParams>,
 ) -> Result<Json<Vec<ProjectDto>>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     Ok(Json(
         svc(&state)
             .list_projects(p.type_.as_deref())
@@ -186,7 +190,7 @@ pub async fn get_project(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<ProjectDetailDto>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     Ok(Json(svc(&state).get_project(id).await.map_err(pe)?))
 }
 
@@ -287,7 +291,7 @@ pub async fn get_location(
     State(state): State<AppState>,
     Path((id, loc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ProjectLocationDto>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     let s = svc(&state);
     owned_location(&s, id, loc_id).await?;
     Ok(Json(s.get_location(loc_id).await.map_err(pe)?))
@@ -364,7 +368,7 @@ pub async fn get_doc(
     State(state): State<AppState>,
     Path((id, doc_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ProjectDocDto>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     let s = svc(&state);
     owned_doc(&s, id, doc_id).await?;
     Ok(Json(s.get_doc(doc_id).await.map_err(pe)?))
@@ -451,7 +455,7 @@ pub async fn list_files(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<ProjectFileDto>>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     Ok(Json(svc(&state).list_files(id).await.map_err(pe)?))
 }
 
@@ -463,7 +467,7 @@ pub async fn get_file(
     State(state): State<AppState>,
     Path((id, name)): Path<(Uuid, String)>,
 ) -> Result<Json<ProjectFileDto>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     Ok(Json(svc(&state).get_file(id, &name).await.map_err(pe)?))
 }
 
@@ -488,7 +492,7 @@ pub async fn list_file_versions(
     State(state): State<AppState>,
     Path((id, name)): Path<(Uuid, String)>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     let rows = svc(&state)
         .list_file_versions(id, &name)
         .await
@@ -508,7 +512,7 @@ pub async fn get_file_version(
     State(state): State<AppState>,
     Path((id, name, version)): Path<(Uuid, String, i32)>,
 ) -> Result<Json<ProjectFileDto>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     let content = svc(&state)
         .get_file_version(id, &name, version)
         .await
@@ -564,7 +568,7 @@ pub async fn list_links(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<ProjectLinkDto>>, ApiError> {
-    require_project(&principal)?;
+    require_project_read(&principal)?;
     Ok(Json(svc(&state).list_links(id).await.map_err(pe)?))
 }
 

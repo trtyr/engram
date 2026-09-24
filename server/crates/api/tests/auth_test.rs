@@ -1809,6 +1809,7 @@ async fn openapi_snapshot() {
             "/todos",
             "/todos/export",
             "/todos/{id}",
+            "/todos/{id}/links",
             "/wiki/documents",
             "/wiki/documents/search",
             "/wiki/documents/{id}",

@@ -48,7 +48,7 @@ pub async fn list_pages(
     State(state): State<AppState>,
     Query(p): Query<ListPagesParams>,
 ) -> Result<Json<Vec<WikiPageMetaDto>>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let lib = main_lib(&state).await?;
     Ok(Json(
         svc(&state)
@@ -70,7 +70,7 @@ pub async fn list_folders(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<(String, i64)>>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let lib = main_lib(&state).await?;
     Ok(Json(svc(&state).list_folders(lib).await.map_err(we)?))
 }
@@ -82,7 +82,7 @@ pub async fn get_page(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<WikiPageDto>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let lib = main_lib(&state).await?;
     Ok(Json(svc(&state).get_page(lib, &slug).await.map_err(we)?))
 }
@@ -160,7 +160,7 @@ pub async fn duplicates(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let lib = main_lib(&state).await?;
     let candidates = svc(&state).duplicate_candidates(lib).await.map_err(we)?;
     Ok(Json(serde_json::json!({ "candidates": candidates })))

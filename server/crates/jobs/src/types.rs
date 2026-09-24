@@ -23,6 +23,30 @@ pub enum JobStatus {
     Cancelled,
 }
 
+impl JobStatus {
+    /// 状态过滤字面量解析（HTTP 与 MCP 两侧唯一收口，RJ-02）：
+    /// 逗号分隔、逐词 trim；六个合法字面量全收（含 cancelled）；
+    /// 非法字面量返回 Err（带可用值清单）——调用方必须报错，不许静默退化成「不过滤」。
+    pub fn parse_filter(s: Option<&str>) -> Result<Vec<Self>, String> {
+        let Some(v) = s else {
+            return Ok(Vec::new());
+        };
+        v.split(',')
+            .map(|p| match p.trim() {
+                "pending" => Ok(Self::Pending),
+                "running" => Ok(Self::Running),
+                "succeeded" => Ok(Self::Succeeded),
+                "failed" => Ok(Self::Failed),
+                "dead" => Ok(Self::Dead),
+                "cancelled" => Ok(Self::Cancelled),
+                other => Err(format!(
+                    "未知状态字面量「{other}」——可用：pending,running,succeeded,failed,dead,cancelled"
+                )),
+            })
+            .collect()
+    }
+}
+
 /// 任务行。
 #[derive(Debug, Clone, sqlx::FromRow, serde::Serialize, utoipa::ToSchema)]
 pub struct Job {
@@ -120,4 +144,38 @@ pub enum FailOutcome {
     Failed,
     /// 重试耗尽终态
     Dead,
+}
+
+#[cfg(test)]
+mod parse_filter_tests {
+    use super::JobStatus;
+
+    #[test]
+    fn six_literals_parse_including_cancelled() {
+        let got = JobStatus::parse_filter(Some("pending, running,succeeded,failed,dead,cancelled"))
+            .unwrap();
+        assert_eq!(
+            got,
+            vec![
+                JobStatus::Pending,
+                JobStatus::Running,
+                JobStatus::Succeeded,
+                JobStatus::Failed,
+                JobStatus::Dead,
+                JobStatus::Cancelled,
+            ]
+        );
+    }
+
+    #[test]
+    fn none_means_no_filter() {
+        assert!(JobStatus::parse_filter(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn unknown_literal_is_error_not_silent_drop() {
+        let err = JobStatus::parse_filter(Some("running,bogus")).unwrap_err();
+        assert!(err.contains("bogus"), "错误须指出非法词：{err}");
+        assert!(err.contains("cancelled"), "错误须列出全部合法值：{err}");
+    }
 }

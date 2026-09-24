@@ -21,7 +21,7 @@ pub async fn graph(
     State(state): State<AppState>,
     Query(f): Query<GraphFilterParams>,
 ) -> Result<Json<engram_core::wiki::GraphDto>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let lib = main_lib(&state).await?;
     Ok(Json(
         svc(&state)
@@ -44,7 +44,7 @@ pub async fn query_gaps(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let lib = main_lib(&state).await?;
     let gaps = svc(&state).query_gaps(lib, 50).await.map_err(we)?;
     Ok(Json(serde_json::json!({
@@ -104,7 +104,7 @@ pub async fn get_purpose(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Option<Purpose>>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let lib = main_lib(&state).await?;
     Ok(Json(svc(&state).get_purpose(lib).await.map_err(we)?))
 }

@@ -104,7 +104,7 @@ describe('InsightsPanel（图洞察）', () => {
     fireEvent.click(screen.getByRole('button', { name: '忽略' }))
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith(
-        expect.stringMatching(/^\/wiki\/insights\/dismiss\?lib=/),
+        expect.stringMatching(/^\/wiki\/insights\/dismiss/),
         { key: 'isolated_page:y' },
       )
     })
@@ -133,7 +133,7 @@ describe('ReviewQueue（人审队列）', () => {
     fireEvent.click(screen.getByTestId('review-action-创建页面'))
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith(
-        expect.stringMatching(/^\/wiki\/reviews\/r1\/resolve\?lib=/),
+        expect.stringMatching(/^\/wiki\/reviews\/r1\/resolve/),
         { action: '创建页面' },
       )
     })

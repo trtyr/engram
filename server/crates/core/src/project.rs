@@ -1,6 +1,6 @@
 //! 项目记忆域服务：项目 / 多主机位置 / 分类文档的三表 CRUD + 类型模板。
 //!
-//! 设计：docs/plantree/plans/project-memory/（0005 三表模型、类型=分类模板）。
+//! 设计：engram projects 域（folder=project-memory）（0005 三表模型、类型=分类模板）。
 //! 类型模板是代码常量（三表决策不建第四表），新建项目时复制进 projects.categories，
 //! 之后项目级自由增删。
 //!

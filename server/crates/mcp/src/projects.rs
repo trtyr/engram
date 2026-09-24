@@ -410,6 +410,13 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "location_get" => {
+                self.project_location_get(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "location_get", call.args)?),
+                )
+                .await
+            }
             "location_delete" => {
                 self.project_location_delete(
                     ctx,

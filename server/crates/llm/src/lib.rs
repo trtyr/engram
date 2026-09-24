@@ -1,7 +1,7 @@
 //! LLM 客户端：provider 抽象（OpenAI 兼容）、purpose 路由、用量记账、密钥加密。
 //! 平台所有 LLM 调用的唯一出口。
 //!
-//! 设计文档：docs/plantree/plans/engram-platform/topics/llm-providers.md
+//! 设计文档：engram projects 域（主题：llm-providers）
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 pub mod crypto;

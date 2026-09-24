@@ -19,7 +19,7 @@ pub async fn list_kv(
     State(state): State<AppState>,
     Query(p): Query<ListKvParams>,
 ) -> Result<Json<Vec<KvEntryDto>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     let limit = p.limit.unwrap_or(100).clamp(1, 500);
     let rows = match p.q.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
         Some(q) => svc(&state).kv_search(q, limit).await,
@@ -37,7 +37,7 @@ pub async fn get_kv(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<KvEntryDto>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     let row = svc(&state)
         .kv_get(&key)
         .await

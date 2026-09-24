@@ -360,6 +360,12 @@ async fn project_full_journey() {
     assert_eq!(upd_loc["path"], "/new/path");
     assert_eq!(upd_loc["host"], "MacBook Pro", "未传 host 不应改变");
 
+    // location_get：按 id 读单条位置详情（RJ-12 补齐）
+    let got_loc = act_json(&app, &key, "location_get", json!({"location_id": loc_id})).await;
+    assert_eq!(got_loc["id"], loc_id, "{got_loc}");
+    assert_eq!(got_loc["path"], "/new/path");
+    assert_eq!(got_loc["host"], "MacBook Pro");
+
     // 项目补丁式更新：只改状态与描述，分类保持
     let upd = act_json(
         &app,
@@ -699,8 +705,8 @@ async fn project_tools_admin_info_and_toggle() {
     assert_eq!(project_tools.len(), 1, "projects 域应为 1 个域工具");
     assert_eq!(
         project_tools[0]["actions"].as_array().unwrap().len(),
-        23,
-        "projects 域应展示 23 个操作（含 doc_patch + file 四动作 + link/unlink/links 三动作）：{tools:?}"
+        24,
+        "projects 域应展示 24 个操作（含 doc_patch + file 四动作 + link/unlink/links + location_get）：{tools:?}"
     );
 
     // 停用 projects.delete：目录隐身 + call 拒绝

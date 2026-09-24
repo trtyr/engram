@@ -16,12 +16,16 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
-use crate::auth::{Principal, require_scope};
+use crate::auth::{Principal, require_scope, require_scope_read};
 use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_wiki_docs(p: &Principal) -> Result<(), ApiError> {
     require_scope(p, "wiki")
+}
+/// 读语义变体：:ro 只读 key 放行（RJ-20，对齐 MCP 读动作口径）。
+fn require_wiki_docs_read(p: &Principal) -> Result<(), ApiError> {
+    require_scope_read(p, "wiki")
 }
 
 fn ke(e: WikiDocumentError) -> ApiError {
@@ -34,13 +38,6 @@ fn ke(e: WikiDocumentError) -> ApiError {
 
 fn svc(state: &AppState) -> WikiDocumentService {
     WikiDocumentService::new(state.pool.clone(), state.registry(), state.data_dir.clone())
-}
-
-/// `?lib=<库slug>` 提取（多库路由，缺省 main）。
-#[derive(Deserialize, IntoParams)]
-pub struct LibQuery {
-    /// 库 slug（缺省 main 主库）
-    pub lib: Option<String>,
 }
 
 /// slug → 库 id：None/空取 main；未命中按 NotFound 拒绝。
@@ -63,16 +60,14 @@ pub struct SubmitUrlRequest {
 /// 提交 URL 摄取（SSRF 防护在管道内）。
 #[utoipa::path(post, path = "/wiki/documents",
     request_body(content = SubmitUrlRequest, content_type = "application/json"),
-    params(LibQuery),
     responses((status = 201, body = DocumentDto)))]
 pub async fn submit_url(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Query(q): Query<LibQuery>,
     Json(req): Json<SubmitUrlRequest>,
 ) -> Result<(StatusCode, Json<DocumentDto>), ApiError> {
     require_wiki_docs(&principal)?;
-    let lib = resolve_lib(&state, q.lib.as_deref()).await?;
+    let lib = resolve_lib(&state, None).await?;
     // wiki-engine 并行改造中：submit 增加 lib 首参（库隔离）
     let (id, deduped) = svc(&state)
         .submit(lib, IngestSource::Url(req.url))
@@ -89,16 +84,14 @@ pub async fn submit_url(
 /// 上传文件摄取（multipart，字段名 file）。
 #[utoipa::path(post, path = "/wiki/upload",
     request_body(content = Vec<u8>, content_type = "multipart/form-data"),
-    params(LibQuery),
     responses((status = 201, body = DocumentDto)))]
 pub async fn upload(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Query(q): Query<LibQuery>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<DocumentDto>), ApiError> {
     require_wiki_docs(&principal)?;
-    let lib = resolve_lib(&state, q.lib.as_deref()).await?;
+    let lib = resolve_lib(&state, None).await?;
     let mut name = None;
     let mut content = None;
     let mut content_type = None;
@@ -168,7 +161,7 @@ pub async fn list_documents(
     State(state): State<AppState>,
     Query(p): Query<ListDocsParams>,
 ) -> Result<Json<Vec<DocumentDto>>, ApiError> {
-    require_wiki_docs(&principal)?;
+    require_wiki_docs_read(&principal)?;
     let lib = resolve_lib(&state, p.lib.as_deref()).await?;
     // wiki-engine 并行改造中：list_documents 增加 lib 首参（库隔离）
     Ok(Json(
@@ -179,30 +172,28 @@ pub async fn list_documents(
     ))
 }
 
-#[utoipa::path(get, path = "/wiki/documents/{id}", params(LibQuery),
+#[utoipa::path(get, path = "/wiki/documents/{id}",
     responses((status = 200, body = DocumentDto)))]
 pub async fn get_document(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Query(q): Query<LibQuery>,
 ) -> Result<Json<DocumentDto>, ApiError> {
-    require_wiki_docs(&principal)?;
-    let lib = resolve_lib(&state, q.lib.as_deref()).await?;
+    require_wiki_docs_read(&principal)?;
+    let lib = resolve_lib(&state, None).await?;
     // wiki-engine 并行改造中：get_document 增加 lib 首参（库隔离）
     Ok(Json(svc(&state).get_document(lib, id).await.map_err(ke)?))
 }
 
-#[utoipa::path(get, path = "/wiki/documents/{id}/chunks", params(LibQuery),
+#[utoipa::path(get, path = "/wiki/documents/{id}/chunks",
     responses((status = 200, body = [(i32, String, bool)])))]
 pub async fn document_chunks(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Query(q): Query<LibQuery>,
 ) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
-    require_wiki_docs(&principal)?;
-    let lib = resolve_lib(&state, q.lib.as_deref()).await?;
+    require_wiki_docs_read(&principal)?;
+    let lib = resolve_lib(&state, None).await?;
     // wiki-engine 并行改造中：chunks 增加 lib 首参（库隔离）
     let chunks = svc(&state).chunks(lib, id, 500).await.map_err(ke)?;
     Ok(Json(
@@ -219,32 +210,30 @@ pub async fn document_chunks(
     ))
 }
 
-#[utoipa::path(delete, path = "/wiki/documents/{id}", params(LibQuery),
+#[utoipa::path(delete, path = "/wiki/documents/{id}",
     responses((status = 204)))]
 pub async fn delete_document(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Query(q): Query<LibQuery>,
 ) -> Result<StatusCode, ApiError> {
     require_wiki_docs(&principal)?;
-    let lib = resolve_lib(&state, q.lib.as_deref()).await?;
+    let lib = resolve_lib(&state, None).await?;
     // wiki-engine 并行改造中：delete 增加 lib 首参（库隔离）
     svc(&state).delete(lib, id).await.map_err(ke)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// 重新嵌入缺失块（embed_failed / NULL 向量的显式恢复入口，K8）。
-#[utoipa::path(post, path = "/wiki/documents/{id}/re-embed", params(LibQuery),
+#[utoipa::path(post, path = "/wiki/documents/{id}/re-embed",
     responses((status = 202, description = "补嵌 job 已入队")))]
 pub async fn reembed(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Query(q): Query<LibQuery>,
 ) -> Result<StatusCode, ApiError> {
     require_wiki_docs(&principal)?;
-    let lib = resolve_lib(&state, q.lib.as_deref()).await?;
+    let lib = resolve_lib(&state, None).await?;
     // wiki-engine 并行改造中：reembed 增加 lib 首参（库隔离）
     svc(&state).reembed(lib, id).await.map_err(ke)?;
     Ok(StatusCode::ACCEPTED)
@@ -259,16 +248,14 @@ pub struct WikiDocumentSearchRequest {
 /// 知识混合检索（结果带文档引用 + 高亮片段）。
 #[utoipa::path(post, path = "/wiki/documents/search", operation_id = "wiki_docs_search",
     request_body = WikiDocumentSearchRequest,
-    params(LibQuery),
     responses((status = 200, body = [ChunkHit])))]
 pub async fn search(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Query(q): Query<LibQuery>,
     Json(req): Json<WikiDocumentSearchRequest>,
 ) -> Result<Json<Vec<ChunkHit>>, ApiError> {
     require_wiki_docs(&principal)?;
-    let lib = resolve_lib(&state, q.lib.as_deref()).await?;
+    let lib = resolve_lib(&state, None).await?;
     // W-3（2026-09-04）：空 query 三问拒绝——与 /search 的 400 口径对齐，不再返回全量
     if req.query.trim().is_empty() {
         return Err(ApiError::BadRequest("query 不能为空".into()));

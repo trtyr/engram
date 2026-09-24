@@ -58,23 +58,12 @@ use super::*;
 impl EngramMcpServer {
     // ---------- 异步任务域（EN-61）：job 状态/错误/事件/救活——闭环 AI 侧异步链路 ----------
 
-    /// 解析 jobs.list 的状态过滤字面量（与 HTTP parse_statuses 同口径）。
-    pub(crate) fn parse_job_statuses(s: &Option<String>) -> Vec<engram_jobs::types::JobStatus> {
-        use engram_jobs::types::JobStatus;
-        s.as_deref()
-            .map(|v| {
-                v.split(',')
-                    .filter_map(|p| match p.trim() {
-                        "pending" => Some(JobStatus::Pending),
-                        "running" => Some(JobStatus::Running),
-                        "succeeded" => Some(JobStatus::Succeeded),
-                        "failed" => Some(JobStatus::Failed),
-                        "dead" => Some(JobStatus::Dead),
-                        _ => None,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+    /// 解析 jobs.list 的状态过滤字面量（唯一收口 `JobStatus::parse_filter`，与 HTTP 同口径；非法值报错，RJ-02）。
+    pub(crate) fn parse_job_statuses(
+        s: &Option<String>,
+    ) -> Result<Vec<engram_jobs::types::JobStatus>, rmcp::ErrorData> {
+        engram_jobs::types::JobStatus::parse_filter(s.as_deref())
+            .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))
     }
 
     /// JobError → MCP 错误（Permanent=参数/状态问题可自愈，Retryable=临时故障）。
@@ -117,7 +106,7 @@ impl EngramMcpServer {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default(),
-                &Self::parse_job_statuses(&params.0.status),
+                &Self::parse_job_statuses(&params.0.status)?,
                 cursor,
                 params.0.limit.unwrap_or(50).min(200),
             )
@@ -126,7 +115,7 @@ impl EngramMcpServer {
         Ok(CallToolResult::structured(serde_json::json!({
             "count": rows.len(),
             "jobs": rows,
-            "hint": "状态字面量 pending/running/succeeded/failed/dead——轮询终止判断用 succeeded 或 failed/dead",
+            "hint": "状态字面量 pending/running/succeeded/failed/dead/cancelled——轮询终止判断用 succeeded 或 failed/dead/cancelled",
         })))
     }
 

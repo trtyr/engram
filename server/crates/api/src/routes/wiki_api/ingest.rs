@@ -113,7 +113,7 @@ pub async fn list_sources(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<WikiSourceDto>>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let lib = main_lib(&state).await?;
     let rows = svc(&state).list_sources(lib).await.map_err(we)?;
     Ok(Json(
@@ -209,7 +209,7 @@ pub async fn promotions(
     State(state): State<AppState>,
     Query(p): Query<PromotionsParams>,
 ) -> Result<Json<Vec<engram_storage::models::wiki_promotions::WikiPromotionDto>>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let rows = engram_core::promote::PromoteService::new(state.pool.clone())
         .list_promotions(p.project.as_deref())
         .await

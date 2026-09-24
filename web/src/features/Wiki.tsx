@@ -23,8 +23,8 @@ type Panel = 'none' | 'inbox' | 'ops'
 const TREE_W_MIN = 220
 const TREE_W_MAX = 480
 
-/** /wiki/* 请求拼接当前库 query（?lib=）；已有 query 用 & 合并。 */
-const withLib = (path: string, lib: string) => `${path}${path.includes('?') ? '&' : '?'}lib=${encodeURIComponent(lib)}`
+/** /wiki/* 请求路径恒等——单库终局（RJ-19 清理）：HTTP 面已删 ?lib=（ADR-16），保留调用点形状。 */
+const withLib = (path: string, _lib: string) => path
 
 /** localStorage 守卫读写——Node 26 实验性 localStorage / 隐私模式下静默降级。 */
 function lsGet<T>(key: string, fallback: T): T {

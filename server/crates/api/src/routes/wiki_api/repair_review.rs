@@ -81,7 +81,7 @@ pub async fn list_proposals(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<JobEvent>>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let rows = engram_jobs::admin::latest_wiki_proposals(&state.pool)
         .await
         .map_err(|e| ApiError::Unavailable(e.to_string()))?;
@@ -94,7 +94,7 @@ pub async fn list_reviews(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ReviewItem>>, ApiError> {
-    require_wiki(&principal)?;
+    require_wiki_read(&principal)?;
     let lib = main_lib(&state).await?;
     Ok(Json(svc(&state).reviews(lib, None).await.map_err(we)?))
 }

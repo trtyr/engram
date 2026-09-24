@@ -364,7 +364,7 @@ describe('Wiki 文档 re-embed', () => {
     await screen.findByText('1 个分块嵌入失败（FTS 降级）')
     fireEvent.click(screen.getByRole('button', { name: '重嵌缺失块' }))
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith('/wiki/documents/d1/re-embed?lib=main')
+      expect(api.post).toHaveBeenCalledWith('/wiki/documents/d1/re-embed')
     })
   })
 })
@@ -379,7 +379,7 @@ describe('Wiki 目标（purpose）', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => {
       expect(api.put).toHaveBeenCalledWith(
-        '/wiki/purpose?lib=main',
+        '/wiki/purpose',
         expect.objectContaining({ goals: ['构建知识库'], key_questions: ['什么？'], scope: ['Rust'] }),
       )
     })

@@ -26,12 +26,16 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
-use crate::auth::{Principal, require_scope};
+use crate::auth::{Principal, require_scope, require_scope_read};
 use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_memory(p: &Principal) -> Result<(), ApiError> {
     require_scope(p, "memory")
+}
+/// 读语义变体：:ro 只读 key 放行（RJ-20，对齐 MCP 读动作口径）。
+fn require_memory_read(p: &Principal) -> Result<(), ApiError> {
+    require_scope_read(p, "memory")
 }
 
 // ---------- L0 会话 ----------

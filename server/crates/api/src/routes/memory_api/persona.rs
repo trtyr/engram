@@ -7,7 +7,7 @@ pub async fn list_scenarios(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ScenarioDto>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(svc(&state).list_scenarios(100).await.map_err(me)?))
 }
 
@@ -18,7 +18,7 @@ pub async fn get_scenario(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<ScenarioDto>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(svc(&state).get_scenario(id).await.map_err(me)?))
 }
 
@@ -27,7 +27,7 @@ pub async fn get_persona(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<PersonaVersion>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(svc(&state).persona().await.map_err(me)?))
 }
 
@@ -43,7 +43,7 @@ pub async fn persona_history(
     State(state): State<AppState>,
     Query(p): Query<HistoryParams>,
 ) -> Result<Json<Vec<PersonaVersion>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(
         svc(&state).persona_history(&p.aspect).await.map_err(me)?,
     ))

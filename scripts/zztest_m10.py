@@ -168,7 +168,7 @@ st, _ = http("GET", "/wiki/pages?lib=" + M, None, TOK)
 check("Z2 已删库 404", st == 404, st)
 # main 靶页删除
 for slug in ["zz-m10-shared", "zz-m10-p"]:
-    st, _ = http("DELETE", "/wiki/pages/" + slug + "?lib=main", None, TOK)
+    st, _ = http("DELETE", "/wiki/pages/" + slug + "", None, TOK)
     print("  cleanup", slug, st)
 # main 的织入原料（若 C1 意外落到 main）
 srcs_main = wiki("sources")

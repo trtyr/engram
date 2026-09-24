@@ -82,7 +82,7 @@ use utoipa::OpenApi;
         migrate_api::export_bundle, migrate_api::import_bundle, migrate_api::pull,
     migrate_api::migrate_sync,
         todos_api::list_todos, todos_api::create_todo, todos_api::get_todo,
-        todos_api::update_todo, todos_api::delete_todo, todos_api::export_todos,
+        todos_api::update_todo, todos_api::delete_todo, todos_api::todo_links, todos_api::export_todos,
         project_api::list_types, project_api::create_project, project_api::list_projects,
         project_api::graph,
         project_api::get_project, project_api::update_project, project_api::delete_project,

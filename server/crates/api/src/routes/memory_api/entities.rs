@@ -10,7 +10,7 @@ pub async fn entity_revisions(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<engram_core::EntityRevision>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(svc(&state).entity_revisions(id).await.map_err(me)?))
 }
 
@@ -29,7 +29,7 @@ pub async fn list_entity_relations(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<engram_core::EntityRelationDto>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(
         svc(&state).list_relations(Some(id)).await.map_err(me)?,
     ))
@@ -128,7 +128,7 @@ pub async fn export_entities(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     let entities = svc(&state).list_entities(None).await.map_err(me)?;
     let relations = svc(&state).list_relations(None).await.map_err(me)?;
     Ok(Json(serde_json::json!({
@@ -162,7 +162,7 @@ pub async fn search_entities_handler(
     State(state): State<AppState>,
     Query(p): Query<SearchEntitiesParams>,
 ) -> Result<Json<Vec<SearchHit>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(
         search_entities(&state.pool, &p.q, p.limit.unwrap_or(20))
             .await
@@ -178,7 +178,7 @@ pub async fn list_entities(
     State(state): State<AppState>,
     Query(p): Query<ListEntitiesParams>,
 ) -> Result<Json<Vec<EntityDto>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(
         svc(&state)
             .list_entities(p.kind.as_deref())
@@ -194,7 +194,7 @@ pub async fn entity_graph(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<EntityGraph>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(svc(&state).entity_graph().await.map_err(me)?))
 }
 
@@ -238,7 +238,7 @@ pub async fn get_entity(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<EntityDetail>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(svc(&state).get_entity(id).await.map_err(me)?))
 }
 

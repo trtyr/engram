@@ -1,7 +1,8 @@
 //! 领域层：memory / wiki / codegraph 各域服务与跨域编排。
 //!
 //! 依赖方向：`api/mcp → core → storage → DB`，core 不直接写 SQL——
-//! 领域表的业务面读写唯一收口在 `engram_storage::repo`（含持久化模型 models）。
+//! 领域表的业务面读写经 `engram_storage::repo` 仓储收口（含持久化模型 models）；
+//! 豁免面与取向见 storage/src/lib.rs 头注释与《技术决策记录》ADR-19。
 //! 本 crate 同时承载跨适配器（HTTP / MCP）共用的身份与装配类型（auth / state）。
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 

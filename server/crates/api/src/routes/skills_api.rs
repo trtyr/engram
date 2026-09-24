@@ -15,12 +15,16 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
-use crate::auth::{Principal, require_scope};
+use crate::auth::{Principal, require_scope, require_scope_read};
 use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_skills(p: &Principal) -> Result<(), ApiError> {
     require_scope(p, "skills")
+}
+/// 读语义变体：:ro 只读 key 放行（RJ-20，对齐 MCP 读动作口径）。
+fn require_skills_read(p: &Principal) -> Result<(), ApiError> {
+    require_scope_read(p, "skills")
 }
 
 fn se(e: SkillsError) -> ApiError {
@@ -131,7 +135,7 @@ pub async fn list_skills(
     State(state): State<AppState>,
     Query(p): Query<ListSkillsParams>,
 ) -> Result<Json<Vec<SkillSummaryDto>>, ApiError> {
-    require_skills(&principal)?;
+    require_skills_read(&principal)?;
     Ok(Json(
         svc(&state)
             .list_skills(p.q.as_deref(), p.tag.as_deref(), p.enabled)
@@ -199,7 +203,7 @@ pub async fn export_skills(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<SkillExportDto>>, ApiError> {
-    require_skills(&principal)?;
+    require_skills_read(&principal)?;
     Ok(Json(svc(&state).export_skills().await.map_err(se)?))
 }
 
@@ -212,7 +216,7 @@ pub async fn get_skill(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<SkillDto>, ApiError> {
-    require_skills(&principal)?;
+    require_skills_read(&principal)?;
     Ok(Json(
         svc(&state)
             .get_skill_with_content(&slug)
@@ -275,7 +279,7 @@ pub async fn list_revisions(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<Vec<SkillRevisionDto>>, ApiError> {
-    require_skills(&principal)?;
+    require_skills_read(&principal)?;
     Ok(Json(svc(&state).list_revisions(&slug).await.map_err(se)?))
 }
 
@@ -323,7 +327,7 @@ pub async fn list_files(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<Vec<SkillFileInfoDto>>, ApiError> {
-    require_skills(&principal)?;
+    require_skills_read(&principal)?;
     Ok(Json(svc(&state).list_files(&slug).await.map_err(se)?))
 }
 
@@ -337,7 +341,7 @@ pub async fn get_file(
     Path(slug): Path<String>,
     Query(p): Query<SkillFileParams>,
 ) -> Result<Response, ApiError> {
-    require_skills(&principal)?;
+    require_skills_read(&principal)?;
     let content = svc(&state).get_file(&slug, &p.path).await.map_err(se)?;
     if p.raw.is_some() {
         // 消费形态②：单文件直下——curl -s ".../file?path=…&raw=1" -o 文件名

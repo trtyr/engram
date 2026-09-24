@@ -159,9 +159,22 @@ async fn readonly_key_write_rejected_with_readable_list() {
     .await;
     assert_eq!(out["title"], "只读基线", "{out}");
 
-    // HTTP 侧保守拒绝（require_scope 精确匹配，:ro 不放行 REST 面——MCP 是 Agent 主通道）
-    let (st, _) = ctx.req_with_key(&key, "GET", "/projects", None).await;
-    assert_eq!(st, StatusCode::FORBIDDEN, ":ro key 打 HTTP REST 应 403");
+    // HTTP 侧读放行/写拒绝（RJ-20/A2 统一后：与 MCP 同语义——读端点放行 :ro，写端点仍要求全量）
+    let (st, list) = ctx.req_with_key(&key, "GET", "/projects", None).await;
+    assert!(st.is_success(), ":ro key 打 HTTP 读端点应放行：{st} {list}");
+    let (st, werr) = ctx
+        .req_with_key(
+            &key,
+            "POST",
+            "/projects",
+            Some(json!({"name": "p-ro-x", "type": "dev"})),
+        )
+        .await;
+    assert_eq!(
+        st,
+        StatusCode::FORBIDDEN,
+        ":ro key 打 HTTP 写端点应 403：{werr}"
+    );
 }
 
 /// 全量 scope 回归：写类动作不受影响（含 projects 高频误写归一）
@@ -199,4 +212,24 @@ async fn full_scope_write_still_ok() {
     )
     .await;
     assert_eq!(out["title"], "全量写", "{out}");
+}
+
+/// RJ-13 实测：缺 scopes 字段 = serde 拒绝 422（旧注释写 400 已修正——行为本就如此）
+#[tokio::test]
+async fn create_key_missing_scopes_is_422() {
+    let (app, _pg) = support::app().await;
+    let token = login_token(&app).await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/settings/api-keys")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"name":"noscope"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "缺 scopes 字段应为 422（serde 拒绝）"
+    );
 }

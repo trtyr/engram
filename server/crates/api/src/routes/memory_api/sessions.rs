@@ -98,7 +98,7 @@ pub async fn list_sessions(
     State(state): State<AppState>,
     Query(p): Query<ListSessionsParams>,
 ) -> Result<Json<Vec<SessionDto>>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(
         svc(&state)
             .list_sessions(p.agent.as_deref(), p.cursor, p.limit.unwrap_or(50))
@@ -114,7 +114,7 @@ pub async fn get_session(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<SessionDto>, ApiError> {
-    require_memory(&principal)?;
+    require_memory_read(&principal)?;
     Ok(Json(svc(&state).get_session(id).await.map_err(me)?))
 }
 

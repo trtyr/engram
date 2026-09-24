@@ -231,7 +231,7 @@ describe('Wiki 编辑器保存', () => {
     fireEvent.click(screen.getByRole('button', { name: /保存（人工版）/ }))
     await waitFor(() => {
       expect(api.put).toHaveBeenCalledWith(
-        '/wiki/pages/%E5%90%91%E9%87%8F%E6%A3%80%E7%B4%A2?lib=main',
+        '/wiki/pages/%E5%90%91%E9%87%8F%E6%A3%80%E7%B4%A2',
         expect.objectContaining({ title: '向量检索', content: mockState.draftContent }),
       )
     })

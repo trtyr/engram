@@ -13,12 +13,16 @@ use serde_json::json;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
-use crate::auth::{Principal, require_scope};
+use crate::auth::{Principal, require_scope, require_scope_read};
 use crate::error::ApiError;
 use crate::state::AppState;
 
 fn require_cg(p: &Principal) -> Result<(), ApiError> {
     require_scope(p, "codegraph")
+}
+/// 读语义变体：:ro 只读 key 放行（RJ-20，对齐 MCP 读动作口径）。
+fn require_cg_read(p: &Principal) -> Result<(), ApiError> {
+    require_scope_read(p, "codegraph")
 }
 
 fn ce(e: CgError) -> ApiError {
@@ -204,7 +208,7 @@ pub async fn list_projects(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_cg(&principal)?;
+    require_cg_read(&principal)?;
     // freshness 与 MCP 对齐（EN-26）：每项带 {head, snapshot_head, stale, hint}——
     // 版本诚实不区分接入面。返回数组包一层 {"items": [...]}？否——保持数组形态，
     // freshness 直接注入每项（serde_json Value 数组逐项改写）。
@@ -224,7 +228,7 @@ pub async fn get_project(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<CgProjectDto>, ApiError> {
-    require_cg(&principal)?;
+    require_cg_read(&principal)?;
     Ok(Json(bridge(&state).get(id).await.map_err(ce)?))
 }
 
@@ -284,7 +288,7 @@ pub async fn status(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
 ) -> Result<Json<CliStatus>, ApiError> {
-    require_cg(&principal)?;
+    require_cg_read(&principal)?;
     Ok(Json(bridge(&state).cli_status().await))
 }
 
@@ -385,7 +389,7 @@ pub async fn graph(
     Path(id): Path<Uuid>,
     Query(p): Query<GraphParams>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_cg(&principal)?;
+    require_cg_read(&principal)?;
     let v = match p.symbol.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(symbol) => bridge(&state).graph(id, symbol).await.map_err(ce)?,
         None => bridge(&state).full_graph(id).await.map_err(ce)?,
@@ -404,7 +408,7 @@ pub async fn project_artifact(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<axum::response::Response, ApiError> {
-    require_cg(&principal)?;
+    require_cg_read(&principal)?;
     let b = bridge(&state);
     let proj = b.get(id).await.map_err(ce)?;
     let (bytes, path) = b.artifact_bytes(id).await.map_err(ce)?;

@@ -256,14 +256,14 @@ async fn asset_scope_enforcement() {
     let (st, _) = send(&app, "GET", "/assets", &with_scope, None).await;
     assert_eq!(st, StatusCode::OK);
 
-    // 只读变体（assets:ro）：HTTP REST 侧**保守拒绝**（既有口径——require_scope 精确匹配，
-    // `:ro` 只服务 MCP 主通道，见 action_level_scope_test 同款断言）；MCP 侧读放行 / 写拒绝。
+    // 只读变体（assets:ro）：RJ-20/A2 统一后 HTTP 与 MCP 同语义——读端点放行 :ro，
+    // 写端点仍要求全量 scope（见上方 FORBIDDEN 断言与 action_level_scope_test）。
     let ro = create_key(&app, &admin, &["assets:ro"]).await;
     let (st, _) = send(&app, "GET", "/assets", &ro, None).await;
     assert_eq!(
         st,
-        StatusCode::FORBIDDEN,
-        ":ro key 打 HTTP REST 应 403（既有口径）"
+        StatusCode::OK,
+        ":ro key 打 HTTP 读端点应放行（RJ-20 统一后）"
     );
     let out = support::mcp_call_json(&app, &ro, "assets", json!({"action": "list"})).await;
     assert_eq!(out["count"], 0, ":ro 应可读：{out}");

@@ -157,7 +157,7 @@ impl EngramMcpServer {
                 slug: ap.slug,
                 title: ap.title,
                 content: ap.content,
-                library: ap.library,
+                library: None, // 单库终局（ADR-16）：恒 main，RJ-19 清理
             })
             .await
             .map_err(|e| match e {

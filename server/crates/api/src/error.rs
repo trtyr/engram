@@ -1,6 +1,6 @@
 //! 统一错误体。所有 handler 的错误出口。
 //!
-//! 契约（docs/plantree/plans/engram-platform/topics/api-design.md）：
+//! 契约（engram projects 域（主题：api-design））：
 //! `{"error": {"code", "message", "retryable", "details?"}}`
 //! - code 稳定可编程判断；message 是人话且不泄漏内部细节。
 //! - 内部细节只进日志，不进响应。
