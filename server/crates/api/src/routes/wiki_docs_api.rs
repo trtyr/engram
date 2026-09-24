@@ -1,7 +1,7 @@
 //! 文档知识端点（wiki scope）。
 //!
-//! 多库（0037）：全部端点接受可选 query 参数 `?lib=<库slug>`（缺省 main 主库），
-//! 统一解析成库 id 后透传到服务/仓储层，读写均收窄到该库。
+//! 单库终局（RJ-19，2026-09-24）：`?lib=` 参数已删除，全部端点经 `resolve_lib(&state, None)`
+//! 恒定解析 main 主库后透传到服务/仓储层。
 
 use axum::Json;
 use axum::extract::multipart::Multipart;
@@ -147,14 +147,12 @@ pub async fn upload(
 
 #[derive(Deserialize, IntoParams)]
 pub struct ListDocsParams {
-    /// 库 slug（缺省 main 主库）
-    pub lib: Option<String>,
     pub status: Option<String>,
     pub cursor: Option<chrono::DateTime<chrono::Utc>>,
     pub limit: Option<i64>,
 }
 
-#[utoipa::path(get, path = "/wiki/documents", params(ListDocsParams),
+#[utoipa::path(get, path = "/wiki/documents",
     responses((status = 200, body = [DocumentDto])))]
 pub async fn list_documents(
     principal: axum::Extension<Principal>,
@@ -162,7 +160,7 @@ pub async fn list_documents(
     Query(p): Query<ListDocsParams>,
 ) -> Result<Json<Vec<DocumentDto>>, ApiError> {
     require_wiki_docs_read(&principal)?;
-    let lib = resolve_lib(&state, p.lib.as_deref()).await?;
+    let lib = resolve_lib(&state, None).await?;
     // wiki-engine 并行改造中：list_documents 增加 lib 首参（库隔离）
     Ok(Json(
         svc(&state)
