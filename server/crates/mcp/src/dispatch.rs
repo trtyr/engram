@@ -559,7 +559,8 @@ pub fn render_manual(domain: &str, disabled: &[String]) -> Value {
     root
 }
 
-/// EN-236：wiki 九任务组导航（找/读/写/织入/体检/人审/版本/整理/晋升）——28 动作全覆盖不重不漏。
+/// EN-236：wiki 九任务组导航（找/读/写/织入/体检/人审/版本/整理/晋升）——全部 28 动作入组不重不漏
+///（含工单后增动作：list_pages 归读、document_delete 归织入——验收③数量不减，按组可导航到每个动作）。
 fn wiki_groups_hint() -> Value {
     let groups: &[(&str, &str, &[&str])] = &[
         (
@@ -570,7 +571,7 @@ fn wiki_groups_hint() -> Value {
         (
             "读",
             "浏览：页面/内容目录/库意图",
-            &["get_page", "index", "purpose"],
+            &["get_page", "index", "purpose", "list_pages"],
         ),
         (
             "写",
@@ -580,7 +581,7 @@ fn wiki_groups_hint() -> Value {
         (
             "织入",
             "原料通道：整篇织入/直传文档/状态",
-            &["ingest", "document_add", "document_get"],
+            &["ingest", "document_add", "document_get", "document_delete"],
         ),
         (
             "体检",
@@ -609,7 +610,7 @@ fn wiki_groups_hint() -> Value {
         .map(|(name, why, actions)| json!({ "group": name, "why": why, "actions": actions }))
         .collect();
     json!({
-        "hint": "动作多，按任务找组——先看组名定位意图，再看组内 action；全部 action 在下方 actions 平铺列表（参数以该处为准）。工单映射外后增动作：list_pages（读类）、document_delete（织入类）",
+        "hint": "动作多，按任务找组——先看组名定位意图，再看组内 action；全部 action 在下方 actions 平铺列表（参数以该处为准）。28 动作已全部入组（list_pages 归读、document_delete 归织入为工单后增补组）",
         "groups": items,
     })
 }

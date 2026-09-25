@@ -153,9 +153,34 @@ async fn merge_moves_atom_links_and_counts() {
     svc.attach_atom(winner.id, a3).await.unwrap();
     svc.attach_atom(loser.id, a3).await.unwrap(); // 两边都挂 a3 → 合并时应冲突跳过
 
+    // 副档留一条修订史（验证合并时随迁主档）
+    sqlx::query(
+        "INSERT INTO entity_revisions (id, entity_id, old_summary, edited_by) VALUES ($1, $2, '李四旧摘要', 'test')",
+    )
+    .bind(Uuid::now_v7())
+    .bind(loser.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let moved = svc.merge_entities(loser.id, winner.id).await.unwrap();
     // a1 a2 迁移成功；a3 冲突跳过 → moved = 2
     assert_eq!(moved, 2);
+    // 副档修订史随迁主档（审计五驳：合并语义=历史跟主走）
+    let loser_revs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM entity_revisions WHERE entity_id = $1")
+            .bind(loser.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(loser_revs, 0, "副档修订史应已迁走");
+    let winner_revs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM entity_revisions WHERE entity_id = $1")
+            .bind(winner.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(winner_revs >= 1, "主档应收下副档的修订史");
     let detail = svc.get_entity(winner.id).await.unwrap();
     assert_eq!(detail.entity.atom_count, 3);
     assert!(

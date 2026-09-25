@@ -354,5 +354,7 @@ pub async fn merge_entity(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_memory(&principal)?;
     let moved = svc(&state).merge_entities(id, req.into).await.map_err(me)?;
-    Ok(Json(serde_json::json!({ "moved": moved })))
+    Ok(Json(
+        serde_json::json!({ "moved": moved, "revisions_migrated": true }),
+    ))
 }

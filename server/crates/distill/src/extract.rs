@@ -222,7 +222,7 @@ async fn link_entity(
     kind: &str,
 ) -> Result<(), String> {
     let similar: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM entities WHERE kind = $2 AND merged_into IS NULL \
+        "SELECT id FROM entities WHERE kind = $2 AND merged_into IS NULL AND archived_at IS NULL \
          AND (position(lower($1) in lower(name)) > 0 OR position(lower(name) in lower($1)) > 0) LIMIT 1",
     )
     .bind(name)
@@ -261,15 +261,9 @@ async fn link_entity(
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
-    // 实体复活：蒸馏重新挂链被归档的同名实体 → 清标记回到可见层。
-    // 合并墓碑（merged_into 非空）永不复活——复活死档会让原子重新挂回已被并走的副档（审计四驳②）。
-    sqlx::query(
-        "UPDATE entities SET archived_at = NULL WHERE id = $1 AND merged_into IS NULL",
-    )
-    .bind(eid)
-    .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    // 复活语义已废除（审计五驳）：近似查询只命中活体（merged_into/archived_at 双排除）——
+    // eid 恒为活体；归档/墓碑行不再被挂原子、不再被清 archived_at。
+    // 抽取要「并」的是活档，不是唤醒死档；同名检测与合并 = 命中活体即复用其 id（幂等）。
     Ok(())
 }
 

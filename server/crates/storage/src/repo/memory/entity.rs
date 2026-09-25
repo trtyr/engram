@@ -350,6 +350,13 @@ pub async fn merge_entities_tx(pool: &PgPool, from: Uuid, into: Uuid) -> StoreRe
     .bind(into)
     .execute(&mut *tx)
     .await?;
+    // 审计五驳：副档修订史随迁主档——否则副档墓碑化后读接口 404，用户拿不回自己的历史，
+    // 主档修订链断裂；合并语义 = 历史跟主走（参照 wiki merge 主从并档）
+    sqlx::query("UPDATE entity_revisions SET entity_id = $2 WHERE entity_id = $1")
+        .bind(from)
+        .bind(into)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("UPDATE entities SET updated_at = now() WHERE id = $1")
         .bind(into)
         .execute(&mut *tx)

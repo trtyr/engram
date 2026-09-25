@@ -160,7 +160,7 @@ impl EngramMcpServer {
             "winner": into,
             "archived": from,
             "atom_refs_moved": moved,
-            "hint": "副档已归档（merged_into=主档），原子引用已迁移；entity_duplicates 复检应不再出现该组",
+            "hint": "副档已归档（merged_into=主档），原子引用与修订史已迁移；entity_duplicates 复检应不再出现该组",
         }))
     }
 }

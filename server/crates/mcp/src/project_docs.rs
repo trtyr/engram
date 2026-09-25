@@ -340,14 +340,7 @@ impl EngramMcpServer {
             // 行模型按 \n 切分会给尾换行文档叠出幽灵空行（审计四驳③：曾产出 "gamma\n\n"）
             let doc = self
                 .svc_project()
-                .update_doc(
-                    id,
-                    None,
-                    None,
-                    None,
-                    Some(&new_full),
-                    dp.expected_version,
-                )
+                .update_doc(id, None, None, None, Some(&new_full), dp.expected_version)
                 .await
                 .map_err(from_project)?;
             let mut v = slim_doc(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})));
