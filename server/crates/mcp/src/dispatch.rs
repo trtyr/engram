@@ -218,17 +218,94 @@ pub fn action_key(domain: &str, action: &str) -> String {
 }
 
 /// 域参数解析：把 DomainCall 平铺参数还原成该操作的强类型结构体（历史参数结构体全复用）。
-pub fn from_args<T: serde::de::DeserializeOwned>(
+///
+/// 两段式（ADR-20）：先严格解析——合法请求零额外开销；失败时按该操作 inputSchema 做
+/// 受控宽容重试：声明为 integer/number/boolean 的字段收到可解析字符串时转原生类型
+/// （劣质客户端把参数 stringify 的兜底，如 pi-mcp-adapter EN-224）。合法字符串值
+/// 永不误转——它们首过即严格通过，不进重试路径。重试仍失败时报**首次**严格错误
+/// （最贴近用户的原始问题）。
+pub fn from_args<T: serde::de::DeserializeOwned + schemars::JsonSchema>(
     domain: &str,
     action: &str,
     args: serde_json::Map<String, Value>,
 ) -> Result<T, rmcp::ErrorData> {
-    serde_json::from_value(Value::Object(args)).map_err(|e| {
-        mcp_err(
-            ErrorCode::INVALID_PARAMS,
-            format!("{domain}.{action} 参数错误：{e}。用 action=\"help\" 查看该操作的参数说明。"),
-        )
-    })
+    let value = Value::Object(args);
+    match serde_json::from_value::<T>(value.clone()) {
+        Ok(parsed) => Ok(parsed),
+        Err(strict_err) => {
+            let root = serde_json::to_value(rmcp::schemars::schema_for!(T)).unwrap_or(Value::Null);
+            let defs = root.get("$defs").cloned().unwrap_or(Value::Null);
+            let mut coerced = value;
+            coerce_by_schema(&root, &defs, &mut coerced);
+            serde_json::from_value::<T>(coerced).map_err(|_| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("{domain}.{action} 参数错误：{strict_err}。用 action=\"help\" 查看该操作的参数说明。"),
+                )
+            })
+        }
+    }
+}
+
+/// 按 inputSchema（JSON Schema Value 形态）递归做受控 string→原生 转换：
+/// `type` 断言为 integer/number/boolean 的位置，收到可解析字符串才转；
+/// 其余（含 string 字段）一律不动。
+fn coerce_by_schema(schema: &Value, defs: &Value, v: &mut Value) {
+    // $ref 解析（schemars 对嵌套类型生成 $defs + $ref）
+    if let Some(name) = schema.get("$ref").and_then(|r| r.as_str()) {
+        let name = name.rsplit('/').next().unwrap_or("");
+        if let Some(def) = defs.get(name) {
+            coerce_by_schema(def, defs, v);
+        }
+        return;
+    }
+    // 1) type 断言：string → boolean / integer / number
+    let types: Vec<&str> = match schema.get("type") {
+        Some(Value::String(s)) => vec![s.as_str()],
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    if let Value::String(s) = v {
+        let is_bool = types.contains(&"boolean") && matches!(s.as_str(), "true" | "false");
+        let is_num = types.contains(&"integer") || types.contains(&"number");
+        if is_bool {
+            *v = Value::Bool(s == "true");
+        } else if is_num {
+            if let Ok(n) = s.parse::<i64>() {
+                *v = Value::Number(n.into());
+            } else if let Ok(f) = s.parse::<f64>()
+                && let Some(n) = serde_json::Number::from_f64(f)
+            {
+                *v = Value::Number(n);
+            }
+        }
+    }
+    // 2) object properties 递归
+    if let Some(props) = schema.get("properties").and_then(Value::as_object)
+        && let Some(map) = v.as_object_mut()
+    {
+        for (key, sub) in props {
+            if let Some(x) = map.get_mut(key) {
+                coerce_by_schema(sub, defs, x);
+            }
+        }
+    }
+    // 3) array items 递归
+    if let Some(sub) = schema.get("items")
+        && let Some(items) = v.as_array_mut()
+    {
+        for x in items {
+            coerce_by_schema(sub, defs, x);
+        }
+    }
+    // 4) 复合形态递归（Option<T> 生成 anyOf [null, T]；oneOf/allOf 一并覆盖）
+    for key in ["anyOf", "oneOf", "allOf"] {
+        if let Some(list) = schema.get(key).and_then(Value::as_array) {
+            for sub in list {
+                coerce_by_schema(sub, defs, v);
+            }
+        }
+    }
 }
 
 /// 未知 action：报错即发现（L2）——列出全部合法操作。
@@ -585,6 +662,75 @@ mod ro_unify_tests {
         assert!(
             check_action_access(&ro, "memory", write).is_err(),
             ":ro 写动作应拒绝：{write}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod lenient_args_tests {
+    use super::*;
+    use schemars::JsonSchema;
+    use serde_json::json;
+
+    #[derive(Debug, Deserialize, JsonSchema)]
+    struct PatchLike {
+        doc_id: String,
+        start_line: i64,
+        end_line: i64,
+        with_ln: Option<bool>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    struct HasStringNum {
+        name: String,
+        ids: Vec<i64>,
+    }
+
+    fn args(v: Value) -> serde_json::Map<String, Value> {
+        match v {
+            Value::Object(m) => m,
+            _ => unreachable!(),
+        }
+    }
+
+    /// EN-224 现场：客户端把 int/bool stringify——宽容层应转换成功
+    #[test]
+    fn stringified_int_and_bool_are_coerced() {
+        let got: PatchLike = from_args(
+            "t",
+            "x",
+            args(
+                json!({"doc_id": "d1", "start_line": "188", "end_line": "188", "with_ln": "true"}),
+            ),
+        )
+        .expect("stringify 参数应被宽容解析");
+        assert_eq!((got.start_line, got.end_line), (188, 188));
+        assert_eq!(got.with_ln, Some(true));
+        assert_eq!(got.doc_id, "d1");
+    }
+
+    /// 防误伤：合法 string 字段值（"188"）必须原样保留
+    #[test]
+    fn legit_string_field_not_tampered() {
+        let got: HasStringNum =
+            from_args("t", "x", args(json!({"name": "188", "ids": ["1", "2"]}))).unwrap();
+        assert_eq!(got.name, "188", "合法 string 字段不得被转换");
+        assert_eq!(got.ids, vec![1, 2], "数组元素内的 string int 也应转换");
+    }
+
+    /// 垃圾值仍报错，且报错保留首次严格信息（可行动）
+    #[test]
+    fn garbage_still_reports_strict_error() {
+        let err = from_args::<PatchLike>(
+            "t",
+            "x",
+            args(json!({"doc_id": "d1", "start_line": "abc", "end_line": 1})),
+        )
+        .expect_err("不可解析字符串仍应报错");
+        assert!(
+            err.message.contains("expected i64"),
+            "报错应保留首次严格信息：{}",
+            err.message
         );
     }
 }
