@@ -164,7 +164,7 @@ impl EngramMcpServer {
         let layer_empty = |k: &str| {
             v.get(k)
                 .and_then(|x| x.as_array())
-                .map_or(true, |a| a.is_empty())
+                .is_none_or(|a| a.is_empty())
         };
         if ["sessions", "atoms", "scenarios", "persona", "entities"]
             .iter()

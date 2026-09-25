@@ -248,7 +248,7 @@ impl EngramMcpServer {
             .map_err(wiki::from_wiki)?;
         // EN-243①：未配置要可感知——手册称「写前必读」，读到空却无提示等于没读
         let mut v = serde_json::to_value(&purpose).unwrap_or(serde_json::json!({}));
-        let configured = v.get("purpose").map_or(false, |x| !x.is_null());
+        let configured = v.get("purpose").is_some_and(|x| !x.is_null());
         v["configured"] = serde_json::json!(configured);
         if !configured {
             v["hint"] = serde_json::json!(

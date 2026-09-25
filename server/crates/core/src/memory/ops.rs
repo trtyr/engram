@@ -252,7 +252,7 @@ impl MemoryService {
             .into_iter()
             .map(|(k, ids)| (k, ids.len() as i64, ids))
             .collect();
-        out.sort_by(|a, b| b.1.cmp(&a.1));
+        out.sort_by_key(|x| std::cmp::Reverse(x.1));
         Ok(out)
     }
 }

@@ -117,7 +117,7 @@ impl EngramMcpServer {
             .into_iter()
             .map(|j| {
                 let partial = matches!(j.status, engram_jobs::types::JobStatus::Succeeded)
-                    && j.error.as_deref().map_or(false, |e| !e.trim().is_empty());
+                    && j.error.as_deref().is_some_and(|e| !e.trim().is_empty());
                 let mut v = serde_json::to_value(&j).unwrap_or(serde_json::json!({}));
                 v["partial"] = serde_json::json!(partial);
                 v
@@ -155,7 +155,7 @@ impl EngramMcpServer {
             })?;
         // EN-238①：succeeded 但 error 非空 = 部分成功（子任务警告）——显式派生标记消歧义
         let partial = matches!(job.status, engram_jobs::types::JobStatus::Succeeded)
-            && job.error.as_deref().map_or(false, |e| !e.trim().is_empty());
+            && job.error.as_deref().is_some_and(|e| !e.trim().is_empty());
         Ok(CallToolResult::structured(serde_json::json!({
             "job": job,
             "partial": partial,
