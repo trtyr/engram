@@ -105,16 +105,23 @@ pub struct ProjectDocPatchParams {
     /// 文档 id（UUID）
     #[schemars(description = "文档 id（UUID，来自 project_get 返回的 docs 列表）。")]
     pub doc_id: String,
-    /// 起始行（1-based）
+    /// 起始行（1-based；或改用 anchor 锚点定位）
     #[schemars(
-        description = "行号（1-based）。replace/delete = 区间起点；insert = 插入位置（在该行之前，total+1 = 追加到末尾）。"
+        description = "行号（1-based）。replace/delete = 区间起点；insert = 插入位置（在该行之前，total+1 = 追加到末尾）。与 anchor 二选一：给了 anchor 则忽略本参数。"
     )]
-    pub start_line: i64,
-    /// 结束行（1-based，含该行）
+    #[serde(default)]
+    pub start_line: Option<i64>,
+    /// 结束行（1-based，含该行；缺省 = 与 start_line 同行）
     #[schemars(
-        description = "行号（1-based，含该行）。replace/delete = 区间终点；insert 忽略此参数。"
+        description = "行号（1-based，含该行）。replace/delete = 区间终点；insert 忽略此参数。缺省 = 与 start_line 同行。"
     )]
-    pub end_line: i64,
+    #[serde(default)]
+    pub end_line: Option<i64>,
+    /// 内容锚（EN-226）：按行包含匹配定位 start_line——多 patch 串行不再漂移
+    #[schemars(
+        description = "可选：内容锚（doc_get 看到的原文短语）。按行包含匹配定位，唯一命中才执行；零命中/多命中报错并列出命中行。给了 anchor 则忽略 start_line；end_line 缺省 = 锚行。"
+    )]
+    pub anchor: Option<String>,
     /// replace（默认）| insert | delete
     #[schemars(
         description = "补丁模式：\"replace\"（默认，[start_line,end_line] 替换为 content）/ \"insert\"（在 start_line 前插入 content，可传 start_line=total+1 追加）/ \"delete\"（删除 [start_line,end_line]，忽略 content）。"
@@ -293,12 +300,56 @@ impl EngramMcpServer {
         let dp = params.0;
         let id = Uuid::parse_str(&dp.doc_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "doc_id 不是合法 UUID"))?;
+        // EN-226：锚点定位——anchor 按行包含匹配解析行号（唯一命中才执行），多 patch 串行不再漂移
+        let (start_line, end_line, via_anchor) = if let Some(anchor) =
+            dp.anchor.as_deref().filter(|a| !a.trim().is_empty())
+        {
+            let doc = self.svc_project().get_doc(id).await.map_err(from_project)?;
+            let hits: Vec<usize> = doc
+                .content
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| l.contains(anchor))
+                .map(|(i, _)| i + 1)
+                .collect();
+            match hits.len() {
+                1 => {
+                    let s = hits[0] as i64;
+                    (s, dp.end_line.unwrap_or(s), true)
+                }
+                0 => {
+                    return Err(mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        format!(
+                            "锚点在文档中零命中：{anchor:?}——用 doc_get 确认原文措辞（锚按行包含匹配）"
+                        ),
+                    ));
+                }
+                n => {
+                    return Err(mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        format!(
+                            "锚点在文档中命中 {n} 行（行号 {:?}）——加长锚文本使其唯一",
+                            &hits[..n.min(8)]
+                        ),
+                    ));
+                }
+            }
+        } else {
+            let s = dp.start_line.ok_or_else(|| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "缺 start_line——行号定位或改用 anchor 锚点（doc_get 原文短语，按行包含匹配）",
+                )
+            })?;
+            (s, dp.end_line.unwrap_or(s), false)
+        };
         let doc = self
             .svc_project()
             .patch_doc(
                 id,
-                dp.start_line,
-                dp.end_line,
+                start_line,
+                end_line,
                 dp.mode.as_deref().unwrap_or("replace"),
                 dp.content.as_deref(),
                 dp.expected_version,
@@ -309,10 +360,13 @@ impl EngramMcpServer {
         v["total_lines"] = json!(doc.content.lines().count());
         v["patched"] = json!({
             "mode": dp.mode.as_deref().unwrap_or("replace"),
-            "start_line": dp.start_line,
-            "end_line": dp.end_line,
+            "start_line": start_line,
+            "end_line": end_line,
+            "via_anchor": via_anchor,
         });
-        v["hint"] = json!("行号基于新版本——继续补丁前先重新定位（行区间读 doc_get）");
+        v["hint"] = json!(
+            "行号基于新版本——继续补丁前先重新定位（行区间读 doc_get）；串行多 patch 建议改用 anchor 锚点定位，不再受行号漂移影响"
+        );
         ok_json(v)
     }
 
