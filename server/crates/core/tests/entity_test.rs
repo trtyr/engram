@@ -52,9 +52,13 @@ async fn entity_lifecycle_create_attach_graph_merge() {
     assert_eq!(zhang.atom_count, 0);
     assert_eq!(zhang.summary, "同事，负责后端");
 
-    // 同名同类拒重
-    let dup = svc.create_entity("张三", "person", "").await;
-    assert!(dup.is_err(), "同名同类活体应拒重");
+    // 同名同类幂等返回已有实体（EN-242：创建幂等——重复抽取/创建不再异形分档，不再报错）
+    let dup = svc
+        .create_entity("张三", "person", "")
+        .await
+        .expect("同名同类应幂等返回已有实体而非报错");
+    assert_eq!(dup.id, zhang.id, "幂等路径应返回已有实体（同 id）");
+    assert_eq!(dup.atom_count, 0);
     // 同名不同类允许（张三 既是 person 也可以是 topic？——按约束允许）
     let topic_zhang = svc.create_entity("张三", "topic", "").await;
     assert!(topic_zhang.is_ok());
