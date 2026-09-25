@@ -129,4 +129,49 @@ impl EngramMcpServer {
             "hint": "已归档（archived），未删除。恢复渠道：list_atoms status=archived 可见；治理红线不变。",
         }))
     }
+
+    /// 合并实体（EN-242）：from 副档并入 into 主档——引用迁移 + 副档归档（merged_into）。
+    pub(crate) async fn memory_entity_merge(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<EntityMergeParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p: Principal = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let parse = |v: &str, label: &str| {
+            uuid::Uuid::parse_str(v).map_err(|_| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "{label} 不是合法 UUID：{v}（entity_duplicates 或 entities 拿实体 id）"
+                    ),
+                )
+            })
+        };
+        let from = parse(&params.0.from_id, "from_id")?;
+        let into = parse(&params.0.into_id, "into_id")?;
+        let moved = self
+            .svc()
+            .merge_entities(from, into)
+            .await
+            .map_err(from_memory)?;
+        ok_json(json!({
+            "merged": true,
+            "winner": into,
+            "archived": from,
+            "atom_refs_moved": moved,
+            "hint": "副档已归档（merged_into=主档），原子引用已迁移；entity_duplicates 复检应不再出现该组",
+        }))
+    }
+}
+
+/// EN-242：实体合并——from 副档并入 into 主档（引用迁移 + 副档归档）。
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct EntityMergeParams {
+    /// 被合并的副档 id（合并后 merged_into=主档 + archived 归档）
+    #[serde(default)]
+    pub from_id: String,
+    /// 保留的主档 id（收下副档的全部原子引用）
+    #[serde(default)]
+    pub into_id: String,
 }

@@ -84,7 +84,8 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "atom_duplicates", false, "重复/近似原子检测：归一化内容完全相同的 active 原子分组（合并前先看清单；治理红线：检测不动数据）" => crate::memory_manage::AtomDuplicatesParams;
             "kv_delete", true, "删除指定 KV 键（物理清理：写坏/过期/测试残留；original :ro 拒绝）" => crate::MemoryKvDeleteParams;
             "atom_archive", true, "归档原子（常规整理：active→archived，不删除；list_atoms status=archived 可见）" => crate::memory_manage::AtomArchiveParams;
-            "entity_duplicates", false, "同名实体检测（大小写/空白不敏感分组；合并动作待设计，先可观测）" => crate::memory_manage::EntityDuplicatesParams
+            "entity_duplicates", false, "同名实体检测（大小写/空白不敏感分组；合并用 entity_merge）" => crate::memory_manage::EntityDuplicatesParams;
+            "entity_merge", true, "合并实体（EN-242）：from 副档并入 into 主档——原子引用迁移 + 副档归档（merged_into）；entity_duplicates 先看清单" => crate::memory_manage::EntityMergeParams
         ],
         "projects" => action_docs![
             "types", false, "列出项目**场景**模板（dev=开发 / ops=运维 / research=调研 / study=学习 / life=生活 / create=创作，各带预设文档分类）" => crate::ProjectTypesParams;
@@ -355,6 +356,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "forget"
                 | "atom_archive"
                 | "kv_delete"
+                | "entity_merge"
         ) | (
             "projects",
             "create"

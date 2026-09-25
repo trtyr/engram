@@ -444,6 +444,13 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "entity_merge" => {
+                self.memory_entity_merge(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "entity_merge", call.args)?),
+                )
+                .await
+            }
             other => Err(dispatch::unknown_action("memory", other)),
         }
     }
