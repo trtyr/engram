@@ -158,7 +158,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "archive", false, "问答/分析产物归档为 analysis 页（related 自动建双向 wikilinks——好答案不该消失在聊天记录里）" => crate::wiki::WikiArchiveParams;
             "purpose", false, "读取库的方向意图（每库一份——写页前先读，避免写跑题）" => crate::wiki::WikiLibParams;
             "insights", false, "列出库的洞察（AI 评审产出的观察项，可与 reviews 对照看）" => crate::wiki::WikiLibParams;
-            "promote", false, "知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 synthesis 页（frontmatter 带源回链）+ 源文档自动追加 ⛳ 标记——提炼由调用方完成" => crate::wiki::WikiPromoteParams;
+            "promote", false, "知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 synthesis 页（frontmatter 带源回链）+ 源文档自动追加 ⛳ 标记——提炼由调用方完成。必填 7 项一次给全：project、doc_id、anchor（源文定位短语）、slug、title、content（提炼正文）、library 缺省 main" => crate::wiki::WikiPromoteParams;
             "promotions", false, "晋升登记列表（谁家的哪些知识晋升成了 wiki 页；按项目过滤）" => crate::wiki::WikiPromotionsParams;
             "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
         ],
