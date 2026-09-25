@@ -51,6 +51,12 @@ pub struct TicketListParams {
     /// 标题/正文子串
     #[schemars(description = "可选子串过滤（标题或正文）。")]
     pub q: Option<String>,
+    /// 翻页游标（keyset：上一次 list 返回的 next_cursor）
+    #[schemars(description = "可选翻页游标（keyset）：上一次 list 返回的 next_cursor。缺省从头。")]
+    pub cursor: Option<String>,
+    /// 条数上限（缺省 50，单页上限 500——更多结果用 cursor 翻页）
+    #[schemars(description = "条数上限（缺省 50，单页上限 500——更多结果用 cursor 翻页）。")]
+    pub limit: Option<i64>,
     /// 摘要模式（MCP 默认 true）：只返回 短号/标题/形态/状态/分级/关联计数
     #[schemars(
         description = "可选：摘要模式，默认 true——只返回 short_no/标题/形态/状态/分级/标签/关联计数（不含 body/symptom 等长字段）。brief=false 返回全量。"
@@ -110,8 +116,8 @@ impl EngramMcpServer {
                 lp.tag.as_deref(),
                 lp.q.as_deref(),
                 lp.severity.as_deref(),
-                None,
-                500, // 工单量级小，一次拉全
+                lp.cursor.as_deref(),
+                lp.limit.unwrap_or(50).min(500),
             )
             .await
             .map_err(from_todo)?;
@@ -140,6 +146,10 @@ impl EngramMcpServer {
             return ok_json(serde_json::json!({
                 "brief": true,
                 "count": brief.len(),
+                "total": todo_svc(&self.state)
+                    .count(lp.status.as_deref(), Some("ticket"), None, lp.tag.as_deref(), lp.q.as_deref(), lp.severity.as_deref())
+                    .await
+                    .unwrap_or(-1),
                 "items": brief,
                 "hint": "摘要模式（body 已省略）——brief=false 取全量；引用条目用 EN-<短号>",
             }));

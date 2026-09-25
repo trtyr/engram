@@ -349,3 +349,33 @@ pub async fn link_count_map(
     }
     Ok(m)
 }
+
+/// 总数（同 list 过滤，不含分页）——EN-237③：tickets/todos list 返回 total。
+#[allow(clippy::too_many_arguments)]
+pub async fn count(
+    pool: &PgPool,
+    status: Option<&str>,
+    kind: Option<&str>,
+    priority: Option<&str>,
+    tag: Option<&str>,
+    q: Option<&str>,
+    severity: Option<&str>,
+) -> StoreResult<i64> {
+    Ok(sqlx::query_scalar(
+        "SELECT COUNT(*) FROM todos \
+         WHERE ($1::text IS NULL OR status = $1) \
+         AND ($2::text IS NULL OR priority = $2) \
+         AND ($3::text IS NULL OR tags @> ARRAY[$3::text]) \
+         AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%') \
+         AND ($5::text IS NULL OR kind = $5) \
+         AND ($6::text IS NULL OR severity = $6)",
+    )
+    .bind(status)
+    .bind(priority)
+    .bind(tag)
+    .bind(q)
+    .bind(kind)
+    .bind(severity)
+    .fetch_one(pool)
+    .await?)
+}

@@ -467,4 +467,18 @@ impl TodoService {
             .map(to_dto)
             .collect())
     }
+
+    /// 总数（同 list 过滤，不含分页）——EN-237③：tickets/todos list 返回 total。
+    pub async fn count(
+        &self,
+        status: Option<&str>,
+        kind: Option<&str>,
+        priority: Option<&str>,
+        tag: Option<&str>,
+        q: Option<&str>,
+        severity: Option<&str>,
+    ) -> Result<i64, TodoError> {
+        let n = repo::count(&self.pool, status, kind, priority, tag, q, severity).await?;
+        Ok(n)
+    }
 }

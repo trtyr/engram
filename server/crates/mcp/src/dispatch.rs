@@ -23,6 +23,7 @@ use rmcp::model::ErrorCode;
 pub struct DomainCall {
     /// 操作名。action="help" 返回本域全部操作与参数手册（渐进式发现）。
     #[schemars(description = "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。")]
+    #[serde(default)]
     pub action: String,
     /// 该操作的参数（平铺在顶层，与 help 返回的参数 schema 一致）。
     #[schemars(

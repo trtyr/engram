@@ -131,6 +131,9 @@ pub struct TodoUpdateParams {
     /// 工单解决记录（resolved 前必填）
     #[schemars(description = "工单解决记录——状态转 resolved 前必填（写了什么方案/修了什么）。")]
     pub resolution: Option<String>,
+    /// 可选：标签整体替换（传即替换全量；不传不动——EN-237②）
+    #[schemars(description = "可选：自由标签整体替换（传了就全量替换；不传保持不变）。")]
+    pub tags: Option<Vec<String>>,
     /// 截止时间（ISO8601，可选）
     #[schemars(description = "可选截止时间（ISO8601）。")]
     pub due_at: Option<String>,
@@ -242,6 +245,10 @@ impl EngramMcpServer {
             return ok_json(serde_json::json!({
                 "brief": true,
                 "count": brief.len(),
+                "total": todo_svc(&self.state)
+                    .count(lp.status.as_deref(), Some("todo"), lp.priority.as_deref(), lp.tag.as_deref(), lp.q.as_deref(), lp.severity.as_deref())
+                    .await
+                    .unwrap_or(-1),
                 "items": brief,
                 "hint": "摘要模式（body 已省略）——brief=false 取全量；引用条目用 EN-<短号>",
             }));
@@ -330,7 +337,7 @@ impl EngramMcpServer {
                     None => None,
                 },
                 None,
-                None,
+                params.0.tags.as_deref(),
             )
             .await
             .map_err(from_todo)?;

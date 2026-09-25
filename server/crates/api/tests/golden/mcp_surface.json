@@ -16,13 +16,11 @@
         "additionalProperties": true,
         "properties": {
           "action": {
+            "default": "",
             "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
             "type": "string"
           }
         },
-        "required": [
-          "action"
-        ],
         "type": "object"
       },
       "name": "assets"
@@ -41,13 +39,11 @@
         "additionalProperties": true,
         "properties": {
           "action": {
+            "default": "",
             "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
             "type": "string"
           }
         },
-        "required": [
-          "action"
-        ],
         "type": "object"
       },
       "name": "codegraph"
@@ -66,13 +62,11 @@
         "additionalProperties": true,
         "properties": {
           "action": {
+            "default": "",
             "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
             "type": "string"
           }
         },
-        "required": [
-          "action"
-        ],
         "type": "object"
       },
       "name": "jobs"
@@ -91,13 +85,11 @@
         "additionalProperties": true,
         "properties": {
           "action": {
+            "default": "",
             "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
             "type": "string"
           }
         },
-        "required": [
-          "action"
-        ],
         "type": "object"
       },
       "name": "memory"
@@ -116,13 +108,11 @@
         "additionalProperties": true,
         "properties": {
           "action": {
+            "default": "",
             "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
             "type": "string"
           }
         },
-        "required": [
-          "action"
-        ],
         "type": "object"
       },
       "name": "projects"
@@ -180,13 +170,11 @@
         "additionalProperties": true,
         "properties": {
           "action": {
+            "default": "",
             "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
             "type": "string"
           }
         },
-        "required": [
-          "action"
-        ],
         "type": "object"
       },
       "name": "skills"
@@ -205,13 +193,11 @@
         "additionalProperties": true,
         "properties": {
           "action": {
+            "default": "",
             "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
             "type": "string"
           }
         },
-        "required": [
-          "action"
-        ],
         "type": "object"
       },
       "name": "tickets"
@@ -230,13 +216,11 @@
         "additionalProperties": true,
         "properties": {
           "action": {
+            "default": "",
             "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
             "type": "string"
           }
         },
-        "required": [
-          "action"
-        ],
         "type": "object"
       },
       "name": "todos"
@@ -255,13 +239,11 @@
         "additionalProperties": true,
         "properties": {
           "action": {
+            "default": "",
             "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
             "type": "string"
           }
         },
-        "required": [
-          "action"
-        ],
         "type": "object"
       },
       "name": "wiki"
