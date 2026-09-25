@@ -180,8 +180,9 @@ pub struct WikiDocumentAddParams {
     /// 二选一：要抓取的 URL（SSRF 校验）
     #[schemars(description = "二选一：要抓取的 URL（自动抓取→分块→嵌入→织入）。与 text 二选一。")]
     pub url: Option<String>,
-    /// 可选：文档名（text 模式作标题；url 模式忽略）
-    #[schemars(description = "可选：文档名（text 模式的标题）。")]
+    /// 可选：文档名/标题（text 模式作标题；url 模式忽略）。兼容 `title` 字段名。
+    #[schemars(description = "可选：文档标题（text 模式）。字段名 `name` 或 `title` 均可。")]
+    #[serde(alias = "title")]
     pub name: Option<String>,
 }
 
@@ -326,6 +327,14 @@ pub struct WikiDeleteSourceParams {
         description = "原料 id（sources 列表返回）。级联删除：该源、其任务与由它产出的页面一并删除，不可逆。"
     )]
     pub source_id: String,
+}
+
+/// 删除一条文档 RAG 原料（document_add 返回的 id——documents 体系，非 delete_source 的 sources 体系）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiDocumentDeleteParams {
+    /// 文档 id（document_add 返回的 id）
+    #[schemars(description = "文档 id（document_add 返回的 id）。删除该文档及其分块/嵌入。")]
+    pub doc_id: String,
 }
 
 /// graph/lint 等无参操作的占位（单库终局：无库入参）。

@@ -62,6 +62,31 @@ impl EngramMcpServer {
         ok_json(out)
     }
 
+    /// 删除一条文档 RAG 原料（document_add 返回的 id；documents 体系——非 delete_source 的 sources 体系）。
+    ///
+    /// 何时用：撤销一次入库（连同分块/嵌入一起删）。
+    pub(crate) async fn wiki_document_delete(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<wiki::WikiDocumentDeleteParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let id = Uuid::parse_str(&params.0.doc_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "doc_id 不是合法 UUID"))?;
+        let lib = self.resolve_wiki_lib().await?;
+        let svc = engram_core::wiki_docs::WikiDocumentService::new(
+            self.state.pool.clone(),
+            self.state.registry(),
+            self.state.data_dir.clone(),
+        );
+        svc.delete(lib, id).await.map_err(Self::from_wiki_docs)?;
+        ok_json(serde_json::json!({
+            "deleted": params.0.doc_id,
+            "hint": "文档及其分块/嵌入已删除",
+        }))
+    }
+
     // ---------- 文档 RAG（wiki_documents）——MCP 对齐 HTTP 能力（工单「工具面不对齐」） ----------
 
     /// 入库文档（document_add）：text 或 url → 分块+嵌入进原文 RAG，并触发 LLM 织入。

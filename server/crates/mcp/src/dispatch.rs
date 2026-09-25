@@ -142,6 +142,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "lint_deep", false, "语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步任务，产出入人审队列；slugs 可限定范围控成本）" => crate::wiki::WikiLintDeepParams;
             "merge", false, "合并页面：duplicate 并入 primary（冗余丢弃或内容并入 + 全库链接改指 + 快照兜底删除）——处置重复页 flag 用" => crate::wiki::WikiMergeParams;
             "document_add", false, "入库文档（text 或 url）——分块+嵌入进原文 RAG 并触发织入；幂等去重" => crate::wiki::WikiDocumentAddParams;
+            "document_delete", true, "删除一条入库文档及其分块/嵌入（document_add 返回的 id；documents 体系，非 delete_source）" => crate::wiki::WikiDocumentDeleteParams;
             "document_get", false, "文档状态（status/error 即处理进度）" => crate::wiki::WikiDocumentGetParams;
             "documents_search", false, "原文检索（chunk 级 FTS+向量混合——与页面级 search 互补）" => crate::wiki::WikiDocumentsSearchParams;
             "reviews", false, "人审队列：列出审查项（lint 深检/织入期 LLM 旗标的发现——kind/payload/来源；status 可过滤 open/resolved/dismissed，缺省 open）" => crate::wiki::WikiReviewsParams;
@@ -376,6 +377,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                     | "delete_source"
                     | "lint_deep"
                     | "document_add"
+                    | "document_delete"
                     | "review_resolve"
                     | "archive"
                     | "promote"
@@ -763,5 +765,26 @@ mod probe_doc_get {
             .and_then(|p| p.get("start_line"))
             .cloned();
         println!("start_line schema = {}", sl.unwrap_or(Value::Null));
+    }
+}
+
+#[cfg(test)]
+mod doc_add_alias_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// EN-249：document_add 的标题字段兼容 `title` 别名（AI 语义上传 title 不再被静默忽略）
+    #[test]
+    fn document_add_title_alias_reaches_name() {
+        let got: crate::wiki::WikiDocumentAddParams = from_args(
+            "wiki",
+            "document_add",
+            json!({"text": "正文", "title": "我的标题"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        )
+        .expect("title 别名应被接受");
+        assert_eq!(got.name.as_deref(), Some("我的标题"), "title 应落到 name");
     }
 }
