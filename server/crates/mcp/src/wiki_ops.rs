@@ -132,6 +132,12 @@ impl EngramMcpServer {
                 v["auto_ingest"] = json!({"state": "failed", "hint": format!("织入入队失败（页面本身已保存）: {e}")});
             }
         }
+        // EN-236②：写入→后续动作提示（页面已入链接图——体检与组织入口）
+        if v.get("hint").is_none() {
+            v["hint"] = json!(
+                "页面已保存并入链接图。后续：action=\"lint_deep\" 深检本页链接质量；整理/合并用 \"merge\"，问答类结论可直接 \"archive_query\""
+            );
+        }
         ok_json(v)
     }
 

@@ -543,13 +543,76 @@ pub fn render_manual(domain: &str, disabled: &[String]) -> Value {
             v
         })
         .collect();
-    json!({
+    let mut root = json!({
         "domain": domain,
         "how_to_call": format!("{{\"action\":\"<操作名>\", ...该操作的参数（平铺）}}；本返回即 {domain} 域全部可用操作"),
         // 验收反馈：search_all 是独立工具，不在任何域 help 里——每份手册顶部指路，
         // 想跨域扫一遍时不用翻 tools/list
         "cross_domain_hint": "另有独立工具 search_all（非本域操作）：一次查询并发 memory/wiki/skills/todos/projects 各回 top-k 摘要——不确定信息在哪域时用",
         "actions": actions,
+    });
+    // EN-236：wiki 域动作最多（28 个），help 平铺可发现性差——按九任务组分组的导航层（纯增量：
+    // actions 平铺原样保留，旧客户端不受影响；每组列 action 名单，数量不减语义不变）
+    if domain == "wiki" {
+        root["groups"] = wiki_groups_hint();
+    }
+    root
+}
+
+/// EN-236：wiki 九任务组导航（找/读/写/织入/体检/人审/版本/整理/晋升）——28 动作全覆盖不重不漏。
+fn wiki_groups_hint() -> Value {
+    let groups: &[(&str, &str, &[&str])] = &[
+        (
+            "找",
+            "检索：全文/向量/链接图/问答归档直查",
+            &["search", "documents_search", "graph"],
+        ),
+        (
+            "读",
+            "浏览：页面/原料/版本史/库意图/洞察",
+            &[
+                "list_pages",
+                "get_page",
+                "document_get",
+                "versions",
+                "version_content",
+                "purpose",
+                "insights",
+            ],
+        ),
+        (
+            "写",
+            "页面编辑：新建/覆盖/删除",
+            &["write_page", "delete_page"],
+        ),
+        (
+            "织入",
+            "原料通道：整篇织入/直传文档/删除/清单",
+            &[
+                "ingest",
+                "document_add",
+                "document_delete",
+                "delete_source",
+                "sources",
+            ],
+        ),
+        ("体检", "质量：lint 快检/深检", &["lint", "lint_deep"]),
+        ("人审", "织入建议的处置", &["reviews", "review_resolve"]),
+        ("版本", "误覆盖回滚", &["restore_version"]),
+        (
+            "整理",
+            "归档/合并/问答存档/索引重建",
+            &["merge", "archive_query", "archive", "index"],
+        ),
+        ("晋升", "跨项目知识晋升与登记", &["promote", "promotions"]),
+    ];
+    let items: Vec<Value> = groups
+        .iter()
+        .map(|(name, why, actions)| json!({ "group": name, "why": why, "actions": actions }))
+        .collect();
+    json!({
+        "hint": "动作多，按任务找组——先看组名定位意图，再看组内 action；全部 action 在下方 actions 平铺列表（参数以该处为准）",
+        "groups": items,
     })
 }
 
