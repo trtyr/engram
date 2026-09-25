@@ -210,10 +210,13 @@ impl MemoryService {
             )));
         }
         let dup = repo::entity_id_by_name_kind(&self.pool, name, kind).await?;
-        if dup.is_some() {
-            return Err(MemoryError::BadRequest(format!(
-                "同名同类实体已存在：{name}"
-            )));
+        if let Some(existing) = dup {
+            // EN-242 审计补强：同名同类（大小写/空白不敏感）幂等合并——返回已有实体而非报错
+            //（创建与抽取路径共用本函数：重复抽取同名实体自动归档，不再产生异形分档）
+            let row = repo::entity_row(&self.pool, existing).await?;
+            if let Some(row) = row {
+                return Ok(row);
+            }
         }
         repo::insert_entity(&self.pool, Uuid::now_v7(), name, kind, summary).await?;
         let id = repo::entity_id_by_name_kind(&self.pool, name, kind)

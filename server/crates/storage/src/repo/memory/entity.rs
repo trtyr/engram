@@ -124,7 +124,7 @@ pub async fn entity_id_by_name_kind(
     kind: &str,
 ) -> StoreResult<Option<Uuid>> {
     let id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM entities WHERE name = $1 AND kind = $2 AND merged_into IS NULL",
+        "SELECT id FROM entities WHERE lower(btrim(name)) = lower(btrim($1)) AND kind = $2 AND merged_into IS NULL",
     )
     .bind(name)
     .bind(kind)
@@ -286,11 +286,30 @@ pub async fn merge_entities_tx(pool: &PgPool, from: Uuid, into: Uuid) -> StoreRe
         .bind(from)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("UPDATE entities SET merged_into = $2, updated_at = now() WHERE id = $1")
+    sqlx::query(
+        "UPDATE entities SET merged_into = $2, archived_at = now(), updated_at = now() WHERE id = $1",
+    )
+    .bind(from)
+    .bind(into)
+    .execute(&mut *tx)
+    .await?;
+    // EN-242 审计补强：关系边迁移——from/to 双向改指主档，重复边去重保留最早一条
+    sqlx::query("UPDATE entity_relations SET from_id = $2, updated_at = now() WHERE from_id = $1")
         .bind(from)
         .bind(into)
         .execute(&mut *tx)
         .await?;
+    sqlx::query("UPDATE entity_relations SET to_id = $2, updated_at = now() WHERE to_id = $1")
+        .bind(from)
+        .bind(into)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "DELETE FROM entity_relations a USING entity_relations b \
+         WHERE a.id > b.id AND a.from_id = b.from_id AND a.to_id = b.to_id AND a.rel_type = b.rel_type",
+    )
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("UPDATE entities SET updated_at = now() WHERE id = $1")
         .bind(into)
         .execute(&mut *tx)

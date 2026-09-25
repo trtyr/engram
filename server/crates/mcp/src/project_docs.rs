@@ -122,6 +122,11 @@ pub struct ProjectDocPatchParams {
         description = "可选：内容锚（doc_get 看到的原文短语）。按行包含匹配定位，唯一命中才执行；零命中/多命中报错并列出命中行。给了 anchor 则忽略 start_line；end_line 缺省 = 锚行。"
     )]
     pub anchor: Option<String>,
+    /// 区间终点锚（EN-226 审计补强）：与 anchor 配对锚定多行区间——insert 后终点同样不漂移
+    #[schemars(
+        description = "可选：区间终点锚（原文短语）。anchor 定起点、anchor_end 定终点（唯一命中才执行）——多行 replace 在串行 insert 后区间两端都不漂移。缺省终点 = 锚行自身。"
+    )]
+    pub anchor_end: Option<String>,
     /// replace（默认）| insert | delete
     #[schemars(
         description = "补丁模式：\"replace\"（默认，[start_line,end_line] 替换为 content）/ \"insert\"（在 start_line 前插入 content，可传 start_line=total+1 追加）/ \"delete\"（删除 [start_line,end_line]，忽略 content）。"
@@ -305,36 +310,37 @@ impl EngramMcpServer {
             dp.anchor.as_deref().filter(|a| !a.trim().is_empty())
         {
             let doc = self.svc_project().get_doc(id).await.map_err(from_project)?;
-            let hits: Vec<usize> = doc
-                .content
-                .lines()
-                .enumerate()
-                .filter(|(_, l)| l.contains(anchor))
-                .map(|(i, _)| i + 1)
-                .collect();
-            match hits.len() {
-                1 => {
-                    let s = hits[0] as i64;
-                    (s, dp.end_line.unwrap_or(s), true)
-                }
-                0 => {
-                    return Err(mcp_err(
+            let locate = |needle: &str| -> Result<usize, rmcp::ErrorData> {
+                let hits: Vec<usize> = doc
+                    .content
+                    .lines()
+                    .enumerate()
+                    .filter(|(_, l)| l.contains(needle))
+                    .map(|(i, _)| i + 1)
+                    .collect();
+                match hits.len() {
+                    1 => Ok(hits[0]),
+                    0 => Err(mcp_err(
                         ErrorCode::INVALID_PARAMS,
                         format!(
-                            "锚点在文档中零命中：{anchor:?}——用 doc_get 确认原文措辞（锚按行包含匹配）"
+                            "锚点在文档中零命中：{needle:?}——用 doc_get 确认原文措辞（锚按行包含匹配）"
                         ),
-                    ));
-                }
-                n => {
-                    return Err(mcp_err(
+                    )),
+                    n => Err(mcp_err(
                         ErrorCode::INVALID_PARAMS,
                         format!(
                             "锚点在文档中命中 {n} 行（行号 {:?}）——加长锚文本使其唯一",
                             &hits[..n.min(8)]
                         ),
-                    ));
+                    )),
                 }
-            }
+            };
+            let s = locate(anchor)? as i64;
+            let e = match dp.anchor_end.as_deref().filter(|a| !a.trim().is_empty()) {
+                Some(ae) => locate(ae)? as i64,
+                None => dp.end_line.unwrap_or(s),
+            };
+            (s, e, true)
         } else {
             let s = dp.start_line.ok_or_else(|| {
                 mcp_err(

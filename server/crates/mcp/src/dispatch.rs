@@ -105,7 +105,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "doc_add", false, "项目下新增分类文档（Markdown）" => crate::ProjectDocAddParams;
             "doc_get", false, "读项目文档（全文或按行区间精读）" => crate::ProjectDocGetParams;
             "doc_search", false, "grep 式跨文档按行检索（需 project_id/project_name 定位项目，先 list；定位到哪篇哪行）" => crate::ProjectDocSearchParams;
-            "doc_patch", false, "行级补丁（replace/insert/delete 一个行区间——改长文档不必取全文重发）" => crate::ProjectDocPatchParams;
+            "doc_patch", false, "行级补丁（replace/insert/delete 一个行区间；行号定位或 anchor 锚点——原文短语按行包含匹配唯一命中才执行，串行多 patch 不漂移）" => crate::ProjectDocPatchParams;
             "doc_update", false, "编辑项目文档（补丁式）" => crate::ProjectDocUpdateParams;
             "doc_delete", true, "删除项目文档（不可逆）" => crate::ProjectDocDeleteParams;
             "file_put", false, "写项目文件（架构图 HTML/配置/报告等制品；同 name 覆盖 version+1，旧版进快照）" => crate::ProjectFileUpsertParams;
@@ -564,45 +564,43 @@ fn wiki_groups_hint() -> Value {
     let groups: &[(&str, &str, &[&str])] = &[
         (
             "找",
-            "检索：全文/向量/链接图/问答归档直查",
-            &["search", "documents_search", "graph"],
+            "检索：页面级全文/向量 + 原文 chunk 级",
+            &["search", "documents_search"],
         ),
         (
             "读",
-            "浏览：页面/原料/版本史/库意图/洞察",
-            &[
-                "list_pages",
-                "get_page",
-                "document_get",
-                "versions",
-                "version_content",
-                "purpose",
-                "insights",
-            ],
+            "浏览：页面/内容目录/库意图",
+            &["get_page", "index", "purpose", "list_pages"],
         ),
         (
             "写",
-            "页面编辑：新建/覆盖/删除",
-            &["write_page", "delete_page"],
+            "页面与问答沉淀：写页/归档分析产物/问答存档",
+            &["write_page", "archive", "archive_query"],
         ),
         (
             "织入",
-            "原料通道：整篇织入/直传文档/删除/清单",
-            &[
-                "ingest",
-                "document_add",
-                "document_delete",
-                "delete_source",
-                "sources",
-            ],
+            "原料通道：整篇织入/直传文档/状态/删除",
+            &["ingest", "document_add", "document_get", "document_delete"],
         ),
-        ("体检", "质量：lint 快检/深检", &["lint", "lint_deep"]),
-        ("人审", "织入建议的处置", &["reviews", "review_resolve"]),
-        ("版本", "误覆盖回滚", &["restore_version"]),
+        (
+            "体检",
+            "质量：lint 快检/LLM 深检/链接图/洞察",
+            &["lint", "lint_deep", "graph", "insights"],
+        ),
+        (
+            "人审",
+            "织入建议与深检发现的处置",
+            &["reviews", "review_resolve"],
+        ),
+        (
+            "版本",
+            "版本史/快照预览/回滚",
+            &["versions", "version_content", "restore_version"],
+        ),
         (
             "整理",
-            "归档/合并/问答存档/索引重建",
-            &["merge", "archive_query", "archive", "index"],
+            "合并/删页/原料清单/删原料",
+            &["merge", "delete_page", "sources", "delete_source"],
         ),
         ("晋升", "跨项目知识晋升与登记", &["promote", "promotions"]),
     ];

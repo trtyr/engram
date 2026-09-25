@@ -42,7 +42,7 @@ impl EngramMcpServer {
         ok_json(serde_json::json!({
             "count": items.len(),
             "groups": items,
-            "hint": "同名异档清单——合并动作（entity_merge，参照 wiki merge 主从设计）待设计落地；当前可先用 entities 看各档内容",
+            "hint": "同名异档清单——合并用 action=\"entity_merge\"（from_id=副档、into_id=主档，引用自动迁移）",
         }))
     }
 }
