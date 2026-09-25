@@ -237,10 +237,12 @@ pub fn from_args<T: serde::de::DeserializeOwned + schemars::JsonSchema>(
             let defs = root.get("$defs").cloned().unwrap_or(Value::Null);
             let mut coerced = value;
             coerce_by_schema(&root, &defs, &mut coerced);
-            serde_json::from_value::<T>(coerced).map_err(|_| {
+            serde_json::from_value::<T>(coerced).map_err(|coerced_err| {
                 mcp_err(
                     ErrorCode::INVALID_PARAMS,
-                    format!("{domain}.{action} 参数错误：{strict_err}。用 action=\"help\" 查看该操作的参数说明。"),
+                    format!(
+                        "{domain}.{action} 参数错误：{coerced_err}（宽容解析后仍失败；原始类型错误：{strict_err}）。用 action=\"help\" 查看该操作的参数说明。"
+                    ),
                 )
             })
         }
@@ -732,5 +734,34 @@ mod lenient_args_tests {
             "报错应保留首次严格信息：{}",
             err.message
         );
+    }
+}
+
+#[cfg(test)]
+mod probe_doc_get {
+    use super::*;
+    use crate::project_docs::ProjectDocGetParams;
+    use serde_json::json;
+
+    #[test]
+    fn real_doc_get_params_stringified() {
+        let got: ProjectDocGetParams = from_args(
+            "projects",
+            "doc_get",
+            json!({"doc_id": "x", "start_line": "1", "end_line": "2", "with_line_numbers": "true"})
+                .as_object()
+                .unwrap()
+                .clone(),
+        )
+        .expect("真实 doc_get 结构体的 stringify 参数应被宽容解析");
+        assert_eq!(got.start_line, Some(1));
+        assert_eq!(got.with_line_numbers, Some(true));
+        // 顺手打印 schema 形态，确认 Option<i64> 的生成结构
+        let s = serde_json::to_value(rmcp::schemars::schema_for!(ProjectDocGetParams)).unwrap();
+        let sl = s
+            .get("properties")
+            .and_then(|p| p.get("start_line"))
+            .cloned();
+        println!("start_line schema = {}", sl.unwrap_or(Value::Null));
     }
 }
