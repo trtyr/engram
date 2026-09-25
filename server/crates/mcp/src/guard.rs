@@ -242,7 +242,7 @@ pub(crate) fn slim_session(s: serde_json::Value) -> serde_json::Value {
         obj.insert("turns".into(), json!(n.unwrap_or(0)));
         obj.insert(
             "hint".into(),
-            json!("已入库（轮次数见 turns）——原文用 get_session 回读；蒸馏产物几分钟后可 search/list_atoms 看到"),
+            json!("已入库（轮次数见 turns）——原文用 get_session 回读；蒸馏产物几分钟后可 search/list_atoms 看到。注意：distill_status 变 done 后本会话不可再 append——续接请用 write_session 开新会话"),
         );
     }
     v

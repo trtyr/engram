@@ -147,7 +147,7 @@ impl MemoryService {
             .ok_or_else(|| MemoryError::NotFound(format!("会话 {id} 不存在")))?;
         if cur.distill_status != "pending" {
             return Err(MemoryError::BadRequest(format!(
-                "会话已蒸馏（{}），不可追加——请开新会话",
+                "会话已蒸馏（{}），不可追加——续接方式：用 write_session 开新会话（turns 直接带上本轮内容，新会话 id 自动生成）；原会话内容可用 context 回看（本会话 id：{id}）",
                 cur.distill_status
             )));
         }
