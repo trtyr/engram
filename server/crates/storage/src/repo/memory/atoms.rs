@@ -424,3 +424,28 @@ pub async fn bump_hit_counts(pool: &PgPool, table: &str, ids: &[Uuid]) -> StoreR
     sqlx::query(sql).bind(ids).execute(pool).await?;
     Ok(())
 }
+
+/// 重复/近似原子检测（EN-230②）：归一化 content 完全相同的 active 原子行——Rust 侧分组。
+pub async fn duplicate_active_rows(pool: &PgPool) -> StoreResult<Vec<(Uuid, String)>> {
+    Ok(sqlx::query_as(
+        "SELECT id, lower(btrim(content)) FROM atoms \
+         WHERE status = 'active' AND lower(btrim(content)) IN ( \
+           SELECT lower(btrim(content)) FROM atoms WHERE status = 'active' \
+           GROUP BY 1 HAVING count(*) > 1) \
+         ORDER BY 2, 1",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+/// 归档调控（EN-230③）：active → archived（常规整理动作；治理红线不变——不删除）。
+pub async fn archive_active(pool: &PgPool, id: Uuid) -> StoreResult<Option<AtomDto>> {
+    let row = sqlx::query_as::<_, AtomDto>(
+        "UPDATE atoms SET status = 'archived', updated_at = now() \
+         WHERE id = $1 AND status = 'active' RETURNING *",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}

@@ -184,7 +184,9 @@ impl EngramMcpServer {
             .await
             .map_err(from_memory)?;
         let mut v = slim_session(serde_json::to_value(&s).unwrap_or(serde_json::json!({})));
-        v["hint"] = json!("已记住（auto 蒸馏，几分钟内可 search 命中）");
+        v["hint"] = json!(
+            "已记住（auto 蒸馏，几分钟内可 search 命中）。写入验收：记下响应里的 session_id，用 action=\"distill_result\" 查蒸馏产物，或 action=\"list_atoms\" 浏览原子"
+        );
         ok_json(v)
     }
 

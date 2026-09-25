@@ -72,13 +72,17 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "discard", false, "待审复核丢弃：归档该条（仅 needs_review=true 可处置；AI 代管复核）" => crate::ReviewActionParams;
             "persona_edit", false, "编辑画像分面（AI 记忆管家）：version+1 落钉（manually_edited=true），蒸馏对该分面不再覆盖；aspect 七值之一，内容 1~4000 字" => crate::PersonaEditParams;
             "distill", false, "手动触发蒸馏链（撞车守卫：正在蒸馏时只提示不投递）；full=true 附带 consolidate 全量整理；mode=sleep 为记忆巩固预留位" => crate::DistillParams;
-            "write_session", false, "写入一段对话到 L0 会话（收尾用；蒸馏自动抽取记忆）" => crate::WriteSessionParams;
+            "write_session", false, "写入一段对话到 L0 会话（收尾用；蒸馏自动抽取记忆）——写入验收：响应里的 session_id 可调 distill_result 查蒸馏产物" => crate::WriteSessionParams;
             "append_session", false, "向未蒸馏的会话追加轮次（长对话分段落库）" => crate::AppendSessionParams;
             "list_sessions", false, "列出 L0 会话（keyset 分页，可按 agent 过滤）" => crate::ListSessionsParams;
             "get_session", false, "读取一个会话的逐轮原文全文" => crate::GetSessionParams;
             "list_atoms", false, "浏览 L1 原子事实（默认只看 active；可按类型/状态/待审过滤，分页）" => crate::ListAtomsParams;
             "entities", false, "检索实体（人物/项目/主题/群组/地点的横向档案）" => crate::EntitiesParams;
-            "forget", true, "遗忘：void 作废（级联归档产物）/ erase 物理删除（需 erase scope）/ restore 撤销 void" => crate::ForgetParams
+            "forget", true, "遗忘：void 作废（级联归档产物）/ erase 物理删除（需 erase scope）/ restore 撤销 void" => crate::ForgetParams;
+            "scenarios_list", false, "浏览 L2 场景（不依赖 search 命中，直接翻库存；默认 100 条，上限 500）" => crate::memory_manage::ScenariosListParams;
+            "persona_get", false, "浏览 L3 画像分面版本史（persona_edit 前先看当前形态）" => crate::memory_manage::PersonaGetParams;
+            "atom_duplicates", false, "重复/近似原子检测：归一化内容完全相同的 active 原子分组（合并前先看清单；治理红线：检测不动数据）" => crate::memory_manage::AtomDuplicatesParams;
+            "atom_archive", true, "归档原子（常规整理：active→archived，不删除；list_atoms status=archived 可见）" => crate::memory_manage::AtomArchiveParams
         ],
         "projects" => action_docs![
             "types", false, "列出项目**场景**模板（dev=开发 / ops=运维 / research=调研 / study=学习 / life=生活 / create=创作，各带预设文档分类）" => crate::ProjectTypesParams;
@@ -347,6 +351,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "write_session"
                 | "append_session"
                 | "forget"
+                | "atom_archive"
         ) | (
             "projects",
             "create"
@@ -414,6 +419,9 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                 | "get_session"
                 | "list_atoms"
                 | "entities"
+                | "scenarios_list"
+                | "persona_get"
+                | "atom_duplicates"
         ) | (
             "projects",
             "types"

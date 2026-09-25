@@ -20,6 +20,7 @@ mod guard;
 pub mod jobs;
 mod memory;
 mod memory_kv;
+mod memory_manage;
 mod memory_sessions;
 mod memory_write;
 mod project_docs;

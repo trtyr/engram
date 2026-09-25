@@ -437,6 +437,52 @@ impl MemoryService {
             .await
             .ok();
     }
+
+    /// 重复/近似原子检测（EN-230②）：active 原子中归一化 content 完全相同的分组。
+    /// 返回 (归一化内容, 数量, 原子 id 列表)，按数量降序。
+    pub async fn duplicates(&self) -> Result<Vec<(String, i64, Vec<Uuid>)>, MemoryError> {
+        let rows = repo::duplicate_active_rows(&self.pool).await?;
+        let mut groups: std::collections::BTreeMap<String, Vec<Uuid>> =
+            std::collections::BTreeMap::new();
+        for (id, key) in rows {
+            groups.entry(key).or_default().push(id);
+        }
+        let mut out: Vec<(String, i64, Vec<Uuid>)> = groups
+            .into_iter()
+            .map(|(k, ids)| (k, ids.len() as i64, ids))
+            .collect();
+        out.sort_by(|a, b| b.1.cmp(&a.1));
+        Ok(out)
+    }
+
+    /// 归档调控（EN-230③）：active → archived（常规整理；审计留痕 + 快照刷新）。
+    pub async fn archive_atom(&self, id: Uuid) -> Result<AtomDto, MemoryError> {
+        let row = repo::archive_active(&self.pool, id)
+            .await?
+            .ok_or_else(|| {
+                MemoryError::NotFound(format!(
+                    "原子 {id} 不存在或不在 active 状态——archive 仅归档 active 原子（治理红线：归档不删除）"
+                ))
+            })?;
+        self.audit(
+            "atom_archive",
+            json!({ "atom_id": id.to_string(), "content": row.content }),
+        )
+        .await;
+        let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
+        // 有意忽略：快照刷新建队是 best-effort（收敛失败由下次快照自愈）
+        let _ = self
+            .queue
+            .enqueue(
+                JobTemplate::new("organize_scenarios")
+                    .with_idempotency_key(format!("snapshot-refresh-{bucket}"))
+                    .with_payload(
+                        serde_json::json!({"converge_only": true, "atom_id": id.to_string()}),
+                    ),
+            )
+            .await;
+        Ok(row)
+    }
 }
 
 /// status 只允许 active/archived 切换（archived → active 需当前为 archived）；supersede 走矛盾流程。

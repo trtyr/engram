@@ -160,6 +160,20 @@ impl EngramMcpServer {
         if !sp.include_evidence.unwrap_or(false) {
             strip_keys(&mut v, &["evidence_refs", "source_refs", "atom_refs"]);
         }
+        // EN-233②：空命中可观测——区分「没存过」vs「存了但蒸馏未完成/已归档」
+        let layer_empty = |k: &str| {
+            v.get(k)
+                .and_then(|x| x.as_array())
+                .map_or(true, |a| a.is_empty())
+        };
+        if ["sessions", "atoms", "scenarios", "persona", "entities"]
+            .iter()
+            .all(|k| layer_empty(k))
+        {
+            v["hint"] = json!(
+                "检索无命中——两种可能：①确实没存过（write_session/remember 写入）；②存了但蒸馏尚未完成（写入后几分钟）或内容已归档。排查：action=\"list_sessions\" 确认会话在不在、action=\"list_atoms\"（status=\"all\"）翻库存、action=\"distill_result\"（session_id）看蒸馏产物"
+            );
+        }
         ok_json(v)
     }
 
@@ -370,6 +384,27 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "scenarios_list" => {
+                self.memory_scenarios_list(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "scenarios_list", call.args)?),
+                )
+                .await
+            }
+            "persona_get" => {
+                self.memory_persona_get(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "persona_get", call.args)?),
+                )
+                .await
+            }
+            "atom_duplicates" => {
+                self.memory_atom_duplicates(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "atom_duplicates", call.args)?),
+                )
+                .await
+            }
             "entities" => {
                 self.memory_entities(
                     ctx,
@@ -381,6 +416,13 @@ impl EngramMcpServer {
                 self.memory_forget(
                     ctx,
                     Parameters(dispatch::from_args("memory", "forget", call.args)?),
+                )
+                .await
+            }
+            "atom_archive" => {
+                self.memory_atom_archive(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "atom_archive", call.args)?),
                 )
                 .await
             }
