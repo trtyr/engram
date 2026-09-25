@@ -62,7 +62,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "context", false, "装载用户记忆上下文包（L3 画像 + L2 场景 + L1 原子 + 实体；会话开场调用一次）" => crate::ContextParams;
             "search", false, "定向检索用户记忆（全文+向量，跨 L1/L2/L3/实体）" => crate::SearchParams;
             "distill_result", false, "蒸馏回执：查一次会话蒸馏产出了哪些原子（id/内容/强度/状态）——写入方可验收" => crate::MemoryDistillResultParams;
-            "kv_put", false, "写入/更新结构化精确值（序列号/UUID/IP:PORT 等重要值的保值通道——重要且需逐字保真的都进 KV；蒸馏零介入逐字保存）——同 key 就地覆盖" => crate::MemoryKvPutParams;
+            "kv_put", false, "写入/更新结构化精确值（value 字段；序列号/UUID/IP:PORT 等重要值的保值通道——重要且需逐字保真的都进 KV；蒸馏零介入逐字保存）——同 key 就地覆盖" => crate::MemoryKvPutParams;
             "kv_get", false, "读取结构化精确值（按 key）" => crate::MemoryKvGetParams;
             "kv_list", false, "列出全部 KV 值（按 updated_at 倒序）" => crate::MemoryKvListParams;
             "kv_search", false, "字面量直查 KV（key/value/context ILIKE——精确值不依赖分词）" => crate::MemoryKvSearchParams;
@@ -136,7 +136,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "search", false, "Wiki 检索（FTS + 向量融合；命中带片段，全文按需 get_page；按库）" => crate::wiki::WikiSearchParams;
             "list_pages", false, "浏览页面列表（可按页型过滤；不含正文）" => crate::wiki::WikiListPagesParams;
             "get_page", false, "读页面全文（含 frontmatter 与版本）" => crate::wiki::WikiGetPageParams;
-            "write_page", false, "写/覆盖一个页面（Markdown + [[wikilink]]；覆盖前先 get_page，旧文自动留版本快照）" => crate::wiki::WikiWritePageParams;
+            "write_page", false, "写/覆盖一个页面（正文字段 content，Markdown + [[wikilink]]；覆盖前先 get_page，旧文自动留版本快照）" => crate::wiki::WikiWritePageParams;
             "ingest", false, "整篇源文本织入 Wiki（异步 LLM 流水线，sha 去重）" => crate::wiki::WikiIngestParams;
             "archive_query", false, "把一条问答存档为 queries 页（幂等跳过重复）" => crate::wiki::WikiArchiveQueryParams;
             "versions", false, "页面版本列表（含已删除页的最后状态快照）" => crate::wiki::WikiVersionsParams;

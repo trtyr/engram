@@ -112,10 +112,21 @@ impl EngramMcpServer {
             )
             .await
             .map_err(Self::from_job)?;
+        // EN-238①：同 jobs_get——succeeded+error 非空的 job 逐行派生 partial 标记
+        let jobs: Vec<_> = rows
+            .into_iter()
+            .map(|j| {
+                let partial = matches!(j.status, engram_jobs::types::JobStatus::Succeeded)
+                    && j.error.as_deref().map_or(false, |e| !e.trim().is_empty());
+                let mut v = serde_json::to_value(&j).unwrap_or(serde_json::json!({}));
+                v["partial"] = serde_json::json!(partial);
+                v
+            })
+            .collect();
         Ok(CallToolResult::structured(serde_json::json!({
-            "count": rows.len(),
-            "jobs": rows,
-            "hint": "状态字面量 pending/running/succeeded/failed/dead/cancelled——轮询终止判断用 succeeded 或 failed/dead/cancelled",
+            "count": jobs.len(),
+            "jobs": jobs,
+            "hint": "状态字面量 pending/running/succeeded/failed/dead/cancelled——succeeded 但 partial=true 是部分成功；轮询终止判断用 succeeded 或 failed/dead/cancelled",
         })))
     }
 
@@ -142,9 +153,13 @@ impl EngramMcpServer {
                     format!("任务 {id} 不存在——codegraph index/sync 的返回里有 job_id"),
                 )
             })?;
+        // EN-238①：succeeded 但 error 非空 = 部分成功（子任务警告）——显式派生标记消歧义
+        let partial = matches!(job.status, engram_jobs::types::JobStatus::Succeeded)
+            && job.error.as_deref().map_or(false, |e| !e.trim().is_empty());
         Ok(CallToolResult::structured(serde_json::json!({
             "job": job,
-            "hint": "failed/dead 时看 error 字段定因；dead 可让管理员 revive（Web 控制台或 admin token）",
+            "partial": partial,
+            "hint": "failed/dead 时看 error 字段定因；succeeded 但 partial=true 表示部分子任务失败（error 是警告，最终态成功）；dead 可让管理员 revive（Web 控制台或 admin token）",
         })))
     }
 
