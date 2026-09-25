@@ -106,14 +106,27 @@ async fn entity_lifecycle_create_attach_graph_merge() {
     assert_eq!(svc.get_entity(zhang.id).await.unwrap().entity.atom_count, 2);
 
     // 合并：topic 张三并入 person 张三（moved=0，无关联）——反向验证 moved 计数
-    let moved = svc
-        .merge_entities(topic_zhang.unwrap().id, zhang.id)
-        .await
-        .unwrap();
+    let topic_id = topic_zhang.unwrap().id;
+    let moved = svc.merge_entities(topic_id, zhang.id).await.unwrap();
     assert_eq!(moved, 0);
     // 合并后 from 不在活体列表，名字让位
     let after = svc.list_entities(None).await.unwrap();
     assert_eq!(after.len(), 2);
+    // 合并墓碑不可复活（审计四驳②）：复活通道对 merged_into 行无效——
+    // 即便 archived_at 被误清，读面仍按墓碑对待（merged_into 指向主档）
+    sqlx::query("UPDATE entities SET archived_at = NULL WHERE id = $1 AND merged_into IS NULL")
+        .bind(topic_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        svc.get_entity(topic_id).await.is_err(),
+        "墓碑复活应无效（merged_into 仍指向主档）"
+    );
+    // 合并后复检：同名组不再出现在 duplicates（审计四驳①：墓碑不算重复——
+    // 合并响应「复检应不再出现该组」由此兑现）
+    let dups = svc.entity_duplicates().await.unwrap();
+    assert!(dups.is_empty(), "合并后不应再报同名组: {dups:?}");
     // 让位后可重建同名 topic
     assert!(svc.create_entity("张三", "topic", "").await.is_ok());
 

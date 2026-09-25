@@ -448,20 +448,29 @@ pub async fn archive_orphan_entities(pool: &PgPool) -> StoreResult<u64> {
 }
 
 /// 蒸馏挂链（或手动挂原子）时复活归档实体：重新有活跃证据即回到可见层。
+/// 合并墓碑（merged_into 非空）永不复活——那不是归档，是死档（审计四驳②）。
 pub async fn revive_entity(pool: &PgPool, entity_id: Uuid) -> StoreResult<()> {
-    sqlx::query("UPDATE entities SET archived_at = NULL WHERE id = $1 AND archived_at IS NOT NULL")
-        .bind(entity_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE entities SET archived_at = NULL \
+         WHERE id = $1 AND archived_at IS NOT NULL AND merged_into IS NULL",
+    )
+    .bind(entity_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
-/// EN-242：同名实体检测——lower(btrim(name)) 完全相同的实体行（大小写/首尾空白异形）。
+/// EN-242：同名实体检测——lower(btrim(name)) 完全相同的活体实体行（大小写/首尾空白异形）。
+/// 只看活体（merged_into/archived_at 双排除）：合并墓碑不算重复——
+/// 合并响应「复检应不再出现该组」由本查询兑现（审计四驳①：此前不过滤，合并后仍报 2 条）。
 pub async fn duplicate_name_rows(pool: &PgPool) -> StoreResult<Vec<(Uuid, String)>> {
     Ok(sqlx::query_as(
         "SELECT id, lower(btrim(name)) FROM entities \
-         WHERE lower(btrim(name)) IN ( \
-           SELECT lower(btrim(name)) FROM entities GROUP BY 1 HAVING count(*) > 1) \
+         WHERE merged_into IS NULL AND archived_at IS NULL \
+         AND lower(btrim(name)) IN ( \
+           SELECT lower(btrim(name)) FROM entities \
+           WHERE merged_into IS NULL AND archived_at IS NULL \
+           GROUP BY 1 HAVING count(*) > 1) \
          ORDER BY 2, 1",
     )
     .fetch_all(pool)

@@ -336,14 +336,15 @@ impl EngramMcpServer {
             let new_full = doc
                 .content
                 .replacen(old, dp.content.as_deref().unwrap_or(""), 1);
-            let total = new_full.lines().count() as i64;
+            // 整文直写（update_doc COALESCE 部分更新）——不走行级 patch：
+            // 行模型按 \n 切分会给尾换行文档叠出幽灵空行（审计四驳③：曾产出 "gamma\n\n"）
             let doc = self
                 .svc_project()
-                .patch_doc(
+                .update_doc(
                     id,
-                    1,
-                    total,
-                    "replace",
+                    None,
+                    None,
+                    None,
                     Some(&new_full),
                     dp.expected_version,
                 )

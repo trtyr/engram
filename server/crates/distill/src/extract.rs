@@ -243,7 +243,8 @@ async fn link_entity(
             .await
             .map_err(|e| e.to_string())?;
             sqlx::query_scalar(
-                "SELECT id FROM entities WHERE lower(btrim(name)) = lower(btrim($1)) AND kind = $2 AND merged_into IS NULL",
+                "SELECT id FROM entities WHERE lower(btrim(name)) = lower(btrim($1)) AND kind = $2 \
+                 AND merged_into IS NULL AND archived_at IS NULL",
             )
             .bind(name)
             .bind(kind)
@@ -260,12 +261,15 @@ async fn link_entity(
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
-    // 实体复活：蒸馏重新挂链被归档的同名实体 → 清标记回到可见层
-    sqlx::query("UPDATE entities SET archived_at = NULL WHERE id = $1")
-        .bind(eid)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    // 实体复活：蒸馏重新挂链被归档的同名实体 → 清标记回到可见层。
+    // 合并墓碑（merged_into 非空）永不复活——复活死档会让原子重新挂回已被并走的副档（审计四驳②）。
+    sqlx::query(
+        "UPDATE entities SET archived_at = NULL WHERE id = $1 AND merged_into IS NULL",
+    )
+    .bind(eid)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
