@@ -396,3 +396,15 @@ pub async fn revive_entity(pool: &PgPool, entity_id: Uuid) -> StoreResult<()> {
         .await?;
     Ok(())
 }
+
+/// EN-242：同名实体检测——lower(btrim(name)) 完全相同的实体行（大小写/首尾空白异形）。
+pub async fn duplicate_name_rows(pool: &PgPool) -> StoreResult<Vec<(Uuid, String)>> {
+    Ok(sqlx::query_as(
+        "SELECT id, lower(btrim(name)) FROM entities \
+         WHERE lower(btrim(name)) IN ( \
+           SELECT lower(btrim(name)) FROM entities GROUP BY 1 HAVING count(*) > 1) \
+         ORDER BY 2, 1",
+    )
+    .fetch_all(pool)
+    .await?)
+}

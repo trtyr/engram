@@ -32,6 +32,14 @@ pub struct MemoryKvGetParams {
     pub key: String,
 }
 
+/// EN-241：KV 删除（写坏/过期/测试残留的物理清理通道）。
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryKvDeleteParams {
+    /// 要删除的键
+    #[schemars(description = "要删除的键（kv_list/kv_search 拿到的 key）。")]
+    pub key: String,
+}
+
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct MemoryKvListParams {
     /// 返回上限（默认 50，≤500）
@@ -106,6 +114,32 @@ impl EngramMcpServer {
                 None,
             )),
         }
+    }
+
+    /// 删除结构化值（kv_delete，EN-241）：物理删除指定 key——治理清理通道。
+    pub(crate) async fn memory_kv_delete(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<MemoryKvDeleteParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_original(&p)?;
+        if p.domain_access("original") == DomainAccess::ReadOnly {
+            return Err(mcp_err(
+                ErrorCode::INVALID_REQUEST,
+                "权限不足：key 的 original scope 是只读变体（:ro）——删除（kv_delete）需要完整 original scope",
+            ));
+        }
+        let deleted = self
+            .svc()
+            .kv_delete(&params.0.key)
+            .await
+            .map_err(from_memory)?;
+        ok_json(serde_json::json!({
+            "deleted": deleted,
+            "key": params.0.key,
+            "hint": if deleted { "已物理删除" } else { "key 不存在——kv_list/kv_search 确认现有键名" },
+        }))
     }
 
     /// 列出全部 KV（kv_list，按 updated_at 倒序）。

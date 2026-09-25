@@ -62,7 +62,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "context", false, "装载用户记忆上下文包（L3 画像 + L2 场景 + L1 原子 + 实体；会话开场调用一次）" => crate::ContextParams;
             "search", false, "定向检索用户记忆（全文+向量，跨 L1/L2/L3/实体）" => crate::SearchParams;
             "distill_result", false, "蒸馏回执：查一次会话蒸馏产出了哪些原子（id/内容/强度/状态）——写入方可验收" => crate::MemoryDistillResultParams;
-            "kv_put", false, "写入/更新结构化精确值（序列号/UUID/IP:PORT 等）——同 key 就地覆盖，蒸馏零介入逐字保存" => crate::MemoryKvPutParams;
+            "kv_put", false, "写入/更新结构化精确值（序列号/UUID/IP:PORT 等重要值的保值通道——重要且需逐字保真的都进 KV；蒸馏零介入逐字保存）——同 key 就地覆盖" => crate::MemoryKvPutParams;
             "kv_get", false, "读取结构化精确值（按 key）" => crate::MemoryKvGetParams;
             "kv_list", false, "列出全部 KV 值（按 updated_at 倒序）" => crate::MemoryKvListParams;
             "kv_search", false, "字面量直查 KV（key/value/context ILIKE——精确值不依赖分词）" => crate::MemoryKvSearchParams;
@@ -82,7 +82,9 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "scenarios_list", false, "浏览 L2 场景（不依赖 search 命中，直接翻库存；默认 100 条，上限 500）" => crate::memory_manage::ScenariosListParams;
             "persona_get", false, "浏览 L3 画像分面版本史（persona_edit 前先看当前形态）" => crate::memory_manage::PersonaGetParams;
             "atom_duplicates", false, "重复/近似原子检测：归一化内容完全相同的 active 原子分组（合并前先看清单；治理红线：检测不动数据）" => crate::memory_manage::AtomDuplicatesParams;
-            "atom_archive", true, "归档原子（常规整理：active→archived，不删除；list_atoms status=archived 可见）" => crate::memory_manage::AtomArchiveParams
+            "kv_delete", true, "删除指定 KV 键（物理清理：写坏/过期/测试残留；original :ro 拒绝）" => crate::MemoryKvDeleteParams;
+            "atom_archive", true, "归档原子（常规整理：active→archived，不删除；list_atoms status=archived 可见）" => crate::memory_manage::AtomArchiveParams;
+            "entity_duplicates", false, "同名实体检测（大小写/空白不敏感分组；合并动作待设计，先可观测）" => crate::memory_manage::EntityDuplicatesParams
         ],
         "projects" => action_docs![
             "types", false, "列出项目**场景**模板（dev=开发 / ops=运维 / research=调研 / study=学习 / life=生活 / create=创作，各带预设文档分类）" => crate::ProjectTypesParams;
@@ -352,6 +354,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "append_session"
                 | "forget"
                 | "atom_archive"
+                | "kv_delete"
         ) | (
             "projects",
             "create"
@@ -422,6 +425,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                 | "scenarios_list"
                 | "persona_get"
                 | "atom_duplicates"
+                | "entity_duplicates"
         ) | (
             "projects",
             "types"

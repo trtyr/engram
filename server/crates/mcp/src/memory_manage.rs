@@ -19,7 +19,34 @@ pub struct PersonaGetParams {}
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AtomDuplicatesParams {}
 
-/// EN-230③：原子归档——active → archived（常规整理；治理红线：归档不删除）。
+/// EN-242：同名实体检测——大小写/首尾空白不敏感的重复分组（合并动作待设计，先可观测）。
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct EntityDuplicatesParams {}
+
+impl EngramMcpServer {
+    pub(crate) async fn memory_entity_duplicates(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<EntityDuplicatesParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p: Principal = principal_of(&ctx)?;
+        require_memory(&p)?;
+        let _ = params.0;
+        let groups = self.svc().entity_duplicates().await.map_err(from_memory)?;
+        let items: Vec<_> = groups
+            .into_iter()
+            .map(|(normalized, count, ids)| {
+                serde_json::json!({ "normalized": normalized, "count": count, "entity_ids": ids })
+            })
+            .collect();
+        ok_json(serde_json::json!({
+            "count": items.len(),
+            "groups": items,
+            "hint": "同名异档清单——合并动作（entity_merge，参照 wiki merge 主从设计）待设计落地；当前可先用 entities 看各档内容",
+        }))
+    }
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AtomArchiveParams {
     /// 要归档的原子 id（list_atoms 或 atom_duplicates 拿到的 UUID）

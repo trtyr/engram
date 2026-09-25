@@ -405,6 +405,17 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "entity_duplicates" => {
+                self.memory_entity_duplicates(
+                    ctx,
+                    Parameters(dispatch::from_args(
+                        "memory",
+                        "entity_duplicates",
+                        call.args,
+                    )?),
+                )
+                .await
+            }
             "entities" => {
                 self.memory_entities(
                     ctx,
@@ -423,6 +434,13 @@ impl EngramMcpServer {
                 self.memory_atom_archive(
                     ctx,
                     Parameters(dispatch::from_args("memory", "atom_archive", call.args)?),
+                )
+                .await
+            }
+            "kv_delete" => {
+                self.memory_kv_delete(
+                    ctx,
+                    Parameters(dispatch::from_args("memory", "kv_delete", call.args)?),
                 )
                 .await
             }

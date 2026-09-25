@@ -225,4 +225,34 @@ impl MemoryService {
     pub async fn timeline(&self, limit: i64) -> Result<Vec<TimelineEvent>, MemoryError> {
         Ok(repo::timeline(&self.pool, limit).await?)
     }
+
+    /// EN-241：KV 删除——物理删除指定 key（返回是否删了；不存在返回 false 不报错）。
+    pub async fn kv_delete(&self, key: &str) -> Result<bool, MemoryError> {
+        let k = key.trim();
+        if k.is_empty() {
+            return Err(MemoryError::BadRequest("key 不能为空".into()));
+        }
+        let deleted = repo::kv_delete(&self.pool, k).await?;
+        if deleted {
+            self.audit("kv_delete", serde_json::json!({ "key": k }))
+                .await;
+        }
+        Ok(deleted)
+    }
+
+    /// EN-242：同名实体检测（大小写/首尾空白不敏感分组）——返回 (归一化名, 数量, id 列表)。
+    pub async fn entity_duplicates(&self) -> Result<Vec<(String, i64, Vec<Uuid>)>, MemoryError> {
+        let rows = repo::duplicate_name_rows(&self.pool).await?;
+        let mut groups: std::collections::BTreeMap<String, Vec<Uuid>> =
+            std::collections::BTreeMap::new();
+        for (id, key) in rows {
+            groups.entry(key).or_default().push(id);
+        }
+        let mut out: Vec<(String, i64, Vec<Uuid>)> = groups
+            .into_iter()
+            .map(|(k, ids)| (k, ids.len() as i64, ids))
+            .collect();
+        out.sort_by(|a, b| b.1.cmp(&a.1));
+        Ok(out)
+    }
 }

@@ -61,3 +61,13 @@ pub async fn kv_search_literal(
     .fetch_all(pool)
     .await?)
 }
+
+/// EN-241：KV 删除通道——物理删除指定 key（治理面：写坏/过期/测试残留清理）。
+pub async fn kv_delete(pool: &PgPool, key: &str) -> StoreResult<bool> {
+    let n = sqlx::query("DELETE FROM kv_entries WHERE key = $1")
+        .bind(key)
+        .execute(pool)
+        .await?
+        .rows_affected();
+    Ok(n > 0)
+}
