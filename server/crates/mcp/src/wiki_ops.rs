@@ -148,12 +148,13 @@ impl EngramMcpServer {
         wiki::require_wiki(&p)?;
         let qp = params.0;
         let lib = self.resolve_wiki_lib().await?;
-        let skipped = wiki::svc(&self.state)
+        let (skipped, slug) = wiki::svc(&self.state)
             .archive_query(lib, &qp.title, &qp.question, &qp.answer)
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::json!({
             "skipped": skipped,
+            "slug": slug,
             "async": true,
             "message": if skipped {
                 "同标题已存档，本次跳过"
@@ -245,7 +246,16 @@ impl EngramMcpServer {
             .get_purpose(lib)
             .await
             .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::to_value(&purpose).unwrap_or(serde_json::json!({})))
+        // EN-243①：未配置要可感知——手册称「写前必读」，读到空却无提示等于没读
+        let mut v = serde_json::to_value(&purpose).unwrap_or(serde_json::json!({}));
+        let configured = v.get("purpose").map_or(false, |x| !x.is_null());
+        v["configured"] = serde_json::json!(configured);
+        if !configured {
+            v["hint"] = serde_json::json!(
+                "库意图未设置——用 purpose_action 配置（写页前先对齐「这个库收什么/不收什么」）"
+            );
+        }
+        ok_json(v)
     }
 
     /// 删除 Wiki 页面（不可逆——连带清理双向 wikilinks；最后状态留版本快照可重建）。

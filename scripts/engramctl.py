@@ -172,6 +172,13 @@ def cmd_install() -> int:
         prev.unlink(missing_ok=True)
         BINARY.rename(prev)  # 现役退为 .prev——新版有问题可一键回滚
     shutil.copy2(src, BINARY)
+    # EN-244：HTTP API 手册随部署分发（在线端点 GET /openapi.json + 本文件双通道）
+    dump = src.parent / "openapi-dump"
+    if dump.is_file():
+        r = subprocess.run([str(dump)], capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            (BIN_DIR / "openapi.json").write_text(r.stdout)
+            print(f"[install]    API 手册 → {BIN_DIR / 'openapi.json'}")
     # 管理脚本自身也装一份：本机自包含（拔盘后 stop/start/status 仍可用）
     shutil.copy2(Path(__file__).resolve(), BIN_DIR / "engramctl")
     os.chmod(BIN_DIR / "engramctl", 0o755)

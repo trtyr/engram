@@ -237,10 +237,12 @@ impl WikiService {
         title: &str,
         question: &str,
         answer: &str,
-    ) -> Result<bool, WikiError> {
+    ) -> Result<(bool, String), WikiError> {
         // W-13（2026-09-04）：同 title 已存档 → 幂等跳过（契约「重复→skipped」），
         // 不再落页 version+1 + 再摄取烧 LLM。
-        let slug = format!("query-{title}");
+        // EN-243③：slug 遵守自家规范（is_valid_slug：禁空白，≤80）——空白折叠为连字符
+        let compact: String = title.split_whitespace().collect::<Vec<_>>().join("-");
+        let slug: String = format!("query-{compact}").chars().take(80).collect();
         // D5：slug 或 title 任一命中即幂等跳过（此前仅 slug 检查，title 尾随差异漏网 → 覆盖旧答案）
         let exists: Option<Uuid> = sqlx::query_scalar(
             "SELECT id FROM wiki_pages WHERE (slug = $1 OR title = $2) AND library_id = $3",
@@ -251,7 +253,7 @@ impl WikiService {
         .fetch_optional(&self.pool)
         .await?;
         if exists.is_some() {
-            return Ok(true);
+            return Ok((true, slug));
         }
         let ts = chrono::Utc::now().format("%Y-%m-%d");
         let content = format!(
@@ -277,7 +279,7 @@ impl WikiService {
 
         // 2) 再摄取（实体概念网络吸收本次问答内容）——D27 三态：仅已就绪算 skipped
         let outcome = crate::ingest::enqueue_ingest(&self.queue, lib, title, &content).await?;
-        Ok(outcome.skipped())
+        Ok((outcome.skipped(), slug))
     }
 
     /// write_page 织入钩子（2026-09-13）：AI 写页后自动把页面当原料入队再摄取

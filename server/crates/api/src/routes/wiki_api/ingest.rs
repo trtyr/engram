@@ -45,6 +45,7 @@ pub async fn ingest(
         StatusCode::ACCEPTED,
         Json(IngestAccepted {
             skipped,
+            slug: None,
             status: Some(status.into()),
             source_id: Some(outcome.source_id()),
             job_id: outcome.job_id(),
@@ -56,6 +57,9 @@ pub async fn ingest(
 pub struct IngestAccepted {
     /// 仅「同内容曾成功织入」为 true；in_flight/enqueued 均为 false
     pub skipped: bool,
+    /// EN-243③：archive_query 落页/跳过时的页 slug（此前不返回，靠 search 才能找到页）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
     /// ready | in_flight | enqueued（仅 /wiki/ingest 返回；queries/archive 无此字段）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
@@ -85,7 +89,7 @@ pub async fn archive_query(
 ) -> Result<(StatusCode, Json<IngestAccepted>), ApiError> {
     require_wiki(&principal)?;
     let lib = main_lib(&state).await?;
-    let skipped = svc(&state)
+    let (skipped, slug) = svc(&state)
         .archive_query(lib, &req.title, &req.question, &req.answer)
         .await
         .map_err(we)?;
@@ -93,6 +97,7 @@ pub async fn archive_query(
         StatusCode::ACCEPTED,
         Json(IngestAccepted {
             skipped,
+            slug: Some(slug),
             status: None,
             source_id: None,
             job_id: None,
