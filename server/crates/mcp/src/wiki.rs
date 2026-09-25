@@ -343,6 +343,7 @@ pub struct WikiLibParams {}
 
 /// 知识晋升参数（EN-59）：把项目文档里的一条跨项目知识提炼成 wiki synthesis 页，
 /// 服务端自动双向回链（页 frontmatter 带源回链 + 源文档追加 ⛳ 晋升标记 + 登记表）。
+/// EN-250：必填 7 项一次给全——project、doc_id、anchor（源文定位短语）、slug、title、content（提炼正文）；library 缺省 main。
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiPromoteParams {
     /// 来源项目（名或 id）
