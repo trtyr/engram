@@ -223,7 +223,7 @@ async fn link_entity(
 ) -> Result<(), String> {
     let similar: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM entities WHERE kind = $2 AND merged_into IS NULL \
-         AND (position($1 in name) > 0 OR position(name in $1) > 0) LIMIT 1",
+         AND (position(lower($1) in lower(name)) > 0 OR position(lower(name) in lower($1)) > 0) LIMIT 1",
     )
     .bind(name)
     .bind(kind)
@@ -243,7 +243,7 @@ async fn link_entity(
             .await
             .map_err(|e| e.to_string())?;
             sqlx::query_scalar(
-                "SELECT id FROM entities WHERE name = $1 AND kind = $2 AND merged_into IS NULL",
+                "SELECT id FROM entities WHERE lower(btrim(name)) = lower(btrim($1)) AND kind = $2 AND merged_into IS NULL",
             )
             .bind(name)
             .bind(kind)

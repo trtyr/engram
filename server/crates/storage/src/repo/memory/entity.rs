@@ -124,7 +124,7 @@ pub async fn entity_id_by_name_kind(
     kind: &str,
 ) -> StoreResult<Option<Uuid>> {
     let id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM entities WHERE lower(btrim(name)) = lower(btrim($1)) AND kind = $2 AND merged_into IS NULL",
+        "SELECT id FROM entities WHERE lower(btrim(name)) = lower(btrim($1)) AND kind = $2 AND merged_into IS NULL AND archived_at IS NULL",
     )
     .bind(name)
     .bind(kind)
@@ -293,12 +293,46 @@ pub async fn merge_entities_tx(pool: &PgPool, from: Uuid, into: Uuid) -> StoreRe
     .bind(into)
     .execute(&mut *tx)
     .await?;
-    // EN-242 审计补强：关系边迁移——from/to 双向改指主档，重复边去重保留最早一条
+    // EN-242 审计补强：摘要并入——主档 summary 为空时收副档的（参照 wiki merge 内容并入语义）
+    let loser_summary: Option<String> = sqlx::query_scalar(
+        "SELECT summary FROM entities WHERE id = $1 AND summary IS NOT NULL AND summary <> ''",
+    )
+    .bind(from)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(ls) = loser_summary {
+        sqlx::query(
+            "UPDATE entities SET summary = $2, updated_at = now() \
+             WHERE id = $1 AND (summary IS NULL OR summary = '')",
+        )
+        .bind(into)
+        .bind(ls)
+        .execute(&mut *tx)
+        .await?;
+    }
+    // EN-242 审计补强：关系边迁移——冲突安全（uniq_entity_relation 下先删语义被覆盖的边再改指，
+    // 避免唯一冲突回滚整个合并事务），事后同向同类去重 + 自环清理
+    sqlx::query(
+        "DELETE FROM entity_relations r WHERE r.from_id = $1 AND EXISTS ( \
+           SELECT 1 FROM entity_relations w WHERE w.from_id = $2 AND w.to_id = r.to_id AND w.rel_type = r.rel_type)",
+    )
+    .bind(from)
+    .bind(into)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("UPDATE entity_relations SET from_id = $2, updated_at = now() WHERE from_id = $1")
         .bind(from)
         .bind(into)
         .execute(&mut *tx)
         .await?;
+    sqlx::query(
+        "DELETE FROM entity_relations r WHERE r.to_id = $1 AND EXISTS ( \
+           SELECT 1 FROM entity_relations w WHERE w.to_id = $2 AND w.from_id = r.from_id AND w.rel_type = r.rel_type)",
+    )
+    .bind(from)
+    .bind(into)
+    .execute(&mut *tx)
+    .await?;
     sqlx::query("UPDATE entity_relations SET to_id = $2, updated_at = now() WHERE to_id = $1")
         .bind(from)
         .bind(into)
@@ -308,6 +342,12 @@ pub async fn merge_entities_tx(pool: &PgPool, from: Uuid, into: Uuid) -> StoreRe
         "DELETE FROM entity_relations a USING entity_relations b \
          WHERE a.id > b.id AND a.from_id = b.from_id AND a.to_id = b.to_id AND a.rel_type = b.rel_type",
     )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM entity_relations WHERE from_id = to_id AND (from_id = $1 OR to_id = $1)",
+    )
+    .bind(into)
     .execute(&mut *tx)
     .await?;
     sqlx::query("UPDATE entities SET updated_at = now() WHERE id = $1")

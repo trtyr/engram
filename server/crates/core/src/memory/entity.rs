@@ -323,6 +323,16 @@ impl MemoryService {
         self.entity_row(from).await?;
         self.entity_row(into).await?;
         let moved = repo::merge_entities_tx(&self.pool, from, into).await?;
+        // EN-242 审计补强：合并审计留痕（主从/迁移计数）
+        self.audit(
+            "entity_merge",
+            json!({
+                "winner": into.to_string(),
+                "loser": from.to_string(),
+                "atom_refs_moved": moved,
+            }),
+        )
+        .await;
         Ok(moved)
     }
 

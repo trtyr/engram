@@ -366,7 +366,7 @@ async fn resolve_to_entity(
     }
     let existing: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM entities \
-         WHERE name = $1 AND kind = $2 AND merged_into IS NULL LIMIT 1",
+         WHERE lower(btrim(name)) = lower(btrim($1)) AND kind = $2 AND merged_into IS NULL LIMIT 1",
     )
     .bind(to)
     .bind(to_kind)

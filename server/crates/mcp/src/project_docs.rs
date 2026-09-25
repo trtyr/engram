@@ -129,7 +129,7 @@ pub struct ProjectDocPatchParams {
     pub anchor_end: Option<String>,
     /// replace（默认）| insert | delete
     #[schemars(
-        description = "补丁模式：\"replace\"（默认，[start_line,end_line] 替换为 content）/ \"insert\"（在 start_line 前插入 content，可传 start_line=total+1 追加）/ \"delete\"（删除 [start_line,end_line]，忽略 content）。"
+        description = "补丁模式：\"replace\"（默认，[start_line,end_line] 替换为 content）/ \"insert\"（在 start_line 前插入 content，可传 start_line=total+1 追加）/ \"delete\"（删除 [start_line,end_line]，忽略 content）/ \"replace_text\"（EN-226：old_text 匹配式替换——anchor 携带被替换原文可跨行，content 为新文，全文唯一命中才执行；此时忽略 start_line/end_line）。"
     )]
     pub mode: Option<String>,
     /// 替换/插入的文本（可多行；delete 忽略）
@@ -305,6 +305,58 @@ impl EngramMcpServer {
         let dp = params.0;
         let id = Uuid::parse_str(&dp.doc_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "doc_id 不是合法 UUID"))?;
+        // EN-226 审计补强：old_text 匹配式替换——全文唯一子串命中才执行（不限行、跨行块也行）
+        if dp.mode.as_deref() == Some("replace_text") {
+            let old = dp
+                .anchor
+                .as_deref()
+                .filter(|a| !a.trim().is_empty())
+                .ok_or_else(|| {
+                    mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        "mode=replace_text 需要 anchor 携带被替换的原文（可跨行）；content 为新文",
+                    )
+                })?;
+            let doc = self.svc_project().get_doc(id).await.map_err(from_project)?;
+            match doc.content.matches(old).count() {
+                1 => {}
+                0 => {
+                    return Err(mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        format!("old_text 零命中：{old:?}——用 doc_get 确认原文"),
+                    ));
+                }
+                k => {
+                    return Err(mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        format!("old_text 命中 {k} 处——加长原文使其唯一"),
+                    ));
+                }
+            }
+            let new_full = doc
+                .content
+                .replacen(old, dp.content.as_deref().unwrap_or(""), 1);
+            let total = new_full.lines().count() as i64;
+            let doc = self
+                .svc_project()
+                .patch_doc(
+                    id,
+                    1,
+                    total,
+                    "replace",
+                    Some(&new_full),
+                    dp.expected_version,
+                )
+                .await
+                .map_err(from_project)?;
+            let mut v = slim_doc(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})));
+            v["total_lines"] = json!(doc.content.lines().count());
+            v["patched"] = json!({ "mode": "replace_text", "via_anchor": true });
+            v["hint"] = json!(
+                "replace_text 完成（old_text 唯一命中替换）——行号已变，继续 patch 用 anchor/anchor_end 锚点或重读 doc_get"
+            );
+            return ok_json(v);
+        }
         // EN-226：锚点定位——anchor 按行包含匹配解析行号（唯一命中才执行），多 patch 串行不再漂移
         let (start_line, end_line, via_anchor) = if let Some(anchor) =
             dp.anchor.as_deref().filter(|a| !a.trim().is_empty())
@@ -336,9 +388,15 @@ impl EngramMcpServer {
                 }
             };
             let s = locate(anchor)? as i64;
+            if dp.end_line.is_some() {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "anchor 锚点模式下不收 end_line（旧行号在串行 patch 后会漂移——正是本参数要消除的问题）；多行区间用 anchor_end 锚定终点，或去掉 end_line（缺省=锚行自身）",
+                ));
+            }
             let e = match dp.anchor_end.as_deref().filter(|a| !a.trim().is_empty()) {
                 Some(ae) => locate(ae)? as i64,
-                None => dp.end_line.unwrap_or(s),
+                None => s,
             };
             (s, e, true)
         } else {

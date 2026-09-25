@@ -570,7 +570,7 @@ fn wiki_groups_hint() -> Value {
         (
             "读",
             "浏览：页面/内容目录/库意图",
-            &["get_page", "index", "purpose", "list_pages"],
+            &["get_page", "index", "purpose"],
         ),
         (
             "写",
@@ -579,8 +579,8 @@ fn wiki_groups_hint() -> Value {
         ),
         (
             "织入",
-            "原料通道：整篇织入/直传文档/状态/删除",
-            &["ingest", "document_add", "document_get", "document_delete"],
+            "原料通道：整篇织入/直传文档/状态",
+            &["ingest", "document_add", "document_get"],
         ),
         (
             "体检",
@@ -609,7 +609,7 @@ fn wiki_groups_hint() -> Value {
         .map(|(name, why, actions)| json!({ "group": name, "why": why, "actions": actions }))
         .collect();
     json!({
-        "hint": "动作多，按任务找组——先看组名定位意图，再看组内 action；全部 action 在下方 actions 平铺列表（参数以该处为准）",
+        "hint": "动作多，按任务找组——先看组名定位意图，再看组内 action；全部 action 在下方 actions 平铺列表（参数以该处为准）。工单映射外后增动作：list_pages（读类）、document_delete（织入类）",
         "groups": items,
     })
 }
