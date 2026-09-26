@@ -382,6 +382,18 @@ fn assets_routes() -> Router<AppState> {
     Router::new()
         .route("/assets/types", get(assets_api::list_kinds))
         .route(
+            "/assets/{id}/runbook/versions",
+            get(assets_api::runbook_versions),
+        )
+        .route(
+            "/assets/{id}/runbook/restore",
+            post(assets_api::restore_runbook),
+        )
+        .route(
+            "/assets/{id}/runbook",
+            get(assets_api::get_runbook).put(assets_api::put_runbook),
+        )
+        .route(
             "/assets",
             post(assets_api::create_asset).get(assets_api::list_assets),
         )

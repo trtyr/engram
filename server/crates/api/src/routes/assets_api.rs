@@ -173,3 +173,95 @@ pub async fn delete_asset(
     svc(&state).delete(id).await.map_err(ae)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+// ---------- 运行手册（runbook）——主机运维台账的主动记录面（0062） ----------
+
+/// 读某资产的运行手册 Markdown 全文。
+#[utoipa::path(get, path = "/assets/{id}/runbook", responses((status = 200)))]
+pub async fn get_runbook(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_assets_read(&principal)?;
+    let md = svc(&state).runbook(id).await.map_err(ae)?;
+    Ok(Json(
+        serde_json::json!({ "asset_id": id, "runbook_md": md }),
+    ))
+}
+
+/// 保存请求体（Markdown 整体替换；旧文自动入修订史）。
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct RunbookSaveRequest {
+    pub md: String,
+    /// 编辑人标识（可选，留痕用；缺省 console）
+    #[serde(default)]
+    pub editor: Option<String>,
+}
+
+/// 保存运行手册（旧文入修订史——错改可回滚）。
+#[utoipa::path(put, path = "/assets/{id}/runbook", responses((status = 200)))]
+pub async fn put_runbook(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<RunbookSaveRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_assets(&principal)?;
+    let editor = req.editor.as_deref().unwrap_or("console");
+    svc(&state)
+        .save_runbook(id, &req.md, editor)
+        .await
+        .map_err(ae)?;
+    Ok(Json(serde_json::json!({
+        "asset_id": id,
+        "saved": true,
+        "hint": "旧文已入修订史（GET /assets/{id}/runbook/versions），错改可 POST restore 回滚。",
+    })))
+}
+
+/// 修订史清单（新→旧）。
+#[utoipa::path(get, path = "/assets/{id}/runbook/versions", responses((status = 200)))]
+pub async fn runbook_versions(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_assets_read(&principal)?;
+    let versions = svc(&state).runbook_versions(id).await.map_err(ae)?;
+    Ok(Json(serde_json::json!({
+        "asset_id": id,
+        "count": versions.len(),
+        "versions": serde_json::to_value(&versions).unwrap_or(serde_json::json!([])),
+    })))
+}
+
+/// 回滚请求体。
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct RunbookRestoreRequest {
+    pub version_id: Uuid,
+    /// 编辑人标识（可选；缺省 console）
+    #[serde(default)]
+    pub editor: Option<String>,
+}
+
+/// 回滚运行手册到某修订（回滚前正文先入史）。
+#[utoipa::path(post, path = "/assets/{id}/runbook/restore", responses((status = 200)))]
+pub async fn restore_runbook(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<RunbookRestoreRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_assets(&principal)?;
+    let editor = req.editor.as_deref().unwrap_or("console");
+    svc(&state)
+        .restore_runbook(id, req.version_id, editor)
+        .await
+        .map_err(ae)?;
+    Ok(Json(serde_json::json!({
+        "asset_id": id,
+        "restored_to": req.version_id,
+        "hint": "已回滚；回滚前的正文也已入史（可再滚回来）。",
+    })))
+}

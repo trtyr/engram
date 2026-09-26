@@ -10,7 +10,7 @@
         "readOnlyHint": false,
         "title": "资产台账域"
       },
-      "description": "资产台账域（单一入口）：我拥有的、可以被操作的东西——主机 / 云实例 / 域名 / 账号 / 设备。\n身份唯一、无「收尾」，被项目**引用**（项目的位置登记指向这里）。操作全景：action=\"help\"。\n\n【本域操作 6 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- kinds：列出资产类型（建档选 kind 用）：host=主机 / cloud=云实例 / domain=域名 / account=账号 / device=设备 / other=其他\n- list：列出资产台账（可按类型过滤 / 按 名称·别名·IP 检索）\n- get：读资产详情（本体 + 被哪些项目位置引用）\n- add：建档一台资产（主机/云实例/域名/账号/设备；别名收历史写法，引用匹配也认它）\n- update：编辑资产（补丁式；aliases 传了就整体替换）\n- delete：【破坏性】删除资产（被项目位置引用的会被拒绝——先解绑，不可逆）",
+      "description": "资产台账域（单一入口）：我拥有的、可以被操作的东西——主机 / 云实例 / 域名 / 账号 / 设备。\n身份唯一、无「收尾」，被项目**引用**（项目的位置登记指向这里）。操作全景：action=\"help\"。\n\n【本域操作 10 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- kinds：列出资产类型（建档选 kind 用）：host=主机 / cloud=云实例 / domain=域名 / account=账号 / device=设备 / other=其他\n- list：列出资产台账（可按类型过滤 / 按 名称·别名·IP 检索）\n- get：读资产详情（本体 + 被哪些项目位置引用）\n- add：建档一台资产（主机/云实例/域名/账号/设备；别名收历史写法，引用匹配也认它）\n- update：编辑资产（补丁式；aliases 传了就整体替换）\n- delete：【破坏性】删除资产（被项目位置引用的会被拒绝——先解绑，不可逆）\n- runbook：读资产运行手册（Markdown 全文——硬件/网络/服务/端口/变更/踩坑；看一眼即知这台机器什么情况）\n- runbook_save：【破坏性】保存运行手册（Markdown 整体替换；旧文自动入修订史——错改可回滚）\n- runbook_versions：运行手册修订史清单（新→旧；old_runbook_md=该次保存前的正文）\n- runbook_restore：【破坏性】回滚运行手册到某修订（回滚前正文先入史——反复横跳可逆）",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,

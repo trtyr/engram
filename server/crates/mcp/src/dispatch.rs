@@ -123,7 +123,11 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "get", false, "读资产详情（本体 + 被哪些项目位置引用）" => crate::AssetGetParams;
             "add", false, "建档一台资产（主机/云实例/域名/账号/设备；别名收历史写法，引用匹配也认它）" => crate::AssetAddParams;
             "update", false, "编辑资产（补丁式；aliases 传了就整体替换）" => crate::AssetUpdateParams;
-            "delete", true, "删除资产（被项目位置引用的会被拒绝——先解绑，不可逆）" => crate::AssetDeleteParams
+            "delete", true, "删除资产（被项目位置引用的会被拒绝——先解绑，不可逆）" => crate::AssetDeleteParams;
+            "runbook", false, "读资产运行手册（Markdown 全文——硬件/网络/服务/端口/变更/踩坑；看一眼即知这台机器什么情况）" => crate::AssetRunbookParams;
+            "runbook_save", true, "保存运行手册（Markdown 整体替换；旧文自动入修订史——错改可回滚）" => crate::AssetRunbookSaveParams;
+            "runbook_versions", false, "运行手册修订史清单（新→旧；old_runbook_md=该次保存前的正文）" => crate::AssetRunbookVersionsParams;
+            "runbook_restore", true, "回滚运行手册到某修订（回滚前正文先入史——反复横跳可逆）" => crate::AssetRunbookRestoreParams
         ],
         // EN-252：skills 域裁撤（原 action_docs 块移除；存量已迁 wiki/projects/本地 git）
         "circles" => action_docs![
@@ -387,6 +391,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "file_put"
                 | "file_delete"
         ) | ("assets", "add" | "update" | "delete")
+            | ("assets", "runbook_save" | "runbook_restore")
             | ("credentials", "put" | "delete")
             | ("circles", "create" | "update" | "relate" | "unrelate")
             | (
@@ -452,6 +457,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                 | "links"
                 | "location_get"
         ) | ("assets", "kinds" | "list" | "get")
+            | ("assets", "runbook" | "runbook_versions")
             | ("credentials", "list" | "get" | "reads")
             | ("circles", "graph" | "entity" | "relations")
             | (

@@ -36,6 +36,60 @@ pub struct AssetGetParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+pub struct AssetRunbookParams {
+    /// 资产 id
+    #[schemars(description = "资产 id（UUID）。与 name 至少给一个。")]
+    pub asset_id: Option<String>,
+    /// 资产名或别名
+    #[schemars(description = "资产名或别名。与 asset_id 至少给一个。")]
+    pub name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct AssetRunbookSaveParams {
+    /// 资产 id
+    #[schemars(description = "资产 id（UUID）。与 name 至少给一个。")]
+    pub asset_id: Option<String>,
+    /// 资产名或别名
+    #[schemars(description = "资产名或别名。与 asset_id 至少给一个。")]
+    pub name: Option<String>,
+    /// Markdown 全文（整体替换；旧文自动入修订史）
+    #[schemars(
+        description = "运行手册 Markdown 全文（整体替换保存；保存前旧文自动入修订史——错改可回滚）。"
+    )]
+    pub md: String,
+    /// 编辑人标识（可选，留痕用）
+    #[schemars(description = "编辑人标识（可选，留痕用；缺省 mcp:assets）。")]
+    pub editor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct AssetRunbookVersionsParams {
+    /// 资产 id
+    #[schemars(description = "资产 id（UUID）。与 name 至少给一个。")]
+    pub asset_id: Option<String>,
+    /// 资产名或别名
+    #[schemars(description = "资产名或别名。与 asset_id 至少给一个。")]
+    pub name: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct AssetRunbookRestoreParams {
+    /// 资产 id
+    #[schemars(description = "资产 id（UUID）。与 name 至少给一个。")]
+    pub asset_id: Option<String>,
+    /// 资产名或别名
+    #[schemars(description = "资产名或别名。与 asset_id 至少给一个。")]
+    pub name: Option<String>,
+    /// 回滚目标修订 id
+    #[schemars(description = "回滚目标修订 id（runbook_versions 列表里的 id）。")]
+    pub version_id: String,
+    /// 编辑人标识（可选，留痕用）
+    #[schemars(description = "编辑人标识（可选；缺省 mcp:assets）。")]
+    pub editor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct AssetAddParams {
     /// 资产类型
     #[schemars(
@@ -165,6 +219,38 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "runbook" => {
+                self.asset_runbook(
+                    ctx,
+                    Parameters(dispatch::from_args("assets", "runbook", call.args)?),
+                )
+                .await
+            }
+            "runbook_save" => {
+                self.asset_runbook_save(
+                    ctx,
+                    Parameters(dispatch::from_args("assets", "runbook_save", call.args)?),
+                )
+                .await
+            }
+            "runbook_versions" => {
+                self.asset_runbook_versions(
+                    ctx,
+                    Parameters(dispatch::from_args(
+                        "assets",
+                        "runbook_versions",
+                        call.args,
+                    )?),
+                )
+                .await
+            }
+            "runbook_restore" => {
+                self.asset_runbook_restore(
+                    ctx,
+                    Parameters(dispatch::from_args("assets", "runbook_restore", call.args)?),
+                )
+                .await
+            }
             other => Err(dispatch::unknown_action("assets", other)),
         }
     }
@@ -231,6 +317,101 @@ impl EngramMcpServer {
             }
         };
         ok_json(serde_json::to_value(&detail).unwrap_or(serde_json::json!({})))
+    }
+
+    /// asset_id/name → 资产 Uuid（runbook 四动作共用定位器）。
+    async fn resolve_asset_id(
+        svc: &engram_core::assets::AssetService,
+        asset_id: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<Uuid, rmcp::ErrorData> {
+        match (asset_id, name) {
+            (Some(id), _) => Uuid::parse_str(id)
+                .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "asset_id 不是合法 UUID")),
+            (None, Some(name)) => Ok(svc.get_by_name_or_alias(name).await.map_err(from_asset)?.id),
+            (None, None) => Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "需要 asset_id 或 name 之一来定位资产",
+            )),
+        }
+    }
+
+    /// 运行手册：读某资产的 Markdown 正文（看一眼就知道这台机器什么情况）。
+    pub(crate) async fn asset_runbook(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<AssetRunbookParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_assets(&p)?;
+        let rp = params.0;
+        let svc = self.svc_asset();
+        let id = Self::resolve_asset_id(&svc, rp.asset_id.as_deref(), rp.name.as_deref()).await?;
+        let md = svc.runbook(id).await.map_err(from_asset)?;
+        ok_json(serde_json::json!({ "asset_id": id, "runbook_md": md }))
+    }
+
+    /// 运行手册：保存（整体替换；旧文自动入修订史——错改可回滚）。
+    pub(crate) async fn asset_runbook_save(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<AssetRunbookSaveParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_assets(&p)?;
+        let rp = params.0;
+        let svc = self.svc_asset();
+        let id = Self::resolve_asset_id(&svc, rp.asset_id.as_deref(), rp.name.as_deref()).await?;
+        svc.save_runbook(id, &rp.md, rp.editor.as_deref().unwrap_or("mcp:assets"))
+            .await
+            .map_err(from_asset)?;
+        ok_json(serde_json::json!({
+            "asset_id": id,
+            "saved": true,
+            "hint": "旧文已入修订史——runbook_versions 查看，错改用 runbook_restore 回滚。",
+        }))
+    }
+
+    /// 运行手册：修订史清单（新→旧）。
+    pub(crate) async fn asset_runbook_versions(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<AssetRunbookVersionsParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_assets(&p)?;
+        let rp = params.0;
+        let svc = self.svc_asset();
+        let id = Self::resolve_asset_id(&svc, rp.asset_id.as_deref(), rp.name.as_deref()).await?;
+        let versions = svc.runbook_versions(id).await.map_err(from_asset)?;
+        ok_json(serde_json::json!({
+            "asset_id": id,
+            "count": versions.len(),
+            "versions": serde_json::to_value(&versions).unwrap_or(serde_json::json!([])),
+        }))
+    }
+
+    /// 运行手册：回滚到某修订（回滚前正文先入史——反复横跳可逆）。
+    pub(crate) async fn asset_runbook_restore(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<AssetRunbookRestoreParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_assets(&p)?;
+        let rp = params.0;
+        let svc = self.svc_asset();
+        let id = Self::resolve_asset_id(&svc, rp.asset_id.as_deref(), rp.name.as_deref()).await?;
+        let vid = Uuid::parse_str(&rp.version_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "version_id 不是合法 UUID"))?;
+        svc.restore_runbook(id, vid, rp.editor.as_deref().unwrap_or("mcp:assets"))
+            .await
+            .map_err(from_asset)?;
+        ok_json(serde_json::json!({
+            "asset_id": id,
+            "restored_to": vid,
+            "hint": "已回滚；回滚前的正文也已入史（可再滚回来）。",
+        }))
     }
 
     /// 建档一台资产（名称与别名共享命名空间，不许与既有条目相撞）。
