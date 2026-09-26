@@ -2,7 +2,7 @@
 //!
 //! 迁移包格式（engram-transfer v1）：
 //! `{format, version, exported_at, counts, memory:{sessions,atoms,scenarios,persona,entities,relations},
-//!   skills:[{skill...,files:[...]}], wiki:{pages:[...]}, projects:{projects,locations,docs}}`
+//!   wiki:{pages:[...]}, projects:{projects,locations,docs}}`
 //!
 //! 导入语义：冲突跳过（主键/slug/name 已存在即 skip）——迁移（空机全量进）与
 //! 合并（两机并集）都可重复执行。派生列（embedding/tsv）不迁移，导入时重建
@@ -40,7 +40,6 @@ pub type Result<T> = std::result::Result<T, TransferError>;
 pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
     let (sessions, atoms, scenarios, persona, entities, relations) =
         repo::export_memory(pool).await?;
-    let skills = repo::export_skills_with_files(pool).await?;
     let wiki_libraries = repo::export_wiki_libraries(pool).await?;
     let wiki_pages = repo::export_wiki_pages(pool).await?;
     let (projects, locations, docs) = repo::export_projects(pool).await?;
@@ -52,7 +51,6 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
     // （codegraph 索引仍是派生数据不迁移：B 机对同源仓库重新建索引即可。）
     let (project_files, project_file_versions) = repo::export_project_files(pool).await?;
     let atom_entities = repo::export_atom_entities(pool).await?;
-    let skill_revisions = repo::export_skill_revisions(pool).await?;
     let todo_links = repo::export_todo_links(pool).await?;
     let wiki_documents = repo::export_wiki_documents(pool).await?;
     let wiki_chunks = repo::export_wiki_chunks(pool).await?;
@@ -63,14 +61,6 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
     let kv_entries = repo::export_kv_entries(pool).await?;
     let wiki_promotions = repo::export_wiki_promotions(pool).await?;
 
-    let skills_json: Vec<Value> = skills
-        .into_iter()
-        .map(|(mut skill, files)| {
-            skill["files"] = json!(files);
-            skill
-        })
-        .collect();
-
     Ok(json!({
         "format": "engram-transfer",
         "version": 1,
@@ -79,13 +69,13 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
             "sessions": sessions.len(), "atoms": atoms.len(),
             "scenarios": scenarios.len(), "persona": persona.len(),
             "entities": entities.len(), "relations": relations.len(),
-            "skills": skills_json.len(), "wiki_libraries": wiki_libraries.len(),
+            "wiki_libraries": wiki_libraries.len(),
     "wiki_pages": wiki_pages.len(),
             "projects": projects.len(), "locations": locations.len(), "docs": docs.len(),
             "assets": assets.len(), "project_links": project_links.len(),
             "project_files": project_files.len(),
             "project_file_versions": project_file_versions.len(),
-            "atom_entities": atom_entities.len(), "skill_revisions": skill_revisions.len(),
+            "atom_entities": atom_entities.len(),
             "todo_links": todo_links.len(), "wiki_documents": wiki_documents.len(),
             "wiki_chunks": wiki_chunks.len(), "wiki_sources": wiki_sources.len(),
             "wiki_review_items": wiki_review_items.len(), "wiki_links": wiki_links.len(),
@@ -97,8 +87,6 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
             "persona": persona, "entities": entities, "relations": relations,
             "atom_entities": atom_entities,
         },
-        "skills": skills_json,
-        "skill_revisions": skill_revisions,
         "wiki": {
             "libraries": wiki_libraries, "pages": wiki_pages,
             "documents": wiki_documents, "chunks": wiki_chunks,
@@ -125,40 +113,6 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
         ));
     }
     import::run_bundle(pool, data).await
-}
-
-/// 技能域导入闭环：吃 /skills/export（或迁移包 skills 数组）同构数据。
-pub async fn import_skills_bundle(pool: &PgPool, items: &Value) -> Result<Value> {
-    let list = items
-        .as_array()
-        .cloned()
-        .or_else(|| items.get("skills").and_then(|x| x.as_array()).cloned())
-        .ok_or_else(|| {
-            TransferError::BadRequest(
-                "格式不对：期望数组（/skills/export 的返回）或含 skills 字段的对象".into(),
-            )
-        })?;
-    let mut imported = 0usize;
-    let mut skipped = 0usize;
-    let mut files = 0usize;
-    for s in list {
-        let fs = s
-            .get("files")
-            .and_then(|x| x.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let (ok, fn_) = repo::import_skill(pool, &s, &fs).await?;
-        if ok {
-            imported += 1;
-            files += fn_;
-        } else {
-            skipped += 1;
-        }
-    }
-    Ok(json!({
-        "imported": imported, "skipped": skipped, "files_imported": files,
-        "note": "slug 已存在按跳过处理（不覆盖）——更新请走 skills_update",
-    }))
 }
 
 // ---------- 远程拉取（A → B 一键迁移） ----------

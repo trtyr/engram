@@ -70,90 +70,6 @@ pub async fn import_todos(pool: &PgPool, items: &[Value]) -> StoreResult<(usize,
     Ok((imported, skipped))
 }
 
-/// 技能：slug 冲突跳过；新插入时随行导入附属文件。返回 (skill_imported, files_imported)。
-/// 二态字段（0038）随行：script 型只导元数据（content 空、files 无行）——指针与来源照收，
-/// 导入端标记待本地就位（local_path 在新机器可能失效，get 时现读校验）。
-pub async fn import_skill(pool: &PgPool, v: &Value, files: &[Value]) -> StoreResult<(bool, usize)> {
-    let tags: Vec<String> = v
-        .get("tags")
-        .and_then(|x| x.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|t| t.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    let kind = {
-        let k = str_of(v, "kind", "text");
-        if k == "script" { "script" } else { "text" }
-    };
-    let local_path: Option<String> = v
-        .get("local_path")
-        .and_then(|x| x.as_str())
-        .map(str::to_string)
-        .filter(|s| !s.is_empty());
-    // script 型必须有指针（源导出保证；防御：缺失则降级 text，避免落地即违反 CHECK）
-    let kind = if kind == "script" && local_path.is_none() {
-        "text"
-    } else {
-        kind
-    };
-    let repo_url: Option<String> = v
-        .get("repo_url")
-        .and_then(|x| x.as_str())
-        .map(str::to_string)
-        .filter(|s| !s.is_empty());
-    let res = sqlx::query(
-        "INSERT INTO skills (id, slug, name, description, content, tags, enabled, source, kind, origin, local_path, repo_url, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'import', $8, $9, $10, $11, $12, $13) ON CONFLICT (slug) DO NOTHING",
-    )
-    .bind(id_of(v, "id"))
-    .bind(str_of(v, "slug", ""))
-    .bind(str_of(v, "name", ""))
-    .bind(str_of(v, "description", ""))
-    .bind(str_of(v, "content", ""))
-    .bind(&tags)
-    .bind(v.get("enabled").and_then(|x| x.as_bool()).unwrap_or(true))
-    .bind(kind)
-    .bind(str_of(v, "origin", "self"))
-    .bind(local_path)
-    .bind(repo_url)
-    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
-    .bind(ts(v, "updated_at").unwrap_or_else(Utc::now))
-    .execute(pool)
-    .await?;
-    if res.rows_affected() == 0 {
-        return Ok((false, 0));
-    }
-    // script 型不导入附属文件（真身在导入端本地，系统只存指针）
-    if kind == "script" {
-        return Ok((true, 0));
-    }
-    let skill_id: Uuid = sqlx::query_scalar("SELECT id FROM skills WHERE slug = $1")
-        .bind(str_of(v, "slug", ""))
-        .fetch_one(pool)
-        .await?;
-    let mut imported_files = 0;
-    for f in files {
-        let path = str_of(f, "path", "");
-        if path.is_empty() {
-            continue;
-        }
-        let r = sqlx::query(
-            "INSERT INTO skill_files (id, skill_id, path, content) VALUES ($1, $2, $3, $4) \
-             ON CONFLICT (skill_id, path) DO NOTHING",
-        )
-        .bind(Uuid::now_v7())
-        .bind(skill_id)
-        .bind(&path)
-        .bind(str_of(f, "content", ""))
-        .execute(pool)
-        .await?;
-        imported_files += r.rows_affected() as usize;
-    }
-    Ok((true, imported_files))
-}
-
 pub async fn import_project(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     let res = sqlx::query(
         "INSERT INTO projects (id, name, type, status, description, categories) \
@@ -311,35 +227,6 @@ pub async fn import_project_file_version(pool: &PgPool, v: &Value) -> StoreResul
     .bind(id_of(v, "file_id"))
     .bind(v.get("version").and_then(|x| x.as_i64()).unwrap_or(1) as i32)
     .bind(str_of(v, "content", ""))
-    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
-    .execute(pool)
-    .await?;
-    Ok(res.rows_affected() > 0)
-}
-
-/// 技能版本历史（外键 → skills，须在其后导入）。
-pub async fn import_skill_revision(pool: &PgPool, v: &Value) -> StoreResult<bool> {
-    let tags: Vec<String> = v
-        .get("tags")
-        .and_then(|x| x.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|t| t.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    let res = sqlx::query(
-        "INSERT INTO skill_revisions (id, skill_id, rev, name, description, content, tags, origin, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, $9) ON CONFLICT DO NOTHING",
-    )
-    .bind(id_of(v, "id"))
-    .bind(id_of(v, "skill_id"))
-    .bind(v.get("rev").and_then(|x| x.as_i64()).unwrap_or(1) as i32)
-    .bind(str_of(v, "name", ""))
-    .bind(str_of(v, "description", ""))
-    .bind(str_of(v, "content", ""))
-    .bind(&tags)
-    .bind(str_of(v, "origin", "create"))
     .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
     .execute(pool)
     .await?;

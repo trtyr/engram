@@ -13,7 +13,6 @@ pub mod credentials;
 pub mod memory;
 pub mod project;
 pub mod promote;
-pub mod skills;
 pub mod state;
 pub mod todos;
 pub mod transfer;
@@ -34,12 +33,6 @@ pub use memory::{
 pub use project::{
     PROJECT_STATUSES, PROJECT_TYPES, ProjectDetailDto, ProjectDocDto, ProjectError,
     ProjectLocationDto, ProjectService, ProjectTypeDto, type_label,
-};
-pub use skills::{
-    MAX_REVISIONS, SKILL_FILE_MAX_CHARS, SKILL_FILES_MAX, SkillDto, SkillExportDto,
-    SkillFileEntryDto, SkillFileInfoDto, SkillImportItem, SkillImportReport, SkillPatch,
-    SkillRevisionDto, SkillSummaryDto, SkillsError, SkillsService, parse_frontmatter, slugify,
-    valid_slug,
 };
 pub use state::AppState;
 pub use unified::{UnifiedError, UnifiedHit, UnifiedSearch};

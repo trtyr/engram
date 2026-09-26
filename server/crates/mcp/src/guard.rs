@@ -104,27 +104,6 @@ pub(crate) fn require_assets(principal: &Principal) -> Result<(), rmcp::ErrorDat
     }
 }
 
-pub(crate) fn require_skills(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    match principal.domain_access("skills") {
-        DomainAccess::None => Err(mcp_err(
-            ErrorCode::INVALID_REQUEST,
-            "缺少 skills scope——请用带 skills scope 的 amk_ key 连接 MCP",
-        )),
-        _ => Ok(()),
-    }
-}
-
-/// SkillsError → MCP 错误码（与 HTTP API 的 se() 同语义）。
-pub(crate) fn from_skills(e: engram_core::skills::SkillsError) -> rmcp::ErrorData {
-    use engram_core::skills::SkillsError;
-    match e {
-        SkillsError::NotFound(m) => rmcp::ErrorData::resource_not_found(m, None),
-        SkillsError::Conflict(m) => rmcp::ErrorData::invalid_params(m, None),
-        SkillsError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
-        SkillsError::Storage(m) => rmcp::ErrorData::internal_error(m, None),
-    }
-}
-
 pub(crate) fn require_todos(principal: &Principal) -> Result<(), rmcp::ErrorData> {
     match principal.domain_access("todos") {
         DomainAccess::None => Err(mcp_err(
@@ -256,11 +235,6 @@ pub(crate) fn slim_session(s: serde_json::Value) -> serde_json::Value {
         );
     }
     v
-}
-
-/// 技能写操作瘦身：正文换 content_chars。
-pub(crate) fn slim_skill(s: serde_json::Value) -> serde_json::Value {
-    slim_content(s, &["content"])
 }
 
 /// 项目文档瘦身：正文换 content_chars。

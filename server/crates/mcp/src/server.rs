@@ -80,11 +80,6 @@ impl EngramMcpServer {
         Ok((Some(a.id), ip, host, os))
     }
 
-    /// skills service（域服务构造器集中在此，便于测试替换与依赖收口）。
-    pub(crate) fn skills_svc(&self) -> engram_core::skills::SkillsService {
-        engram_core::skills::SkillsService::new(self.state.pool.clone())
-    }
-
     /// 单库终局：main 主库 id（无外部入参——多库 API 已移除，2026-09-20）。
     pub(crate) async fn resolve_wiki_lib(&self) -> Result<Uuid, rmcp::ErrorData> {
         engram_core::wiki::libraries::resolve(&self.state.pool, None)

@@ -1,6 +1,6 @@
 //! `transfer` 的分域导入实现切片（2026-09-22 结构红线拆分：自 transfer.rs 纯搬移，零行为变化）。
 //!
-//! 编排外键序即调用序：memory → atom_entities → skills → skill_revisions →
+//! 编排外键序即调用序：memory → atom_entities →
 //! wiki（库+页 → 五表）→ assets → projects(+files) → project_links →
 //! todos/kv/promotions → todo_links。入口 `run_bundle` 只被 transfer.rs::import_bundle
 //! （格式校验后）调用。
@@ -62,9 +62,6 @@ pub(super) async fn run_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
     let mem = import_memory_domain(pool, data).await?;
     // atom↔entity 边须在 atoms/entities 之后（外键 → 两表）
     let c_atom_entity = import_atom_entities_domain(pool, data).await?;
-    let (c_skill, files_imported) = import_skills_domain(pool, data).await?;
-    // 技能历史须在 skills 之后（外键 → skills）
-    let c_skill_rev = import_skill_revisions_domain(pool, data).await?;
     let (lib_map, c_wikilib, c_wiki) = import_wiki_domain(pool, data).await?;
     // wiki 关联五表（文档/分块/来源/复核项/页间链接）复用库映射
     let (c_wdoc, c_wchunk, c_wsrc, c_wrev, c_wlink) =
@@ -95,10 +92,6 @@ pub(super) async fn run_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
             "scenarios": c_scenario.to_json(), "persona": c_persona.to_json(),
             "entities": c_entity.to_json(), "relations": c_relation.to_json(),
             "atom_entities": c_atom_entity.to_json(),
-        },
-        "skills": {
-            "skills": c_skill.to_json(), "files": { "imported": files_imported },
-            "revisions": c_skill_rev.to_json(),
         },
         "wiki": {
             "libraries": c_wikilib.to_json(), "pages": c_wiki.to_json(),
@@ -169,24 +162,6 @@ async fn import_memory_domain(pool: &PgPool, data: &Value) -> Result<MemoryImpor
         entities: c_entity,
         relations: c_relation,
     })
-}
-
-/// 技能域导入（技能行 + 文件），返回 `(技能计数, 文件导入数)`。
-async fn import_skills_domain(pool: &PgPool, data: &Value) -> Result<(DomainCount, usize)> {
-    let mut c_skill = DomainCount::default();
-    let mut files_imported = 0usize;
-    for s in each(Some(data), "skills") {
-        let files = s
-            .get("files")
-            .and_then(|x| x.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let (imported, files_n) = repo::import_skill(pool, &s, &files).await?;
-        c_skill.merge(DomainCount::bump(imported));
-        files_imported += files_n;
-    }
-
-    Ok((c_skill, files_imported))
 }
 
 /// wiki 域导入（库 + 页面，库先于页——页面外键指向库）。
@@ -303,17 +278,6 @@ async fn import_atom_entities_domain(pool: &PgPool, data: &Value) -> Result<Doma
     for it in each(data.get("memory"), "atom_entities") {
         c.merge(DomainCount::bump(
             repo::import_atom_entity(pool, &it).await?,
-        ));
-    }
-    Ok(c)
-}
-
-/// 技能版本历史导入（须在 skills 之后）。
-async fn import_skill_revisions_domain(pool: &PgPool, data: &Value) -> Result<DomainCount> {
-    let mut c = DomainCount::default();
-    for it in each(Some(data), "skill_revisions") {
-        c.merge(DomainCount::bump(
-            repo::import_skill_revision(pool, &it).await?,
         ));
     }
     Ok(c)

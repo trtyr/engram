@@ -5,15 +5,14 @@
 
 use uuid::Uuid;
 
-/// 资产域 scope。
-pub const SCOPES: [&str; 13] = [
+/// 全部合法 scope（12 个；skills 已随域裁撤移除——EN-252 全清 2026-09-26）。
+pub const SCOPES: [&str; 12] = [
     "memory",
     "wiki",
     "codegraph",
     "project",
     "assets",
     "credentials",
-    "skills",
     "todos",
     "llm",
     "erase",
@@ -38,7 +37,6 @@ pub fn normalize_scope(s: &str) -> Option<String> {
     let base = match base {
         "projects" => "project",
         "todo" => "todos",
-        "skill" => "skills",
         other => SCOPES.iter().copied().find(|x| *x == other)?,
     };
     Some(if ro {

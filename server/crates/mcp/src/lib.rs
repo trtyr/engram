@@ -2,10 +2,10 @@
 //!
 //! 官方 Rust SDK（rmcp）Streamable HTTP 传输，由 api 装配到 engram-server 的 `/mcp` 端点。
 //! 与 HTTP 路由平级的第二适配器：同一套 core 服务与 scope 分权，独立成 crate。
-//! 渐进式发现（progressive disclosure）：九个领域各一个入口工具
-//! （memory/projects/assets/skills/wiki/todos/tickets/codegraph/jobs），域内操作经 action 分发
+//! 渐进式发现（progressive disclosure）：十个领域各一个入口工具
+//! （memory/projects/assets/credentials/circles/wiki/todos/tickets/codegraph/jobs），域内操作经 action 分发
 //! （历史 53 个扁平工具全部收编，R 测试报告后又扩至 60+ 个：remember/doc_patch/
-//! versions/restore/sources 等；action 表在 dispatch 模块，三级发现同源）。
+//! versions/restore/sources 等；action 表在 dispatch 模块，三级发现同源；skills 域 2026-09-26 裁撤）。
 //! 各域工具在调用时检查各自 scope。鉴权复用 Bearer 中间件（amk_ key / ams_ 会话）：
 //! 每个工具调用请求都过 `bearer_auth`，Principal 已注入 request extensions；
 //! rmcp 把 HTTP request Parts 注入工具上下文，工具实现从这里取 Principal
@@ -34,10 +34,6 @@ mod projects;
 mod registry;
 mod search_all;
 mod server;
-#[allow(dead_code)]
-mod skills;
-#[allow(dead_code)]
-mod skills_versions;
 mod tickets;
 mod todos;
 mod todos_links;
@@ -65,10 +61,6 @@ pub(crate) use project_locations::*;
 pub(crate) use projects::*;
 pub use registry::*;
 pub use server::*;
-#[allow(unused_imports)]
-pub(crate) use skills::*;
-#[allow(unused_imports)]
-pub(crate) use skills_versions::*;
 pub(crate) use tickets::*;
 pub(crate) use todos::*;
 pub(crate) use todos_links::*;
@@ -102,7 +94,6 @@ impl EngramMcpServer {
     /// 合并各域工具 router（每个域模块自带 `#[tool_router]` 块）。
     pub(crate) fn build_tool_router() -> ToolRouter<Self> {
         let mut tool_router = ToolRouter::<Self>::new();
-        // EN-252：skills 域裁撤——工具路由注销（模块与存储层保留供回滚）
         tool_router.merge(crate::wiki_ops::routes_wiki_ops());
         tool_router.merge(crate::credentials::routes_credentials());
         tool_router.merge(crate::circles::routes_circles());
@@ -123,7 +114,6 @@ impl EngramMcpServer {
         tool_router.merge(crate::todos_links::routes_todos_links());
         tool_router.merge(crate::memory_kv::routes_memory_kv());
         tool_router.merge(crate::project_locations::routes_project_locations());
-        // tool_router.merge(crate::skills_versions::routes_skills_versions()); // EN-252 裁撤
         tool_router
     }
 }

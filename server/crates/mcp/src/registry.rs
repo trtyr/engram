@@ -240,7 +240,7 @@ pub struct McpActionInfo {
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct McpToolInfo {
     pub name: String,
-    /// 所属资产域（渐进式发现后工具名即域名：memory/projects/skills/wiki/todos/codegraph）
+    /// 所属资产域（渐进式发现后工具名即域名：memory/projects/assets/credentials/circles/wiki/todos/codegraph）
     pub domain: String,
     pub description: String,
     pub read_only: Option<bool>,

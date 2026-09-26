@@ -5,7 +5,6 @@ pub mod credential;
 pub mod keys;
 pub mod memory;
 pub mod project;
-pub mod skills;
 pub mod wiki_docs;
 
 pub mod wiki_promotions;

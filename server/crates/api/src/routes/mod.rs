@@ -10,7 +10,6 @@ pub mod memory_api;
 pub mod migrate_api;
 pub mod project_api;
 pub mod search_api;
-pub mod skills_api;
 pub mod todos_api;
 pub mod wiki_api;
 pub mod wiki_docs_api;
@@ -94,11 +93,6 @@ use utoipa::OpenApi;
         project_api::list_file_versions, project_api::get_file_version,
         assets_api::list_kinds, assets_api::list_assets, assets_api::create_asset,
         assets_api::get_asset, assets_api::update_asset, assets_api::delete_asset,
-        skills_api::list_skills, skills_api::create_skill, skills_api::import_skills,
-        skills_api::export_skills, skills_api::get_skill, skills_api::update_skill,
-        skills_api::delete_skill, skills_api::list_revisions, skills_api::restore_revision,
-        skills_api::import_transfer,
-        skills_api::list_files, skills_api::get_file, skills_api::put_file, skills_api::delete_file,
     ),
 )]
 pub(crate) struct ApiDoc;
@@ -117,7 +111,6 @@ pub fn router(state: AppState) -> Router {
         .merge(codegraph_routes())
         .merge(projects_routes())
         .merge(assets_routes())
-        .merge(skills_routes())
         .merge(todos_routes())
         .merge(migrate_routes());
 
@@ -455,37 +448,6 @@ fn projects_routes() -> Router<AppState> {
             get(project_api::get_doc)
                 .put(project_api::update_doc)
                 .delete(project_api::delete_doc),
-        )
-}
-
-/// `/skills` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。
-fn skills_routes() -> Router<AppState> {
-    Router::new()
-        // 技能域：import/export 先于 {slug}，避免被当作 slug 解析
-        .route("/skills/import", post(skills_api::import_skills))
-        .route("/skills/{slug}/files", get(skills_api::list_files))
-        .route(
-            "/skills/{slug}/file",
-            get(skills_api::get_file)
-                .put(skills_api::put_file)
-                .delete(skills_api::delete_file),
-        )
-        .route("/skills/export", get(skills_api::export_skills))
-        .route("/skills/import-transfer", post(skills_api::import_transfer))
-        .route(
-            "/skills",
-            post(skills_api::create_skill).get(skills_api::list_skills),
-        )
-        .route(
-            "/skills/{slug}",
-            get(skills_api::get_skill)
-                .put(skills_api::update_skill)
-                .delete(skills_api::delete_skill),
-        )
-        .route("/skills/{slug}/revisions", get(skills_api::list_revisions))
-        .route(
-            "/skills/{slug}/revisions/{rev_id}/restore",
-            post(skills_api::restore_revision),
         )
 }
 

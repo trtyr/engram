@@ -1,8 +1,6 @@
 //! 迁移（transfer）往返闭环集成测试：
 //! 造五域数据 → 导出迁移包 → 清库 → 导入 → 断言计数与内容 → 重复导入全跳过（幂等）。
 
-use engram_storage::repo::transfer as trepo;
-
 use serde_json::Value;
 
 mod support;
@@ -43,18 +41,6 @@ async fn transfer_roundtrip_and_idempotency() {
     .unwrap();
     sqlx::query("INSERT INTO entity_relations (id, from_id, to_id, rel_type, weight, source) VALUES ($1,$2,$3,'works_on',1,'manual')")
         .bind(uuid::Uuid::now_v7()).bind(eid).bind(eid).execute(&pool).await.unwrap();
-
-    let slug = "transfer-skill";
-    sqlx::query("INSERT INTO skills (id, slug, name, description, content, tags, enabled, source) VALUES ($1,$2,'打包技能','迁移','正文',$3,true,'manual')")
-        .bind(uuid::Uuid::now_v7()).bind(slug)
-        .bind(vec!["ops".to_string()]).execute(&pool).await.unwrap();
-    let skid: uuid::Uuid = sqlx::query_scalar("SELECT id FROM skills WHERE slug=$1")
-        .bind(slug)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO skill_files (id, skill_id, path, content) VALUES ($1,$2,'scripts/run.sh','echo hi')")
-        .bind(uuid::Uuid::now_v7()).bind(skid).execute(&pool).await.unwrap();
 
     sqlx::query("INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, folder) VALUES ($1, (SELECT id FROM wiki_libraries WHERE slug = 'main'), 'transfer-page','迁移页','concept','# 页面','docs')")
         .bind(uuid::Uuid::now_v7()).execute(&pool).await.unwrap();
@@ -112,17 +98,6 @@ async fn transfer_roundtrip_and_idempotency() {
         .execute(&pool)
         .await
         .unwrap();
-
-    sqlx::query(
-        "INSERT INTO skill_revisions (id, skill_id, rev, name, description, content, tags, origin) \
-         VALUES ($1,$2,1,'打包技能','旧版','旧正文',$3,'update')",
-    )
-    .bind(uuid::Uuid::now_v7())
-    .bind(skid)
-    .bind(vec!["ops".to_string()])
-    .execute(&pool)
-    .await
-    .unwrap();
 
     let todo_a = uuid::Uuid::now_v7();
     let todo_b = uuid::Uuid::now_v7();
@@ -203,7 +178,6 @@ async fn transfer_roundtrip_and_idempotency() {
     assert_eq!(bundle["format"], "engram-transfer");
     assert_eq!(bundle["counts"]["sessions"], 1);
     assert_eq!(bundle["counts"]["atoms"], 1);
-    assert_eq!(bundle["counts"]["skills"], 1);
     assert_eq!(bundle["counts"]["wiki_pages"], 1);
     assert_eq!(bundle["counts"]["projects"], 2);
     assert_eq!(
@@ -216,7 +190,6 @@ async fn transfer_roundtrip_and_idempotency() {
         ("project_files", "项目文件是真实产物，不随包就是丢"),
         ("project_file_versions", "文件历史"),
         ("atom_entities", "圈子图的边，重建要重跑抽取"),
-        ("skill_revisions", "技能历史"),
         ("todo_links", "工单关联"),
         ("wiki_documents", "wiki 源文档"),
         ("wiki_chunks", "wiki 分块"),
@@ -232,16 +205,9 @@ async fn transfer_roundtrip_and_idempotency() {
         bundle["wiki"]["chunks"][0].get("embedding").is_none(),
         "分块向量是派生列，不随包（导入后落 embed_failed 等 re-embed）"
     );
-    assert!(
-        bundle["skills"][0]
-            .get("files")
-            .and_then(|f| f.as_array())
-            .map(|f| f.len())
-            == Some(1)
-    );
 
     // ---------- 清库（模拟一台空 B 机） ----------
-    sqlx::query("TRUNCATE raw_sessions, atoms, scenarios, persona_aspects, entities, entity_relations, atom_entities, skills, skill_files, skill_revisions, wiki_pages, wiki_documents, wiki_chunks, wiki_sources, wiki_review_items, wiki_links, projects, project_locations, project_docs, project_files, project_file_versions, assets, project_links, todos, todo_links CASCADE")
+    sqlx::query("TRUNCATE raw_sessions, atoms, scenarios, persona_aspects, entities, entity_relations, atom_entities, wiki_pages, wiki_documents, wiki_chunks, wiki_sources, wiki_review_items, wiki_links, projects, project_locations, project_docs, project_files, project_file_versions, assets, project_links, todos, todo_links CASCADE")
         .execute(&pool).await.unwrap();
 
     // ---------- 导入 ----------
@@ -261,7 +227,6 @@ async fn transfer_roundtrip_and_idempotency() {
     assert_eq!(imported(&["memory", "persona"]), 1);
     assert_eq!(imported(&["memory", "entities"]), 1);
     assert_eq!(imported(&["memory", "relations"]), 1);
-    assert_eq!(imported(&["skills", "skills"]), 1);
     assert_eq!(imported(&["wiki", "pages"]), 1);
     assert_eq!(imported(&["projects", "projects"]), 2);
     assert_eq!(imported(&["projects", "locations"]), 1);
@@ -274,7 +239,6 @@ async fn transfer_roundtrip_and_idempotency() {
         1,
         "圈子图的边须能导入"
     );
-    assert_eq!(imported(&["skills", "revisions"]), 1, "技能历史须能导入");
     assert_eq!(imported(&["projects", "files"]), 1, "项目文件须能导入");
     assert_eq!(
         imported(&["projects", "file_versions"]),
@@ -312,12 +276,6 @@ async fn transfer_roundtrip_and_idempotency() {
             .await
             .unwrap();
     assert!(tsv_ok, "导入应重建 tsv（FTS 可检索）");
-    let files: i64 = sqlx::query_scalar("SELECT count(*) FROM skill_files WHERE skill_id = $1")
-        .bind(skid)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(files, 1, "技能附属文件应随迁移进");
     let wiki_ok: bool = sqlx::query_scalar(
         "SELECT tsv @@ to_tsquery('simple','页面') FROM wiki_pages WHERE slug='transfer-page'",
     )
@@ -378,13 +336,6 @@ async fn transfer_roundtrip_and_idempotency() {
     .await
     .unwrap();
     assert_eq!(ae_n, 1, "圈子图的边应随迁移进（否则实体失联）");
-    let srev_n: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM skill_revisions WHERE skill_id = $1")
-            .bind(skid)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(srev_n, 1, "技能历史应随迁移进");
     let tlink_n: i64 = sqlx::query_scalar("SELECT count(*) FROM todo_links")
         .fetch_one(&pool)
         .await
@@ -427,12 +378,11 @@ async fn transfer_roundtrip_and_idempotency() {
     let report2 = engram_core::transfer::import_bundle(&pool, &bundle)
         .await
         .expect("重复导入");
-    let all_skipped = ["memory", "skills", "wiki", "projects"].iter().all(|dom| {
+    let all_skipped = ["memory", "wiki", "projects"].iter().all(|dom| {
         let d = &report2[dom];
         serde_json::to_string(d).unwrap().contains("\"skipped\"")
     });
     assert!(all_skipped);
-    assert_eq!(report2["skills"]["skills"]["skipped"], 1);
     assert_eq!(report2["memory"]["sessions"]["skipped"], 1);
     assert_eq!(report2["assets"]["skipped"], 1, "资产重复导入应跳过");
     assert_eq!(report2["project_links"]["skipped"], 1, "关联重复导入应跳过");
@@ -440,7 +390,6 @@ async fn transfer_roundtrip_and_idempotency() {
         report2["memory"]["atom_entities"]["skipped"], 1,
         "圈子图的边重复导入应跳过"
     );
-    assert_eq!(report2["skills"]["revisions"]["skipped"], 1);
     assert_eq!(report2["projects"]["files"]["skipped"], 1);
     assert_eq!(report2["projects"]["file_versions"]["skipped"], 1);
     assert_eq!(report2["todo_links"]["skipped"], 1);
@@ -460,96 +409,6 @@ async fn import_rejects_foreign_format() {
     assert!(err.to_string().contains("engram-transfer"));
 }
 
-#[tokio::test]
-async fn export_roundtrip_skills_files_count() {
-    let pg = support::start_pgvector().await.expect("测试库");
-    let url = support::connection_url(&pg).await.expect("连接串");
-    let pool = support::connect_with_retry(&url).await.expect("连接");
-    engram_storage::run_migrations(&pool).await.expect("迁移");
-    trepo::import_skill(
-        &pool,
-        &serde_json::json!({"id": uuid::Uuid::now_v7(), "slug":"f1","name":"F","description":"","content":"c","tags":[],"enabled":true}),
-        &[serde_json::json!({"path":"a/b.txt","content":"x"})],
-    ).await.expect("import_skill");
-    let skills = trepo::export_skills_with_files(&pool)
-        .await
-        .expect("export");
-    assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0].1.len(), 1);
-    assert_eq!(skills[0].1[0]["path"], "a/b.txt");
-}
-
-/// 二态（0038）：script 型技能迁移 = 只导元数据（指针 + 来源），
-/// A 机导出 → B 机导入，指针照收（导入端待本地就位）。
-#[tokio::test]
-async fn transfer_script_skill_metadata_only() {
-    let pg_a = support::start_pgvector().await.expect("A 机测试库");
-    let url_a = support::connection_url(&pg_a).await.expect("A 连接串");
-    let pool_a = support::connect_with_retry(&url_a).await.expect("A 连接");
-    engram_storage::run_migrations(&pool_a)
-        .await
-        .expect("A 迁移");
-    let pg_b = support::start_pgvector().await.expect("B 机测试库");
-    let url_b = support::connection_url(&pg_b).await.expect("B 连接串");
-    let pool_b = support::connect_with_retry(&url_b).await.expect("B 连接");
-    engram_storage::run_migrations(&pool_b)
-        .await
-        .expect("B 迁移");
-
-    // A 机：script 型技能（指针 + 来源，无附属文件）
-    trepo::import_skill(
-        &pool_a,
-        &serde_json::json!({
-            "id": uuid::Uuid::now_v7(), "slug":"remote-tool","name":"远程工具",
-            "description":"","content":"","tags":[],"enabled":true,
-            "kind":"script","origin":"both",
-            "local_path":"/opt/skills/remote-tool","repo_url":"https://github.com/x/remote-tool"
-        }),
-        &[],
-    )
-    .await
-    .expect("A 机导入 script 技能");
-
-    // A 机导出：script 型无 files 行、元数据随行
-    let skills = trepo::export_skills_with_files(&pool_a)
-        .await
-        .expect("A 机导出");
-    let entry = skills
-        .iter()
-        .find(|(s, _)| s["slug"] == "remote-tool")
-        .expect("导出应含 remote-tool");
-    assert_eq!(entry.1.len(), 0, "script 型不应带附属文件");
-    assert_eq!(entry.0["kind"], "script");
-    assert_eq!(entry.0["origin"], "both");
-    assert_eq!(entry.0["local_path"], "/opt/skills/remote-tool");
-    assert_eq!(entry.0["repo_url"], "https://github.com/x/remote-tool");
-
-    // B 机导入：指针照收（先转成 export_bundle 同构形态：skill 对象 + files 字段）
-    let payload: Vec<Value> = skills
-        .into_iter()
-        .map(|(mut s, files)| {
-            s["files"] = serde_json::json!(files);
-            s
-        })
-        .collect();
-    let report = engram_core::transfer::import_skills_bundle(&pool_b, &serde_json::json!(payload))
-        .await
-        .expect("B 机导入");
-    assert_eq!(report["imported"], 1);
-    assert_eq!(report["files_imported"], 0, "script 型不导文件");
-    let (kind, origin, lp, ru): (String, String, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT kind, origin, local_path, repo_url FROM skills WHERE slug='remote-tool'",
-    )
-    .fetch_one(&pool_b)
-    .await
-    .unwrap();
-    assert_eq!((kind.as_str(), origin.as_str()), ("script", "both"));
-    assert_eq!(lp.as_deref(), Some("/opt/skills/remote-tool"));
-    assert_eq!(ru.as_deref(), Some("https://github.com/x/remote-tool"));
-}
-
-/// 位置 → 资产引用的**自愈**：包里 asset_id 在目标库不存在时，按「台账名 / 别名」重新解析
-/// （与 0058 存量清洗同规则）——跨实例迁移后引用不会静默落空。
 #[tokio::test]
 async fn location_asset_ref_self_heals_by_name() {
     let pg = support::start_pgvector().await.expect("测试库");

@@ -13,7 +13,6 @@ pub mod llm;
 pub mod memory;
 pub mod project;
 pub mod settings;
-pub mod skills;
 pub mod todos;
 pub mod transfer;
 pub mod wiki_docs;

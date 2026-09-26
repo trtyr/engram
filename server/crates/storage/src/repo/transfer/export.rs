@@ -50,35 +50,6 @@ pub async fn export_todos(pool: &PgPool) -> StoreResult<Vec<Value>> {
     Ok(rows)
 }
 
-/// 技能全量：[(skill 行, files 行)]。
-pub async fn export_skills_with_files(pool: &PgPool) -> StoreResult<Vec<(Value, Vec<Value>)>> {
-    let skills: Vec<Value> = sqlx::query_scalar("SELECT to_jsonb(s) FROM skills s ORDER BY s.slug")
-        .fetch_all(pool)
-        .await?;
-    let files: Vec<(String, Value)> = sqlx::query_as(
-        "SELECT s.slug, to_jsonb(f) FROM skill_files f JOIN skills s ON s.id = f.skill_id ORDER BY s.slug, f.path",
-    )
-    .fetch_all(pool)
-    .await?;
-    let mut by_slug: std::collections::HashMap<String, Vec<Value>> =
-        std::collections::HashMap::new();
-    for (slug, f) in files {
-        by_slug.entry(slug).or_default().push(f);
-    }
-    Ok(skills
-        .into_iter()
-        .map(|s| {
-            let slug = s
-                .get("slug")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string();
-            let files = by_slug.remove(&slug).unwrap_or_default();
-            (s, files)
-        })
-        .collect())
-}
-
 /// 资产台账全量（0058；2026-09-22 上云补齐——资产是「我拥有的东西」的唯一事实源，须随包走）。
 pub async fn export_assets(pool: &PgPool) -> StoreResult<Vec<Value>> {
     let rows: Vec<Value> = sqlx::query_scalar("SELECT to_jsonb(a) FROM assets a ORDER BY a.name")
@@ -129,15 +100,6 @@ pub async fn export_atom_entities(pool: &PgPool) -> StoreResult<Vec<Value>> {
     )
     .fetch_all(pool)
     .await?;
-    Ok(rows)
-}
-
-/// 技能版本历史（skill_revisions；当前内容在 skills/skill_files，这里补历史）。
-pub async fn export_skill_revisions(pool: &PgPool) -> StoreResult<Vec<Value>> {
-    let rows: Vec<Value> =
-        sqlx::query_scalar("SELECT to_jsonb(r) FROM skill_revisions r ORDER BY r.skill_id, r.rev")
-            .fetch_all(pool)
-            .await?;
     Ok(rows)
 }
 

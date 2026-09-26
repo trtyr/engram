@@ -598,7 +598,7 @@ async fn api_key_scope_alias_and_actionable_error() {
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {admin}"))
                 .body(Body::from(
-                    r#"{"name":"alias","scopes":["memory","projects","skill"]}"#,
+                    r#"{"name":"alias","scopes":["memory","projects","todo"]}"#,
                 ))
                 .unwrap(),
         )
@@ -607,7 +607,7 @@ async fn api_key_scope_alias_and_actionable_error() {
     assert_eq!(
         resp.status(),
         StatusCode::CREATED,
-        "别名 projects/skill 应签发成功"
+        "别名 projects/todo 应签发成功"
     );
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
         .await
@@ -615,7 +615,7 @@ async fn api_key_scope_alias_and_actionable_error() {
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let key = v["key"].as_str().unwrap().to_string();
 
-    // 落库为 project/skills（列表回显归一后值）
+    // 落库为 project/todos（列表回显归一后值）
     let resp = app
         .clone()
         .oneshot(
@@ -639,7 +639,7 @@ async fn api_key_scope_alias_and_actionable_error() {
         .expect("alias key 在列");
     assert_eq!(
         row["scopes"],
-        serde_json::json!(["memory", "project", "skills"]),
+        serde_json::json!(["memory", "project", "todos"]),
         "别名应归一为单数 scope 落库"
     );
 
@@ -687,7 +687,7 @@ async fn api_key_scope_alias_and_actionable_error() {
         "wiki",
         "codegraph",
         "project",
-        "skills",
+        "credentials",
         "todos",
         "llm",
         "erase",
@@ -1797,15 +1797,6 @@ async fn openapi_snapshot() {
             "/settings/llm/routing/suggest",
             "/settings/mcp",
             "/settings/rhythm",
-            "/skills",
-            "/skills/export",
-            "/skills/import",
-            "/skills/import-transfer",
-            "/skills/{slug}",
-            "/skills/{slug}/file",
-            "/skills/{slug}/files",
-            "/skills/{slug}/revisions",
-            "/skills/{slug}/revisions/{rev_id}/restore",
             "/todos",
             "/todos/export",
             "/todos/{id}",

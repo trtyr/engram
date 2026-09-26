@@ -106,10 +106,10 @@ async fn spawn_target_app() -> String {
     let bundle = serde_json::json!({
         "format": "engram-transfer", "version": 1, "exported_at": "2026-01-01T00:00:00Z",
         "counts": {"sessions": 0, "atoms": 0, "scenarios": 0, "persona": 0, "entities": 0,
-            "relations": 0, "skills": 0, "wiki_libraries": 0, "wiki_pages": 0, "projects": 0,
+            "relations": 0, "wiki_libraries": 0, "wiki_pages": 0, "projects": 0,
             "locations": 0, "docs": 0, "todos": 0, "kv_entries": 0, "wiki_promotions": 0},
         "memory": {"sessions": [], "atoms": [], "scenarios": [], "persona": [], "entities": [], "relations": []},
-        "skills": [], "wiki": {"libraries": [], "pages": []},
+        "wiki": {"libraries": [], "pages": []},
         "projects": {"projects": [], "locations": [], "docs": []},
         "todos": [], "kv_entries": [], "wiki_promotions": []
     });
