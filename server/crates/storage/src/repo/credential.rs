@@ -50,7 +50,7 @@ pub struct EncRow {
     pub sensitive: bool,
     pub description: String,
     pub last_read_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub read_count: i64,
+    pub read_count: i32,
 }
 
 /// 按名取加密行（大小写/首尾空白不敏感命中）。

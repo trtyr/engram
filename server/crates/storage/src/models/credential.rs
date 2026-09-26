@@ -23,7 +23,7 @@ pub struct CredentialMetaDto {
     /// 取用审计：最近一次 get
     pub last_read_at: Option<DateTime<Utc>>,
     /// 取用审计：累计 get 次数
-    pub read_count: i64,
+    pub read_count: i32,
 }
 
 /// 取用审计流水行。
@@ -44,5 +44,5 @@ pub struct CredentialValueDto {
     pub sensitive: bool,
     pub description: String,
     pub last_read_at: Option<DateTime<Utc>>,
-    pub read_count: i64,
+    pub read_count: i32,
 }
