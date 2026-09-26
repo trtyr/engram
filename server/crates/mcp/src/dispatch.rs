@@ -195,6 +195,8 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "links", false, "双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口" => crate::TodoLinksParams;
             "get", false, "详情（含 severity/symptom/acceptance/resolution）" => crate::TodoIdParams;
             "update", false, "编辑与状态流转（confirmed/in_progress/resolved/verified/archived；工单字段 severity/symptom/acceptance/resolution）" => crate::TodoUpdateParams;
+            "events", false, "活动时间线（状态流转 event 自动留痕 + 评论 comment，升序）" => crate::TicketEventsParams;
+            "comment", false, "工单评论（入活动时间线）" => crate::TicketCommentParams;
             "delete", true, "删除工单（不可逆）" => crate::TodoIdParams
         ],
         "codegraph" => action_docs![
@@ -414,7 +416,10 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 "todos",
                 "add" | "link" | "unlink" | "done" | "update" | "delete"
             )
-            | ("tickets", "add" | "link" | "unlink" | "update" | "delete")
+            | (
+                "tickets",
+                "add" | "link" | "unlink" | "update" | "delete" | "comment"
+            )
             | (
                 "codegraph",
                 "register" | "index" | "sync" | "gc" | "delete" | "upload"
@@ -479,7 +484,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                     | "promotions"
             )
             | ("todos", "list" | "links" | "get")
-            | ("tickets", "list" | "links" | "get")
+            | ("tickets", "list" | "links" | "get" | "events")
             | ("codegraph", "list" | "query")
             | ("jobs", "list" | "get" | "events")
     )

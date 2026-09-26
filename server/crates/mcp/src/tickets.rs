@@ -184,8 +184,8 @@ impl EngramMcpServer {
         }
         let action = call.action.clone();
         match action.as_str() {
-            "list" | "get" | "links" => self.tickets_read_group(ctx, call).await,
-            "add" | "link" | "unlink" | "update" | "delete" => {
+            "list" | "get" | "links" | "events" => self.tickets_read_group(ctx, call).await,
+            "add" | "link" | "unlink" | "update" | "delete" | "comment" => {
                 self.tickets_write_group(ctx, call).await
             }
             other => Err(dispatch::unknown_action("tickets", other)),
@@ -216,6 +216,13 @@ impl EngramMcpServer {
                 self.todo_links(
                     ctx,
                     Parameters(dispatch::from_args("tickets", "links", call.args)?),
+                )
+                .await
+            }
+            "events" => {
+                self.ticket_events(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "events", call.args)?),
                 )
                 .await
             }
@@ -265,6 +272,13 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "comment" => {
+                self.ticket_comment(
+                    ctx,
+                    Parameters(dispatch::from_args("tickets", "comment", call.args)?),
+                )
+                .await
+            }
             other => Err(dispatch::unknown_action("tickets", other)),
         }
     }
@@ -273,4 +287,61 @@ impl EngramMcpServer {
 /// 供装配层合并（宏生成的 router 方法私有，本模块内包一层）。
 pub(crate) fn routes_tickets() -> ToolRouter<EngramMcpServer> {
     EngramMcpServer::tickets_router()
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TicketEventsParams {
+    /// 工单 id 或 EN-短号
+    #[schemars(
+        description = "工单 id 或 EN-短号。返回活动时间线（状态流转 event + 评论 comment，升序）。"
+    )]
+    pub id: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct TicketCommentParams {
+    /// 工单 id 或 EN-短号
+    #[schemars(description = "工单 id 或 EN-短号。评论将入活动时间线。")]
+    pub id: String,
+    /// 评论正文
+    #[schemars(description = "评论正文（trim 后非空）。")]
+    pub text: String,
+}
+
+// 时间线处理器（读：events / 写：comment）——复用 todos 的 require/scope 与 id 解析
+impl EngramMcpServer {
+    pub(crate) async fn ticket_events(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TicketEventsParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let id = self.todo_ref_id(&params.0.id).await?;
+        let rows = todo_svc(&self.state).events(id).await.map_err(from_todo)?;
+        ok_json(serde_json::json!({
+            "ticket_id": id.to_string(),
+            "count": rows.len(),
+            "events": rows,
+        }))
+    }
+
+    pub(crate) async fn ticket_comment(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<TicketCommentParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_todos(&p)?;
+        let id = self.todo_ref_id(&params.0.id).await?;
+        todo_svc(&self.state)
+            .comment(id, &params.0.text, "mcp:tickets")
+            .await
+            .map_err(from_todo)?;
+        ok_json(serde_json::json!({
+            "ticket_id": id.to_string(),
+            "commented": true,
+            "hint": "评论已入活动时间线（events 可查）。"
+        }))
+    }
 }

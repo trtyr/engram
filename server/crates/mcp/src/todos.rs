@@ -308,6 +308,7 @@ impl EngramMcpServer {
                 None,
                 None,
                 None,
+                "mcp:todos",
             )
             .await
             .map_err(from_todo)?;
@@ -344,6 +345,7 @@ impl EngramMcpServer {
                 },
                 None,
                 params.0.tags.as_deref(),
+                "mcp:todos",
             )
             .await
             .map_err(from_todo)?;

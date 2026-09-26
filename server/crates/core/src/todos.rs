@@ -413,6 +413,7 @@ impl TodoService {
         due_at: Option<Option<DateTime<Utc>>>,
         project_hint: Option<Option<&str>>,
         tags: Option<&[String]>,
+        actor: &str,
     ) -> Result<TodoDto, TodoError> {
         let existing = repo::get(&self.pool, id)
             .await?
@@ -455,7 +456,50 @@ impl TodoService {
         if n == 0 {
             return Err(TodoError::NotFound(format!("待办 {id} 不存在")));
         }
+        // 状态流转自动留痕（ticket_events kind=event）：状态真的变了才记
+        let new_status = status.unwrap_or(existing.status.as_str());
+        if new_status != existing.status {
+            repo::event_insert(
+                &self.pool,
+                id,
+                "event",
+                &serde_json::json!({ "from": existing.status, "to": new_status }),
+                actor,
+            )
+            .await?;
+        }
         self.get(id).await
+    }
+
+    /// 工单评论（ticket_events kind=comment）
+    pub async fn comment(&self, id: Uuid, text: &str, actor: &str) -> Result<(), TodoError> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(TodoError::BadRequest("评论不能为空".into()));
+        }
+        repo::get(&self.pool, id)
+            .await?
+            .ok_or_else(|| TodoError::NotFound(format!("待办 {id} 不存在")))?;
+        repo::event_insert(
+            &self.pool,
+            id,
+            "comment",
+            &serde_json::json!({ "text": text }),
+            actor,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// 活动时间线（升序；存在性校验后回列表）
+    pub async fn events(
+        &self,
+        id: Uuid,
+    ) -> Result<Vec<engram_storage::repo::todos::TicketEventRow>, TodoError> {
+        repo::get(&self.pool, id)
+            .await?
+            .ok_or_else(|| TodoError::NotFound(format!("待办 {id} 不存在")))?;
+        Ok(repo::events_for(&self.pool, id).await?)
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<(), TodoError> {

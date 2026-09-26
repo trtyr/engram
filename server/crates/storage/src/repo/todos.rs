@@ -407,3 +407,46 @@ pub async fn count(
     .fetch_one(pool)
     .await?)
 }
+
+// ---------- 工单活动时间线（ticket_events，0063） ----------
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct TicketEventRow {
+    pub id: Uuid,
+    pub ticket_id: Uuid,
+    pub kind: String,
+    pub payload: serde_json::Value,
+    pub actor: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 追加时间线条目（kind=event|comment 由 CHECK 兜底）
+pub async fn event_insert(
+    pool: &PgPool,
+    ticket_id: Uuid,
+    kind: &str,
+    payload: &serde_json::Value,
+    actor: &str,
+) -> StoreResult<Uuid> {
+    let id = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO ticket_events (id, ticket_id, kind, payload, actor) VALUES ($1, $2, $3, $4, $5)")
+        .bind(id)
+        .bind(ticket_id)
+        .bind(kind)
+        .bind(payload)
+        .bind(actor)
+        .execute(pool)
+        .await?;
+    Ok(id)
+}
+
+/// 时间线（升序——时序正确性断言友好；前端倒序展示自行 reverse）
+pub async fn events_for(pool: &PgPool, ticket_id: Uuid) -> StoreResult<Vec<TicketEventRow>> {
+    Ok(sqlx::query_as::<_, TicketEventRow>(
+        "SELECT id, ticket_id, kind, payload, actor, created_at \
+         FROM ticket_events WHERE ticket_id = $1 ORDER BY created_at ASC, id ASC",
+    )
+    .bind(ticket_id)
+    .fetch_all(pool)
+    .await?)
+}

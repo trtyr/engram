@@ -1002,7 +1002,17 @@ async fn list_order_is_open_first_then_updated_at_desc() {
     let mut cursor: Option<String> = None;
     loop {
         let page = svc
-            .list(None, None, None, None, None, None, None, cursor.as_deref(), 2)
+            .list(
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                cursor.as_deref(),
+                2,
+            )
             .await
             .unwrap();
         if page.is_empty() {
@@ -1068,7 +1078,19 @@ async fn todos_update_fields_and_overdue_filter() {
         .await
         .unwrap();
     let nodue = svc
-        .create("无到期", "body", "todo", "low", None, "", "", "", &[], None, None)
+        .create(
+            "无到期",
+            "body",
+            "todo",
+            "low",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            None,
+            None,
+        )
         .await
         .unwrap();
 
@@ -1076,18 +1098,18 @@ async fn todos_update_fields_and_overdue_filter() {
     let upd = svc
         .update(
             past.id,
-            None,             // kind
-            Some("过期任务·改"), // title
-            None,             // body
-            Some("low"),      // priority
-            None,             // status
-            None,             // severity
-            None,             // symptom
-            None,             // reproduce
-            None,             // acceptance
-            None,             // resolution
-            Some(None),       // due_at 清除
-            None,             // project_hint
+            None,                                   // kind
+            Some("过期任务·改"),                    // title
+            None,                                   // body
+            Some("low"),                            // priority
+            None,                                   // status
+            None,                                   // severity
+            None,                                   // symptom
+            None,                                   // reproduce
+            None,                                   // acceptance
+            None,                                   // resolution
+            Some(None),                             // due_at 清除
+            None,                                   // project_hint
             Some(&["ops".into(), "urgent".into()]), // tags
         )
         .await
@@ -1100,20 +1122,44 @@ async fn todos_update_fields_and_overdue_filter() {
     // 改回过期 due，供 overdue 过滤断言
     svc.update(
         past.id,
-        None, None, None, None, None, // kind/title/body/priority/status/severity
-        None, None, None, None, None, // symptom/reproduce/acceptance/resolution +1
+        None,
+        None,
+        None,
+        None,
+        None, // kind/title/body/priority/status/severity
+        None,
+        None,
+        None,
+        None,
+        None, // symptom/reproduce/acceptance/resolution +1
         Some(Some(Utc::now() - chrono::Duration::hours(2))), // due_at
-        None, None,                   // project_hint/tags
+        None,
+        None, // project_hint/tags
     )
     .await
     .unwrap();
 
     // ③ overdue 过滤：只回未完成且已过期（改字段后的那条），today/无 due 不混入
     let od = svc
-        .list(None, None, None, None, None, None, Some("overdue"), None, 200)
+        .list(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("overdue"),
+            None,
+            200,
+        )
         .await
         .unwrap();
-    assert_eq!(od.len(), 1, "overdue 应恰好命中 1 条: {:?}", od.iter().map(|r| &r.title).collect::<Vec<_>>());
+    assert_eq!(
+        od.len(),
+        1,
+        "overdue 应恰好命中 1 条: {:?}",
+        od.iter().map(|r| &r.title).collect::<Vec<_>>()
+    );
     assert_eq!(od[0].id, past.id);
 
     // ④ 排序：due 过滤下按到期升序（更紧急在前）——再造一条更早过期的验证
@@ -1134,7 +1180,17 @@ async fn todos_update_fields_and_overdue_filter() {
         .await
         .unwrap();
     let od2 = svc
-        .list(None, None, None, None, None, None, Some("overdue"), None, 200)
+        .list(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("overdue"),
+            None,
+            200,
+        )
         .await
         .unwrap();
     assert_eq!(od2.len(), 2);
@@ -1144,10 +1200,19 @@ async fn todos_update_fields_and_overdue_filter() {
     // ⑤ today 过滤：把 future 改成 1 小时后（今天内）→ today 命中且 overdue 不含它
     svc.update(
         future.id,
-        None, None, None, None, None, // kind/title/body/priority/status/severity
-        None, None, None, None, None, // symptom/reproduce/acceptance/resolution +1
+        None,
+        None,
+        None,
+        None,
+        None, // kind/title/body/priority/status/severity
+        None,
+        None,
+        None,
+        None,
+        None, // symptom/reproduce/acceptance/resolution +1
         Some(Some(Utc::now() + chrono::Duration::hours(1))), // due_at → 今天内
-        None, None,                   // project_hint/tags
+        None,
+        None, // project_hint/tags
     )
     .await
     .unwrap();
@@ -1158,7 +1223,17 @@ async fn todos_update_fields_and_overdue_filter() {
     assert_eq!(today.len(), 1);
     assert_eq!(today[0].id, future.id);
     let od3 = svc
-        .list(None, None, None, None, None, None, Some("overdue"), None, 200)
+        .list(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("overdue"),
+            None,
+            200,
+        )
         .await
         .unwrap();
     assert_eq!(od3.len(), 2, "today 项不得混入 overdue");
@@ -1174,14 +1249,34 @@ async fn todos_update_fields_and_overdue_filter() {
     // ⑦ done 后不再算 overdue
     svc.update(
         past.id,
-        None, None, None, None, Some("done"), // kind/title/body/priority/status
-        None, None, None, None, None,          // severity/symptom/reproduce/acceptance/resolution
-        None, None, None,                      // due_at/project_hint/tags
+        None,
+        None,
+        None,
+        None,
+        Some("done"), // kind/title/body/priority/status
+        None,
+        None,
+        None,
+        None,
+        None, // severity/symptom/reproduce/acceptance/resolution
+        None,
+        None,
+        None, // due_at/project_hint/tags
     )
     .await
     .unwrap();
     let od4 = svc
-        .list(None, None, None, None, None, None, Some("overdue"), None, 200)
+        .list(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("overdue"),
+            None,
+            200,
+        )
         .await
         .unwrap();
     assert_eq!(od4.len(), 1, "done 的过期项应退出 overdue");
