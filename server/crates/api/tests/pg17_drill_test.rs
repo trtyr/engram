@@ -45,6 +45,7 @@ async fn pg17_full_migrations_and_schema() {
         "wiki_promotions",
         "wiki_query_log",
         "asset_revisions",
+        "ticket_events",
         "todos",
         "cg_projects",
         "kv_entries",
