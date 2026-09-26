@@ -600,6 +600,17 @@ export interface AssetUsageRow {
 }
 export interface AssetDetailDto extends AssetDto {
   used_by: AssetUsageRow[]
+  /** 运行手册 Markdown 正文（主动记录：硬件/网络/服务/端口/变更/踩坑） */
+  runbook_md: string
+}
+
+/** 资产运行手册修订史行（新→旧；old_runbook_md = 该次保存前的正文）。 */
+export interface AssetRevisionDto {
+  id: string
+  asset_id: string
+  old_runbook_md: string
+  edited_by: string
+  created_at: string
 }
 
 /** 工作线 ↔ 资产关系图（一次取全；节点 = 项目 + 资产，边 = 隶属/相关 + 用到）。 */

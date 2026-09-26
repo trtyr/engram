@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   api,
+  type AssetDto,
   type Atom,
   type Document,
   type Job,
@@ -153,6 +154,7 @@ export default function Dashboard() {
   const [cg, setCg] = useState<{ id: string }[] | null>(null)
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [usage, setUsage] = useState<UsageRow[] | null>(null)
+  const [assets, setAssets] = useState<AssetDto[] | null>(null)
   const [openTodos, setOpenTodos] = useState<number | null>(null)
   // 复用侧栏轮询源（10s，页面隐藏自动跳过）：失败徽章 + 蒸馏脉冲与全局状态一致
   const { failed, distilling } = useSystemStatus()
@@ -173,6 +175,7 @@ export default function Dashboard() {
     api.get<{ id: string }[]>('/codegraph/projects').then(setCg).catch(() => setCg([]))
     api.get<Job[]>('/jobs?limit=8').then(setJobs).catch(() => setJobs([]))
     api.get<UsageRow[]>('/llm/usage').then(setUsage).catch(() => setUsage([]))
+    api.get<AssetDto[]>('/assets').then(setAssets).catch(() => setAssets([]))
     api
       .get<{ status: string }[]>('/todos')
       .then((t) => setOpenTodos(t.filter((x) => x.status === 'open').length))
@@ -298,6 +301,44 @@ export default function Dashboard() {
           )}
         </Card>
       </div>
+
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="text-sm font-medium">主机速览</h2>
+          <Link
+            to="/assets"
+            className="font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            资产台账 →
+          </Link>
+        </div>
+        {(assets ?? []).filter((a) => a.kind === 'host').length === 0 ? (
+          <div className="p-4">
+            <Empty text="暂无主机——去资产台账建档" />
+          </div>
+        ) : (
+          <ul className="divide-y divide-border/60">
+            {(assets ?? [])
+              .filter((a) => a.kind === 'host')
+              .map((a) => (
+                <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                  <div className="min-w-0">
+                    <Link
+                      to={`/assets?q=${encodeURIComponent(a.name)}`}
+                      className="text-sm font-medium hover:underline"
+                    >
+                      {a.name}
+                    </Link>
+                    <span className="ml-2 text-xs text-muted-foreground">{a.os || '—'}</span>
+                  </div>
+                  <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                    {a.ip || '—'}
+                  </span>
+                </li>
+              ))}
+          </ul>
+        )}
+      </Card>
     </div>
   )
 }

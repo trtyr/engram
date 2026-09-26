@@ -6,7 +6,9 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, type AssetDetailDto, type AssetDto, type AssetKindDto } from '@/lib/api'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { api, type AssetDetailDto, type AssetDto, type AssetKindDto, type AssetRevisionDto } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
@@ -41,6 +43,13 @@ export default function Assets() {
 
   // 编辑表单（右栏内联）
   const [editing, setEditing] = useState(false)
+  // 运行手册（0062）：查看/编辑/修订史
+  const [rbEditing, setRbEditing] = useState(false)
+  const [rbMd, setRbMd] = useState('')
+  const [rbVersions, setRbVersions] = useState<AssetRevisionDto[] | null>(null)
+  const [rbShowVersions, setRbShowVersions] = useState(false)
+  // fields 运维字段编辑态（键值对；保存整体替换）
+  const [eFields, setEFields] = useState<[string, string][]>([])
   const [eKind, setEKind] = useState('host')
   const [eName, setEName] = useState('')
   const [eAliases, setEAliases] = useState('')
@@ -130,12 +139,57 @@ export default function Assets() {
         ip: eIp.trim(),
         os: eOs.trim(),
         note: eNote.trim(),
+        fields: Object.fromEntries(eFields.filter(([k]) => k.trim())),
       })
       setEditing(false)
       await load()
       openDetail(detail.id)
     } catch (e) {
       setErr(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 运行手册：修订史开关（懒加载）
+  async function loadVersions(id: string) {
+    if (rbShowVersions) {
+      setRbShowVersions(false)
+      return
+    }
+    setRbShowVersions(true)
+    setRbVersions(null)
+    const r = await api
+      .get<{ versions: AssetRevisionDto[] }>(`/assets/${id}/runbook/versions`)
+      .catch(() => null)
+    setRbVersions(r?.versions ?? [])
+  }
+
+  // 运行手册：保存（旧文自动入修订史）
+  async function doSaveRunbook() {
+    if (!detail) return
+    setBusy(true)
+    try {
+      await api.put(`/assets/${detail.id}/runbook`, { md: rbMd, editor: 'console' })
+      setRbEditing(false)
+      await openDetail(detail.id)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '手册保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // 运行手册：回滚到某修订（回滚前正文也会入史）
+  async function doRestoreRunbook(id: string, versionId: string) {
+    setBusy(true)
+    try {
+      await api.post(`/assets/${id}/runbook/restore`, { version_id: versionId, editor: 'console' })
+      await openDetail(id)
+      setRbVersions(null)
+      setRbShowVersions(false)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '回滚失败')
     } finally {
       setBusy(false)
     }
@@ -322,6 +376,11 @@ export default function Assets() {
                             setEIp(detail.ip)
                             setEOs(detail.os)
                             setENote(detail.note)
+                            setEFields(
+                              Object.entries(
+                                (detail.fields ?? {}) as Record<string, unknown>,
+                              ).map(([k, v]) => [k, v == null ? '' : String(v)]),
+                            )
                           }}
                         >
                           编辑
@@ -335,6 +394,98 @@ export default function Assets() {
                           删除
                         </Button>
                       </div>
+                    </div>
+
+                    <div className="border-t border-border/60 pt-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-xs font-medium text-muted-foreground">
+                          运行手册（Markdown · 主动记录）
+                        </div>
+                        <div className="flex gap-1">
+                          {rbEditing ? (
+                            <>
+                              <Button size="sm" disabled={busy} onClick={doSaveRunbook}>
+                                保存手册
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setRbEditing(false)}>
+                                取消
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setRbMd(detail.runbook_md)
+                                  setRbEditing(true)
+                                }}
+                              >
+                                编辑手册
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => void loadVersions(detail.id)}
+                              >
+                                {rbShowVersions ? '收起版本' : '版本史'}
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      {rbEditing ? (
+                        <textarea
+                          className={`${inputCls} h-64 w-full font-mono text-xs`}
+                          value={rbMd}
+                          onChange={(e) => setRbMd(e.target.value)}
+                          placeholder="# 主机手册（Markdown）——硬件 / 网络 / 服务 / 端口 / 变更 / 踩坑"
+                        />
+                      ) : detail.runbook_md ? (
+                        <div className="max-w-none text-sm leading-relaxed">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {detail.runbook_md}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          还没有手册——点「编辑手册」开始记录（硬件/网络/服务/端口/变更/踩坑）。
+                        </p>
+                      )}
+                      {rbShowVersions && (
+                        <div className="mt-2 rounded-md border border-border/60 bg-muted/30 p-2 text-xs">
+                          {rbVersions === null ? (
+                            <span className="text-muted-foreground">加载中…</span>
+                          ) : rbVersions.length === 0 ? (
+                            <span className="text-muted-foreground">
+                              暂无修订——首次改动手册后这里会出现旧文。
+                            </span>
+                          ) : (
+                            <ul className="space-y-1">
+                              {rbVersions.map((v) => (
+                                <li key={v.id} className="space-y-0.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="truncate font-mono">
+                                      {new Date(v.created_at).toLocaleString()} · {v.edited_by}
+                                    </span>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      disabled={busy}
+                                      onClick={() => void doRestoreRunbook(detail.id, v.id)}
+                                    >
+                                      滚到这版
+                                    </Button>
+                                  </div>
+                                  <div className="truncate font-mono text-[11px] text-muted-foreground/80">
+                                    旧文：{v.old_runbook_md.split('\n')[0] || '（空）'}
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="border-t border-border/60 pt-3">
@@ -409,6 +560,51 @@ export default function Assets() {
                       value={eNote}
                       onChange={(e) => setENote(e.target.value)}
                     />
+                    <div className="space-y-1.5 rounded-md border border-border/60 p-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          运维字段（自由 kv：主机名/规格/用途/到期日…）
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setEFields((f) => [...f, ['', '']])}
+                        >
+                          + 字段
+                        </Button>
+                      </div>
+                      {eFields.map(([k, v], i) => (
+                        <div key={i} className="flex gap-1.5">
+                          <input
+                            className={`${inputCls} w-36`}
+                            placeholder="字段名"
+                            value={k}
+                            onChange={(e) =>
+                              setEFields((f) =>
+                                f.map(([fk, fv], j) => (j === i ? [e.target.value, fv] : [fk, fv])),
+                              )
+                            }
+                          />
+                          <input
+                            className={`${inputCls} flex-1`}
+                            placeholder="值"
+                            value={v}
+                            onChange={(e) =>
+                              setEFields((f) =>
+                                f.map(([fk, fv], j) => (j === i ? [fk, e.target.value] : [fk, fv])),
+                              )
+                            }
+                          />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setEFields((f) => f.filter((_, j) => j !== i))}
+                          >
+                            删
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                     <div className="flex gap-2">
                       <Button size="sm" disabled={busy} onClick={doSave}>
                         保存
