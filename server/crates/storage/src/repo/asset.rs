@@ -203,3 +203,73 @@ pub async fn assets_used_by_project(
     .await
     .map_err(Into::into)
 }
+
+/// 当前 runbook 正文（None = 资产不存在）。
+pub async fn get_runbook(pool: &PgPool, id: Uuid) -> StoreResult<Option<String>> {
+    let r: Option<String> = sqlx::query_scalar("SELECT runbook_md FROM assets WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(r)
+}
+
+/// 保存 runbook（同事务：旧文进修订史）。返回 false = 资产不存在。
+pub async fn save_runbook(pool: &PgPool, id: Uuid, md: &str, editor: &str) -> StoreResult<bool> {
+    let mut tx = pool.begin().await?;
+    let cur: Option<String> = sqlx::query_scalar("SELECT runbook_md FROM assets WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let Some(cur) = cur else {
+        return Ok(false);
+    };
+    // 空串 = 从未有手册（初始态），不记为版本——史里只留真实旧文
+    if !cur.is_empty() {
+        sqlx::query(
+            "INSERT INTO asset_revisions (id, asset_id, old_runbook_md, edited_by) \
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(id)
+        .bind(cur)
+        .bind(editor)
+        .execute(&mut *tx)
+        .await?;
+    }
+    sqlx::query("UPDATE assets SET runbook_md = $2, updated_at = now() WHERE id = $1")
+        .bind(id)
+        .bind(md)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(true)
+}
+
+/// 修订史清单（新→旧；old_runbook_md = 该次保存前的正文）。
+pub async fn runbook_versions(
+    pool: &PgPool,
+    id: Uuid,
+) -> StoreResult<Vec<crate::models::asset::AssetRevisionRow>> {
+    sqlx::query_as::<_, crate::models::asset::AssetRevisionRow>(
+        "SELECT id, asset_id, old_runbook_md, edited_by, created_at \
+         FROM asset_revisions WHERE asset_id = $1 ORDER BY created_at DESC",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await
+    .map_err(Into::into)
+}
+
+/// 单条修订（回滚取旧文用）。
+pub async fn get_runbook_version(
+    pool: &PgPool,
+    vid: Uuid,
+) -> StoreResult<Option<crate::models::asset::AssetRevisionRow>> {
+    sqlx::query_as::<_, crate::models::asset::AssetRevisionRow>(
+        "SELECT id, asset_id, old_runbook_md, edited_by, created_at FROM asset_revisions WHERE id = $1",
+    )
+    .bind(vid)
+    .fetch_optional(pool)
+    .await
+    .map_err(Into::into)
+}

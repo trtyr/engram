@@ -25,3 +25,13 @@ pub struct AssetDto {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// runbook 修订史行（0062；新→旧清单用，回滚取 old_runbook_md）。
+#[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct AssetRevisionRow {
+    pub id: Uuid,
+    pub asset_id: Uuid,
+    pub old_runbook_md: String,
+    pub edited_by: String,
+    pub created_at: DateTime<Utc>,
+}

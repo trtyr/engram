@@ -8,6 +8,7 @@
 //! 别名（aliases）是「同一台机器多种写法」的收敛器：`trtyr-mac` / `demotestdeMacBook-Air.local`
 //! 这类历史写法都挂在同一条目下，引用匹配也认别名。
 
+use engram_storage::models::asset::AssetRevisionRow;
 use engram_storage::repo::asset as repo;
 use engram_storage::{PgPool, StoreError};
 use serde::Serialize;
@@ -87,6 +88,8 @@ pub struct AssetDetailDto {
     #[serde(flatten)]
     pub asset: AssetDto,
     pub used_by: Vec<AssetUsageRow>,
+    /// 运行手册正文（Markdown；主动记录——硬件/网络/服务/端口/变更/踩坑）。
+    pub runbook_md: String,
 }
 
 // ---------- Service ----------
@@ -126,13 +129,62 @@ impl AssetService {
         Ok(repo::list_assets(&self.pool, kind, q).await?)
     }
 
-    /// 详情（本体 + 被引用位置）。
+    /// 详情（本体 + 被引用位置 + 运行手册）。
     pub async fn get(&self, id: Uuid) -> Result<AssetDetailDto, AssetError> {
         let asset = repo::get_asset(&self.pool, id)
             .await?
             .ok_or_else(|| AssetError::NotFound(format!("资产 {id} 不存在——先 list 定位")))?;
         let used_by = repo::projects_using(&self.pool, id).await?;
-        Ok(AssetDetailDto { asset, used_by })
+        let runbook_md = repo::get_runbook(&self.pool, id).await?.unwrap_or_default();
+        Ok(AssetDetailDto {
+            asset,
+            used_by,
+            runbook_md,
+        })
+    }
+
+    /// 运行手册：读某资产的 Markdown 正文。
+    pub async fn runbook(&self, id: Uuid) -> Result<String, AssetError> {
+        repo::get_runbook(&self.pool, id)
+            .await?
+            .ok_or_else(|| AssetError::NotFound(format!("资产 {id} 不存在——先 list 定位")))
+    }
+
+    /// 运行手册：保存（同事务旧文进修订史——错改可回滚，变更可追溯）。
+    pub async fn save_runbook(&self, id: Uuid, md: &str, editor: &str) -> Result<(), AssetError> {
+        if !repo::save_runbook(&self.pool, id, md, editor).await? {
+            return Err(AssetError::NotFound(format!(
+                "资产 {id} 不存在——先 list 定位"
+            )));
+        }
+        Ok(())
+    }
+
+    /// 运行手册：修订史清单（新→旧；old_runbook_md = 该次保存前的正文）。
+    pub async fn runbook_versions(&self, id: Uuid) -> Result<Vec<AssetRevisionRow>, AssetError> {
+        // 资产存在性校验（空清单与不存在要可区分）
+        repo::get_runbook(&self.pool, id)
+            .await?
+            .ok_or_else(|| AssetError::NotFound(format!("资产 {id} 不存在——先 list 定位")))?;
+        repo::runbook_versions(&self.pool, id)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// 运行手册：回滚到某修订（把该版旧文存回；当前正文先入史——回滚本身也留痕）。
+    pub async fn restore_runbook(
+        &self,
+        id: Uuid,
+        version_id: Uuid,
+        editor: &str,
+    ) -> Result<(), AssetError> {
+        let rev = repo::get_runbook_version(&self.pool, version_id)
+            .await?
+            .ok_or_else(|| AssetError::NotFound(format!("修订 {version_id} 不存在")))?;
+        if rev.asset_id != id {
+            return Err(AssetError::BadRequest("修订不属于该资产".into()));
+        }
+        self.save_runbook(id, &rev.old_runbook_md, editor).await
     }
 
     /// 按名称或别名解析（项目侧引用的解析入口；大小写不敏感）。
