@@ -68,6 +68,8 @@ pub struct AssetPatchRequest {
     pub ip: Option<String>,
     pub os: Option<String>,
     pub note: Option<String>,
+    /// 轻结构运维字段（整体替换；不传则不动——主机名/规格/用途/到期日等自由 kv）
+    pub fields: Option<serde_json::Value>,
 }
 
 /// 资产类型模板（建档选类型用；与 core 的 ASSET_KINDS 同源）。
@@ -155,6 +157,7 @@ pub async fn update_asset(
             req.ip.as_deref(),
             req.os.as_deref(),
             req.note.as_deref(),
+            req.fields.as_ref(),
         )
         .await
         .map_err(ae)?;

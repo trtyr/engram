@@ -270,6 +270,7 @@ impl AssetService {
         ip: Option<&str>,
         os: Option<&str>,
         note: Option<&str>,
+        fields: Option<&serde_json::Value>,
     ) -> Result<AssetDto, AssetError> {
         let cur = repo::get_asset(&self.pool, id)
             .await?
@@ -321,6 +322,7 @@ impl AssetService {
             ip.map(str::trim).unwrap_or(cur.ip.as_str()),
             os.map(str::trim).unwrap_or(cur.os.as_str()),
             note.map(str::trim).unwrap_or(cur.note.as_str()),
+            fields,
         )
         .await?;
         if n == 0 {

@@ -101,10 +101,11 @@ pub async fn update_asset(
     ip: &str,
     os: &str,
     note: &str,
+    fields: Option<&serde_json::Value>,
 ) -> StoreResult<u64> {
     let res = sqlx::query(
         "UPDATE assets SET kind = $2, name = $3, aliases = $4, ip = $5, os = $6, note = $7, \
-         updated_at = now() WHERE id = $1",
+         fields = COALESCE($8, fields), updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(kind)
@@ -113,6 +114,7 @@ pub async fn update_asset(
     .bind(ip)
     .bind(os)
     .bind(note)
+    .bind(fields)
     .execute(pool)
     .await?;
     Ok(res.rows_affected())
