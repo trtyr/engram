@@ -290,6 +290,7 @@ const SCOPE_LABELS: Record<string, string> = {
   wiki: 'Wiki',
   codegraph: '代码图谱',
   project: '项目',
+  assets: '资产',
   credentials: '凭据（机密台账）',
   todos: '待办',
   llm: 'LLM 网关',
