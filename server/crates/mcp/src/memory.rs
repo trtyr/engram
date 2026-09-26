@@ -29,6 +29,44 @@ pub struct MemoryDistillResultParams {
     pub session_id: String,
 }
 
+// ---------- EN-235 六动词（存找翻改审忘）——mode 路由到既有动作，其余参数同名平铺 ----------
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryRecallParams {
+    /// 子操作
+    #[schemars(
+        description = "找=记忆检索总入口。mode：\"search\"（默认，混合检索）/ \"context\"（开场上下文包）/ \"entities\"（实体清单）/ \"kv_get\"（按 key 取精确值，需 original scope）/ \"kv_search\"（KV 字面量子串）。其余参数与原动作同名平铺（如 search 的 query）。"
+    )]
+    pub mode: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryBrowseParams {
+    /// 子操作
+    #[schemars(
+        description = "翻=清单浏览。mode：\"atoms\"（默认，原子清单）/ \"sessions\"（会话清单）/ \"session\"（单会话详情，需 session_id）/ \"kv\"（KV 全清单，需 original scope）。其余参数与原动作同名平铺。"
+    )]
+    pub mode: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryReviseParams {
+    /// 子操作
+    #[schemars(
+        description = "改=纠错与画像修订。mode：\"correct\"（默认，纠正原子——取代链留痕）/ \"persona\"（画像分面编辑，编辑后蒸馏不覆盖）。其余参数与原动作同名平铺。"
+    )]
+    pub mode: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct MemoryReviewParams {
+    /// 子操作
+    #[schemars(
+        description = "审=蒸馏与复核。mode：\"distill\"（默认，触发会话蒸馏）/ \"result\"（取蒸馏结果，需 session_id）/ \"confirm\"（确认候选原子）/ \"discard\"（废弃候选原子）。其余参数与原动作同名平铺。"
+    )]
+    pub mode: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SearchParams {
     /// 检索词
@@ -224,10 +262,12 @@ impl EngramMcpServer {
     // schema）是 dispatch::action_docs 的静态表——L0 目录、help 手册、管理台三方同源。
     // scope 检查在各域实现方法内原样保留；这里只做 help 渲染与 action 分发。
 
-    /// 用户记忆域（单一入口）。记忆四层：L0 会话 →（蒸馏）→ L1 原子 → L2 场景 → L3 画像，
-    /// 实体坐标系横向串联。开场用 action="context" 装载，定向回忆用 "search"，
-    /// 收尾用 "write_session" 写入；遗忘用 "forget"。
-    /// 速记：remember 正文字段名是 text；strength=fact 直写原话限 500 字，默认蒸馏路径成段内容也可，更长走 write_session。操作全景：action="help"。
+    /// 用户记忆域（单一入口）。六动词（EN-235，2026-09-26）：存 remember / 找 recall /
+    /// 翻 browse / 改 revise / 审 review / 忘 forget——实现分层（L0-L3/KV）藏进 mode 参数。
+    /// 开场 recall(mode="context") 装载，定向回忆 recall(mode="search")，收尾
+    /// remember(mode="session") 写入；遗忘 forget（void/erase/restore 三档）。
+    /// 旧动作名（search/context/write_session/kv_* 等 18 个）全部保留为别名，行为不变。
+    /// 速记：remember 正文字段名是 text。操作全景：action="help"。
     #[tool(
         name = "memory",
         annotations(
@@ -243,211 +283,284 @@ impl EngramMcpServer {
         ctx: RequestContext<RoleServer>,
         Parameters(call): Parameters<dispatch::DomainCall>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.memory_dispatch(ctx, call.action, call.args).await
+    }
+
+    /// EN-235 六动词统一分发：存 remember / 找 recall / 翻 browse / 改 revise / 审 review /
+    /// 忘 forget——六动词按 mode 归一到既有动作实现（实现分层 L0-L3/KV 藏进 mode 参数）；
+    /// 旧动作名全部保留为别名，平滑迁移不硬切。KV 门（original scope）与 help 在此统一。
+    pub(crate) async fn memory_dispatch(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        action: String,
+        args: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
-        // 工具级 gate 按 action 分流（收录哲学线：原件独立）——
-        // kv_* 要求 original scope（凭据/精确值读写权，memory 不再顺手携带）；
-        // 其余动作要求 memory scope。各 handler 内部还有二次校验（防御性）。
         const KV_ACTIONS: [&str; 4] = ["kv_put", "kv_get", "kv_list", "kv_search"];
-        if KV_ACTIONS.contains(&call.action.as_str()) {
+        if KV_ACTIONS.contains(&action.as_str()) {
             require_original(&p)?;
         } else {
             require_memory(&p)?;
         }
-        if call.action == "help" {
+        // 六动词 mode → 底层动作（参数原样透传给既有实现，未知 mode 可行动报错）。
+        let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+        let unknown_mode = |verb: &str, allowed: &str| {
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("{verb} mode=\"{mode}\" 未知。可用：{allowed}"),
+            )
+        };
+        let resolved: String = match action.as_str() {
+            "remember" => match mode {
+                "" | "atom" => "remember".into(),
+                "session" => "write_session".into(),
+                "session_append" => "append_session".into(),
+                "kv" => "kv_put".into(),
+                _ => {
+                    return Err(unknown_mode(
+                        "remember",
+                        "atom（默认，一句话记忆）/ session（成段会话）/ session_append（续写会话）/ kv（精确值逐字保存）",
+                    ));
+                }
+            },
+            "recall" => match mode {
+                "" | "search" => "search".into(),
+                "context" => "context".into(),
+                "entities" => "entities".into(),
+                "kv_get" => "kv_get".into(),
+                "kv_search" => "kv_search".into(),
+                _ => {
+                    return Err(unknown_mode(
+                        "recall",
+                        "search（默认）/ context（开场装载）/ entities（实体清单）/ kv_get / kv_search",
+                    ));
+                }
+            },
+            "browse" => match mode {
+                "" | "atoms" => "list_atoms".into(),
+                "sessions" => "list_sessions".into(),
+                "session" => "get_session".into(),
+                "kv" => "kv_list".into(),
+                _ => {
+                    return Err(unknown_mode(
+                        "browse",
+                        "atoms（默认）/ sessions / session / kv",
+                    ));
+                }
+            },
+            "revise" => match mode {
+                "" | "correct" => "correct".into(),
+                "persona" => "persona_edit".into(),
+                _ => return Err(unknown_mode("revise", "correct（默认）/ persona")),
+            },
+            "review" => match mode {
+                "" | "distill" => "distill".into(),
+                "result" => "distill_result".into(),
+                "confirm" => "confirm".into(),
+                "discard" => "discard".into(),
+                _ => {
+                    return Err(unknown_mode(
+                        "review",
+                        "distill（默认）/ result / confirm / discard",
+                    ));
+                }
+            },
+            _ => action.clone(),
+        };
+        if resolved != action && KV_ACTIONS.contains(&resolved.as_str()) {
+            require_original(&p)?; // 六动词走 kv_* 底层动作同样要 original scope
+        }
+        if resolved == "help" {
             let cfg = load_config(&self.state.pool).await;
             return ok_json(dispatch::render_manual("memory", &cfg.disabled_tools));
         }
-        match call.action.as_str() {
+        match resolved.as_str() {
             "context" => {
                 self.memory_context(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "context", call.args)?),
+                    Parameters(dispatch::from_args("memory", "context", args)?),
                 )
                 .await
             }
             "search" => {
                 self.memory_search(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "search", call.args)?),
+                    Parameters(dispatch::from_args("memory", "search", args)?),
                 )
                 .await
             }
             "remember" => {
                 self.memory_remember(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "remember", call.args)?),
+                    Parameters(dispatch::from_args("memory", "remember", args)?),
                 )
                 .await
             }
             "correct" => {
                 self.memory_correct(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "correct", call.args)?),
+                    Parameters(dispatch::from_args("memory", "correct", args)?),
                 )
                 .await
             }
             "confirm" => {
                 self.memory_confirm(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "confirm", call.args)?),
+                    Parameters(dispatch::from_args("memory", "confirm", args)?),
                 )
                 .await
             }
             "discard" => {
                 self.memory_discard(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "discard", call.args)?),
+                    Parameters(dispatch::from_args("memory", "discard", args)?),
                 )
                 .await
             }
             "persona_edit" => {
                 self.memory_persona_edit(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "persona_edit", call.args)?),
+                    Parameters(dispatch::from_args("memory", "persona_edit", args)?),
                 )
                 .await
             }
             "distill" => {
                 self.memory_distill(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "distill", call.args)?),
+                    Parameters(dispatch::from_args("memory", "distill", args)?),
                 )
                 .await
             }
             "write_session" => {
                 self.memory_write_session(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "write_session", call.args)?),
+                    Parameters(dispatch::from_args("memory", "write_session", args)?),
                 )
                 .await
             }
             "append_session" => {
                 self.memory_append_session(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "append_session", call.args)?),
+                    Parameters(dispatch::from_args("memory", "append_session", args)?),
                 )
                 .await
             }
             "list_sessions" => {
                 self.memory_list_sessions(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "list_sessions", call.args)?),
+                    Parameters(dispatch::from_args("memory", "list_sessions", args)?),
                 )
                 .await
             }
             "get_session" => {
                 self.memory_get_session(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "get_session", call.args)?),
+                    Parameters(dispatch::from_args("memory", "get_session", args)?),
                 )
                 .await
             }
             "distill_result" => {
                 self.memory_distill_result(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "distill_result", call.args)?),
+                    Parameters(dispatch::from_args("memory", "distill_result", args)?),
                 )
                 .await
             }
             "kv_put" => {
                 self.memory_kv_put(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "kv_put", call.args)?),
+                    Parameters(dispatch::from_args("memory", "kv_put", args)?),
                 )
                 .await
             }
             "kv_get" => {
                 self.memory_kv_get(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "kv_get", call.args)?),
+                    Parameters(dispatch::from_args("memory", "kv_get", args)?),
                 )
                 .await
             }
             "kv_list" => {
                 self.memory_kv_list(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "kv_list", call.args)?),
+                    Parameters(dispatch::from_args("memory", "kv_list", args)?),
                 )
                 .await
             }
             "kv_search" => {
                 self.memory_kv_search(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "kv_search", call.args)?),
+                    Parameters(dispatch::from_args("memory", "kv_search", args)?),
                 )
                 .await
             }
             "list_atoms" => {
                 self.memory_list_atoms(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "list_atoms", call.args)?),
+                    Parameters(dispatch::from_args("memory", "list_atoms", args)?),
                 )
                 .await
             }
             "scenarios_list" => {
                 self.memory_scenarios_list(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "scenarios_list", call.args)?),
+                    Parameters(dispatch::from_args("memory", "scenarios_list", args)?),
                 )
                 .await
             }
             "persona_get" => {
                 self.memory_persona_get(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "persona_get", call.args)?),
+                    Parameters(dispatch::from_args("memory", "persona_get", args)?),
                 )
                 .await
             }
             "atom_duplicates" => {
                 self.memory_atom_duplicates(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "atom_duplicates", call.args)?),
+                    Parameters(dispatch::from_args("memory", "atom_duplicates", args)?),
                 )
                 .await
             }
             "entity_duplicates" => {
                 self.memory_entity_duplicates(
                     ctx,
-                    Parameters(dispatch::from_args(
-                        "memory",
-                        "entity_duplicates",
-                        call.args,
-                    )?),
+                    Parameters(dispatch::from_args("memory", "entity_duplicates", args)?),
                 )
                 .await
             }
             "entities" => {
                 self.memory_entities(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "entities", call.args)?),
+                    Parameters(dispatch::from_args("memory", "entities", args)?),
                 )
                 .await
             }
             "forget" => {
                 self.memory_forget(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "forget", call.args)?),
+                    Parameters(dispatch::from_args("memory", "forget", args)?),
                 )
                 .await
             }
             "atom_archive" => {
                 self.memory_atom_archive(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "atom_archive", call.args)?),
+                    Parameters(dispatch::from_args("memory", "atom_archive", args)?),
                 )
                 .await
             }
             "kv_delete" => {
                 self.memory_kv_delete(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "kv_delete", call.args)?),
+                    Parameters(dispatch::from_args("memory", "kv_delete", args)?),
                 )
                 .await
             }
             "entity_merge" => {
                 self.memory_entity_merge(
                     ctx,
-                    Parameters(dispatch::from_args("memory", "entity_merge", call.args)?),
+                    Parameters(dispatch::from_args("memory", "entity_merge", args)?),
                 )
                 .await
             }
