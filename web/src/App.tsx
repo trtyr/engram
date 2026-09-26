@@ -17,7 +17,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
-  Puzzle,
+  KeyRound,
   Search,
   Settings as SettingsIcon,
   Ticket,
@@ -43,7 +43,7 @@ const CodeGraphImport = lazy(() => import('@/features/CodeGraphImport'))
 const Projects = lazy(() => import('@/features/Projects'))
 const ProjectDetail = lazy(() => import('@/features/ProjectDetail'))
 const Assets = lazy(() => import('@/features/Assets'))
-const Skills = lazy(() => import('@/features/Skills'))
+const Credentials = lazy(() => import('@/features/Credentials'))
 const Todos = lazy(() => import('@/features/Todos'))
 const Tickets = lazy(() => import('@/features/Tickets'))
 const Jobs = lazy(() => import('@/features/Jobs'))
@@ -75,7 +75,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
       { to: '/codegraph', label: '代码图谱', icon: Waypoints },
       { to: '/projects', label: '项目', icon: FolderKanban },
       { to: '/assets', label: '资产', icon: HardDrive },
-      { to: '/skills', label: '技能', icon: Puzzle },
+      { to: '/credentials', label: '凭据', icon: KeyRound },
       { to: '/todos', label: '待办', icon: ListTodo },
       { to: '/tickets', label: '工单', icon: Ticket },
     ],
@@ -334,7 +334,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/assets" element={<Assets />} />
-              <Route path="/skills" element={<Skills />} />
+              <Route path="/credentials" element={<Credentials />} />
               <Route path="/todos" element={<Todos />} />
               <Route path="/tickets" element={<Tickets />} />
               <Route path="/jobs" element={<Jobs />} />

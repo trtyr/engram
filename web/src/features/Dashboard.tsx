@@ -9,7 +9,6 @@ import {
   type Persona,
   type Scenario,
   type Session,
-  type SkillSummaryDto,
   type UsageRow,
   type WikiPage,
 } from '@/lib/api'
@@ -154,7 +153,6 @@ export default function Dashboard() {
   const [cg, setCg] = useState<{ id: string }[] | null>(null)
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [usage, setUsage] = useState<UsageRow[] | null>(null)
-  const [skills, setSkills] = useState<SkillSummaryDto[] | null>(null)
   const [openTodos, setOpenTodos] = useState<number | null>(null)
   // 复用侧栏轮询源（10s，页面隐藏自动跳过）：失败徽章 + 蒸馏脉冲与全局状态一致
   const { failed, distilling } = useSystemStatus()
@@ -175,7 +173,6 @@ export default function Dashboard() {
     api.get<{ id: string }[]>('/codegraph/projects').then(setCg).catch(() => setCg([]))
     api.get<Job[]>('/jobs?limit=8').then(setJobs).catch(() => setJobs([]))
     api.get<UsageRow[]>('/llm/usage').then(setUsage).catch(() => setUsage([]))
-    api.get<SkillSummaryDto[]>('/skills').then(setSkills).catch(() => setSkills([]))
     api
       .get<{ status: string }[]>('/todos')
       .then((t) => setOpenTodos(t.filter((x) => x.status === 'open').length))
@@ -227,11 +224,6 @@ export default function Dashboard() {
     },
     { label: 'Wiki 页面', n: wikiPages.length.toLocaleString(), sub: `共 ${core.pages.length}` },
     { label: '代码图谱项目', n: (cg?.length ?? 0).toLocaleString(), sub: '已注册' },
-    {
-      label: '技能',
-      n: (skills?.length ?? 0).toLocaleString(),
-      sub: `启用 ${skills?.filter((s) => s.enabled).length ?? 0}`,
-    },
     {
       label: '待办（进行中）',
       n: (openTodos ?? 0).toLocaleString(),

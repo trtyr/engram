@@ -217,8 +217,8 @@ function ToolDetail({
         <div className="rounded-md border border-border/60 bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
           <p className="font-medium text-foreground">跨域工具——无域内操作目录</p>
           <p className="mt-1">
-            它不是域，是单个全局检索工具：一次查询并发 memory / wiki / skills / todos / projects
-            五域，各回 top-k 摘要——AI 不确定信息在哪个域时的兜底入口。命中后 AI 再用对应域工具精确取用。
+            它不是域，是单个全局检索工具：一次查询并发 memory / wiki / todos / projects
+            四域，各回 top-k 摘要——AI 不确定信息在哪个域时的兜底入口。命中后 AI 再用对应域工具精确取用。
           </p>
           <p className="mt-1">整个工具只有一个开关（上方工具行右侧）；没有 action 级开关，所以这里没有计数与操作列表。</p>
         </div>
@@ -239,7 +239,6 @@ const DOMAIN_LABELS: Record<string, string> = {
   wiki: 'Wiki',
   codegraph: '代码图谱',
   projects: '项目',
-  skills: '技能',
   todos: '待办',
   tickets: '工单',
   jobs: '异步任务',

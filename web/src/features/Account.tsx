@@ -284,13 +284,13 @@ function uaLabel(ua: string | null): string {
   return os ? `${browser} · ${os}` : browser
 }
 
-/** scope 中文标签（与后端 SCOPES 十一项对齐）。 */
+/** scope 中文标签（与后端 SCOPES 十二项对齐；skills 已随域裁撤移除）。 */
 const SCOPE_LABELS: Record<string, string> = {
   memory: '记忆',
   wiki: 'Wiki',
   codegraph: '代码图谱',
   project: '项目',
-  skills: '技能',
+  credentials: '凭据（机密台账）',
   todos: '待办',
   llm: 'LLM 网关',
   erase: '擦除（不可逆删除）',

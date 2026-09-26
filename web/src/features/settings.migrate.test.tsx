@@ -23,7 +23,6 @@ vi.mock('@/lib/api', () => {
       if (p === '/migrate/import') {
         return {
           memory: { sessions: { imported: 1, skipped: 0 } },
-          skills: { skills: { imported: 2, skipped: 1 }, files: { imported: 3 } },
         }
       }
       if (p === '/migrate/pull') {
@@ -87,7 +86,6 @@ describe('设置页 · 数据迁移', () => {
     })
     await waitFor(() => expect(screen.getByText('导入报告')).toBeTruthy())
     expect(screen.getByText(/"imported": 1/)).toBeTruthy()
-    expect(screen.getByText(/"imported": 2/)).toBeTruthy()
   })
 
   it('远程拉取：空表单按钮禁用；填写后 POST /migrate/pull 并展示报告', async () => {
