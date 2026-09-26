@@ -14,8 +14,9 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 mod assets;
-mod codegraph;
 #[allow(dead_code)]
+mod circles;
+mod codegraph;
 mod credentials;
 pub mod dispatch;
 mod guard;
@@ -47,8 +48,9 @@ mod wiki_ops;
 // 架构治理 2026-09-20：lib.rs 只留 crate 装配（类型/构造/router 合并/再导出），
 // 各域工具面在各自模块内（`#[tool_router(router = <mod>_router)]` + `routes_<mod>()`）。
 pub(crate) use assets::*;
-pub(crate) use codegraph::*;
 #[allow(unused_imports)]
+pub(crate) use circles::*;
+pub(crate) use codegraph::*;
 pub(crate) use credentials::*;
 pub(crate) use guard::*;
 pub(crate) use memory::*;
@@ -101,6 +103,7 @@ impl EngramMcpServer {
         // EN-252：skills 域裁撤——工具路由注销（模块与存储层保留供回滚）
         tool_router.merge(crate::wiki_ops::routes_wiki_ops());
         tool_router.merge(crate::credentials::routes_credentials());
+        tool_router.merge(crate::circles::routes_circles());
         tool_router.merge(crate::projects::routes_projects());
         tool_router.merge(crate::assets::routes_assets());
         tool_router.merge(crate::codegraph::routes_codegraph());

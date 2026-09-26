@@ -122,6 +122,15 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "delete", true, "删除资产（被项目位置引用的会被拒绝——先解绑，不可逆）" => crate::AssetDeleteParams
         ],
         // EN-252：skills 域裁撤（原 action_docs 块移除；存量已迁 wiki/projects/本地 git）
+        "circles" => action_docs![
+            "graph", false, "实体坐标系全景（nodes+共现边+类型化关系）" => crate::CirclesGraphParams;
+            "entity", false, "实体详情（档案+原子时间线+关系+场景）" => crate::CirclesEntityParams;
+            "create", false, "建实体（同名同类型幂等返回已有）" => crate::CirclesCreateParams;
+            "update", false, "改实体名/摘要（摘要手编留修订史）" => crate::CirclesUpdateParams;
+            "relate", true, "建类型化关系（member_of/located_in/works_on/part_of/related_to；同向同类型 upsert）" => crate::CirclesRelateParams;
+            "unrelate", true, "删关系" => crate::CirclesUnrelateParams;
+            "relations", false, "实体关系清单（双向）" => crate::CirclesRelationsParams
+        ],
         "credentials" => action_docs![
             "put", true, "写入/更新凭据（值加密落库；同名换值清零旧取用审计）" => crate::CredentialPutParams;
             "get", false, "按名取用（返回直接可用值，取用留审计痕）" => crate::CredentialGetParams;
@@ -206,6 +215,7 @@ pub const DOMAIN_TOOLS: &[&str] = &[
     "projects",
     "assets",
     "credentials",
+    "circles",
     "wiki",
     "todos",
     "tickets",
@@ -372,6 +382,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "file_delete"
         ) | ("assets", "add" | "update" | "delete")
             | ("credentials", "put" | "delete")
+            | ("circles", "create" | "update" | "relate" | "unrelate")
             | (
                 "wiki",
                 "write_page"
@@ -434,6 +445,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                 | "location_get"
         ) | ("assets", "kinds" | "list" | "get")
             | ("credentials", "list" | "get" | "reads")
+            | ("circles", "graph" | "entity" | "relations")
             | (
                 "wiki",
                 "search"

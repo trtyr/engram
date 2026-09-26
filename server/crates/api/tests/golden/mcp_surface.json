@@ -26,6 +26,22 @@
       "name": "assets"
     },
     {
+      "description": "圈子域（实体坐标系读写，EN-229）：实体图全景 graph、实体详情 entity、建实体 create、类型化关系 relate/unrelate、改档案 update、关系清单 relations。操作全景：action=\"help\"。\n\n【本域操作 7 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- graph：实体坐标系全景（nodes+共现边+类型化关系）\n- entity：实体详情（档案+原子时间线+关系+场景）\n- create：建实体（同名同类型幂等返回已有）\n- update：改实体名/摘要（摘要手编留修订史）\n- relate：【破坏性】建类型化关系（member_of/located_in/works_on/part_of/related_to；同向同类型 upsert）\n- unrelate：【破坏性】删关系\n- relations：实体关系清单（双向）",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "default": "",
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "circles"
+    },
+    {
       "annotations": {
         "destructiveHint": true,
         "idempotentHint": false,
@@ -49,7 +65,7 @@
       "name": "codegraph"
     },
     {
-      "description": "凭据域（机密值的一等台账，EN-234）：按名存取 API Key/Token——值静态加密落库、按名 get 返回直接可用值且每次取用留审计痕、list 只回台账不回值。操作全景：action=\"help\"。",
+      "description": "凭据域（机密值的一等台账，EN-234）：按名存取 API Key/Token——值静态加密落库、按名 get 返回直接可用值且每次取用留审计痕、list 只回台账不回值。操作全景：action=\"help\"。\n\n【本域操作 5 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- put：【破坏性】写入/更新凭据（值加密落库；同名换值清零旧取用审计）\n- get：按名取用（返回直接可用值，取用留审计痕）\n- list：台账列表（元数据，永不回显值）\n- reads：取用审计流水（谁/何时，最近在前）\n- delete：【破坏性】删除凭据（级联清取用审计，不可逆）",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,

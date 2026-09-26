@@ -11,6 +11,7 @@ pub(crate) fn tool_scope(name: &str) -> &'static str {
         "projects" => "project",
         "assets" => "assets", // 资产台账域：独立一等对象（2026-09-21 新增）
         "credentials" => "credentials", // 凭据域：机密值一等台账（EN-234，2026-09-26 新增）
+        "circles" => "memory", // 圈子域：实体坐标系读写（EN-229）——底座 memory 同表，scope 不分家（todos/tickets 先例）
         "memory" => "memory",
         "wiki" => "wiki",
         "todos" | "tickets" => "todos", // 工单域与待办同 scope（同表同底座，权限不分家）
@@ -24,6 +25,7 @@ pub(crate) fn flat_tool_scope(other: &str) -> &'static str {
     match other.split('_').next() {
         Some("project") => "project",
         Some("credentials") => "credentials",
+        Some("circles") => "memory",
         Some("wiki") => "wiki",
         Some("codegraph") => "codegraph",
         Some("llm") => "llm",
