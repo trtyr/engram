@@ -18,6 +18,7 @@ export default function Todos() {
   const [rows, setRows] = useState<Todo[] | null>(null)
   const [view, setView] = useState<View>('active')
   const [priority, setPriority] = useState('')
+  const [due, setDue] = useState('') // overdue=已过期 today=今天到期
   const [tag, setTag] = useState('')
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
@@ -39,10 +40,11 @@ export default function Todos() {
     // limit 拉满（服务端默认 200 会静默截断）——翻页在前端切
     const parts = [`kind=todo`, `status=${status}`, `limit=1000`]
     if (priority) parts.push(`priority=${priority}`)
+    if (due) parts.push(`due=${due}`)
     if (tag.trim()) parts.push(`tag=${encodeURIComponent(tag.trim())}`)
     if (q.trim()) parts.push(`q=${encodeURIComponent(q.trim())}`)
     return parts.join('&')
-  }, [view, priority, tag, q])
+  }, [view, priority, due, tag, q])
 
   const load = () =>
     api
@@ -165,6 +167,16 @@ export default function Todos() {
           <option value="high">高</option>
           <option value="normal">普通</option>
           <option value="low">低</option>
+        </select>
+        <select
+          className={selectCls}
+          aria-label="到期筛选"
+          value={due}
+          onChange={(e) => setDue(e.target.value)}
+        >
+          <option value="">全部到期</option>
+          <option value="overdue">已逾期</option>
+          <option value="today">今天到期</option>
         </select>
         <select
           className={selectCls}
