@@ -410,7 +410,7 @@ pub async fn count(
 
 // ---------- 工单活动时间线（ticket_events，0063） ----------
 
-#[derive(sqlx::FromRow, serde::Serialize)]
+#[derive(sqlx::FromRow, serde::Serialize, Debug)]
 pub struct TicketEventRow {
     pub id: Uuid,
     pub ticket_id: Uuid,

@@ -193,6 +193,43 @@ pub async fn todo_links(
     Ok(Json(items))
 }
 
+/// 活动时间线（状态流转 event + 评论 comment，升序）。
+#[utoipa::path(get, path = "/todos/{id}/events", responses((status = 200)))]
+pub async fn todo_events(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_todos_read(&principal)?;
+    let rows = svc(&state).events(id).await.map_err(te)?;
+    Ok(Json(serde_json::json!({ "events": rows })))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct TicketCommentRequest {
+    pub text: String,
+}
+
+/// 工单评论（入活动时间线）。
+#[utoipa::path(post, path = "/todos/{id}/events", request_body = TicketCommentRequest,
+    responses((status = 201)))]
+pub async fn todo_comment(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    axum::Json(req): axum::Json<TicketCommentRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    require_todos(&principal)?;
+    svc(&state)
+        .comment(id, &req.text, "console")
+        .await
+        .map_err(te)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "commented": true })),
+    ))
+}
+
 /// 更新待办（部分字段，None 不动；status=done 自动记 done_at）。
 #[utoipa::path(put, path = "/todos/{id}", request_body = UpdateTodoRequest,
     responses((status = 200, body = TodoDto), (status = 404, body = crate::error::ErrorEnvelope)))]
@@ -220,6 +257,7 @@ pub async fn update_todo(
                 req.due_at,
                 req.project_hint.as_ref().map(|o| o.as_deref()),
                 req.tags.as_deref(),
+                "console",
             )
             .await
             .map_err(te)?,

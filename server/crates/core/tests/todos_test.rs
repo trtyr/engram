@@ -55,6 +55,8 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap();
@@ -77,6 +79,8 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap();
@@ -99,6 +103,8 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap();
@@ -119,6 +125,8 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap();
@@ -203,6 +211,8 @@ async fn nul_bytes_are_rejected() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .expect_err("update NUL 应被拒");
@@ -250,7 +260,9 @@ async fn cursor_pagination_walks_all_without_loss() {
                     None,
                     None,
                     None,
-                )
+                
+            "test",
+        )
                 .await
                 .unwrap(),
             None => t,
@@ -373,6 +385,8 @@ async fn kind_rejects_foreign_status() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap_err();
@@ -409,6 +423,8 @@ async fn kind_rejects_foreign_status() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap_err();
@@ -480,6 +496,8 @@ async fn ticket_state_machine_and_resolution_gate() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap();
@@ -501,6 +519,8 @@ async fn ticket_state_machine_and_resolution_gate() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap_err();
@@ -522,6 +542,8 @@ async fn ticket_state_machine_and_resolution_gate() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap();
@@ -544,6 +566,8 @@ async fn ticket_state_machine_and_resolution_gate() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap();
@@ -587,6 +611,8 @@ async fn kind_conversion_todo_to_ticket() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await
         .unwrap();
@@ -728,6 +754,8 @@ async fn short_no_and_links() {
             None,
             None,
             None,
+        
+            "test",
         )
         .await;
     // t 是 todo——priority 正常更新不受影响
@@ -806,7 +834,9 @@ async fn list_supports_ticket_status_and_severity_filters() {
         None,
         None,
         None,
-    )
+    
+            "test",
+        )
     .await
     .unwrap();
     let confirmed = svc
@@ -924,7 +954,9 @@ async fn list_order_is_open_first_then_updated_at_desc() {
         None,
         None,
         None,
-    )
+    
+            "test",
+        )
     .await
     .unwrap();
     svc.update(
@@ -942,7 +974,9 @@ async fn list_order_is_open_first_then_updated_at_desc() {
         None,
         None,
         None,
-    )
+    
+            "test",
+        )
     .await
     .unwrap();
     svc.update(
@@ -960,7 +994,9 @@ async fn list_order_is_open_first_then_updated_at_desc() {
         None,
         None,
         None,
-    )
+    
+            "test",
+        )
     .await
     .unwrap();
 
@@ -1111,6 +1147,8 @@ async fn todos_update_fields_and_overdue_filter() {
             Some(None),                             // due_at 清除
             None,                                   // project_hint
             Some(&["ops".into(), "urgent".into()]), // tags
+        
+            "test",
         )
         .await
         .unwrap();
@@ -1135,7 +1173,9 @@ async fn todos_update_fields_and_overdue_filter() {
         Some(Some(Utc::now() - chrono::Duration::hours(2))), // due_at
         None,
         None, // project_hint/tags
-    )
+    
+            "test",
+        )
     .await
     .unwrap();
 
@@ -1213,7 +1253,9 @@ async fn todos_update_fields_and_overdue_filter() {
         Some(Some(Utc::now() + chrono::Duration::hours(1))), // due_at → 今天内
         None,
         None, // project_hint/tags
-    )
+    
+            "test",
+        )
     .await
     .unwrap();
     let today = svc
@@ -1262,7 +1304,9 @@ async fn todos_update_fields_and_overdue_filter() {
         None,
         None,
         None, // due_at/project_hint/tags
-    )
+    
+            "test",
+        )
     .await
     .unwrap();
     let od4 = svc
@@ -1282,4 +1326,59 @@ async fn todos_update_fields_and_overdue_filter() {
     assert_eq!(od4.len(), 1, "done 的过期项应退出 overdue");
     assert_eq!(od4[0].id, earlier.id);
     let _ = nodue; // 无 due 项全程不参与 due 过滤（仅存在性）
+}
+
+#[tokio::test]
+async fn ticket_status_flow_and_comments_timeline() {
+    let (_pool, svc, _pg) = setup().await;
+
+    let t = svc
+        .create(
+            "T 工单", "body", "ticket", "", Some("P2"), "症状", "复现", "验收", &[],
+            None, None,
+        )
+        .await
+        .unwrap();
+    assert!(svc.events(t.id).await.unwrap().is_empty());
+
+    // 状态流转 open→confirmed→in_progress：每次真实变化一条 event
+    for s in ["confirmed", "in_progress"] {
+        svc.update(
+            t.id,
+            None, None, None, None, Some(s),
+            None, None, None, None, None, None, None, None,
+            "test",
+        )
+        .await
+        .unwrap();
+    }
+
+    // 同状态重复 update 不留痕
+    svc.update(
+        t.id,
+        None, None, None, None, Some("in_progress"),
+        None, None, None, None, None, None, None, None,
+        "test",
+    )
+    .await
+    .unwrap();
+
+    // 评论入流
+    svc.comment(t.id, "第一条评论", "tester").await.unwrap();
+
+    // 时序正确：升序 event,event,comment；payload from/to 齐全；created_at 单调不减
+    let ev = svc.events(t.id).await.unwrap();
+    assert_eq!(ev.len(), 3, "两次流转+一条评论应恰好 3 条: {ev:?}");
+    assert_eq!(ev[0].kind, "event");
+    assert_eq!(ev[0].payload["from"], "open");
+    assert_eq!(ev[0].payload["to"], "confirmed");
+    assert_eq!(ev[1].kind, "event");
+    assert_eq!(ev[1].payload["from"], "confirmed");
+    assert_eq!(ev[1].payload["to"], "in_progress");
+    assert_eq!(ev[2].kind, "comment");
+    assert_eq!(ev[2].payload["text"], "第一条评论");
+    assert_eq!(ev[2].actor, "tester");
+    for w in ev.windows(2) {
+        assert!(w[0].created_at <= w[1].created_at, "时间线应升序");
+    }
 }

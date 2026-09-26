@@ -500,6 +500,10 @@ fn todos_routes() -> Router<AppState> {
                 .delete(todos_api::delete_todo),
         )
         .route("/todos/{id}/links", get(todos_api::todo_links))
+        .route(
+            "/todos/{id}/events",
+            get(todos_api::todo_events).post(todos_api::todo_comment),
+        )
         .route("/todos/export", get(todos_api::export_todos))
 }
 
