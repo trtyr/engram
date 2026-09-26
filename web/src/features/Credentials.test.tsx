@@ -3,10 +3,14 @@
  * 台账两条存量凭据（不含值）→ 取用流水可见 → put 换值后流水清零语义可复现。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import Credentials from './Credentials'
 
-const state = {
+const state: {
+  rows: Array<Record<string, unknown>>
+  reads: Record<string, Array<{ id: string; credential_id: string; reader: string; read_at: string }>>
+  revealed: string
+} = {
   rows: [
     {
       id: 'c1',
@@ -50,7 +54,11 @@ vi.mock('@/lib/api', () => {
           { id: `r-${Math.random()}`, credential_id: 'x', reader: 'console', read_at: '2026-09-26T09:30:00Z' },
         ]
         state.revealed = `sk-value-of-${name}`
-        return { name, value: state.revealed, read_count: (state.rows.find((r) => r.name === name)?.read_count ?? 0) + 1 }
+        return {
+          name,
+          value: state.revealed,
+          read_count: (Number(state.rows.find((r) => r.name === name)?.read_count) || 0) + 1,
+        }
       }
       return {}
     }),
