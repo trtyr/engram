@@ -359,6 +359,28 @@ function TicketDetail({
 }) {
   const doneish = TICKET_DONEISH.includes(t.status)
   const step = TICKET_NEXT[t.status]
+
+  // 活动时间线（ticket_events）：状态流转自动留痕 + 评论
+  const [events, setEvents] = useState<TicketEvent[] | null>(null)
+  const [cText, setCText] = useState('')
+  useEffect(() => {
+    setEvents(null)
+    api
+      .get<{ events: TicketEvent[] }>(`/todos/${t.id}/events`)
+      .then((r) => setEvents(r.events))
+      .catch(() => setEvents([]))
+  }, [t.id])
+  async function postComment() {
+    const text = cText.trim()
+    if (!text) return
+    await api.post(`/todos/${t.id}/events`, { text })
+    setCText('')
+    api
+      .get<{ events: TicketEvent[] }>(`/todos/${t.id}/events`)
+      .then((r) => setEvents(r.events))
+      .catch(() => {})
+  }
+
   return (
     <Card className="h-fit min-w-0 p-4 lg:sticky lg:top-0">
       {/* 头：短号 + 关闭 */}
@@ -470,8 +492,49 @@ function TicketDetail({
           <Trash2 className="size-3.5" aria-hidden="true" />
         </Button>
       </div>
+
+      {/* 活动时间线：event 自动留痕 + comment 讨论 */}
+      <div className="mt-4 border-t border-border pt-3">
+        <div className="text-xs font-medium text-muted-foreground">活动时间线</div>
+        {events && events.length > 0 && (
+          <ul className="mt-1.5 space-y-1 text-xs">
+            {events.map((e) => (
+              <li key={e.id} className="text-muted-foreground">
+                {e.kind === 'event'
+                  ? `状态 ${String(e.payload.from)} → ${String(e.payload.to)}`
+                  : String(e.payload.text ?? '')}
+                {' · '}
+                {e.actor} · {new Date(e.created_at).toLocaleString()}
+              </li>
+            ))}
+          </ul>
+        )}
+        {events && events.length === 0 && (
+          <p className="mt-1 text-xs text-muted-foreground">暂无动态——状态流转与评论都会留在这里。</p>
+        )}
+        <div className="mt-2 flex gap-2">
+          <input
+            className="min-w-0 flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs"
+            placeholder="写评论…"
+            aria-label="评论输入"
+            value={cText}
+            onChange={(ev) => setCText(ev.target.value)}
+          />
+          <Button size="sm" variant="outline" disabled={busy || !cText.trim()} onClick={postComment}>
+            评论
+          </Button>
+        </div>
+      </div>
     </Card>
   )
+}
+
+interface TicketEvent {
+  id: string
+  kind: string
+  payload: Record<string, unknown>
+  actor: string
+  created_at: string
 }
 
 /** 四件套小节（内联编辑）：点「编辑」→ textarea → 保存走 PUT 部分更新；
