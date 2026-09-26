@@ -94,7 +94,7 @@ async fn credentials_http_journey() {
         0,
         "换值后旧流水清零：{v}"
     );
-    let (st, v) = req(&app, &tok, "GET", "/credentials/t%2Fjourney/value", None).await;
+    let (_, v) = req(&app, &tok, "GET", "/credentials/t%2Fjourney/value", None).await;
     assert_eq!(v["value"], "secret-v2", "换值后取到新值");
 
     // ⑥ 删除：级联清流水；再揭示 404
