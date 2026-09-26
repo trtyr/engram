@@ -27,7 +27,7 @@ export default function Assets() {
   const [rows, setRows] = useState<AssetDto[] | null>(null)
   const [kinds, setKinds] = useState<AssetKindDto[]>([])
   const [filter, setFilter] = useState('')
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '')
   const [selId, setSelId] = useState<string | null>(null)
   const [detail, setDetail] = useState<AssetDetailDto | null>(null)
   const [err, setErr] = useState('')
@@ -362,6 +362,13 @@ export default function Assets() {
                           {detail.os && <div>系统：{detail.os}</div>}
                           {detail.aliases.length > 0 && <div>别名：{detail.aliases.join('、')}</div>}
                           {detail.note && <div>备注：{detail.note}</div>}
+                          {Object.entries(
+                            (detail.fields ?? {}) as Record<string, unknown>,
+                          ).map(([k, v]) => (
+                            <div key={k}>
+                              {k}：<span className="font-mono">{v == null ? '' : String(v)}</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                       <div className="flex shrink-0 gap-1">
@@ -442,7 +449,7 @@ export default function Assets() {
                           placeholder="# 主机手册（Markdown）——硬件 / 网络 / 服务 / 端口 / 变更 / 踩坑"
                         />
                       ) : detail.runbook_md ? (
-                        <div className="max-w-none text-sm leading-relaxed">
+                        <div className="md-body max-w-none text-sm">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {detail.runbook_md}
                           </ReactMarkdown>

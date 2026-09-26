@@ -312,3 +312,105 @@
         transition-duration: 0.01ms !important;
     }
 }
+
+/* ---------- Markdown 渲染容器（资产 runbook 等） ----------
+   Tailwind preflight 会清掉标题/列表/表格的浏览器默认样式，没有这层
+   react-markdown 渲染出来就是一面平文本墙。灰阶用 rgb() 直接写，明暗两用。 */
+.md-body {
+    line-height: 1.7;
+    overflow-wrap: break-word;
+}
+.md-body > :first-child {
+    margin-top: 0;
+}
+.md-body > :last-child {
+    margin-bottom: 0;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 1.1em 0 0.5em;
+}
+.md-body h1 {
+    font-size: 1.35em;
+    border-bottom: 1px solid rgb(128 128 128 / 0.25);
+    padding-bottom: 0.3em;
+}
+.md-body h2 {
+    font-size: 1.2em;
+}
+.md-body h3 {
+    font-size: 1.05em;
+}
+.md-body p {
+    margin: 0.5em 0;
+}
+.md-body ul,
+.md-body ol {
+    margin: 0.5em 0;
+    padding-left: 1.4em;
+}
+.md-body ul {
+    list-style: disc;
+}
+.md-body ol {
+    list-style: decimal;
+}
+.md-body li {
+    margin: 0.25em 0;
+}
+.md-body li > ul,
+.md-body li > ol {
+    margin: 0.2em 0;
+}
+.md-body table {
+    border-collapse: collapse;
+    margin: 0.7em 0;
+    width: 100%;
+    font-size: 0.875em;
+}
+.md-body th,
+.md-body td {
+    border: 1px solid rgb(128 128 128 / 0.3);
+    padding: 0.4em 0.7em;
+    text-align: left;
+}
+.md-body th {
+    background: rgb(128 128 128 / 0.12);
+    font-weight: 600;
+}
+.md-body code {
+    background: rgb(128 128 128 / 0.15);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+    font-size: 0.85em;
+}
+.md-body pre {
+    background: rgb(128 128 128 / 0.12);
+    border-radius: 6px;
+    padding: 0.8em 1em;
+    overflow-x: auto;
+    margin: 0.7em 0;
+}
+.md-body pre code {
+    background: transparent;
+    padding: 0;
+}
+.md-body blockquote {
+    border-left: 3px solid rgb(128 128 128 / 0.4);
+    margin: 0.7em 0;
+    padding: 0.1em 0 0.1em 0.9em;
+    color: rgb(128 128 128 / 0.95);
+}
+.md-body a {
+    color: #60a5fa;
+    text-decoration: underline;
+}
+.md-body hr {
+    border: 0;
+    border-top: 1px solid rgb(128 128 128 / 0.25);
+    margin: 1.2em 0;
+}
