@@ -37,7 +37,7 @@ docker exec -i "$CONTAINER" pg_restore \
   --no-owner --no-privileges < "$DUMP" || echo "⚠ restore 有告警，以下方行数对照为准"
 
 echo "④ 行数对照"
-for t in project_docs skills wiki_pages wiki_page_versions wiki_sources todos llm_providers cg_projects; do
+for t in project_docs credentials wiki_pages wiki_page_versions wiki_sources todos llm_providers cg_projects; do
   local_n=$(psql "$LOCAL_DB_URL" -t -A -c "SELECT count(*) FROM $t" 2>/dev/null || echo "表不存在")
   docker_n=$(docker exec "$CONTAINER" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -A -c "SELECT count(*) FROM $t" 2>/dev/null || echo "表不存在")
   flag="✅"; [ "$local_n" = "$docker_n" ] || flag="❌"
