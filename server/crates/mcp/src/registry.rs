@@ -10,6 +10,7 @@ pub(crate) fn tool_scope(name: &str) -> &'static str {
     match name {
         "projects" => "project",
         "assets" => "assets", // 资产台账域：独立一等对象（2026-09-21 新增）
+        "credentials" => "credentials", // 凭据域：机密值一等台账（EN-234，2026-09-26 新增）
         "memory" => "memory",
         "wiki" => "wiki",
         "todos" | "tickets" => "todos", // 工单域与待办同 scope（同表同底座，权限不分家）

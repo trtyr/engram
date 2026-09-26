@@ -205,6 +205,7 @@ pub const DOMAIN_TOOLS: &[&str] = &[
     "memory",
     "projects",
     "assets",
+    "credentials",
     "wiki",
     "todos",
     "tickets",
@@ -370,6 +371,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "file_put"
                 | "file_delete"
         ) | ("assets", "add" | "update" | "delete")
+            | ("credentials", "put" | "delete")
             | (
                 "wiki",
                 "write_page"
@@ -431,6 +433,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                 | "links"
                 | "location_get"
         ) | ("assets", "kinds" | "list" | "get")
+            | ("credentials", "list" | "get" | "reads")
             | (
                 "wiki",
                 "search"
