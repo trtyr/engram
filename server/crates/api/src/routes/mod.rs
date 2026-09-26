@@ -3,6 +3,7 @@
 pub mod assets_api;
 pub mod auth_api;
 pub mod codegraph_api;
+pub mod credentials_api;
 pub mod health;
 pub mod jobs_api;
 pub mod llm_api;
@@ -111,6 +112,7 @@ pub fn router(state: AppState) -> Router {
         .merge(codegraph_routes())
         .merge(projects_routes())
         .merge(assets_routes())
+        .merge(credentials_routes())
         .merge(todos_routes())
         .merge(migrate_routes());
 
@@ -448,6 +450,27 @@ fn projects_routes() -> Router<AppState> {
             get(project_api::get_doc)
                 .put(project_api::update_doc)
                 .delete(project_api::delete_doc),
+        )
+}
+
+/// `/credentials` 域路由组：台账/取用流水/显式揭示/写删（值永不进列表响应）。
+fn credentials_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/credentials",
+            get(credentials_api::list_credentials).post(credentials_api::put_credential),
+        )
+        .route(
+            "/credentials/{name}/reads",
+            get(credentials_api::credential_reads),
+        )
+        .route(
+            "/credentials/{name}/value",
+            get(credentials_api::reveal_credential),
+        )
+        .route(
+            "/credentials/{name}",
+            delete(credentials_api::delete_credential),
         )
 }
 

@@ -213,6 +213,8 @@ fn is_spa_nav_path(path: &str) -> bool {
         || path.starts_with("/projects/")
         || path == "/assets"
         || path.starts_with("/assets/")
+        || path == "/credentials"
+        || path.starts_with("/credentials/")
         || path == "/todos"
         || path == "/mcp"
 }
