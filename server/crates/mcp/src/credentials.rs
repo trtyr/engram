@@ -68,12 +68,7 @@ impl EngramMcpServer {
     ) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_credentials(&p)?;
-        let action = call
-            .args
-            .get("action")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let action = call.action.clone();
         match action.as_str() {
             "put" => {
                 let p: CredentialPutParams = dispatch::from_args("credentials", "put", call.args)?;

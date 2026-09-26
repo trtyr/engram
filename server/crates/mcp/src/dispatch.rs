@@ -122,6 +122,13 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "delete", true, "删除资产（被项目位置引用的会被拒绝——先解绑，不可逆）" => crate::AssetDeleteParams
         ],
         // EN-252：skills 域裁撤（原 action_docs 块移除；存量已迁 wiki/projects/本地 git）
+        "credentials" => action_docs![
+            "put", true, "写入/更新凭据（值加密落库；同名换值清零旧取用审计）" => crate::CredentialPutParams;
+            "get", false, "按名取用（返回直接可用值，取用留审计痕）" => crate::CredentialGetParams;
+            "list", false, "台账列表（元数据，永不回显值）" => crate::CredentialListParams;
+            "reads", false, "取用审计流水（谁/何时，最近在前）" => crate::CredentialReadsParams;
+            "delete", true, "删除凭据（级联清取用审计，不可逆）" => crate::CredentialDeleteParams
+        ],
         "wiki" => action_docs![
             "search", false, "Wiki 检索（FTS + 向量融合；命中带片段，全文按需 get_page；按库）" => crate::wiki::WikiSearchParams;
             "list_pages", false, "浏览页面列表（可按页型过滤；不含正文）" => crate::wiki::WikiListPagesParams;
