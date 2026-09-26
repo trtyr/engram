@@ -1,7 +1,7 @@
 //! R 测试报告（macOS 四轮全量）落地项的集成测试：
 //! remember 快捷写入、写操作瘦身（P0-1）、void 级联含 superseded（D2）与 restore 撤销、
 //! wiki 版本快照/回滚/删除重建（建议 #5）、search 片段化（P0-2）、title 寻址（P1-11）、
-//! sources 通道（E7）、skills 版本回滚（建议 #5）、search_all 跨域检索（P1-8）。
+//! sources 通道（E7）、search_all 跨域检索（P1-8）。（skills 版本回滚旅程已随 EN-252 域裁撤移除）
 
 mod support;
 
@@ -366,82 +366,6 @@ async fn wiki_versions_restore_snippets_and_title_addressing() {
     let (_, v) = mcp_rpc(&app, &key, call(11, "wiki", "sources", json!({}))).await;
     let rows = out_json(&v, "sources");
     assert!(rows.as_array().is_some(), "sources 应返回数组：{rows}");
-}
-
-/// 技能版本通道：update 留快照 → versions 列表 → restore 回滚。
-#[tokio::test]
-async fn skills_versions_and_restore_journey() {
-    let (app, _pg) = app().await;
-    let key = create_key(&app, &login_token(&app).await, &["skills"]).await;
-
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        call(
-            1,
-            "skills",
-            "create",
-            json!({"name": "rev-journey", "slug": "rev-journey", "content": "v1 正文"}),
-        ),
-    )
-    .await;
-    let s = out_json(&v, "skills create");
-    assert!(
-        s["content_chars"].is_i64() && s.get("content").is_none(),
-        "写操作瘦身：{s}"
-    );
-
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        call(
-            2,
-            "skills",
-            "update",
-            json!({"slug": "rev-journey", "content": "v2 正文"}),
-        ),
-    )
-    .await;
-    expect_result(&v, "skills update");
-
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        call(3, "skills", "versions", json!({"slug": "rev-journey"})),
-    )
-    .await;
-    let rows = out_json(&v, "versions").as_array().unwrap().clone();
-    assert_eq!(rows.len(), 2, "create+update 各一条快照");
-    assert!(rows[0].get("content").is_none(), "列表不带正文");
-    let create_rev = rows
-        .iter()
-        .find(|r| r["origin"] == "create")
-        .expect("create 快照");
-    let rid = create_rev["id"].as_str().unwrap().to_string();
-
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        call(
-            4,
-            "skills",
-            "restore",
-            json!({"slug": "rev-journey", "revision_id": rid}),
-        ),
-    )
-    .await;
-    expect_result(&v, "restore");
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        call(5, "skills", "get", json!({"slug": "rev-journey"})),
-    )
-    .await;
-    let s = out_json(&v, "get after restore");
-    assert!(
-        s["content"].as_str().unwrap().contains("v1 正文"),
-        "应回滚到 create 版本：{s}"
-    );
 }
 
 /// search_all（P1-8）：一次调用跨域命中（memory/wiki/todos 三 scope）。
