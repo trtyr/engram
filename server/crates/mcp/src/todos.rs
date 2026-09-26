@@ -142,6 +142,16 @@ pub struct TodoUpdateParams {
     /// 截止时间（ISO8601，可选）
     #[schemars(description = "可选截止时间（ISO8601）。")]
     pub due_at: Option<String>,
+    /// 显式清除字段（白名单 due_at/severity/project_hint）
+    #[schemars(
+        description = "可选：显式清除字段清单（白名单 due_at/severity/project_hint，如 [\"due_at\"]）——清空该字段而非置之不理。"
+    )]
+    pub clear: Option<Vec<String>>,
+}
+
+/// clear 白名单判定（TodoUpdateParams.clear）
+fn clears(field: &str, clear: &Option<Vec<String>>) -> bool {
+    clear.as_ref().is_some_and(|v| v.iter().any(|f| f == field))
 }
 
 #[tool_router(router = todos_router)]
@@ -334,16 +344,25 @@ impl EngramMcpServer {
                 params.0.body.as_deref(),
                 params.0.priority.as_deref(),
                 params.0.status.as_deref(),
-                params.0.severity.as_ref().map(|o| Some(o.as_str())),
+                match params.0.severity.as_ref().map(|o| Some(o.as_str())) {
+                    Some(s) => Some(s),
+                    None if clears("severity", &params.0.clear) => Some(None),
+                    None => None,
+                },
                 params.0.symptom.as_deref(),
                 params.0.reproduce.as_deref(),
                 params.0.acceptance.as_deref(),
                 params.0.resolution.as_deref(),
                 match params.0.due_at.as_deref() {
                     Some(s) => Some(Some(parse_flex_datetime(s)?)),
+                    None if clears("due_at", &params.0.clear) => Some(None),
                     None => None,
                 },
-                None,
+                if clears("project_hint", &params.0.clear) {
+                    Some(None)
+                } else {
+                    None
+                },
                 params.0.tags.as_deref(),
                 "mcp:todos",
             )

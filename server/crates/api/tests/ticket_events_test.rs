@@ -82,3 +82,81 @@ async fn ticket_timeline_http_journey() {
     assert_eq!(ev[1]["kind"], "comment");
     assert_eq!(ev[1]["payload"]["text"], "控制台评论");
 }
+
+#[tokio::test]
+async fn http_null_clears_due_at() {
+    let (app, _pg) = support::app().await;
+    let tok = support::login_token(&app).await;
+
+    // 建待办带过期 due → 应在 overdue 里
+    let (st, v) = req(
+        &app,
+        &tok,
+        "POST",
+        "/todos",
+        Some(json!({ "title": "清除截止", "due_at": "2020-01-01T00:00:00Z" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let (st, v) = req(
+        &app,
+        &tok,
+        "GET",
+        "/todos?kind=todo&status=open&due=overdue",
+        None,
+    )
+    .await;
+    assert!(
+        v.as_array().unwrap().iter().any(|t| t["id"] == id),
+        "先应在 overdue: {v}"
+    );
+
+    // PUT {"due_at": null} → 显式清除（审计驳回点：null 不得被吞成「不传」）
+    let (st, v) = req(
+        &app,
+        &tok,
+        "PUT",
+        &format!("/todos/{id}"),
+        Some(json!({ "due_at": null })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert!(v["due_at"].is_null(), "due_at 应已被清除: {v}");
+
+    // overdue 不再命中
+    let (st, v) = req(
+        &app,
+        &tok,
+        "GET",
+        "/todos?kind=todo&status=open&due=overdue",
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(
+        !v.as_array().unwrap().iter().any(|t| t["id"] == id),
+        "清除后应退出 overdue: {v}"
+    );
+
+    // 不带 due_at 字段的普通编辑不得误清
+    let (st, v) = req(
+        &app,
+        &tok,
+        "POST",
+        "/todos",
+        Some(json!({ "title": "保留截止", "due_at": "2020-01-01T00:00:00Z" })),
+    )
+    .await;
+    let id2 = v["id"].as_str().unwrap().to_string();
+    let (st, v) = req(
+        &app,
+        &tok,
+        "PUT",
+        &format!("/todos/{id2}"),
+        Some(json!({ "title": "改标题不动 due" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert!(!v["due_at"].is_null(), "普通编辑不得误清 due_at: {v}");
+}

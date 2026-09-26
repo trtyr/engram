@@ -76,6 +76,16 @@ pub struct CreateTodoRequest {
     pub project_hint: Option<String>,
 }
 
+/// serde 双层 Option：字段缺失→None（不动）；字段=null→Some(None)（显式清除）；字段=值→Some(Some(v))。
+/// 直接 derive 会把 null 和缺失都解成 None——清除语义到不了服务层（审计驳回点）。
+fn double_option<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<T>::deserialize(de)?))
+}
+
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateTodoRequest {
     /// 可选：形态转换 todo ↔ ticket
@@ -85,13 +95,18 @@ pub struct UpdateTodoRequest {
     pub priority: Option<String>,
     /// todo: open | done | archived；ticket: open | confirmed | in_progress | resolved | verified | archived
     pub status: Option<String>,
-    /// 可选：工单严重度 P0-P3（仅 kind=ticket）
+    /// 可选：工单严重度 P0-P3（仅 kind=ticket）；null=显式清除（回到未定级）
+    #[serde(default, deserialize_with = "double_option")]
     pub severity: Option<Option<String>>,
     pub symptom: Option<String>,
     pub reproduce: Option<String>,
     pub acceptance: Option<String>,
     pub resolution: Option<String>,
+    /// null=显式清除截止时间
+    #[serde(default, deserialize_with = "double_option")]
     pub due_at: Option<Option<DateTime<Utc>>>,
+    /// null=显式清除项目提示
+    #[serde(default, deserialize_with = "double_option")]
     pub project_hint: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
 }

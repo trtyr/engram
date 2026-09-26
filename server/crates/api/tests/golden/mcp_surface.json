@@ -196,7 +196,7 @@
         "readOnlyHint": false,
         "title": "工单域"
       },
-      "description": "工单域（todos scope）：结构化问题跟踪——severity/symptom/acceptance 结构化字段，\n状态流转 confirmed/in_progress/resolved/verified（工单六态）。与待办同表不同心智\n（2026-09-18 拆域：todos 纯待办、tickets 纯工单，互不可见）。操作全景：action=\"help\"。\n\n【本域操作 10 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- add：开工单（kind 固定 ticket——结构化问题跟踪；建议填 severity/symptom/acceptance）\n- list：工单列表（仅 kind=ticket；status 含 confirmed/in_progress/resolved/verified 六态；默认摘要模式 brief 只回短号/标题/状态/分级/关联计数）\n- link：建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号\n- unlink：解除关联\n- links：双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口\n- get：详情（含 severity/symptom/acceptance/resolution）\n- update：编辑与状态流转（confirmed/in_progress/resolved/verified/archived；工单字段 severity/symptom/acceptance/resolution）\n- events：活动时间线（状态流转 event 自动留痕 + 评论 comment，升序）\n- comment：工单评论（入活动时间线）\n- delete：【破坏性】删除工单（不可逆）",
+      "description": "工单域（todos scope）：结构化问题跟踪——severity/symptom/acceptance 结构化字段，\n状态流转 confirmed/in_progress/resolved/verified（工单六态）。与待办同表不同心智\n（2026-09-18 拆域：todos 纯待办、tickets 纯工单，互不可见）。操作全景：action=\"help\"。\n\n【本域操作 10 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- add：开工单（kind 固定 ticket——结构化问题跟踪；建议填 severity/symptom/acceptance）\n- list：工单列表（仅 kind=ticket；status 含 confirmed/in_progress/resolved/verified 六态；默认摘要模式 brief 只回短号/标题/状态/分级/关联计数）\n- link：建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号\n- unlink：解除关联\n- links：双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口\n- get：详情（含 severity/symptom/acceptance/resolution）\n- update：编辑与状态流转（confirmed/in_progress/resolved/verified/archived；工单字段 severity/symptom/acceptance/resolution）；clear=[due_at/severity/project_hint] 显式清空字段\n- events：活动时间线（状态流转 event 自动留痕 + 评论 comment，升序）\n- comment：工单评论（入活动时间线）\n- delete：【破坏性】删除工单（不可逆）",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
@@ -219,7 +219,7 @@
         "readOnlyHint": false,
         "title": "待办域"
       },
-      "description": "待办域（todos scope）：快速记录与跟进不绑定项目的行动项/灵感速记（kind 固定 todo）。\n工单在独立 tickets 域（2026-09-18 拆域——同表不同心智）。\"add\" 秒记，\"list\" 看进行中，\n\"done\" 完成，\"delete\" 删。操作全景：action=\"help\"。\n\n【本域操作 9 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- add：记一条待办（kind 固定 todo——行动项/灵感速记；开工单用 tickets 域）\n- list：待办列表（仅 kind=todo；status/priority/tag/q 过滤；默认摘要模式 brief 只回短号/标题/状态/优先级/关联计数）\n- link：建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号\n- unlink：解除关联\n- links：双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口\n- get：详情\n- done：标记完成（记 done_at）\n- update：编辑（标题/详情/优先级/状态/截止）\n- delete：【破坏性】删除待办（不可逆）",
+      "description": "待办域（todos scope）：快速记录与跟进不绑定项目的行动项/灵感速记（kind 固定 todo）。\n工单在独立 tickets 域（2026-09-18 拆域——同表不同心智）。\"add\" 秒记，\"list\" 看进行中，\n\"done\" 完成，\"delete\" 删。操作全景：action=\"help\"。\n\n【本域操作 9 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- add：记一条待办（kind 固定 todo——行动项/灵感速记；开工单用 tickets 域）\n- list：待办列表（仅 kind=todo；status/priority/tag/q 过滤；默认摘要模式 brief 只回短号/标题/状态/优先级/关联计数）\n- link：建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号\n- unlink：解除关联\n- links：双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口\n- get：详情\n- done：标记完成（记 done_at）\n- update：编辑（标题/详情/优先级/状态/截止）；clear=[due_at/project_hint] 显式清空字段\n- delete：【破坏性】删除待办（不可逆）",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,

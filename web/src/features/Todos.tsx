@@ -86,6 +86,20 @@ export default function Todos() {
     }
   }
 
+  /** 清空截止时间（PUT {"due_at": null}——serde double_option 显式清除语义） */
+  async function clearDue(t: Todo) {
+    setBusy(true)
+    try {
+      await api.put(`/todos/${t.id}`, { due_at: null })
+      setErr('')
+      load()
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** 勾选完成 / 重开——完成后行从「进行中」消失（视图切换），已完成组在 active 视图内可展开看 */
   async function toggleDone(t: Todo) {
     setBusy(true)
@@ -269,6 +283,7 @@ export default function Todos() {
                 onToggle={() => toggleDone(t)}
                 onArchive={doArchive}
                 onDelete={doDelete}
+                onClearDue={clearDue}
               />
             ))}
           </div>
@@ -296,6 +311,7 @@ export default function Todos() {
           onToggle={toggleDone}
           onArchive={doArchive}
           onDelete={doDelete}
+          onClearDue={clearDue}
         />
       )}
     </div>
@@ -314,6 +330,7 @@ function DoneGroup({
   onToggle,
   onArchive,
   onDelete,
+  onClearDue,
 }: {
   count: number
   open: boolean
@@ -323,6 +340,7 @@ function DoneGroup({
   onToggle: (t: Todo) => void
   onArchive: (t: Todo) => void
   onDelete: (t: Todo) => void
+  onClearDue: (t: Todo) => void
 }) {
   return (
     <div className="pt-3">
@@ -351,6 +369,7 @@ function DoneGroup({
                 onToggle={() => onToggle(t)}
                 onArchive={onArchive}
                 onDelete={onDelete}
+                onClearDue={onClearDue}
               />
             ))
           )}
@@ -367,12 +386,14 @@ function TodoRow({
   onToggle,
   onArchive,
   onDelete,
+  onClearDue,
 }: {
   t: Todo
   busy: boolean
   onToggle: (id: string) => void
   onArchive: (t: Todo) => void
   onDelete: (t: Todo) => void
+  onClearDue: (t: Todo) => void
 }) {
   const overdue = t.due_at && t.status === 'open' && new Date(t.due_at) < new Date()
   const done = t.status === 'done'
@@ -426,9 +447,14 @@ function TodoRow({
             <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive">已逾期</span>
           )}
           {t.due_at && (
-            <span className="font-mono text-[10px] text-muted-foreground/70">
-              截止 {new Date(t.due_at).toLocaleDateString()}
-            </span>
+            <button
+              className="font-mono text-[10px] text-muted-foreground/70 underline decoration-dotted hover:text-foreground"
+              title="清空截止时间"
+              disabled={busy}
+              onClick={() => onClearDue(t)}
+            >
+              截止 {new Date(t.due_at).toLocaleDateString()} ✕
+            </button>
           )}
         </div>
       </div>
