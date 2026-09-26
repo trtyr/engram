@@ -7,6 +7,7 @@
 //!   [`StoreError::Conflict`](crate::StoreError)（用 [`crate::error::is_unique_violation`] 判定）。
 
 pub mod asset;
+pub mod credential;
 pub mod keys;
 pub mod llm;
 pub mod memory;

@@ -9,6 +9,7 @@
 pub mod assets;
 pub mod auth;
 pub mod codegraph;
+pub mod credentials;
 pub mod memory;
 pub mod project;
 pub mod promote;

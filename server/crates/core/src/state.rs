@@ -75,6 +75,20 @@ impl AppState {
         engram_distill::gateway_llm(self.pool.clone(), cipher)
     }
 
+    /// 凭据域服务（EN-234）：值加解密走 AGENT_MEMORY_MASTER_KEY 体系。
+    /// master_key 缺省时用占位密钥——put/get 会产出无意义的密文，与 provider 密钥同口径。
+    #[allow(clippy::expect_used)]
+    pub fn credentials(&self) -> crate::credentials::CredentialsService {
+        let hex = self
+            .master_key
+            .as_ref()
+            .map(|m| m.0.clone())
+            .unwrap_or_else(|| "00".repeat(32));
+        let cipher =
+            engram_llm::KeyCipher::from_hex_master(&hex).expect("主密钥格式恒合法（占位 64 hex）");
+        crate::credentials::CredentialsService::new(self.pool.clone(), cipher)
+    }
+
     /// L10：占位主密钥检测——此状态下创建的 provider 密钥与后续真实密钥不兼容。
     pub fn is_placeholder_master_key(&self) -> bool {
         match &self.master_key {

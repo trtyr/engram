@@ -6,12 +6,13 @@
 use uuid::Uuid;
 
 /// 资产域 scope。
-pub const SCOPES: [&str; 12] = [
+pub const SCOPES: [&str; 13] = [
     "memory",
     "wiki",
     "codegraph",
     "project",
     "assets",
+    "credentials",
     "skills",
     "todos",
     "llm",

@@ -84,6 +84,16 @@ pub(crate) fn require_erase(principal: &Principal) -> Result<(), rmcp::ErrorData
 }
 
 /// 资产台账域（2026-09-21 新增）：scope 名同域名，叫 assets。
+pub(crate) fn require_credentials(principal: &Principal) -> Result<(), rmcp::ErrorData> {
+    match principal.domain_access("credentials") {
+        DomainAccess::None => Err(mcp_err(
+            ErrorCode::INVALID_REQUEST,
+            "缺少 credentials scope——请用带 credentials scope 的 amk_ key 连接 MCP",
+        )),
+        _ => Ok(()),
+    }
+}
+
 pub(crate) fn require_assets(principal: &Principal) -> Result<(), rmcp::ErrorData> {
     match principal.domain_access("assets") {
         DomainAccess::None => Err(mcp_err(

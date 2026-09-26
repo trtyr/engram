@@ -49,6 +49,22 @@
       "name": "codegraph"
     },
     {
+      "description": "凭据域（机密值的一等台账，EN-234）：按名存取 API Key/Token——值静态加密落库、按名 get 返回直接可用值且每次取用留审计痕、list 只回台账不回值。操作全景：action=\"help\"。",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "default": "",
+            "description": "操作名。action=\"help\" 返回本域全部操作与参数手册（渐进式发现）。",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "credentials"
+    },
+    {
       "annotations": {
         "destructiveHint": true,
         "idempotentHint": false,

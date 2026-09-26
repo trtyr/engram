@@ -15,6 +15,8 @@
 
 mod assets;
 mod codegraph;
+#[allow(dead_code)]
+mod credentials;
 pub mod dispatch;
 mod guard;
 pub mod jobs;
@@ -31,7 +33,6 @@ mod projects;
 mod registry;
 mod search_all;
 mod server;
-#[allow(dead_code)]
 mod skills;
 #[allow(dead_code)]
 mod skills_versions;
@@ -47,6 +48,8 @@ mod wiki_ops;
 // 各域工具面在各自模块内（`#[tool_router(router = <mod>_router)]` + `routes_<mod>()`）。
 pub(crate) use assets::*;
 pub(crate) use codegraph::*;
+#[allow(unused_imports)]
+pub(crate) use credentials::*;
 pub(crate) use guard::*;
 pub(crate) use memory::*;
 pub(crate) use memory_kv::*;
@@ -59,7 +62,6 @@ pub(crate) use project_locations::*;
 pub(crate) use projects::*;
 pub use registry::*;
 pub use server::*;
-#[allow(unused_imports)]
 pub(crate) use skills::*;
 #[allow(unused_imports)]
 pub(crate) use skills_versions::*;
@@ -98,6 +100,7 @@ impl EngramMcpServer {
         let mut tool_router = ToolRouter::<Self>::new();
         // EN-252：skills 域裁撤——工具路由注销（模块与存储层保留供回滚）
         tool_router.merge(crate::wiki_ops::routes_wiki_ops());
+        tool_router.merge(crate::credentials::routes_credentials());
         tool_router.merge(crate::projects::routes_projects());
         tool_router.merge(crate::assets::routes_assets());
         tool_router.merge(crate::codegraph::routes_codegraph());

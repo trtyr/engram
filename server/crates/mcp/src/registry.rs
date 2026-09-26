@@ -22,6 +22,7 @@ pub(crate) fn tool_scope(name: &str) -> &'static str {
 pub(crate) fn flat_tool_scope(other: &str) -> &'static str {
     match other.split('_').next() {
         Some("project") => "project",
+        Some("credentials") => "credentials",
         Some("wiki") => "wiki",
         Some("codegraph") => "codegraph",
         Some("llm") => "llm",
