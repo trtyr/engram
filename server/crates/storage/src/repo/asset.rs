@@ -51,6 +51,8 @@ pub async fn list_assets(
            AND ($2::text IS NULL \
                 OR name ILIKE '%' || $2 || '%' \
                 OR ip = $2 \
+                OR runbook_md ILIKE '%' || $2 || '%' \
+                OR fields::text ILIKE '%' || $2 || '%' \
                 OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE a ILIKE '%' || $2 || '%')) \
          ORDER BY kind, name"
     ))

@@ -125,6 +125,11 @@ pub struct AssetUpdateParams {
     /// 新类型
     #[schemars(description = "可选：新类型（host/cloud/domain/account/device/other）。不传不改。")]
     pub kind: Option<String>,
+    /// 运维字段（整体替换）
+    #[schemars(
+        description = "可选：运维字段（自由 kv 对象——主机名/规格/用途/到期日等）。**整体替换**；不传不改。这些字段可被 list 的关键词检索命中。"
+    )]
+    pub fields: Option<serde_json::Value>,
     /// 新名称
     #[schemars(description = "可选：新台账名。不传不改。")]
     pub name: Option<String>,
@@ -459,7 +464,7 @@ impl EngramMcpServer {
                 up.ip.as_deref(),
                 up.os.as_deref(),
                 up.note.as_deref(),
-                None,
+                up.fields.as_ref(),
             )
             .await
             .map_err(from_asset)?;

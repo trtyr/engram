@@ -65,4 +65,26 @@ async fn runbook_save_versions_restore() {
         .save_runbook(uuid::Uuid::now_v7(), "# x", "tester")
         .await;
     assert!(miss.is_err());
+
+    // ⑦ 检索面：fields 运维字段与 runbook 正文都进 list 关键词检索
+    sqlx::query(
+        "UPDATE assets SET fields = $2::jsonb, runbook_md = '# 跑着 GPU 推理' WHERE id = $1",
+    )
+    .bind(id)
+    .bind(r#"{"用途":"GPU 推理节点"}"#)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let by_fields = svc
+        .list(None, Some("GPU 推理节点"))
+        .await
+        .expect("list fields");
+    assert_eq!(by_fields.len(), 1, "fields 值应可检索：{by_fields:?}");
+    let by_runbook = svc
+        .list(None, Some("GPU 推理"))
+        .await
+        .expect("list runbook");
+    assert_eq!(by_runbook.len(), 1, "runbook 正文应可检索：{by_runbook:?}");
+    let by_miss = svc.list(None, Some("不存在的词")).await.expect("list miss");
+    assert!(by_miss.is_empty());
 }
