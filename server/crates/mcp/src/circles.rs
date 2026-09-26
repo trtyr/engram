@@ -1,8 +1,8 @@
 //! circles 域 MCP 工具面（EN-229：实体坐标系「圈子」视图的 agent 读写入口）。
 //!
-//! 前端「圈子」页（web Circle.tsx → Galaxy）浏览的是 memory 实体坐标系：
-//! 实体（人物/项目/主题/群组/地点）+ 类型化关系（member_of/located_in/works_on/part_of/related_to）
-//! + 共现边。此前这套模型只有 HTTP 入口，MCP 面对 agent 不可见——本域补齐读写。
+//! 前端「圈子」页（web Circle.tsx → Galaxy）浏览的是 memory 实体坐标系——
+//! 实体（人物/项目/主题/群组/地点）与类型化关系（member_of/located_in/works_on/part_of/related_to）
+//! 加共现边。此前这套模型只有 HTTP 入口，MCP 面对 agent 不可见——本域补齐读写。
 //! 底座全复用 MemoryService 实体服务（同表同底座），scope 沿用 memory（todos/tickets 先例）。
 
 use super::*;

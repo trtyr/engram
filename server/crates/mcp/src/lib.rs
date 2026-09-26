@@ -34,6 +34,7 @@ mod projects;
 mod registry;
 mod search_all;
 mod server;
+#[allow(dead_code)]
 mod skills;
 #[allow(dead_code)]
 mod skills_versions;
@@ -64,6 +65,7 @@ pub(crate) use project_locations::*;
 pub(crate) use projects::*;
 pub use registry::*;
 pub use server::*;
+#[allow(unused_imports)]
 pub(crate) use skills::*;
 #[allow(unused_imports)]
 pub(crate) use skills_versions::*;
