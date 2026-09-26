@@ -107,6 +107,7 @@ async fn http_null_clears_due_at() {
         None,
     )
     .await;
+    assert_eq!(st, StatusCode::OK);
     assert!(
         v.as_array().unwrap().iter().any(|t| t["id"] == id),
         "先应在 overdue: {v}"
@@ -149,6 +150,7 @@ async fn http_null_clears_due_at() {
     )
     .await;
     let id2 = v["id"].as_str().unwrap().to_string();
+    assert_eq!(st, StatusCode::CREATED);
     let (st, v) = req(
         &app,
         &tok,
