@@ -3,6 +3,7 @@
 
 mod support;
 
+use chrono::Utc;
 use engram_core::todos::TodoService;
 use sqlx::PgPool;
 
@@ -129,7 +130,7 @@ async fn done_is_idempotent_keeps_first_done_at() {
 async fn negative_limit_is_rejected() {
     let (_pool, svc, _pg) = setup().await;
     let err = svc
-        .list(None, None, None, None, None, None, None, -1)
+        .list(None, None, None, None, None, None, None, None, -1)
         .await
         .expect_err("负 limit 应报错");
     assert!(
@@ -137,7 +138,7 @@ async fn negative_limit_is_rejected() {
         "应报参数错误而非存储故障：{err}"
     );
     // 上限 clamp 语义保持：超大 limit 合法
-    svc.list(None, None, None, None, None, None, None, 100000)
+    svc.list(None, None, None, None, None, None, None, None, 100000)
         .await
         .unwrap();
 }
@@ -262,7 +263,7 @@ async fn cursor_pagination_walks_all_without_loss() {
     loop {
         let c = cursor.as_deref();
         let page = svc
-            .list(None, None, None, None, None, None, c, 5)
+            .list(None, None, None, None, None, None, None, c, 5)
             .await
             .unwrap();
         assert!(page.len() <= 5);
@@ -301,7 +302,7 @@ async fn cursor_pagination_walks_all_without_loss() {
     assert_eq!(ids, expect, "翻页集合应与全量一致");
     // 垃圾游标响亮拒
     let err = svc
-        .list(None, None, None, None, None, None, Some("garbage"), 5)
+        .list(None, None, None, None, None, None, None, Some("garbage"), 5)
         .await
         .expect_err("垃圾游标应被拒");
     assert!(err.to_string().contains("cursor"), "{err}");
@@ -817,6 +818,7 @@ async fn list_supports_ticket_status_and_severity_filters() {
             None,
             None,
             None,
+            None,
             200,
         )
         .await
@@ -833,6 +835,7 @@ async fn list_supports_ticket_status_and_severity_filters() {
             None,
             None,
             Some("P2"),
+            None,
             None,
             200,
         )
@@ -851,6 +854,7 @@ async fn list_supports_ticket_status_and_severity_filters() {
             None,
             Some("P0"),
             None,
+            None,
             200,
         )
         .await
@@ -866,6 +870,7 @@ async fn list_supports_ticket_status_and_severity_filters() {
             None,
             None,
             Some("P9"),
+            None,
             None,
             200,
         )
@@ -982,7 +987,7 @@ async fn list_order_is_open_first_then_updated_at_desc() {
 
     // 断言口径：open 段（A -6d → C -14d）在前，非 open 段（E -2d → D -3d → B -7d）在后
     let rows = svc
-        .list(None, None, None, None, None, None, None, 200)
+        .list(None, None, None, None, None, None, None, None, 200)
         .await
         .unwrap();
     let got: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
@@ -997,7 +1002,7 @@ async fn list_order_is_open_first_then_updated_at_desc() {
     let mut cursor: Option<String> = None;
     loop {
         let page = svc
-            .list(None, None, None, None, None, None, cursor.as_deref(), 2)
+            .list(None, None, None, None, None, None, None, cursor.as_deref(), 2)
             .await
             .unwrap();
         if page.is_empty() {
@@ -1023,4 +1028,163 @@ async fn list_order_is_open_first_then_updated_at_desc() {
         5,
         "cursor 翻页应覆盖全部 5 条不丢不重: {seen:?}"
     );
+}
+
+#[tokio::test]
+async fn todos_update_fields_and_overdue_filter() {
+    let (_pool, svc, _pg) = setup().await;
+
+    // ① create：两条带 due（一条已过期、一条三天后）、一条无 due
+    let past = svc
+        .create(
+            "过期任务",
+            "body",
+            "todo",
+            "high",
+            None,
+            "",
+            "",
+            "",
+            &["ops".into()],
+            Some(Utc::now() - chrono::Duration::hours(26)),
+            None,
+        )
+        .await
+        .unwrap();
+    let future = svc
+        .create(
+            "三天后到期",
+            "body",
+            "todo",
+            "normal",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            Some(Utc::now() + chrono::Duration::hours(72)),
+            None,
+        )
+        .await
+        .unwrap();
+    let nodue = svc
+        .create("无到期", "body", "todo", "low", None, "", "", "", &[], None, None)
+        .await
+        .unwrap();
+
+    // ② update 改字段生效：priority high→low + due 清空（双层 Option None=清除）
+    let upd = svc
+        .update(
+            past.id,
+            None,             // kind
+            Some("过期任务·改"), // title
+            None,             // body
+            Some("low"),      // priority
+            None,             // status
+            None,             // severity
+            None,             // symptom
+            None,             // reproduce
+            None,             // acceptance
+            None,             // resolution
+            Some(None),       // due_at 清除
+            None,             // project_hint
+            Some(&["ops".into(), "urgent".into()]), // tags
+        )
+        .await
+        .unwrap();
+    assert_eq!(upd.title, "过期任务·改");
+    assert_eq!(upd.priority, "low");
+    assert!(upd.due_at.is_none(), "due_at=Some(None) 应清除到期");
+    assert_eq!(upd.tags, vec!["ops".to_string(), "urgent".to_string()]);
+
+    // 改回过期 due，供 overdue 过滤断言
+    svc.update(
+        past.id,
+        None, None, None, None, None, // kind/title/body/priority/status/severity
+        None, None, None, None, None, // symptom/reproduce/acceptance/resolution +1
+        Some(Some(Utc::now() - chrono::Duration::hours(2))), // due_at
+        None, None,                   // project_hint/tags
+    )
+    .await
+    .unwrap();
+
+    // ③ overdue 过滤：只回未完成且已过期（改字段后的那条），today/无 due 不混入
+    let od = svc
+        .list(None, None, None, None, None, None, Some("overdue"), None, 200)
+        .await
+        .unwrap();
+    assert_eq!(od.len(), 1, "overdue 应恰好命中 1 条: {:?}", od.iter().map(|r| &r.title).collect::<Vec<_>>());
+    assert_eq!(od[0].id, past.id);
+
+    // ④ 排序：due 过滤下按到期升序（更紧急在前）——再造一条更早过期的验证
+    let earlier = svc
+        .create(
+            "更早过期",
+            "body",
+            "todo",
+            "normal",
+            None,
+            "",
+            "",
+            "",
+            &[],
+            Some(Utc::now() - chrono::Duration::hours(48)),
+            None,
+        )
+        .await
+        .unwrap();
+    let od2 = svc
+        .list(None, None, None, None, None, None, Some("overdue"), None, 200)
+        .await
+        .unwrap();
+    assert_eq!(od2.len(), 2);
+    assert_eq!(od2[0].id, earlier.id, "到期更早的应排最前");
+    assert_eq!(od2[1].id, past.id);
+
+    // ⑤ today 过滤：把 future 改成 1 小时后（今天内）→ today 命中且 overdue 不含它
+    svc.update(
+        future.id,
+        None, None, None, None, None, // kind/title/body/priority/status/severity
+        None, None, None, None, None, // symptom/reproduce/acceptance/resolution +1
+        Some(Some(Utc::now() + chrono::Duration::hours(1))), // due_at → 今天内
+        None, None,                   // project_hint/tags
+    )
+    .await
+    .unwrap();
+    let today = svc
+        .list(None, None, None, None, None, None, Some("today"), None, 200)
+        .await
+        .unwrap();
+    assert_eq!(today.len(), 1);
+    assert_eq!(today[0].id, future.id);
+    let od3 = svc
+        .list(None, None, None, None, None, None, Some("overdue"), None, 200)
+        .await
+        .unwrap();
+    assert_eq!(od3.len(), 2, "today 项不得混入 overdue");
+    assert!(od3.iter().all(|r| r.id != future.id));
+
+    // ⑥ 非法 due 值拒绝
+    let err = svc
+        .list(None, None, None, None, None, None, Some("bogus"), None, 200)
+        .await
+        .expect_err("非法 due 应报错");
+    assert!(err.to_string().contains("overdue"), "{err}");
+
+    // ⑦ done 后不再算 overdue
+    svc.update(
+        past.id,
+        None, None, None, None, Some("done"), // kind/title/body/priority/status
+        None, None, None, None, None,          // severity/symptom/reproduce/acceptance/resolution
+        None, None, None,                      // due_at/project_hint/tags
+    )
+    .await
+    .unwrap();
+    let od4 = svc
+        .list(None, None, None, None, None, None, Some("overdue"), None, 200)
+        .await
+        .unwrap();
+    assert_eq!(od4.len(), 1, "done 的过期项应退出 overdue");
+    assert_eq!(od4[0].id, earlier.id);
+    let _ = nodue; // 无 due 项全程不参与 due 过滤（仅存在性）
 }

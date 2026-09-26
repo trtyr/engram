@@ -116,6 +116,7 @@ impl EngramMcpServer {
                 lp.tag.as_deref(),
                 lp.q.as_deref(),
                 lp.severity.as_deref(),
+                None, // 工单不用 due 逾期过滤（工单治理走 severity/状态机）
                 lp.cursor.as_deref(),
                 lp.limit.unwrap_or(50).min(500),
             )

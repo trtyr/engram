@@ -179,6 +179,7 @@ async fn credentials_tags_expiry_and_search() {
     .await;
     assert_eq!(st, StatusCode::CREATED);
     let (st, v) = req(&app, &tok, "GET", "/credentials?tag=legacy", None).await;
+    assert_eq!(st, StatusCode::OK);
     let item = v["items"].as_array().unwrap()[0].clone();
     assert_eq!(
         item["expires_at"].as_str().unwrap(),

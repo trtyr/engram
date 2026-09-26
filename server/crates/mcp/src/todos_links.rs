@@ -115,7 +115,7 @@ impl EngramMcpServer {
         let id = self.todo_ref_id(&params.0.id).await?;
         let raw = todo_svc(&self.state).links(id).await.map_err(from_todo)?;
         let counts = todo_svc(&self.state)
-            .list(None, None, None, None, None, None, None, 500)
+            .list(None, None, None, None, None, None, None, None, 500)
             .await
             .map_err(from_todo)?;
         let short_of: std::collections::HashMap<Uuid, i32> =

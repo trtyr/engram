@@ -10,6 +10,7 @@ type Row_ = CredentialMetaDto;
 
 /// upsert（按 name 唯一，大小写不敏感）：存在则更新值/标记/说明并清零取用审计——值换了，
 /// 旧取用流水一并删除（同事务，审计语义=流水随值作废，不留悬空旧痕）。
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert(
     pool: &sqlx::PgPool,
     id: Uuid,

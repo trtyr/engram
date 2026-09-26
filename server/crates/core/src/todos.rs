@@ -353,12 +353,18 @@ impl TodoService {
         tag: Option<&str>,
         q: Option<&str>,
         severity: Option<&str>,
+        due: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
     ) -> Result<Vec<TodoDto>, TodoError> {
         if limit < 0 {
             return Err(TodoError::BadRequest(format!(
                 "limit 不能为负（收到 {limit}）"
+            )));
+        }
+        if let Some(d) = due.filter(|d| *d != "overdue" && *d != "today") {
+            return Err(TodoError::BadRequest(format!(
+                "due 仅接受 overdue/today（收到 {d}）"
             )));
         }
         let cursor = parse_todo_cursor(cursor)?;
@@ -371,6 +377,7 @@ impl TodoService {
             tag,
             q,
             severity,
+            due,
             cursor,
             limit.min(500),
         )

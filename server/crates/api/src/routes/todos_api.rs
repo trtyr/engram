@@ -42,6 +42,8 @@ pub struct ListTodosParams {
     pub q: Option<String>,
     /// 可选：工单严重度 P0-P3（仅命中 kind=ticket 的行）
     pub severity: Option<String>,
+    /// 可选 due 过滤：overdue=未完成且已过期；today=今天到期
+    pub due: Option<String>,
     /// keyset 分页游标：{1|0}|{updated_at ISO8601}|{id}（1=该条 status=open）
     pub cursor: Option<String>,
     pub limit: Option<i64>,
@@ -112,6 +114,7 @@ pub async fn list_todos(
                 p.tag.as_deref(),
                 p.q.as_deref(),
                 p.severity.as_deref(),
+                p.due.as_deref(),
                 p.cursor.as_deref(),
                 p.limit.unwrap_or(200),
             )

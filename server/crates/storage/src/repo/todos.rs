@@ -86,9 +86,26 @@ pub async fn list(
     tag: Option<&str>,
     q: Option<&str>,
     severity: Option<&str>,
+    due: Option<&str>,
     cursor: Option<(i32, DateTime<Utc>, Uuid)>,
     limit: i64,
 ) -> StoreResult<Vec<TodoRow>> {
+    // due 过滤（白名单，无注入面）：overdue=未完成且已过期；today=今天到期。
+    // 非游标分支按 due_at 升序（最紧急在前）；游标分支保持原序（游标元组一致性优先）。
+    let due_clause = |n: u8| {
+        format!(
+            "AND (${n}::text IS NULL OR (${n} = 'overdue' AND status = 'open' \
+             AND due_at IS NOT NULL AND due_at < now()) \
+             OR (${n} = 'today' AND status = 'open' AND due_at IS NOT NULL \
+             AND due_at >= now() \
+             AND due_at < date_trunc('day', now()) + interval '1 day'))"
+        )
+    };
+    let order = if due.is_some() && cursor.is_none() {
+        "ORDER BY due_at ASC, updated_at DESC, id DESC"
+    } else {
+        "ORDER BY (status = 'open') DESC, updated_at DESC, id DESC"
+    };
     if let Some((flag, ts, id)) = cursor {
         Ok(sqlx::query_as::<_, TodoRow>(
             format!(
@@ -99,9 +116,12 @@ pub async fn list(
                  AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%') \
                  AND ($5::text IS NULL OR kind = $5) \
                  AND ($10::text IS NULL OR severity = $10) \
+                 { } \
                  AND (CASE WHEN status = 'open' THEN 1 ELSE 0 END, updated_at, id) < ($7::int, $8::timestamptz, $9::uuid) \
-                 ORDER BY (status = 'open') DESC, updated_at DESC, id DESC \
-                 LIMIT $6"
+                 {order} \
+                 LIMIT $6",
+                due_clause(11),
+                order = order
             )
             .as_str(),
         )
@@ -115,6 +135,7 @@ pub async fn list(
         .bind(ts)
         .bind(id)
         .bind(severity)
+        .bind(due)
         .fetch_all(pool)
         .await?)
     } else {
@@ -127,8 +148,11 @@ pub async fn list(
                  AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%') \
                  AND ($5::text IS NULL OR kind = $5) \
                  AND ($7::text IS NULL OR severity = $7) \
-                 ORDER BY (status = 'open') DESC, updated_at DESC, id DESC \
-                 LIMIT $6"
+                 { } \
+                 {order} \
+                 LIMIT $6",
+                due_clause(8),
+                order = order
             )
             .as_str(),
         )
@@ -139,6 +163,7 @@ pub async fn list(
         .bind(kind)
         .bind(limit)
         .bind(severity)
+        .bind(due)
         .fetch_all(pool)
         .await?)
     }
@@ -180,13 +205,13 @@ pub async fn update(pool: &PgPool, id: Uuid, p: &TodoPatch<'_>) -> StoreResult<u
             body = COALESCE($3, body), \
             priority = COALESCE($4, priority), \
             status = COALESCE($5, status), \
-            severity = COALESCE($6, severity), \
+            severity = CASE WHEN $15 THEN NULL ELSE COALESCE($6, severity) END, \
             symptom = COALESCE($7, symptom), \
             reproduce = COALESCE($8, reproduce), \
             acceptance = COALESCE($9, acceptance), \
             resolution = COALESCE($10, resolution), \
-            due_at = COALESCE($11, due_at), \
-            project_hint = COALESCE($12, project_hint), \
+            due_at = CASE WHEN $16 THEN NULL ELSE COALESCE($11, due_at) END, \
+            project_hint = CASE WHEN $17 THEN NULL ELSE COALESCE($12, project_hint) END, \
             tags = COALESCE($13::text[], tags), \
             done_at = CASE \
                 WHEN kind = 'todo' AND $5 = 'done' AND todos.status IS DISTINCT FROM 'done' THEN now() \
@@ -213,6 +238,9 @@ pub async fn update(pool: &PgPool, id: Uuid, p: &TodoPatch<'_>) -> StoreResult<u
     .bind(p.project_hint)
     .bind(p.tags)
     .bind(p.kind)
+    .bind(matches!(p.severity, Some(None)))
+    .bind(matches!(p.due_at, Some(None)))
+    .bind(matches!(p.project_hint, Some(None)))
     .execute(pool)
     .await?;
     Ok(res.rows_affected())

@@ -65,6 +65,11 @@ pub struct TodoListParams {
     /// 工单严重度 P0-P3（仅命中 kind=ticket 的行）
     #[schemars(description = "可选：工单严重度 P0-P3（仅命中 kind=ticket 的行）。")]
     pub severity: Option<String>,
+    /// 逾期/今日过滤
+    #[schemars(
+        description = "可选 due 过滤：overdue=未完成且已过期（按到期升序）；today=今天到期。"
+    )]
+    pub due: Option<String>,
     /// 标签过滤
     #[schemars(description = "可选标签过滤。")]
     pub tag: Option<String>,
@@ -213,6 +218,7 @@ impl EngramMcpServer {
                 lp.tag.as_deref(),
                 lp.q.as_deref(),
                 lp.severity.as_deref(),
+                lp.due.as_deref(),
                 lp.cursor.as_deref(),
                 lp.limit.unwrap_or(50),
             )
