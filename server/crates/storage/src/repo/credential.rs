@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 type Row_ = CredentialMetaDto;
 
-/// upsert（按 name 唯一，大小写不敏感）：存在则更新值/标记/说明并清零取用审计（值换了，旧痕作废）。
+/// upsert（按 name 唯一，大小写不敏感）：存在则更新值/标记/说明并清零取用审计——值换了，
+/// 旧取用流水一并删除（同事务，审计语义=流水随值作废，不留悬空旧痕）。
 pub async fn upsert(
     pool: &sqlx::PgPool,
     id: Uuid,
@@ -18,7 +19,17 @@ pub async fn upsert(
     description: &str,
     created_by: &str,
 ) -> StoreResult<Row_> {
-    sqlx::query_as::<_, Row_>(
+    let mut tx = pool.begin().await.map_err(StoreError::from)?;
+    // 换值即作废旧流水：先删该名下既有凭据的取用记录（新插入路径删 0 行，无害）
+    sqlx::query(
+        "DELETE FROM credential_reads WHERE credential_id IN \
+         (SELECT id FROM credentials WHERE lower(btrim(name)) = lower(btrim($1)))",
+    )
+    .bind(name)
+    .execute(&mut *tx)
+    .await
+    .map_err(StoreError::from)?;
+    let row = sqlx::query_as::<_, Row_>(
         "INSERT INTO credentials (id, name, value_enc, sensitive, description, created_by) \
          VALUES ($1, $2, $3, $4, $5, $6) \
          ON CONFLICT (lower(btrim(name))) DO UPDATE SET \
@@ -37,9 +48,11 @@ pub async fn upsert(
     .bind(sensitive)
     .bind(description)
     .bind(created_by)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
-    .map_err(StoreError::from)
+    .map_err(StoreError::from)?;
+    tx.commit().await.map_err(StoreError::from)?;
+    Ok(row)
 }
 
 /// 内部行（含加密值）——服务层解密用。

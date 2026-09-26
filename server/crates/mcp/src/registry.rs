@@ -36,23 +36,22 @@ pub(crate) fn flat_tool_scope(other: &str) -> &'static str {
 
 /// MCP instructions：initialize 时返回给调用方 AI 的顶层使用说明。
 pub(crate) const SERVER_INSTRUCTIONS: &str = "\
-Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：九个领域各一个入口工具\
-（memory 用户记忆 / projects 工作线 / assets 资产台账 / skills 技能 / wiki 知识库 / todos 待办 / tickets 工单 / codegraph 代码图谱 / jobs 任务），\
-外加跨域全局检索 search_all（一次查询并发四域，各回 top-k 摘要）。\
+Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：十个领域各一个入口工具\
+（memory 用户记忆 / projects 工作线 / assets 资产台账 / credentials 机密凭据 / circles 圈子实体图 / wiki 知识库 / todos 待办 / tickets 工单 / codegraph 代码图谱 / jobs 任务），\
+外加跨域全局检索 search_all（一次查询并发四域，各回 top-k 摘要；机密域 credentials 不进全局检索）。\
 域工具调用形态 {\"action\":\"<操作名>\", ...参数}；每个工具的描述里带操作目录（常驻可见），\
 参数细节用 {\"action\":\"help\"} 一轮取回全域操作手册。
 
 用户记忆分四层蒸馏：L0 原始会话 →（蒸馏）→ L1 原子事实 → L2 场景模式 → L3 用户画像；\
 另有实体坐标系（人物/项目/主题/群组/地点）横向串联记忆。全部记忆可溯源、可遗忘（void 可 restore 撤销）。
 
-memory 域用法：
-1. 会话开始：{\"action\":\"context\"} 装载用户画像与近期记忆，再开始对话；
-2. 对话中需要背景：{\"action\":\"search\",\"query\":\"…\"} 定向回忆，或 {\"action\":\"entities\"} 按人/项目/主题查档案；
-3. 记一句话事实：{\"action\":\"remember\",\"text\":\"…\"}（不必手搓 turns）；
-4. 会话收尾：{\"action\":\"write_session\",\"turns\":[…]} 把值得长期记住的对话写入（蒸馏自动沉淀）；
-   长对话分段用 {\"action\":\"append_session\"} 追加；
-5. 用户明确表达遗忘：「别记住这个」→ {\"action\":\"forget\"}（void 会话作废且蒸馏产物级联归档；
-   误作废用 mode=\"restore\" 撤销）。凭据类内容（账号/密码/密钥/令牌）**照记不脱敏**——记忆库是用户的外置大脑，2026-09-20 用户拍板改口径；安全边界在传输与存储加密。
+memory 域用法（六动词，2026-09-26 收敛：存/找/翻/改/审/忘；旧动作名仍可用作别名）：
+1. 会话开始：{\"action\":\"recall\",\"mode\":\"context\"} 装载用户画像与近期记忆，再开始对话；
+2. 对话中需要背景：{\"action\":\"recall\",\"mode\":\"search\",\"query\":\"…\"} 定向回忆，或 {\"action\":\"recall\",\"mode\":\"entities\"} 按人/项目/主题查档案；翻清单用 {\"action\":\"browse\"}；
+3. 记一句话事实：{\"action\":\"remember\",\"text\":\"…\"}；成段对话收尾 {\"action\":\"remember\",\"mode\":\"session\",\"turns\":[…]}（蒸馏自动沉淀），长对话分段 {\"action\":\"remember\",\"mode\":\"session_append\"}；
+4. 纠错与画像：{\"action\":\"revise\",\"mode\":\"correct\"}（取代链留痕）/ {\"action\":\"revise\",\"mode\":\"persona\"}（分面编辑后蒸馏不覆盖）；蒸馏复核 {\"action\":\"review\"}；
+5. 精确值逐字保存：{\"action\":\"remember\",\"mode\":\"kv\",\"key\":\"…\",\"value\":\"…\"}（序列号/端口/路径等，蒸馏零介入）；**机密凭据（API Key/Token/密码）不进 memory——走 credentials 域**（加密落库+取用审计）；
+6. 用户明确表达遗忘：「别记住这个」→ {\"action\":\"forget\"}（void 会话作废且蒸馏产物级联归档；误作废用 mode=\"restore\" 撤销）。
 
 projects 域用法：项目 = 一件有明确目标、一次干不完、跨多次会话推进的工作。
 1. 开工：{\"action\":\"list\"} / {\"action\":\"get\"} 找到这件事的锚点接上上下文；没有就 {\"action\":\"create\"}；
@@ -62,15 +61,10 @@ projects 域用法：项目 = 一件有明确目标、一次干不完、跨多�
    小修一段用 {\"action\":\"doc_patch\"}（行级 replace/insert/delete，不必取全文重发）；
 4. 收尾：{\"action\":\"update\"} 改状态、写总结文档，下次会话从 get 接上。
 
-skills 域用法：技能 = 可复用的指令包（SKILL.md 形态 + scripts/references 附件）。
-1. 需要某种能力前：{\"action\":\"list\"} 看有没有现成技能，命中 {\"action\":\"get\"} 照做；
-2. 用户说「把这个做法存成技能」：{\"action\":\"create\"}；修正演进：{\"action\":\"update\"}（自动留版本）；
-   改坏了 {\"action\":\"versions\"} 查历史、{\"action\":\"restore\"} 回滚；
-3. 用户给现成 SKILL.md：{\"action\":\"import\"}。
+skills 域已裁撤（2026-09-26，EN-252）：技能触发回归调用方本地目录；方法论沉淀在 wiki（skill-* 页）、engram 自身口径在 projects（[skills 迁入] 篇）。
 
 wiki 域用法：单库知识库（Markdown 页面 + [[wikilink]] + 混合检索）。单库终局——无 library 参数，一切读写恒定在 main 主库。
 1. 查证事实性知识 → {\"action\":\"search\"}（命中带片段，全文 get_page）；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}；
-2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步，产物落同库），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；
 2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步，产物落同库），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；
 3. 版本与原料：{\"action\":\"versions\"}/{\"action\":\"restore_version\"} 查历史与回滚（误删页可重建）；{\"action\":\"sources\"}/{\"action\":\"delete_source\"} 清理织入原料（lint 报 stale_source 时用）。
 
@@ -85,8 +79,9 @@ tickets 域用法：工单 = 结构化问题跟踪（与待办同表不同心智
 codegraph 域用法：注册代码库 → index/sync → {\"action\":\"query\"}（search/explore/node/callers/callees/impact）读懂调用关系。\
 explore 默认返回符号大纲（不带源码）；单符号源码用 node，整份源码 explore 传 include_source=true。
 
-域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory；查证「客观知识」用 wiki；
-跨会话的工作线用 projects；随手记行动项用 todos；开工单跟踪问题用 tickets；不确定在哪域就 search_all。
+域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory；实体关系/圈子视图用 circles；
+查证「客观知识」用 wiki；跨会话的工作线用 projects；随手记行动项用 todos；开工单跟踪问题用 tickets；
+API Key/Token 等机密存取用 credentials；不确定在哪域就 search_all。
 LLM 供应商/模型的配置与排障是管理员专属，走 Web 控制台「设置 → AI 功能」——MCP 工具面
 不提供 provider 配置工具（AI 报 LLM 未配置时，引导用户去设置页，不要尝试自行配置）。
 
@@ -94,9 +89,8 @@ LLM 供应商/模型的配置与排障是管理员专属，走 Web 控制台「�
 - 用户记忆的写入通道只有「写会话」：事实抽取、画像更新、实体维护全部由蒸馏完成；
 - 直接改写用户记忆语义内容（原子内容、画像分面、实体档案）是用户专属权限，MCP 工具面不提供；
 - 纠错也走会话：把正确的表述写成对话（correction 语义），蒸馏会自动生成取代链；
-- 敏感对话（医疗/感情/财务等）写入时可置 sensitive=true——敏感是标记不是隐身，检索与上下文默认可见（2026-09-12 口径放开）；凭据类（账号/密码/密钥/token）**照记逐字、不脱敏**（2026-09-20 口径改版：外置大脑什么都记，安全边界在传输与存储加密）——需要精确值检索时同样走 kv_put/kv_get 通道；
-- 破坏性操作（各域 delete/forget 类，目录里有【破坏性】标注）不可逆，只对用户明确请求使用；
-- skills delete 仅限用户明确要求——内容过时用 update 修订，改坏用 restore 回滚，不要自行删除。\
+- 敏感对话（医疗/感情/财务等）写入时可置 sensitive=true——敏感是标记不是隐身，检索与上下文默认可见（2026-09-12 口径放开）；**机密凭据（账号/密码/密钥/token）一律走 credentials 域**（静态加密+按名取用+取用留痕，2026-09-26 EN-234 口径——不再走 kv_put/kv_get）；
+- 破坏性操作（各域 delete/forget 类，目录里有【破坏性】标注）不可逆，只对用户明确请求使用。\
 ";
 
 // ---------- 动态工具描述（发现能力长在工具面上） ----------

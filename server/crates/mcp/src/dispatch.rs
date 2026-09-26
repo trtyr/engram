@@ -59,10 +59,12 @@ macro_rules! action_docs {
 pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
     Some(match domain {
         "memory" => action_docs![
+            "remember", false, "存=一句话记忆（EN-235 六动词·存）。mode：atom（默认，本描述）/ session（成段会话=旧 write_session）/ session_append（续写=旧 append_session）/ kv（精确值逐字保存=旧 kv_put）；其余参数同名平铺。吸收旧名：write_session/append_session/kv_put（别名保留）" => crate::RememberParams;
             "recall", false, "找=记忆检索总入口（EN-235 六动词）。mode：search（默认）/ context（开场装载）/ entities / kv_get / kv_search；其余参数同名平铺。吸收旧名：search/context/entities/kv_get/kv_search（别名保留）" => crate::MemoryRecallParams;
             "browse", false, "翻=清单浏览（EN-235 六动词）。mode：atoms（默认）/ sessions / session / kv；其余参数同名平铺。吸收旧名：list_atoms/list_sessions/get_session/kv_list（别名保留）" => crate::MemoryBrowseParams;
             "revise", false, "改=纠错与画像修订（EN-235 六动词）。mode：correct（默认，取代链留痕）/ persona（分面编辑后蒸馏不覆盖）；其余参数同名平铺。吸收旧名：correct/persona_edit（别名保留）" => crate::MemoryReviseParams;
             "review", false, "审=蒸馏与复核（EN-235 六动词）。mode：distill（默认）/ result（蒸馏回执）/ confirm / discard；其余参数同名平铺。吸收旧名：distill/distill_result/confirm/discard（别名保留）" => crate::MemoryReviewParams;
+            "forget", true, "忘=遗忘（EN-235 六动词·忘）：void 作废（级联归档产物）/ erase 物理删除（需 erase scope）/ restore 撤销 void" => crate::ForgetParams;
             "context", false, "装载用户记忆上下文包（L3 画像 + L2 场景 + L1 原子 + 实体；会话开场调用一次）——别名：recall(mode=\"context\")" => crate::ContextParams;
             "search", false, "定向检索用户记忆（全文+向量，跨 L1/L2/L3/实体）" => crate::SearchParams;
             "distill_result", false, "蒸馏回执：查一次会话蒸馏产出了哪些原子（id/内容/强度/状态）——写入方可验收" => crate::MemoryDistillResultParams;
@@ -70,7 +72,6 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "kv_get", false, "读取结构化精确值（按 key）" => crate::MemoryKvGetParams;
             "kv_list", false, "列出全部 KV 值（按 updated_at 倒序）" => crate::MemoryKvListParams;
             "kv_search", false, "字面量直查 KV（key/value/context ILIKE——精确值不依赖分词）" => crate::MemoryKvSearchParams;
-            "remember", false, "存=一句话记忆（EN-235 六动词·存）。mode：atom（默认，本描述）/ session（成段会话=旧 write_session）/ session_append（续写=旧 append_session）/ kv（精确值逐字保存=旧 kv_put）；其余参数同名平铺。吸收旧名：write_session/append_session/kv_put（别名保留）" => crate::RememberParams;
             "correct", false, "更正记忆（快路径取代链）：用户说「你记错了」时用——先 search 定位旧原子，再 correct(target_id, text)；旧原子 superseded 指向新条目，仅 active 非敏感可更正" => crate::CorrectParams;
             "confirm", false, "待审复核通过：摘掉 needs_review 标记（仅 needs_review=true 可处置；AI 代管复核）" => crate::ReviewActionParams;
             "discard", false, "待审复核丢弃：归档该条（仅 needs_review=true 可处置；AI 代管复核）" => crate::ReviewActionParams;
@@ -82,7 +83,6 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "get_session", false, "读取一个会话的逐轮原文全文" => crate::GetSessionParams;
             "list_atoms", false, "浏览 L1 原子事实（默认只看 active；可按类型/状态/待审过滤，分页）" => crate::ListAtomsParams;
             "entities", false, "检索实体（人物/项目/主题/群组/地点的横向档案）" => crate::EntitiesParams;
-            "forget", true, "忘=遗忘（EN-235 六动词·忘）：void 作废（级联归档产物）/ erase 物理删除（需 erase scope）/ restore 撤销 void" => crate::ForgetParams;
             "scenarios_list", false, "浏览 L2 场景（不依赖 search 命中，直接翻库存；默认 100 条，上限 500）" => crate::memory_manage::ScenariosListParams;
             "persona_get", false, "浏览 L3 画像分面版本史（persona_edit 前先看当前形态）" => crate::memory_manage::PersonaGetParams;
             "atom_duplicates", false, "重复/近似原子检测：归一化内容完全相同的 active 原子分组（合并前先看清单；治理红线：检测不动数据）" => crate::memory_manage::AtomDuplicatesParams;
