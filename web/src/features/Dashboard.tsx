@@ -156,6 +156,10 @@ export default function Dashboard() {
   const [usage, setUsage] = useState<UsageRow[] | null>(null)
   const [assets, setAssets] = useState<AssetDto[] | null>(null)
   const [openTodos, setOpenTodos] = useState<number | null>(null)
+  // 三域速览（凭据/待办/工单）：台账数+过期临期、逾期数、工单 open 数
+  const [credStats, setCredStats] = useState<{ total: number; soon: number; expired: number } | null>(null)
+  const [overdueTodos, setOverdueTodos] = useState<number | null>(null)
+  const [openTickets, setOpenTickets] = useState<number | null>(null)
   // 复用侧栏轮询源（10s，页面隐藏自动跳过）：失败徽章 + 蒸馏脉冲与全局状态一致
   const { failed, distilling } = useSystemStatus()
 
@@ -180,6 +184,30 @@ export default function Dashboard() {
       .get<{ status: string }[]>('/todos')
       .then((t) => setOpenTodos(t.filter((x) => x.status === 'open').length))
       .catch(() => setOpenTodos(0))
+    api
+      .get<{ items: { expires_at: string | null }[] }>('/credentials')
+      .then((r) => {
+        const now = Date.now()
+        const soonMs = 30 * 86400_000
+        setCredStats({
+          total: r.items.length,
+          expired: r.items.filter((c) => c.expires_at && new Date(c.expires_at).getTime() < now).length,
+          soon: r.items.filter((c) => {
+            if (!c.expires_at) return false
+            const t = new Date(c.expires_at).getTime()
+            return t >= now && t - now < soonMs
+          }).length,
+        })
+      })
+      .catch(() => setCredStats({ total: 0, soon: 0, expired: 0 }))
+    api
+      .get<{ status: string }[]>('/todos?kind=todo&status=open&due=overdue')
+      .then((t) => setOverdueTodos(t.length))
+      .catch(() => setOverdueTodos(0))
+    api
+      .get<{ status: string }[]>('/todos?kind=ticket&status=open')
+      .then((t) => setOpenTickets(t.length))
+      .catch(() => setOpenTickets(0))
   }, [])
 
   if (err) return <ErrorBox msg={err} />
@@ -338,6 +366,47 @@ export default function Dashboard() {
               ))}
           </ul>
         )}
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="text-sm font-medium">三域速览</h2>
+        </div>
+        <ul className="divide-y divide-border/60">
+          <li className="flex items-center justify-between px-4 py-2.5 text-sm">
+            <Link to="/credentials" className="hover:underline">
+              凭据台账
+            </Link>
+            <span className="text-xs text-muted-foreground">
+              {credStats ? `${credStats.total} 条` : '—'}
+              {credStats && credStats.expired > 0 && (
+                <span className="ml-2 text-red-400">过期 {credStats.expired}</span>
+              )}
+              {credStats && credStats.soon > 0 && (
+                <span className="ml-2 text-yellow-500">临期 {credStats.soon}</span>
+              )}
+            </span>
+          </li>
+          <li className="flex items-center justify-between px-4 py-2.5 text-sm">
+            <Link to="/todos" className="hover:underline">
+              待办
+            </Link>
+            <span className="text-xs text-muted-foreground">
+              {openTodos !== null ? `open ${openTodos}` : '—'}
+              {overdueTodos !== null && overdueTodos > 0 && (
+                <span className="ml-2 text-red-400">逾期 {overdueTodos}</span>
+              )}
+            </span>
+          </li>
+          <li className="flex items-center justify-between px-4 py-2.5 text-sm">
+            <Link to="/tickets" className="hover:underline">
+              工单
+            </Link>
+            <span className="text-xs text-muted-foreground">
+              {openTickets !== null ? `open ${openTickets}` : '—'}
+            </span>
+          </li>
+        </ul>
       </Card>
     </div>
   )
