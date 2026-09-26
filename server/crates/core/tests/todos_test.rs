@@ -55,7 +55,6 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -79,7 +78,6 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -103,7 +101,6 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -125,7 +122,6 @@ async fn done_is_idempotent_keeps_first_done_at() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -211,7 +207,6 @@ async fn nul_bytes_are_rejected() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -260,9 +255,8 @@ async fn cursor_pagination_walks_all_without_loss() {
                     None,
                     None,
                     None,
-                
-            "test",
-        )
+                    "test",
+                )
                 .await
                 .unwrap(),
             None => t,
@@ -385,7 +379,6 @@ async fn kind_rejects_foreign_status() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -423,7 +416,6 @@ async fn kind_rejects_foreign_status() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -496,7 +488,6 @@ async fn ticket_state_machine_and_resolution_gate() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -519,7 +510,6 @@ async fn ticket_state_machine_and_resolution_gate() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -542,7 +532,6 @@ async fn ticket_state_machine_and_resolution_gate() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -566,7 +555,6 @@ async fn ticket_state_machine_and_resolution_gate() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -611,7 +599,6 @@ async fn kind_conversion_todo_to_ticket() {
             None,
             None,
             None,
-        
             "test",
         )
         .await
@@ -754,7 +741,6 @@ async fn short_no_and_links() {
             None,
             None,
             None,
-        
             "test",
         )
         .await;
@@ -834,9 +820,8 @@ async fn list_supports_ticket_status_and_severity_filters() {
         None,
         None,
         None,
-    
-            "test",
-        )
+        "test",
+    )
     .await
     .unwrap();
     let confirmed = svc
@@ -954,9 +939,8 @@ async fn list_order_is_open_first_then_updated_at_desc() {
         None,
         None,
         None,
-    
-            "test",
-        )
+        "test",
+    )
     .await
     .unwrap();
     svc.update(
@@ -974,9 +958,8 @@ async fn list_order_is_open_first_then_updated_at_desc() {
         None,
         None,
         None,
-    
-            "test",
-        )
+        "test",
+    )
     .await
     .unwrap();
     svc.update(
@@ -994,9 +977,8 @@ async fn list_order_is_open_first_then_updated_at_desc() {
         None,
         None,
         None,
-    
-            "test",
-        )
+        "test",
+    )
     .await
     .unwrap();
 
@@ -1147,7 +1129,6 @@ async fn todos_update_fields_and_overdue_filter() {
             Some(None),                             // due_at 清除
             None,                                   // project_hint
             Some(&["ops".into(), "urgent".into()]), // tags
-        
             "test",
         )
         .await
@@ -1173,9 +1154,8 @@ async fn todos_update_fields_and_overdue_filter() {
         Some(Some(Utc::now() - chrono::Duration::hours(2))), // due_at
         None,
         None, // project_hint/tags
-    
-            "test",
-        )
+        "test",
+    )
     .await
     .unwrap();
 
@@ -1253,9 +1233,8 @@ async fn todos_update_fields_and_overdue_filter() {
         Some(Some(Utc::now() + chrono::Duration::hours(1))), // due_at → 今天内
         None,
         None, // project_hint/tags
-    
-            "test",
-        )
+        "test",
+    )
     .await
     .unwrap();
     let today = svc
@@ -1304,9 +1283,8 @@ async fn todos_update_fields_and_overdue_filter() {
         None,
         None,
         None, // due_at/project_hint/tags
-    
-            "test",
-        )
+        "test",
+    )
     .await
     .unwrap();
     let od4 = svc
@@ -1334,8 +1312,17 @@ async fn ticket_status_flow_and_comments_timeline() {
 
     let t = svc
         .create(
-            "T 工单", "body", "ticket", "", Some("P2"), "症状", "复现", "验收", &[],
-            None, None,
+            "T 工单",
+            "body",
+            "ticket",
+            "",
+            Some("P2"),
+            "症状",
+            "复现",
+            "验收",
+            &[],
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -1345,8 +1332,19 @@ async fn ticket_status_flow_and_comments_timeline() {
     for s in ["confirmed", "in_progress"] {
         svc.update(
             t.id,
-            None, None, None, None, Some(s),
-            None, None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            Some(s),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             "test",
         )
         .await
@@ -1356,8 +1354,19 @@ async fn ticket_status_flow_and_comments_timeline() {
     // 同状态重复 update 不留痕
     svc.update(
         t.id,
-        None, None, None, None, Some("in_progress"),
-        None, None, None, None, None, None, None, None,
+        None,
+        None,
+        None,
+        None,
+        Some("in_progress"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
         "test",
     )
     .await
