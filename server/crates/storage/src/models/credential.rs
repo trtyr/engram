@@ -24,6 +24,10 @@ pub struct CredentialMetaDto {
     pub last_read_at: Option<DateTime<Utc>>,
     /// 取用审计：累计 get 次数
     pub read_count: i32,
+    /// 分组标签（按系统/环境归组；可检索）
+    pub tags: Vec<String>,
+    /// 到期时间（过期治理：台账页红/黄高亮，判定在调用端按 now() 算）
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 /// 取用审计流水行。
@@ -45,4 +49,8 @@ pub struct CredentialValueDto {
     pub description: String,
     pub last_read_at: Option<DateTime<Utc>>,
     pub read_count: i32,
+    /// 分组标签
+    pub tags: Vec<String>,
+    /// 到期时间
+    pub expires_at: Option<DateTime<Utc>>,
 }

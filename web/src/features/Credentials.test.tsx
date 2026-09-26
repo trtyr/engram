@@ -22,6 +22,8 @@ const state: {
       updated_at: '2026-09-26T08:00:00Z',
       last_read_at: null,
       read_count: 1,
+      tags: ['newapi', 'prod'],
+      expires_at: null,
     },
     {
       id: 'c2',
@@ -33,6 +35,8 @@ const state: {
       updated_at: '2026-09-26T08:00:00Z',
       last_read_at: null,
       read_count: 0,
+      tags: ['helm'],
+      expires_at: '2020-01-01T00:00:00Z',
     },
   ],
   reads: { 'newapi/api_key': [{ id: 'r1', credential_id: 'c1', reader: 'agent', read_at: '2026-09-26T09:00:00Z' }] },
@@ -43,6 +47,10 @@ vi.mock('@/lib/api', () => {
   const api = {
     get: vi.fn(async (p: string) => {
       if (p === '/credentials') return { items: state.rows }
+      if (p.includes('tag=')) {
+        const tag = decodeURIComponent(p.split('tag=')[1])
+        return { items: state.rows.filter((r) => (r.tags as string[]).includes(tag)) }
+      }
       if (p.endsWith('/reads')) {
         const name = decodeURIComponent(p.split('/')[2])
         return { name, reads: state.reads[name] ?? [] }

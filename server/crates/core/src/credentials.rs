@@ -84,6 +84,8 @@ impl CredentialsService {
         value: &str,
         description: Option<&str>,
         created_by: &str,
+        tags: &[String],
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<CredentialMetaDto, CredentialError> {
         let name = Self::validate_name(name)?;
         if value.is_empty() {
@@ -98,6 +100,8 @@ impl CredentialsService {
             true,
             description.unwrap_or(""),
             created_by,
+            tags,
+            expires_at,
         )
         .await?)
     }
@@ -125,12 +129,18 @@ impl CredentialsService {
             description: row.description,
             last_read_at: Some(chrono::Utc::now()),
             read_count: row.read_count + 1,
+            tags: row.tags,
+            expires_at: row.expires_at,
         })
     }
 
     /// 台账（元数据，永不回显值）。
-    pub async fn list(&self) -> Result<Vec<CredentialMetaDto>, CredentialError> {
-        Ok(repo::list(&self.pool).await?)
+    pub async fn list(
+        &self,
+        tag: Option<&str>,
+        q: Option<&str>,
+    ) -> Result<Vec<CredentialMetaDto>, CredentialError> {
+        Ok(repo::list(&self.pool, tag, q).await?)
     }
 
     /// 取用审计流水（最近在前）。

@@ -23,6 +23,10 @@ export interface CredentialMetaDto {
   updated_at: string
   last_read_at: string | null
   read_count: number
+  /** 分组标签（按系统/环境归组） */
+  tags: string[]
+  /** 到期时间（过期红/临期黄） */
+  expires_at: string | null
 }
 
 export interface CredentialReadRow {
@@ -46,14 +50,19 @@ export default function Credentials() {
   const [fName, setFName] = useState('')
   const [fValue, setFValue] = useState('')
   const [fDesc, setFDesc] = useState('')
+  const [fTags, setFTags] = useState('')
+  const [fExpires, setFExpires] = useState('')
   const [notice, setNotice] = useState('')
+  // 标签筛选（点行的 tag chip 或输入）
+  const [filterTag, setFilterTag] = useState('')
 
   const load = useCallback(() => {
+    const qs = filterTag ? `?tag=${encodeURIComponent(filterTag)}` : ''
     api
-      .get<{ items: CredentialMetaDto[] }>('/credentials')
+      .get<{ items: CredentialMetaDto[] }>(`/credentials${qs}`)
       .then((r) => setRows(r.items))
       .catch((e) => setErr(String(e)))
-  }, [])
+  }, [filterTag])
   useEffect(() => {
     load()
   }, [load])
@@ -97,6 +106,11 @@ export default function Credentials() {
         name: fName,
         value: fValue,
         description: fDesc || null,
+        tags: fTags
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        expires_at: fExpires ? new Date(fExpires).toISOString() : null,
       })
       .catch((e) => {
         setErr(String(e))
@@ -158,6 +172,18 @@ export default function Credentials() {
             value={fDesc}
             onChange={(e) => setFDesc(e.target.value)}
           />
+          <input
+            className={inputCls + ' w-40'}
+            placeholder="标签（逗号分隔）"
+            value={fTags}
+            onChange={(e) => setFTags(e.target.value)}
+          />
+          <input
+            className={inputCls + ' w-48'}
+            type="datetime-local"
+            value={fExpires}
+            onChange={(e) => setFExpires(e.target.value)}
+          />
           <Button onClick={doPut} disabled={busy || !fName || !fValue}>
             写入
           </Button>
@@ -166,9 +192,29 @@ export default function Credentials() {
       </Card>
 
       {rows.length === 0 ? (
-        <Empty text="台账空——写入第一条凭据。" />
+        <Empty text={filterTag ? `没有带「${filterTag}」标签的凭据。` : '台账空——写入第一条凭据。'} />
       ) : (
         <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">标签筛选：</span>
+            {filterTag && (
+              <button
+                className="rounded-full border border-border px-2 py-0.5 hover:bg-muted"
+                onClick={() => setFilterTag('')}
+              >
+                ✕ {filterTag}
+              </button>
+            )}
+            {[...new Set(rows.flatMap((c) => c.tags))].map((t) => (
+              <button
+                key={t}
+                className="rounded-full border border-border px-2 py-0.5 hover:bg-muted"
+                onClick={() => setFilterTag(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
           {rows.map((c) => (
             <Card key={c.id} className="p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -180,11 +226,34 @@ export default function Credentials() {
                         敏感
                       </span>
                     )}
+                    {c.expires_at &&
+                      (new Date(c.expires_at) < new Date() ? (
+                        <span className="ml-2 rounded bg-red-500/15 px-1.5 py-0.5 text-xs text-red-400">
+                          已过期
+                        </span>
+                      ) : new Date(c.expires_at).getTime() - Date.now() < 30 * 86400_000 ? (
+                        <span className="ml-2 rounded bg-yellow-500/15 px-1.5 py-0.5 text-xs text-yellow-500">
+                          30 天内到期
+                        </span>
+                      ) : null)}
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">
                     {c.description || '（无说明）'} · 取用 {c.read_count} 次
                     {c.last_read_at ? ` · 最近 ${new Date(c.last_read_at).toLocaleString()}` : ' · 从未取用'}
                   </div>
+                  {c.tags.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {c.tags.map((t) => (
+                        <button
+                          key={t}
+                          className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+                          onClick={() => setFilterTag(t)}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <Button variant="outline" onClick={() => loadReads(c.name)}>

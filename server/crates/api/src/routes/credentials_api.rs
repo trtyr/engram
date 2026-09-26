@@ -4,7 +4,7 @@
 //! （与 MCP credentials 域同一 core 服务，安全语义零分叉）。
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use engram_core::credentials::{CredentialError, CredentialsService};
 use serde::Deserialize;
@@ -42,17 +42,36 @@ pub struct CredentialPutRequest {
     pub value: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// 分组标签（按系统/环境归组）
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    /// 到期时间（RFC3339；可选）
+    #[serde(default)]
+    pub expires_at: Option<String>,
 }
 
 /// 台账列表（元数据，永不回显值）。
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct ListCredentialsParams {
+    /// 按标签过滤
+    pub tag: Option<String>,
+    /// 关键词（命中 name/description/tags）
+    pub q: Option<String>,
+}
+
 #[utoipa::path(get, path = "/credentials",
+    params(ListCredentialsParams),
     responses((status = 200)))]
 pub async fn list_credentials(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
+    Query(p): Query<ListCredentialsParams>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_credentials_read(&principal)?;
-    let items = svc(&state).list().await.map_err(ce)?;
+    let items = svc(&state)
+        .list(p.tag.as_deref(), p.q.as_deref())
+        .await
+        .map_err(ce)?;
     Ok(Json(serde_json::json!({ "items": items })))
 }
 
@@ -92,8 +111,32 @@ pub async fn put_credential(
     Json(req): Json<CredentialPutRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     require_credentials(&principal)?;
+    let expires_at = match req.expires_at.as_deref() {
+        Some(s) if !s.trim().is_empty() => Some(
+            chrono::DateTime::parse_from_rfc3339(s.trim())
+                .map_err(|_| {
+                    ApiError::BadRequest("expires_at 需 RFC3339（如 2026-12-31T00:00:00Z）".into())
+                })?
+                .with_timezone(&chrono::Utc),
+        ),
+        _ => None,
+    };
+    let tags: Vec<String> = req
+        .tags
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
     let meta = svc(&state)
-        .put(&req.name, &req.value, req.description.as_deref(), "console")
+        .put(
+            &req.name,
+            &req.value,
+            req.description.as_deref(),
+            "console",
+            &tags,
+            expires_at,
+        )
         .await
         .map_err(ce)?;
     Ok((

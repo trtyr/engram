@@ -21,6 +21,16 @@ pub struct CredentialPutParams {
     /// 用途说明
     #[schemars(description = "可选：用途说明（用在哪/找谁等元信息；不要把值写进说明）。")]
     pub description: Option<String>,
+    /// 分组标签（按系统/环境归组）
+    #[schemars(
+        description = "可选：分组标签（按系统/环境归组，如 newapi/helm/prod）；list 可按 tag 过滤。"
+    )]
+    pub tags: Option<Vec<String>>,
+    /// 到期时间（RFC3339）
+    #[schemars(
+        description = "可选：到期时间（RFC3339，如 2026-12-31T00:00:00Z）——台账页过期红/临期黄高亮。"
+    )]
+    pub expires_at: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -38,7 +48,14 @@ pub struct CredentialDeleteParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct CredentialListParams {}
+pub struct CredentialListParams {
+    /// 按标签过滤
+    #[schemars(description = "可选：按标签过滤（命中 tags 任一）。")]
+    pub tag: Option<String>,
+    /// 关键词
+    #[schemars(description = "可选：关键词（命中 name/description/tags）。")]
+    pub q: Option<String>,
+}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CredentialReadsParams {
@@ -72,16 +89,45 @@ impl EngramMcpServer {
         match action.as_str() {
             "put" => {
                 let p: CredentialPutParams = dispatch::from_args("credentials", "put", call.args)?;
+                let expires_at = match p.expires_at.as_deref() {
+                    Some(s) if !s.trim().is_empty() => Some(
+                        chrono::DateTime::parse_from_rfc3339(s.trim())
+                            .map_err(|_| {
+                                mcp_err(
+                                    ErrorCode::INVALID_PARAMS,
+                                    "expires_at 需 RFC3339（如 2026-12-31T00:00:00Z）",
+                                )
+                            })?
+                            .with_timezone(&chrono::Utc),
+                    ),
+                    _ => None,
+                };
+                let tags: Vec<String> = p
+                    .tags
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect();
                 let meta = self
                     .state
                     .credentials()
-                    .put(&p.name, &p.value, p.description.as_deref(), "mcp")
+                    .put(
+                        &p.name,
+                        &p.value,
+                        p.description.as_deref(),
+                        "mcp",
+                        &tags,
+                        expires_at,
+                    )
                     .await
                     .map_err(credential_err)?;
                 ok_json(json!({
                     "name": meta.name,
                     "sensitive": meta.sensitive,
                     "description": meta.description,
+                    "tags": meta.tags,
+                    "expires_at": meta.expires_at,
                     "updated_at": meta.updated_at,
                     "hint": "值已加密落库（明文不落任何日志/文档）。同名 put = 换值。取用：action=\"get\"。"
                 }))
@@ -104,18 +150,18 @@ impl EngramMcpServer {
                 }))
             }
             "list" => {
-                let _: CredentialListParams =
+                let p: CredentialListParams =
                     dispatch::from_args("credentials", "list", call.args)?;
                 let items = self
                     .state
                     .credentials()
-                    .list()
+                    .list(p.tag.as_deref(), p.q.as_deref())
                     .await
                     .map_err(credential_err)?;
                 ok_json(json!({
                     "count": items.len(),
                     "items": items,
-                    "hint": "台账不含值——值只在 get 响应中出现。取用某条：action=\"get\" name=…"
+                    "hint": "台账不含值——值只在 get 响应中出现。过期治理：expires_at 已过=红，30 天内=黄。取用某条：action=\"get\" name=…"
                 }))
             }
             "reads" => {
