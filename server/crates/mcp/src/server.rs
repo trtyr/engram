@@ -141,7 +141,7 @@ impl ServerHandler for EngramMcpServer {
             .filter(|t| !cfg.disabled_tools.iter().any(|d| d == t.name.as_ref()))
             .filter(|t| {
                 scope.as_ref().is_none_or(|p| match t.name.as_ref() {
-                    "search_all" => ["memory", "wiki", "skills", "todos", "project"]
+                    "search_all" => ["memory", "wiki", "todos", "project"]
                         .iter()
                         .any(|s| p.domain_access(s) != DomainAccess::None),
                     // jobs 无域 scope（对齐 HTTP：任何合法凭证可读任务——AI 轮询自己触发的任务）

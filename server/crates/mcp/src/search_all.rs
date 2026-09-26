@@ -7,7 +7,7 @@ use super::*;
 pub struct SearchAllParams {
     /// 检索词（各域同词并发检索）
     #[schemars(
-        description = "检索词。对 key 有 scope 的域并发检索（memory/wiki/skills/todos/projects）。"
+        description = "检索词。对 key 有 scope 的域并发检索（memory/wiki/todos/projects）。"
     )]
     pub query: String,
     /// R6：可选 LLM 精排（默认关）——开时五域命中合并 top-10 交 LLM 重排，响应附 reranked 视图
@@ -24,7 +24,7 @@ pub struct SearchAllParams {
 impl EngramMcpServer {
     // ---------- 跨域全局检索（常驻工具之一；不属单一 scope，按 key 实际 scope 分域执行） ----------
 
-    /// 全局检索（R 报告 P1-8）：一次查询并发打 memory/wiki/skills/todos/projects 五域，
+    /// 全局检索（R 报告 P1-8）：一次查询并发打 memory/wiki/todos/projects 四域，
     /// 各返回 top-k 摘要（含命中域标注）——「6 次单域搜索」压成 1 次。
     ///
     /// 何时用：不确定信息在哪域、或要先扫一遍全库面时。
@@ -55,7 +55,7 @@ impl EngramMcpServer {
         }
         let max = params.0.max_per_domain.unwrap_or(3).clamp(1, 10);
         let scope_of = |s: &str| p.domain_access(s) != DomainAccess::None;
-        if !["memory", "wiki", "skills", "todos", "project"]
+        if !["memory", "wiki", "todos", "project"]
             .iter()
             .any(|s| scope_of(s))
         {
@@ -107,29 +107,7 @@ impl EngramMcpServer {
                 Err(e) => json!({ "error": e.to_string() }),
             })
         };
-        // skills（名字/描述命中，标题 + 描述即可定位）
-        let sk = scope_of("skills");
-        let skills_fut = async {
-            if !sk {
-                return None;
-            }
-            let pattern = format!("%{q}%");
-            match engram_storage::repo::skills::list_skills(
-                &self.state.pool,
-                Some(pattern),
-                None,
-                None,
-            )
-            .await
-            {
-                Ok(rows) => Some(json!(rows
-                .iter()
-                .take(max as usize)
-                .map(|s| json!({"slug": s.slug, "name": s.name, "description": s.description}))
-                .collect::<Vec<_>>())),
-                Err(e) => Some(json!({ "error": e.to_string() })),
-            }
-        };
+        // EN-252：skills 域裁撤——search_all 不再并发 skills
         // todos（标题/正文子串）
         let td = scope_of("todos");
         let todos_fut = async {
@@ -148,8 +126,7 @@ impl EngramMcpServer {
                 Err(e) => Some(json!({ "error": e.to_string() })),
             }
         };
-        let (mem_r, wiki_r, skills_r, todos_r) =
-            tokio::join!(mem_fut, wiki_fut, skills_fut, todos_fut);
+        let (mem_r, wiki_r, todos_r) = tokio::join!(mem_fut, wiki_fut, todos_fut);
 
         // projects（项目名/描述命中 + 各项目文档按行检索，总量封顶）
         let mut projects_val: Option<serde_json::Value> = None;
@@ -190,16 +167,13 @@ impl EngramMcpServer {
 
         let mut out = json!({
             "query": q,
-            "note": "各域 top-k 摘要——精确/过滤检索用单域工具；wiki 全文 get_page，memory 原文 get_session，技能全文 skills get",
+            "note": "各域 top-k 摘要——精确/过滤检索用单域工具；wiki 全文 get_page，memory 原文 get_session",
         });
         if let Some(v) = &mem_r {
             out["memory"] = v.clone();
         }
         if let Some(v) = &wiki_r {
             out["wiki"] = v.clone();
-        }
-        if let Some(v) = &skills_r {
-            out["skills"] = v.clone();
         }
         if let Some(v) = &todos_r {
             out["todos"] = v.clone();
@@ -208,7 +182,7 @@ impl EngramMcpServer {
             out["projects"] = v.clone();
         }
 
-        // R6：rerank=true 时五域命中合并 top-10 交 LLM 精排，附 reranked 视图（失败降级为无此字段）
+        // R6：rerank=true 时四域命中合并 top-10 交 LLM 精排，附 reranked 视图（失败降级为无此字段）
         if params.0.rerank == Some(true) {
             let mut candidates: Vec<UnifiedHit> = Vec::new();
             let push_arr =
@@ -252,9 +226,6 @@ impl EngramMcpServer {
             }
             if let Some(v) = wiki_r.as_ref() {
                 push_arr("wiki", v, &mut candidates);
-            }
-            if let Some(v) = skills_r.as_ref() {
-                push_arr("skills", v, &mut candidates);
             }
             if let Some(v) = todos_r.as_ref() {
                 push_arr("todos", v, &mut candidates);

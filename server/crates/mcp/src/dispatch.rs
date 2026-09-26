@@ -121,18 +121,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "update", false, "编辑资产（补丁式；aliases 传了就整体替换）" => crate::AssetUpdateParams;
             "delete", true, "删除资产（被项目位置引用的会被拒绝——先解绑，不可逆）" => crate::AssetDeleteParams
         ],
-        "skills" => action_docs![
-            "list", false, "列出技能（q/tag/enabled 过滤，不含正文；kind=script 的条目带 local_path 指针）" => crate::SkillsListParams;
-            "get", false, "读技能全文（script 型从 local_path 现读，指针失效报错）" => crate::SkillsGetParams;
-            "file_get", false, "读技能附属文件（scripts/references 等；script 型不可用——文件在本地，系统只存指针）" => crate::SkillsFileGetParams;
-            "file_put", false, "写技能附属文件（同路径覆盖；SKILL.md 本体走 update；script 型不可用；text 型禁 .py/.sh 等脚本后缀）" => crate::SkillsFilePutParams;
-            "create", false, "沉淀新技能（默认 text 整体入库；带 .py/.sh 等脚本的用 kind=script + local_path 存本地指针）" => crate::SkillsCreateParams;
-            "update", false, "更新技能（语义变更自动留版本快照；script 型改正文拒绝、可改 origin/repo_url/local_path）" => crate::SkillsUpdateParams;
-            "versions", false, "版本快照列表（改坏前看历史 / 找回滚 revision_id；script 型不可用——版本归本地 git）" => crate::SkillsVersionsParams;
-            "restore", false, "回滚到历史版本（回滚本身也留快照；script 型不可用）" => crate::SkillsRestoreParams;
-            "delete", true, "删除技能（级联删版本快照，不可逆；仅限用户明确要求）" => crate::SkillsDeleteParams;
-            "import", false, "导入现成 SKILL.md（frontmatter 容错解析；导入为 text 型）" => crate::SkillsImportParams
-        ],
+        // EN-252：skills 域裁撤（原 action_docs 块移除；存量已迁 wiki/projects/本地 git）
         "wiki" => action_docs![
             "search", false, "Wiki 检索（FTS + 向量融合；命中带片段，全文按需 get_page；按库）" => crate::wiki::WikiSearchParams;
             "list_pages", false, "浏览页面列表（可按页型过滤；不含正文）" => crate::wiki::WikiListPagesParams;
@@ -209,7 +198,6 @@ pub const DOMAIN_TOOLS: &[&str] = &[
     "memory",
     "projects",
     "assets",
-    "skills",
     "wiki",
     "todos",
     "tickets",
@@ -376,10 +364,6 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "file_delete"
         ) | ("assets", "add" | "update" | "delete")
             | (
-                "skills",
-                "create" | "update" | "import" | "restore" | "delete" | "file_put"
-            )
-            | (
                 "wiki",
                 "write_page"
                     | "ingest"
@@ -440,7 +424,6 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                 | "links"
                 | "location_get"
         ) | ("assets", "kinds" | "list" | "get")
-            | ("skills", "list" | "get" | "file_get" | "versions")
             | (
                 "wiki",
                 "search"
@@ -548,7 +531,7 @@ pub fn render_manual(domain: &str, disabled: &[String]) -> Value {
         "how_to_call": format!("{{\"action\":\"<操作名>\", ...该操作的参数（平铺）}}；本返回即 {domain} 域全部可用操作"),
         // 验收反馈：search_all 是独立工具，不在任何域 help 里——每份手册顶部指路，
         // 想跨域扫一遍时不用翻 tools/list
-        "cross_domain_hint": "另有独立工具 search_all（非本域操作）：一次查询并发 memory/wiki/skills/todos/projects 各回 top-k 摘要——不确定信息在哪域时用",
+        "cross_domain_hint": "另有独立工具 search_all（非本域操作）：一次查询并发 memory/wiki/todos/projects 各回 top-k 摘要——不确定信息在哪域时用",
         "actions": actions,
     });
     // EN-236：wiki 域动作最多（28 个），help 平铺可发现性差——按九任务组分组的导航层（纯增量：

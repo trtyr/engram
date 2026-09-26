@@ -11,7 +11,6 @@ pub(crate) fn tool_scope(name: &str) -> &'static str {
         "projects" => "project",
         "assets" => "assets", // 资产台账域：独立一等对象（2026-09-21 新增）
         "memory" => "memory",
-        "skills" => "skills",
         "wiki" => "wiki",
         "todos" | "tickets" => "todos", // 工单域与待办同 scope（同表同底座，权限不分家）
         "codegraph" => "codegraph",
@@ -23,7 +22,6 @@ pub(crate) fn tool_scope(name: &str) -> &'static str {
 pub(crate) fn flat_tool_scope(other: &str) -> &'static str {
     match other.split('_').next() {
         Some("project") => "project",
-        Some("skills") => "skills",
         Some("wiki") => "wiki",
         Some("codegraph") => "codegraph",
         Some("llm") => "llm",
@@ -36,7 +34,7 @@ pub(crate) fn flat_tool_scope(other: &str) -> &'static str {
 pub(crate) const SERVER_INSTRUCTIONS: &str = "\
 Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：九个领域各一个入口工具\
 （memory 用户记忆 / projects 工作线 / assets 资产台账 / skills 技能 / wiki 知识库 / todos 待办 / tickets 工单 / codegraph 代码图谱 / jobs 任务），\
-外加跨域全局检索 search_all（一次查询并发五域，各回 top-k 摘要）。\
+外加跨域全局检索 search_all（一次查询并发四域，各回 top-k 摘要）。\
 域工具调用形态 {\"action\":\"<操作名>\", ...参数}；每个工具的描述里带操作目录（常驻可见），\
 参数细节用 {\"action\":\"help\"} 一轮取回全域操作手册。
 
@@ -84,7 +82,7 @@ codegraph 域用法：注册代码库 → index/sync → {\"action\":\"query\"}�
 explore 默认返回符号大纲（不带源码）；单符号源码用 node，整份源码 explore 传 include_source=true。
 
 域的选择：回忆「用户本人是谁、偏好什么、经历过什么」用 memory；查证「客观知识」用 wiki；
-跨会话的工作线用 projects；可复用能力用 skills；随手记行动项用 todos；开工单跟踪问题用 tickets；不确定在哪域就 search_all。
+跨会话的工作线用 projects；随手记行动项用 todos；开工单跟踪问题用 tickets；不确定在哪域就 search_all。
 LLM 供应商/模型的配置与排障是管理员专属，走 Web 控制台「设置 → AI 功能」——MCP 工具面
 不提供 provider 配置工具（AI 报 LLM 未配置时，引导用户去设置页，不要尝试自行配置）。
 
@@ -109,18 +107,12 @@ pub(crate) const CATALOG_ITEM_CAP: usize = 40;
 
 /// 按本次工具面实际包含的工具惰性取动态清单（工具不在面内就不查库）。
 pub(crate) struct ToolCatalogs {
-    skills: Option<String>,
     projects: Option<String>,
     codegraph: Option<String>,
 }
 
 impl ToolCatalogs {
     pub(crate) async fn for_tools(pool: &engram_storage::PgPool, names: &[&str]) -> Self {
-        let skills = if names.contains(&"skills") {
-            skills_catalog(pool).await
-        } else {
-            None
-        };
         let projects = if names.contains(&"projects") {
             projects_catalog(pool).await
         } else {
@@ -132,7 +124,6 @@ impl ToolCatalogs {
             None
         };
         Self {
-            skills,
             projects,
             codegraph,
         }
@@ -140,7 +131,6 @@ impl ToolCatalogs {
 
     pub(crate) fn extra_for(&self, name: &str) -> Option<&str> {
         match name {
-            "skills" => self.skills.as_deref(),
             "projects" => self.projects.as_deref(),
             "codegraph" => self.codegraph.as_deref(),
             _ => None,

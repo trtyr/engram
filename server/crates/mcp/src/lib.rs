@@ -31,7 +31,9 @@ mod projects;
 mod registry;
 mod search_all;
 mod server;
+#[allow(dead_code)]
 mod skills;
+#[allow(dead_code)]
 mod skills_versions;
 mod tickets;
 mod todos;
@@ -57,7 +59,9 @@ pub(crate) use project_locations::*;
 pub(crate) use projects::*;
 pub use registry::*;
 pub use server::*;
+#[allow(unused_imports)]
 pub(crate) use skills::*;
+#[allow(unused_imports)]
 pub(crate) use skills_versions::*;
 pub(crate) use tickets::*;
 pub(crate) use todos::*;
@@ -92,7 +96,7 @@ impl EngramMcpServer {
     /// 合并各域工具 router（每个域模块自带 `#[tool_router]` 块）。
     pub(crate) fn build_tool_router() -> ToolRouter<Self> {
         let mut tool_router = ToolRouter::<Self>::new();
-        tool_router.merge(crate::skills::routes_skills());
+        // EN-252：skills 域裁撤——工具路由注销（模块与存储层保留供回滚）
         tool_router.merge(crate::wiki_ops::routes_wiki_ops());
         tool_router.merge(crate::projects::routes_projects());
         tool_router.merge(crate::assets::routes_assets());
@@ -111,7 +115,7 @@ impl EngramMcpServer {
         tool_router.merge(crate::todos_links::routes_todos_links());
         tool_router.merge(crate::memory_kv::routes_memory_kv());
         tool_router.merge(crate::project_locations::routes_project_locations());
-        tool_router.merge(crate::skills_versions::routes_skills_versions());
+        // tool_router.merge(crate::skills_versions::routes_skills_versions()); // EN-252 裁撤
         tool_router
     }
 }
