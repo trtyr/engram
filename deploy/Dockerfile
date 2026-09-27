@@ -67,9 +67,9 @@ ARG NO_PROXY
 # https://mirrors.aliyun.com/debian）即整段替换；留空保持官方源（海外机）。
 ARG APT_MIRROR=""
 RUN if [ -n "$APT_MIRROR" ]; then \
-      sed -i "s|deb.debian.org|${APT_MIRROR#https://}|g; s|http://${APT_MIRROR#https://}|${APT_MIRROR}|g" \
-        /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
-      grep -r "URI" /etc/apt/sources.list.d/ | head -3; \
+      sed -i "s|http://deb.debian.org|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+      grep "URIs" /etc/apt/sources.list.d/debian.sources | head -2; \
     fi
 # apt 代理必须走非保留名 ARG（compose 静默剔除 HTTP_PROXY 这类保留名 build-arg），
 # 且 apt 只认小写 proxy 变量——行内显式导出
