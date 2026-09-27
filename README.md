@@ -133,6 +133,8 @@ docker compose up -d --build
 # 控制台 → http://localhost:8080
 ```
 
+**完整部署文档（必填项/反代 HTTPS/升级/备份/排障）见 [deploy/README.md](deploy/README.md)。**
+
 数据全在宿主：bind mount 到 `~/.engram/`（`postgres/`、`app/`、`backups/`），备份这一个目录即可。
 已有本地实例？`deploy/migrate-from-local.sh` 一键迁移。
 
