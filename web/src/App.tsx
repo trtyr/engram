@@ -190,7 +190,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               {group.label && (
                 <p
                   className={cn(
-                    'hidden px-3 pt-4 pb-1 font-mono text-[10px] tracking-wider text-muted-foreground/60 uppercase md:block',
+                    'hidden px-3 pt-4 pb-1 font-mono text-[10px] tracking-wider text-muted-foreground/90 uppercase md:block',
                     collapsed && 'md:hidden',
                   )}
                 >

@@ -285,7 +285,7 @@ export default function Dashboard() {
             <p className="font-mono text-2xl font-medium tracking-tight tabular-nums">{s.n}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {s.label}
-              <span className="ml-1.5 text-muted-foreground/60">{s.sub}</span>
+              <span className="ml-1.5 text-muted-foreground/90">{s.sub}</span>
             </p>
           </div>
         ))}

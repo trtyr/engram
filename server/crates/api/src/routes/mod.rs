@@ -131,6 +131,8 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(
             crate::client_ip::inject_client_ip,
         ))
+        // 安全响应头（2026-09-27 Lighthouse 修复）：防点击劫持 + 跨源隔离 + 基础 CSP + HSTS
+        .layer(axum::middleware::from_fn(security_headers_mw))
         // R10：HTTP 指标（请求计数 + 延迟直方图，按路由模板聚合）——放最外层，覆盖全部 API 路由
         .layer(axum::middleware::from_fn(http_metrics_mw))
         // SPA 静态资源兜底（API 路由未命中时 → web/dist）
@@ -514,6 +516,30 @@ fn migrate_routes() -> Router<AppState> {
         .route("/migrate/import", post(migrate_api::import_bundle))
         .route("/migrate/pull", post(migrate_api::pull))
         .route("/migrate/sync", post(migrate_api::migrate_sync))
+}
+
+/// 安全响应头中间件（2026-09-27 Lighthouse 修复）：全部响应统一附加。
+/// CSP 说明：index.html 有内联主题引导脚本（防闪烁，先于渲染执行）+ React 内联样式，
+/// 故 script/style 需 'unsafe-inline'——已比无 CSP 好一档（default-src 收紧其余方向）。
+async fn security_headers_mw(
+    req: axum::extract::Request,
+    next: Next,
+) -> axum::response::Response {
+    let mut res = next.run(req).await;
+    let h = res.headers_mut();
+    h.insert("x-frame-options", "DENY".parse().expect("static"));
+    h.insert("cross-origin-opener-policy", "same-origin".parse().expect("static"));
+    h.insert(
+        "content-security-policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+            .parse()
+            .expect("static"),
+    );
+    h.insert(
+        "strict-transport-security",
+        "max-age=31536000; includeSubDomains".parse().expect("static"),
+    );
+    res
 }
 
 /// R10：HTTP 指标中间件——请求计数 + 延迟直方图，route 用匹配模板（非逐 URI，防高基数）。
