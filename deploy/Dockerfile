@@ -62,7 +62,15 @@ ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
 # 2026-09-13：TUN 虚拟网卡直连——apt 走 debian 官方源（清华镜像在当前网络下不可达）；
-# 代理 ARG 保留（历史兼容，默认空不生效）
+# 代理 ARG 保留（历史兼容，默认空不生效）。
+# 2026-09-27：国内机构建 apt 官方源过慢——APT_MIRROR 设国内镜像（如
+# https://mirrors.aliyun.com/debian）即整段替换；留空保持官方源（海外机）。
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR#https://}|g; s|http://${APT_MIRROR#https://}|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+      grep -r "URI" /etc/apt/sources.list.d/ | head -3; \
+    fi
 RUN apt-get update -o Acquire::ForceIPv4=true \
     && apt-get install -y --no-install-recommends ca-certificates curl git npm \
     && rm -rf /var/lib/apt/lists/*
