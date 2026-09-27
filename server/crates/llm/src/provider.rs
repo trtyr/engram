@@ -213,13 +213,14 @@ impl ProviderRegistry {
                 ),
             }
         }
-        // 默认回退：按能力选默认 provider（chat 与 embedding 各有一个默认）。
+        // 默认回退：按能力选 provider。优先 is_default 行；缺失时兜底该能力任意一行
+        // （EN-1：控制台建了 provider 但漏开"默认"开关曾致蒸馏链整链卡死——配置了就该能用）。
         // L3：ORDER BY 兜底确定性——存量多 default 行时取最早创建的。
         let want_embed = purpose == crate::types::Purpose::Embed;
         let capability = if want_embed { "embedding" } else { "chat" };
         let row: Option<(String, String, Vec<u8>, String)> = sqlx::query_as(
             "SELECT name, base_url, api_key_encrypted, model_id FROM llm_providers \
-             WHERE is_default = true AND capability = $1 ORDER BY created_at LIMIT 1",
+             WHERE capability = $1 ORDER BY is_default DESC, created_at LIMIT 1",
         )
         .bind(capability)
         .fetch_optional(&self.pool)
