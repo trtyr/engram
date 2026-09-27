@@ -71,8 +71,10 @@ RUN if [ -n "$APT_MIRROR" ]; then \
         /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
       grep -r "URI" /etc/apt/sources.list.d/ | head -3; \
     fi
-# apt 只认小写 proxy 环境变量（BuildKit 自动注入的是大写，apt 无视）——行内显式导出
-RUN http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" \
+# apt 代理必须走非保留名 ARG（compose 静默剔除 HTTP_PROXY 这类保留名 build-arg），
+# 且 apt 只认小写 proxy 变量——行内显式导出
+ARG APT_PROXY=""
+RUN http_proxy="${APT_PROXY}" https_proxy="${APT_PROXY}" \
     apt-get update -o Acquire::ForceIPv4=true \
     && apt-get install -y --no-install-recommends ca-certificates curl git npm \
     && rm -rf /var/lib/apt/lists/*

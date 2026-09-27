@@ -30,8 +30,10 @@ services:
         # crates.io 镜像（默认 rsproxy；国内云机建议 USTC：sparse+https://mirrors.ustc.edu.cn/crates.io-index/；
         # 海外机留空即直连官方 index）
         CARGO_MIRROR: ${CARGO_MIRROR-sparse+https://rsproxy.cn/index/}
-        # runtime 层 apt 镜像（国内机设 https://mirrors.aliyun.com/debian；海外机留空官方源）
+        # runtime 层 apt 镜像（国内机设 https://mirrors.aliyun.com；海外机留空官方源）
         APT_MIRROR: ${APT_MIRROR:-}
+        # apt 代理（非保留名 ARG——compose 剔除保留名 HTTP_PROXY）；走宿主 mihomo
+        APT_PROXY: ${HTTP_PROXY:-}
         # release 编译并发（2 核小机建议 2）
         CARGO_JOBS: ${CARGO_JOBS:-3}
     depends_on:
