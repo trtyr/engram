@@ -71,7 +71,9 @@ RUN if [ -n "$APT_MIRROR" ]; then \
         /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
       grep -r "URI" /etc/apt/sources.list.d/ | head -3; \
     fi
-RUN apt-get update -o Acquire::ForceIPv4=true \
+# apt 只认小写 proxy 环境变量（BuildKit 自动注入的是大写，apt 无视）——行内显式导出
+RUN http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" \
+    apt-get update -o Acquire::ForceIPv4=true \
     && apt-get install -y --no-install-recommends ca-certificates curl git npm \
     && rm -rf /var/lib/apt/lists/*
 # codegraph CLI pin 版本（D0005；升级需重新验证 JSON 输出格式）
