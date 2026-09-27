@@ -131,12 +131,13 @@ pub fn router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(
             crate::client_ip::inject_client_ip,
         ))
-        // 安全响应头（2026-09-27 Lighthouse 修复）：防点击劫持 + 跨源隔离 + 基础 CSP + HSTS
-        .layer(axum::middleware::from_fn(security_headers_mw))
         // R10：HTTP 指标（请求计数 + 延迟直方图，按路由模板聚合）——放最外层，覆盖全部 API 路由
         .layer(axum::middleware::from_fn(http_metrics_mw))
         // SPA 静态资源兜底（API 路由未命中时 → web/dist）
         .fallback_service(axum::routing::any(crate::web_assets::static_handler))
+        // 安全响应头（2026-09-27 Lighthouse 修复）：必须挂在 fallback 之后——
+        // Router::layer 不作用于之后才注册的 fallback_service
+        .layer(axum::middleware::from_fn(security_headers_mw))
         .with_state(state)
 }
 

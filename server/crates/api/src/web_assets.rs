@@ -21,6 +21,22 @@ const CACHE_NO_CACHE: &str = "no-cache";
 /// robots.txt：私有记忆系统，全站禁爬。
 const ROBOTS_TXT: &str = "User-agent: *\nDisallow: /\n";
 
+/// 安全响应头（静态路径在 handler 内直附——Router::layer 不覆盖 fallback_service）。
+fn with_security_headers(mut res: Response) -> Response {
+    let h = res.headers_mut();
+    h.insert("x-frame-options", "DENY".parse().expect("static"));
+    h.insert("cross-origin-opener-policy", "same-origin".parse().expect("static"));
+    h.insert(
+        "content-security-policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'".parse().expect("static"),
+    );
+    h.insert(
+        "strict-transport-security",
+        "max-age=31536000; includeSubDomains".parse().expect("static"),
+    );
+    res
+}
+
 /// 静态资源 + SPA fallback（未知路径 → index.html）。
 pub async fn static_handler(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
@@ -28,7 +44,7 @@ pub async fn static_handler(uri: Uri) -> Response {
 
     // robots.txt 优先于 SPA fallback（否则被 fallback 回 HTML，爬虫解析出几十条语法错误）
     if path == "robots.txt" {
-        return (
+        return with_security_headers((
             StatusCode::OK,
             [
                 (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
@@ -36,7 +52,7 @@ pub async fn static_handler(uri: Uri) -> Response {
             ],
             ROBOTS_TXT,
         )
-            .into_response();
+            .into_response());
     }
 
     match WebAssets::get(path) {
@@ -47,27 +63,31 @@ pub async fn static_handler(uri: Uri) -> Response {
             } else {
                 CACHE_NO_CACHE
             };
-            (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, mime.as_ref()),
-                    (header::CACHE_CONTROL, cache),
-                ],
-                asset.data,
+            with_security_headers(
+                (
+                    StatusCode::OK,
+                    [
+                        (header::CONTENT_TYPE, mime.as_ref()),
+                        (header::CACHE_CONTROL, cache),
+                    ],
+                    asset.data,
+                )
+                    .into_response(),
             )
-                .into_response()
         }
         // SPA：非 API 路径回退 index.html（React Router 前端路由）
         None => match WebAssets::get("index.html") {
-            Some(index) => (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, "text/html"),
-                    (header::CACHE_CONTROL, CACHE_NO_CACHE),
-                ],
-                index.data,
-            )
-                .into_response(),
+            Some(index) => with_security_headers(
+                (
+                    StatusCode::OK,
+                    [
+                        (header::CONTENT_TYPE, "text/html"),
+                        (header::CACHE_CONTROL, CACHE_NO_CACHE),
+                    ],
+                    index.data,
+                )
+                    .into_response(),
+            ),
             None => (
                 StatusCode::NOT_FOUND,
                 "前端资源未构建（web/dist 缺失；开发模式用 Vite dev server）",
