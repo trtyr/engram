@@ -4,12 +4,12 @@
 
 ### 把 AI 的记忆，做成可蒸馏、可检索、可审计、可遗忘的资产
 
-**单用户 AI 长期记忆平台 · Rust 单二进制 · 九域 MCP 渐进式发现 · Wiki 单库 · 全程可溯源**
+**单用户 AI 长期记忆平台 · Rust 单二进制 · 十域 MCP 渐进式发现 · Wiki 单库 · 全程可溯源**
 
 [![Rust](https://img.shields.io/badge/Rust-axum-DEA584?style=for-the-badge&logo=rust&logoColor=white)](server/)
 [![React](https://img.shields.io/badge/React_19-SPA-61DAFB?style=for-the-badge&logo=react&logoColor=black)](web/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](server/crates/storage/)
-[![MCP](https://img.shields.io/badge/MCP-九域_渐进式发现-8A2BE2?style=for-the-badge)](#-mcp给-ai-的原生接口)
+[![MCP](https://img.shields.io/badge/MCP-十域_渐进式发现-8A2BE2?style=for-the-badge)](#-mcp给-ai-的原生接口)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=for-the-badge)](LICENSE)
 
 > **en·gram**（/ˈenɡræm/）*n.* 神经科学中的「记忆痕迹」——记忆在脑中留下的物理印记。
@@ -66,18 +66,19 @@ flowchart LR
 - **遗忘是断层**：`forget` 作废会话，已蒸馏产物**级联归档**，检索立即失效
 - **实体坐标系**：人物 / 项目 / 主题 / 群组 / 地点，由蒸馏自动抽取，横向串联所有记忆
 
-## 🗂️ 九域资产
+## 🗂️ 十域资产
 
 | 域 | 记什么 | 形态 |
 |:--|:--|:--|
-| 💬 **Chat Memory** | 用户的事实、偏好、决策、事件 | L0→L3 分层蒸馏，全程可溯源 |
+| 💬 **Chat Memory** | 用户的事实、偏好、决策、事件 | L0→L3 分层蒸馏，六动词入口（存/找/翻/改/审/忘），全程可溯源 |
 | 🕸️ **Wiki** | 世界的知识：文档 + LLM 增量互链 | 文档/URL 摄取 → `[[wikilink]]` 知识网 + 图谱 + lint 死链分级 |
 | 🧬 **CodeGraph** | 代码库结构索引 | 本地路径/git 注册 → 异步索引 → 结构化查询 + 调用子图 / 文件依赖全图 |
 | 🧩 **项目记忆** | 跨会话的工作「线」 | 项目 + 多主机位置 + 分类文档，精确寻址读（零截断） |
-| 🪄 **Skills** | 可复用的 AI 技能包 | slug 唯一 + 容错导入 + 版本快照回滚 + 附属文件按路径寻址 |
-| ✅ **待办** | 行动项（todo） | 轻量清单：勾选即完成，已完成折叠收纳 |
-| 🎫 **工单** | 结构化问题跟踪（ticket） | severity P0-P3 + 症状/复现/验收/解决四段 + 状态机 |
-| 🗄️ **资产台账** | 我拥有的、可被操作的对象（主机 / 云实例 / 域名 / U 盘 / 账号） | 类型 + 名称 + 别名[] + 结构化字段；项目只**引用不拥有**，台账反查「被哪些项目用到」 |
+| 🔐 **凭据** | API Key / Token 等机密 | 值 AES-GCM 加密落库、按名取用留审计痕、标签分组 + 到期治理（过期红/临期黄）、**台账永不回显值** |
+| ✅ **待办** | 行动项（todo） | 轻量清单：勾选即完成；截止时间 + 逾期/今日过滤（按到期升序） |
+| 🎫 **工单** | 结构化问题跟踪（ticket） | severity P0-P3 + 症状/复现/验收/解决四段 + 状态机 + **活动时间线**（状态流转自动留痕 + 评论） |
+| 🗄️ **资产台账** | 我拥有的、可被操作的对象（主机 / 云实例 / 域名 / 账号） | 类型 + 名称 + 别名[] + 结构化字段 + **Markdown 运行手册**（修订史可回滚）；项目只**引用不拥有** |
+| ⭕ **圈子** | 实体坐标系读写视图 | 人物/项目/主题/群组/地点——建实体、类型化关系、全景图（与 memory 同底座） |
 | 🚦 **任务面（jobs）** | 异步任务的运行状态（蒸馏 / 摄取 / 索引 / 迁移） | PG 队列：pending / running / dead 可见可恢复，进程重启不丢 |
 
 ## 🛡️ 治理，不是摆设
@@ -94,7 +95,7 @@ flowchart LR
 ## 🔌 MCP：给 AI 的原生接口
 
 engram-server 内置 MCP 服务端（Streamable HTTP）。**工具面采用渐进式发现**：
-九个领域各一个入口工具 + 跨域全局检索，共 **10 个工具位**；
+十个领域各一个入口工具 + 跨域全局检索，共 **11 个工具位**；
 域内操作按需发现（描述自带操作目录，`help` 一轮取回全部参数手册，坏参数报错附合法清单）。
 
 按密钥 scope 分权——AI 看到的工具面与它实际能调用的完全一致。
@@ -189,7 +190,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_B" -H "Content-Type: application/j
   -d '{"source_url":"http://a-host:8080","source_admin_password":"…"}' http://b-host:8080/migrate/pull
 ```
 
-覆盖记忆 / 项目 / 技能 / Wiki / 待办 / 工单 / KV 等业务数据（**assets 台账、LLM 供应商配置、API 密钥与管理员会话不随迁**——目标侧重配）；向量与 codegraph 索引为派生数据不迁移，导入端重建。
+覆盖记忆 / 项目 / Wiki / 待办 / 工单 / KV 等业务数据（**assets 台账、credentials 凭据、LLM 供应商配置、API 密钥与管理员会话不随迁**——目标侧重配）；向量与 codegraph 索引为派生数据不迁移，导入端重建。
 控制台「设置 → 数据迁移」有同能力 UI。
 
 </details>
