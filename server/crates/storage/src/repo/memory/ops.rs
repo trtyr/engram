@@ -56,7 +56,7 @@ pub async fn purge_deep(pool: &PgPool) -> StoreResult<Value> {
 pub async fn timeline(pool: &PgPool, limit: i64) -> StoreResult<Vec<TimelineEvent>> {
     Ok(sqlx::query_as::<_, TimelineEvent>(
         "SELECT a.id, COALESCE(a.occurred_at, a.created_at) AS at, 'atom' AS kind, a.content \
-         FROM atoms a WHERE a.status = 'active' AND NOT a.sensitive \
+         FROM atoms a WHERE a.status = 'active' \
          UNION ALL \
          SELECT s.id, s.created_at AS at, 'scenario' AS kind, s.topic \
          FROM scenarios s \

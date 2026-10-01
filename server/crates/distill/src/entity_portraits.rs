@@ -37,7 +37,7 @@ pub async fn fill_entity_portraits(
     for (eid, name, kind) in &candidates {
         let atoms: Vec<String> = sqlx::query_scalar(
             "SELECT a.content FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
-             WHERE ae.entity_id = $1 AND a.status = 'active' AND NOT a.sensitive \
+             WHERE ae.entity_id = $1 AND a.status = 'active' \
          ORDER BY a.created_at DESC LIMIT 20",
         )
         .bind(eid)

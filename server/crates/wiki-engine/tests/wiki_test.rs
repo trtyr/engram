@@ -219,7 +219,7 @@ async fn two_docs_interlinked_no_duplicate() {
     );
 
     // queries 存档闭环：archive_query → wiki_analyze 入队（自动再摄取产页）
-    let skipped_q = wiki
+    let (skipped_q, _slug) = wiki
         .archive_query(
             lib,
             "向量检索问答",
@@ -993,12 +993,12 @@ async fn graph_community_sparse_flag_matches_insights_threshold() {
 async fn archive_query_is_idempotent_by_title() {
     let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
 
-    let first = wiki
+    let (first, _slug1) = wiki
         .archive_query(lib, "幂等存档", "问", "答")
         .await
         .unwrap();
     assert!(!first, "首次存档 skipped=false");
-    let second = wiki
+    let (second, _slug2) = wiki
         .archive_query(lib, "幂等存档", "问", "答")
         .await
         .unwrap();

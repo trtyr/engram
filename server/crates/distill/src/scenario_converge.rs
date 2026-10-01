@@ -73,7 +73,7 @@ async fn fetch_stale_scenarios(
         "SELECT s.id, s.topic, \
          (SELECT jsonb_agg(jsonb_build_object('id', a.id::text, 'kind', a.kind, 'content', a.content)) \
           FROM jsonb_array_elements_text(s.atom_refs) r \
-          JOIN atoms a ON a.id = r::uuid AND a.status = 'active' AND NOT a.sensitive) AS members \
+          JOIN atoms a ON a.id = r::uuid AND a.status = 'active') AS members \
          FROM scenarios s \
          WHERE EXISTS ( \
             SELECT 1 FROM jsonb_array_elements_text(s.atom_refs) r \

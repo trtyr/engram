@@ -103,11 +103,12 @@ async fn mcp_initialize_and_list_tools() {
         .clone();
     let mut names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     names.sort_unstable();
-    // memory-only key 看到 memory 域工具 + 跨域 search_all（按任一 scope 可见）
+    // memory-only key 看到 memory 域工具 + 跨域 search_all（按任一 scope 可见）；
+    // circles 共享 memory scope（registry.rs circles→memory），一并可见
     assert_eq!(
         names,
-        vec!["jobs", "memory", "search_all"],
-        "memory-only key 应见 memory 域工具与 search_all（jobs 无域 scope——任何合法凭证可见）"
+        vec!["circles", "jobs", "memory", "search_all"],
+        "memory-only key 应见 memory 域工具 + circles（共享 memory scope）与 search_all（jobs 无域 scope——任何合法凭证可见）"
     );
     let memory = tools
         .iter()
@@ -441,15 +442,15 @@ async fn mcp_admin_info_endpoint() {
     let tools = info["tools"].as_array().expect("工具清单");
     assert_eq!(
         tools.len(),
-        10,
-        "应为九个域工具（含 jobs/tickets/assets）+ search_all：{}",
+        11,
+        "应为十个域工具（含 jobs/tickets/assets/circles）+ search_all：{}",
         tools.len()
     );
     let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();
     assert_eq!(
         memory["actions"].as_array().unwrap().len(),
-        20,
-        "memory 域应展示 20 个操作（KV 四动作 + 管家五动作 correct/confirm/discard/persona_edit/distill + 回执）：{memory}"
+        31,
+        "memory 域应展示 31 个操作（EN-235 六动词收编后：六动词 + KV 四动作 + 管家 correct/confirm/discard/persona_edit/distill + 浏览/治理/回执）：{memory}"
     );
 
     // 非 admin 拒绝
@@ -555,8 +556,8 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     sorted.sort();
     assert_eq!(
         sorted,
-        vec!["jobs", "memory", "search_all"],
-        "域工具应保留（+跨域 search_all；jobs 无域 scope 恒可见）：{names:?}"
+        vec!["circles", "jobs", "memory", "search_all"],
+        "域工具应保留（+跨域 search_all；jobs 无域 scope 恒可见；circles 共享 memory scope）：{names:?}"
     );
     // 描述目录里 write_session 应隐身
     let domain = result["tools"]
@@ -607,8 +608,8 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .collect();
     assert_eq!(
         actions.len(),
-        19,
-        "停用操作应从手册隐身（20 含 remember，停 1 剩 19）：{actions:?}"
+        30,
+        "停用操作应从手册隐身（31 含 write_session，停 1 剩 30）：{actions:?}"
     );
     assert!(!actions.contains(&"write_session"));
 
@@ -758,8 +759,8 @@ async fn wiki_mcp_tools_listed() {
     assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
     assert_eq!(
         wiki_tools[0]["actions"].as_array().unwrap().len(),
-        27,
-        "wiki 域应展示 27 个操作（文档 RAG 三动作 + EN-59 晋升两 action + EN-61 purpose/insights + 收录哲学线 merge；单库终局 2026-09-20 拆除 libraries 后 28→27）"
+        28,
+        "wiki 域应展示 28 个操作（文档 RAG 三动作 + EN-59 晋升两 action + EN-61 purpose/insights + 收录哲学线 merge；单库终局 28→27 后又随实现演进 +1，P001 口径对齐）"
     );
 
     // instructions 应覆盖 wiki 域

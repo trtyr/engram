@@ -1119,9 +1119,9 @@ async fn arbitrate_similar_pool_reaches_embeddingless_seed() {
 /// R3 画像退休：分面超 7 天未更新 → 即使 payload 无新场景也以近期场景强制重写。
 // F3 快照收敛：含 archived 成员的场景——活跃≥1 重算（atom_refs 重写为活跃成员）、
 // 全非活跃解散删除。
-// F4 防：敏感原子不进 organize 素材（prompt 里看不到 sensitive 内容）。
+// F4 口径更新（P001 决策 001）：敏感原子照常进 organize 素材——sensitive 只是标记不再排除。
 #[tokio::test]
-async fn organize_excludes_sensitive_atoms_from_prompt() {
+async fn organize_includes_sensitive_atoms_in_prompt() {
     let env = setup(vec![json!({ "actions": [] })]).await;
 
     sqlx::query(
@@ -1157,8 +1157,8 @@ async fn organize_excludes_sensitive_atoms_from_prompt() {
     let prompt = sent.first().cloned().unwrap_or_default();
     assert!(prompt.contains("普通原子内容公开可见"), "普通原子应进素材");
     assert!(
-        !prompt.contains("青霉素"),
-        "敏感原子不得进素材 prompt：{prompt}"
+        prompt.contains("青霉素"),
+        "敏感原子照常进素材 prompt（sensitive 仅标记）：{prompt}"
     );
 }
 

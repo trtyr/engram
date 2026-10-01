@@ -617,7 +617,7 @@ async fn concurrent_append_keeps_all_turns() {
     );
 }
 
-/// sensitive 口径（2026-09-12 放开）：标记保留、检索默认可见；蒸馏素材链（organize）仍过滤防扩散。
+/// sensitive 口径（2026-09-12 放开检索；P001 决策 001 放开蒸馏素材）：标记保留、全链路可见。
 #[tokio::test]
 async fn sensitive_atoms_visible_with_flag() {
     let (pool, svc, _container) = setup().await;

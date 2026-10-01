@@ -110,11 +110,10 @@ async fn fetch_near_duplicates(
             FROM atoms a JOIN LATERAL ( \
                 SELECT b.id, b.embedding FROM atoms b \
                 WHERE b.status = 'active' AND b.id != a.id AND b.embedding IS NOT NULL \
-                  AND NOT b.sensitive \
                   AND a.embedding IS NOT NULL AND a.embedding <=> b.embedding < 0.25 \
                 ORDER BY a.embedding <=> b.embedding LIMIT 3 \
             ) b ON true \
-            WHERE a.status = 'active' AND a.embedding IS NOT NULL AND NOT a.sensitive \
+            WHERE a.status = 'active' AND a.embedding IS NOT NULL \
             GROUP BY a.id, a.content \
          ) SELECT id, content, nbrs FROM near",
     )
@@ -296,7 +295,7 @@ async fn build_relation_prompt(
     for (eid, name, kind) in entities {
         let atoms: Vec<String> = sqlx::query_scalar(
             "SELECT a.content FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
-             WHERE ae.entity_id = $1 AND NOT a.sensitive \
+             WHERE ae.entity_id = $1 AND a.status = 'active' \
              ORDER BY a.created_at DESC LIMIT 10",
         )
         .bind(eid)

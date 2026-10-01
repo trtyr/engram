@@ -90,12 +90,12 @@ fn payload_bool(ctx: &JobContext, key: &str) -> bool {
 
 // ---------- 主组织流程 ----------
 
-/// 原子（payload 指定 ∪ 少量历史未归组，防漏；敏感原子不进组织素材）。
+/// 原子（payload 指定 ∪ 少量历史未归组，防漏；敏感原子照常进组织素材——P001 决策 001）。
 async fn fetch_atoms(ctx: &JobContext) -> Result<Vec<(Uuid, String, String)>, JobError> {
     let ids = payload_uuids(ctx, "atom_ids");
     sqlx::query_as(
         "SELECT id, kind, content FROM atoms \
-         WHERE status = 'active' AND NOT sensitive AND (id = ANY($1) OR scenario_id IS NULL) \
+         WHERE status = 'active' AND (id = ANY($1) OR scenario_id IS NULL) \
          ORDER BY created_at LIMIT 300",
     )
     .bind(&ids)
