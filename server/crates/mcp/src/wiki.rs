@@ -375,3 +375,57 @@ pub struct WikiPromotionsParams {
     #[schemars(description = "可选：按来源项目（名或 id）过滤。")]
     pub project: Option<String>,
 }
+
+/// 设置库方向意图参数（EN-61 写侧补齐）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiPurposeSetParams {
+    /// wiki 存在的目标（为什么建这个知识库）
+    #[schemars(description = "wiki 存在的目标列表（为什么建这个知识库）。")]
+    pub goals: Vec<String>,
+    /// 关键问题（wiki 应能回答什么）
+    #[schemars(description = "可选：关键问题列表（wiki 应能回答什么）。")]
+    #[serde(default)]
+    pub key_questions: Vec<String>,
+    /// 研究范围边界
+    #[schemars(description = "可选：研究范围边界列表。")]
+    #[serde(default)]
+    pub scope: Vec<String>,
+    /// 当前中心论点（可选）
+    #[schemars(description = "可选：当前中心论点。")]
+    pub thesis: Option<String>,
+}
+
+/// 人审合入提案参数（proposals 列表里的提案内容写入页面）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiProposalApplyParams {
+    /// 目标页 slug
+    #[schemars(description = "目标页 slug（提案将写入的页面）。")]
+    pub slug: String,
+    /// 页面标题
+    #[schemars(description = "页面标题。")]
+    pub title: String,
+    /// 提案正文（Markdown）
+    #[schemars(description = "提案正文（Markdown）。")]
+    pub content: String,
+    /// 可选：执行者标记（AI 代执行传 "ai"，落 frontmatter.via）
+    #[schemars(description = "可选：执行者标记（AI 代执行传 ai）。")]
+    pub via: Option<String>,
+}
+
+/// dismiss 图洞察参数（不再出现）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiInsightDismissParams {
+    /// 洞察 key（insights 返回的 key）
+    #[schemars(description = "洞察 key（insights 返回的 key），dismiss 后不再出现。")]
+    pub key: String,
+}
+
+/// 重新嵌入文档缺失块参数（EN-32 恢复入口：embed_failed/NULL 向量块补嵌）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct WikiReembedParams {
+    /// 文档 id（document_add 返回的 id）
+    #[schemars(
+        description = "文档 id（document_add 返回的 id）。只补 embed_failed/缺失向量块，已嵌入块不重复计费。"
+    )]
+    pub doc_id: String,
+}

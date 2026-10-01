@@ -445,6 +445,15 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                     | "promote"
                     | "delete_page"
                     | "merge"
+                    | "purpose_set"
+                    | "proposal_apply"
+                    | "repair"
+                    | "repair_async"
+                    | "insight_dismiss"
+                    | "insight_reset"
+                    | "rebuild_links"
+                    | "rebuild_tsv"
+                    | "reembed"
             )
             | (
                 "todos",
@@ -516,6 +525,10 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                     | "purpose"
                     | "insights"
                     | "promotions"
+                    | "duplicates"
+                    | "query_gaps"
+                    | "folders"
+                    | "proposals"
             )
             | ("todos", "list" | "links" | "get")
             | ("tickets", "list" | "links" | "get" | "events")
