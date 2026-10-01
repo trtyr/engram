@@ -25,3 +25,4 @@ anyhow.workspace = true
 engram-storage = { path = "../storage" }
 axum.workspace = true
 metrics.workspace = true
+tracing-subscriber.workspace = true

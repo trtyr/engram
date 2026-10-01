@@ -3,6 +3,7 @@
 
 mod support;
 
+use tracing_subscriber::prelude::*;
 use axum::Json;
 use axum::routing::post;
 use engram_llm::KeyCipher;
@@ -268,4 +269,85 @@ async fn l6_embed_for_records_usage() {
     assert_eq!(model, "mock-emb");
     assert_eq!(purpose, "embed");
     assert_eq!(jid, Some(job_id), "job_id 透传记账");
+}
+
+// ---------- P005-T003：record_usage 结构化事件（成功调用全量日志） ----------
+
+struct CollectLayer(std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>);
+
+struct Collector {
+    message: String,
+    fields: serde_json::Map<String, serde_json::Value>,
+}
+
+impl tracing::field::Visit for Collector {
+    fn record_debug(&mut self, f: &tracing::field::Field, v: &dyn std::fmt::Debug) {
+        if f.name() == "message" {
+            self.message = format!("{v:?}");
+        } else {
+            self.fields
+                .insert(f.name().into(), serde_json::json!(format!("{v:?}")));
+        }
+    }
+}
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CollectLayer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let mut v = Collector {
+            message: String::new(),
+            fields: serde_json::Map::new(),
+        };
+        event.record(&mut v);
+        self.0.lock().unwrap().push(serde_json::json!({
+            "level": event.metadata().level().to_string(),
+            "message": v.message,
+            "fields": v.fields,
+        }));
+    }
+}
+
+/// record_usage 必发「LLM 调用」info! 事件（provider/model/purpose/token/latency 齐全）——
+/// 生产经 api 层 PgLogLayer 落 logs 表。
+#[tokio::test]
+async fn record_usage_emits_structured_log_event() {
+    let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let layer = CollectLayer(collected.clone());
+    let (_c, registry, _router) = setup().await;
+
+    // 全局注册（spawn 跨线程也生效；本文件其他测试的事件同入 collected，无碍断言）
+    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer))
+        .unwrap();
+
+    let handle = tokio::spawn(async move {
+        registry
+            .record_usage(&engram_llm::types::UsageMeta {
+                provider: "mock".into(),
+                model: "bge-m3".into(),
+                purpose: "embed".into(),
+                input_tokens: 7,
+                output_tokens: 0,
+                latency_ms: 42,
+                job_id: None,
+            })
+            .await;
+    });
+    handle.await.unwrap();
+
+    let events = collected.lock().unwrap();
+    let hit = events
+        .iter()
+        .find(|e| e["message"] == "LLM 调用")
+        .expect("record_usage 应发「LLM 调用」事件");
+    assert_eq!(hit["level"], "INFO");
+    assert_eq!(hit["fields"]["provider"], "mock");
+    assert_eq!(hit["fields"]["purpose"], "embed");
+    assert!(
+        hit["fields"].get("input_tokens").is_some(),
+        "token 字段应在"
+    );
+    assert!(hit["fields"].get("latency_ms").is_some(), "耗时字段应在");
 }

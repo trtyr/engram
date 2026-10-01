@@ -239,7 +239,19 @@ impl ProviderRegistry {
     }
 
     /// 记账（失败静默——记账故障不该影响业务，但要留日志）。
+    /// P005-T003：成功调用全量结构化日志（经 api 层 PgLogLayer 落 logs 表——
+    /// 调用流水可查：provider/model/purpose/耗时/token；EN-32 类故障从此有据可查）。
     pub async fn record_usage(&self, u: &crate::types::UsageMeta) {
+        tracing::info!(
+            provider = %u.provider,
+            model = %u.model,
+            purpose = %u.purpose,
+            input_tokens = u.input_tokens,
+            output_tokens = u.output_tokens,
+            latency_ms = u.latency_ms,
+            job_id = ?u.job_id,
+            "LLM 调用"
+        );
         let res = sqlx::query(
             "INSERT INTO llm_usage (provider, model, purpose, input_tokens, output_tokens, latency_ms, job_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7)",

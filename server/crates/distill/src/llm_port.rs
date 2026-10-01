@@ -255,7 +255,10 @@ impl GatewayLlm {
                 max_tokens: None,
             })
             .await
-            .map_err(to_job_err)?;
+            .map_err(|e| {
+                tracing::warn!(purpose = %purpose.as_str(), model = %model, error = %e, "LLM chat 失败");
+                to_job_err(e)
+            })?;
         let total = resp.input_tokens + resp.output_tokens;
         self.registry
             .record_usage(&engram_llm::types::UsageMeta {
@@ -318,7 +321,10 @@ impl DistillLlm for GatewayLlm {
                     dimensions: Some(embedding_dimensions()),
                 })
                 .await
-                .map_err(to_job_err)?;
+                .map_err(|e| {
+                    tracing::warn!(purpose = "embed", model = %model, error = %e, "LLM embed 失败");
+                    to_job_err(e)
+                })?;
             self.registry
                 .record_usage(&engram_llm::types::UsageMeta {
                     provider: provider.name().to_string(),
