@@ -203,9 +203,9 @@ async fn harness_destructive_tool_is_audited() {
         .expect("建页");
 
     let events: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-    let layer = CollectLayer(events.clone());
-    let _guard = tracing::subscriber::set_default(
-        tracing_subscriber::registry().with(layer),
+    // 进程级订阅（tokio 捕获纪律：set_default per-thread 在 await 竞态下丢事件）
+    let _ = tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(CollectLayer(events.clone())),
     );
 
     let provider = Arc::new(MockProvider::new(vec![resp(
@@ -229,9 +229,10 @@ async fn harness_destructive_tool_is_audited() {
         .iter()
         .filter(|e| e.get("audit").and_then(|v| v.as_bool()) == Some(true))
         .collect();
-    assert_eq!(audit.len(), 1, "破坏性工具应有且仅有一条审计: {evs:?}");
-    let a = audit[0];
-    assert_eq!(a["tool"], "delete_page");
+    let a = audit
+        .iter()
+        .find(|e| e["tool"] == "delete_page")
+        .expect("delete_page 审计事件应存在（进程级订阅下混入他测事件只影响计数不影响存在性）: {evs:?}");
     assert_eq!(a["destructive"], serde_json::json!(true));
     assert_eq!(a["ok"], serde_json::json!(true));
 }
@@ -291,4 +292,129 @@ async fn harness_tool_error_feeds_back_not_aborts() {
     assert_eq!(report.tool_calls, 2);
     assert!(!report.degraded);
     let _ = ChatMessage::system("引用防未用告警");
+}
+
+// ---------- 真实 demo（#[ignore]：ENGRAM_DEMO_LLM_KEY + ENGRAM_DEMO_READER_KEY 就绪时跑） ----------
+
+/// 真实链接 → harness 自主抓取 → 建页 → 互链（newapi LLM + 智谱 web-reader）。
+#[tokio::test]
+#[ignore = "真实网络 demo：ENGRAM_DEMO_LLM_KEY/ENGRAM_DEMO_READER_KEY 环境变量就绪时运行"]
+async fn demo_real_url_ingest_builds_pages() {
+    let llm_key = std::env::var("ENGRAM_DEMO_LLM_KEY").expect("需要 ENGRAM_DEMO_LLM_KEY");
+    let reader_key = std::env::var("ENGRAM_DEMO_READER_KEY").expect("需要 ENGRAM_DEMO_READER_KEY");
+    unsafe { std::env::set_var("AGENT_MEMORY_MASTER_KEY", "ab".repeat(32)) };
+    // 让 LLM 失败 warn（含响应 body）可见
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::WARN)
+        .try_init();
+
+    let (deps, lib, _dir, _pg) = setup_deps().await;
+
+    // 1. chat provider：newapi 网关（is_default → WikiAgent resolve 回退默认 chat）
+    sqlx::query(
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default) \
+         VALUES ($1, 'newapi-demo', $4, $2, $3, 'chat', true)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(
+        engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32))
+            .unwrap()
+            .encrypt(&llm_key)
+            .unwrap(),
+    )
+    .bind(std::env::var("ENGRAM_DEMO_LLM_MODEL").unwrap_or_else(|_| "MiniMax-M3".into()))
+    .bind(std::env::var("ENGRAM_DEMO_BASE_URL").unwrap_or_else(|_| "https://newapi.trtyr.top".into()))
+    .execute(&deps.pool)
+    .await
+    .expect("provider 配置");
+
+    // 2. web-reader 凭据（harness web_reader 工具读取）
+    let creds = engram_core::credentials::CredentialsService::new(
+        deps.pool.clone(),
+        engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
+    );
+    creds
+        .put("zhipu/web_reader_key", &reader_key, None, "manual", &[], None)
+        .await
+        .expect("凭据写入");
+
+    // 3. 起 runner（wiki_docs 管道 + agent harness）
+    let handle = {
+        let pool = deps.pool.clone();
+        let registry = deps.registry.clone();
+        let dir = deps.data_dir.clone();
+        let runner = engram_core::wiki_docs::register_handlers(
+            engram_jobs::Runner::new(
+                pool.clone(),
+                engram_jobs::RunnerConfig {
+                    worker_id: "demo".into(),
+                    concurrency: 2,
+                    poll_interval: std::time::Duration::from_millis(50),
+                    batch_size: 10,
+                    reap_interval: std::time::Duration::from_secs(3600),
+                    per_kind_concurrency: Default::default(),
+                },
+            ),
+            registry.clone(),
+        );
+        engram_core::wiki_agent::register_agent_handler(runner, registry, dir).start()
+    };
+
+    // 4. 提交真实任务：真实链接 → 自主抓取建页
+    let queue = engram_jobs::JobQueue::new(deps.pool.clone());
+    let task = AgentTask {
+        lib,
+        instruction:
+            "阅读这篇 RAG 文字切分教程，为 wiki 沉淀 2-3 页知识页（概念页 + 与库内已有页互链；无已有页则至少两页互链）。"
+                .into(),
+        source_url: Some(
+            "https://python.langchain.com/docs/concepts/text_splitters/".into(),
+        ),
+        source_text: None,
+        source_name: Some("LangChain Text Splitters".into()),
+    };
+    let job_id = engram_core::wiki_agent::enqueue_agent_task(&queue, &task)
+        .await
+        .expect("入队");
+
+    // 5. 轮询 job 终态（demo 上限 8 分钟）
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(480);
+    let mut final_status = String::new();
+    let mut report = serde_json::Value::Null;
+    while std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+        let (status, err): (String, Option<String>) = sqlx::query_as(
+            "SELECT status, error FROM jobs WHERE id = $1",
+        )
+        .bind(job_id)
+        .fetch_one(&deps.pool)
+        .await
+        .unwrap();
+        if matches!(status.as_str(), "succeeded" | "failed" | "dead") {
+            final_status = status;
+            report = serde_json::json!({"error": err});
+            break;
+        }
+    }
+    eprintln!("DEMO job {job_id} 终态 = {final_status}\nDEMO report = {report}");
+    let _ = handle
+        .shutdown_and_wait(std::time::Duration::from_secs(10))
+        .await;
+
+    assert_eq!(final_status, "succeeded", "harness job 应成功: {report}");
+    let page_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wiki_pages WHERE library_id = $1")
+            .bind(lib)
+            .fetch_one(&deps.pool)
+            .await
+            .unwrap();
+    let link_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wiki_links WHERE library_id = $1")
+            .bind(lib)
+            .fetch_one(&deps.pool)
+            .await
+            .unwrap();
+    eprintln!("DEMO pages = {page_count}, links = {link_count}");
+    assert!(page_count >= 2, "至少建 2 页");
+    assert!(link_count >= 1, "至少 1 条互链");
 }

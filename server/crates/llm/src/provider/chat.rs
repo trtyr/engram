@@ -22,7 +22,14 @@ impl OpenAiCompatProvider {
             name,
             base_url: normalize_base_url(base_url.into().as_str()),
             api_key: api_key.into(),
-            http: reqwest::Client::new(),
+            // http1_only：部分自建网关（如 newapi）HTTP/2 路径对大 body 不稳（5xx）——
+            // HTTP/1.1 全兼容（P004-T010 demo 实测）
+            http: reqwest::Client::builder()
+                .http1_only()
+                // 无 UA 会被部分网关前置层（WAF）拦成 5xx——显式带 UA（P004-T010 demo 实测）
+                .user_agent(concat!("engram-llm/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             chat_timeout: std::time::Duration::from_secs(120),
             embed_timeout: std::time::Duration::from_secs(30),
             circuit,

@@ -384,7 +384,8 @@ pub async fn run_agent<P: LlmProvider + 'static>(
             messages: messages.clone(),
             temperature: Some(0.3),
             json_mode: false,
-            max_tokens: None,
+            // 限响应长度：部分网关对长非流式响应的聚合转发不稳（bad_response_body）
+            max_tokens: Some(4096),
             tools: Some(defs.clone()),
         };
         let t0 = Instant::now();
@@ -450,14 +451,11 @@ pub async fn enqueue_agent_task(
     queue: &engram_jobs::JobQueue,
     task: &AgentTask,
 ) -> Result<Uuid, JobError> {
-    let job_id = Uuid::now_v7();
-    queue
-        .enqueue(
-            JobTemplate::new("wiki_agent").with_payload(json!({"task": task})),
-        )
+    let job = queue
+        .enqueue(JobTemplate::new("wiki_agent").with_payload(json!({"task": task})))
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
-    Ok(job_id)
+    Ok(job.id)
 }
 
 /// document_add → harness 自动接力（拍板③；ENGRAM_WIKI_AGENT_RELAY=0 关闭）。
