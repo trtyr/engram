@@ -120,6 +120,7 @@ pub async fn parse_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| JobError::Permanent("payload 缺 document_id".into()))?;
 
+    tracing::debug!(doc = %doc_id, "parse_document 开始");
     // 文档所属库（多库：全部 repo 调用按库收窄）
     let lib: Uuid = repo::document_library(pool, doc_id)
         .await
@@ -153,6 +154,7 @@ pub async fn chunk_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| JobError::Permanent("payload 缺 document_id".into()))?;
 
+    tracing::debug!(doc = %doc_id, "chunk_document 开始");
     let lib: Uuid = repo::document_library(pool, doc_id)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?
@@ -215,6 +217,7 @@ pub async fn embed_job(
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| JobError::Permanent("payload 缺 document_id".into()))?;
 
+    tracing::debug!(doc = %doc_id, "embed_document 开始");
     let lib: Uuid = repo::document_library(pool, doc_id)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?
@@ -253,6 +256,7 @@ pub async fn embed_job(
     // 清理 extracted 临时文件
     let _ = tokio::fs::remove_file(data_uploads().join(format!("{doc_id}.extracted.txt"))).await; // 有意忽略：best-effort 清理/建目录（失败由后续步骤或下次运行暴露）
 
+    tracing::debug!(doc = %doc_id, embedded, missing, total, "embed_document 完成");
     ctx.emit(
         &format!("文档 ready（补嵌 {embedded}/{missing}，共 {total} 块）"),
         None,
