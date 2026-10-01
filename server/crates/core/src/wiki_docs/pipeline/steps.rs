@@ -81,11 +81,15 @@ pub(super) async fn fetch_document_bytes(
         // URL：优先智谱 web-reader（结构化 markdown，质量高于本地裸 HTML——Q002 已决）；
         // 未配置 key 或调用失败 → 回落本地 safe_fetch（降级标注走 job 事件）。
         let mut degraded_note: Option<String> = None;
-        let via_reader = match crate::wiki_docs::web_reader::WebReaderClient::from_pool(pool).await {
+        let via_reader = match crate::wiki_docs::web_reader::WebReaderClient::from_pool(pool).await
+        {
             Some(client) => match client.read_url(source_uri).await {
                 Ok(page) => {
                     ctx.emit(
-                        &format!("web-reader 抓取成功（{} 字 markdown）", page.content_markdown.chars().count()),
+                        &format!(
+                            "web-reader 抓取成功（{} 字 markdown）",
+                            page.content_markdown.chars().count()
+                        ),
                         None,
                     )
                     .await
@@ -116,7 +120,8 @@ pub(super) async fn fetch_document_bytes(
                     ))
                 }
                 Err(e) => {
-                    degraded_note = Some(format!("web-reader 失败（{e}）——回落本地抓取（质量降级）"));
+                    degraded_note =
+                        Some(format!("web-reader 失败（{e}）——回落本地抓取（质量降级）"));
                     None
                 }
             },
@@ -144,7 +149,8 @@ pub(super) async fn fetch_document_bytes(
                         if let Err(e) = tokio::fs::write(&path, &page.bytes).await {
                             tracing::warn!(path = %path.display(), error = %e, "上传件落盘失败");
                         }
-                        let title = extract_title_from_html(&page.bytes).or(Some(source_uri.to_string()));
+                        let title =
+                            extract_title_from_html(&page.bytes).or(Some(source_uri.to_string()));
                         // 错误上浮：抓取结果落库失败必须可见（否则成功被抓取的文档状态失真）
                         if let Err(e) = repo::update_document_fetch_result(
                             pool,
@@ -336,7 +342,7 @@ pub(super) async fn embed_missing_chunks(
                                 .await
                                 .map_err(|e| JobError::Retryable(e.to_string()))?;
                             ctx.emit(
-                                "嵌入重试耗尽——缺失块降级 FTS，文档提前 ready（可事后 re-embed 补）",
+                                "[WIKI-DOC-EMBED-DEGRADED] 嵌入重试耗尽——缺失块降级 FTS，文档提前 ready（可事后 re-embed 补）",
                                 Some(json!({"document_id": doc_id, "missing": missing, "degraded": true})),
                             )
                             .await
@@ -366,7 +372,13 @@ async fn fetch_failure_error(
     doc_id: Uuid,
     e: super::super::ssrf::FetchError,
 ) -> JobError {
-    let m = format!("URL 抓取失败: {e}");
+    // P006-T002：错误码前缀（归因分类进 error 字段——调试定位与编程判断）
+    let code = match &e {
+        super::super::ssrf::FetchError::PrivateAddress
+        | super::super::ssrf::FetchError::Scheme => "WIKI-DOC-SSRF-REJECTED",
+        _ => "WIKI-DOC-URL-FETCH-FAILED",
+    };
+    let m = format!("[{code}] URL 抓取失败: {e}");
     // W-1/W-2（2026-09-04）：按错误类分治——
     // · HTTP 4xx（除 429）重试无意义 → Permanent + mark_failed（404 文档
     //   直接 failed，不再退避重试到 job dead 而文档永久卡 pending）；

@@ -54,7 +54,12 @@ const fn def(
     retryable: bool,
     description: &'static str,
 ) -> ErrorCodeDef {
-    ErrorCodeDef { code, category, retryable, description }
+    ErrorCodeDef {
+        code,
+        category,
+        retryable,
+        description,
+    }
 }
 
 /// 全系统错误码注册表——**新增错误码必须在此登记**（`error_codes_unique` 测试强制）。
@@ -240,6 +245,26 @@ impl std::fmt::Display for EngramError {
 
 impl std::error::Error for EngramError {}
 
+/// WikiDocumentError → 统一错误桥（P006-T002 首批：EN-32 故障域示范）。
+/// 归因映射：NotFound/BadRequest=调用方输入；Storage=网络/存储层。
+impl From<&crate::wiki_docs::WikiDocumentError> for EngramError {
+    fn from(e: &crate::wiki_docs::WikiDocumentError) -> Self {
+        use crate::wiki_docs::WikiDocumentError;
+        let (code, category) = match e {
+            WikiDocumentError::NotFound(_) => ("WIKI-DOC-NOT-FOUND", ErrorCategory::ExternalInput),
+            WikiDocumentError::BadRequest(_) => ("INPUT-INVALID", ErrorCategory::ExternalInput),
+            WikiDocumentError::Storage(_) => ("STORAGE-UNAVAILABLE", ErrorCategory::Network),
+        };
+        Self {
+            code,
+            category,
+            message: e.to_string(),
+            context: serde_json::Value::Null,
+            source: Some(e.to_string()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,8 +276,13 @@ mod tests {
         for d in ERROR_CODES {
             assert!(seen.insert(d.code), "错误码重复: {}", d.code);
             assert!(!d.code.is_empty());
-            assert!(d.code.chars().all(|c| c.is_ascii_uppercase() || c == '-' || c.is_ascii_digit()),
-                "码格式应为大写字母-连字符: {}", d.code);
+            assert!(
+                d.code
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c == '-' || c.is_ascii_digit()),
+                "码格式应为大写字母-连字符: {}",
+                d.code
+            );
             assert!(!d.description.is_empty(), "{} 缺描述", d.code);
             // 强不变式：内部 bug 重试无意义（其余类别允许显式覆盖默认建议）
             if d.category == ErrorCategory::InternalBug {
@@ -272,6 +302,19 @@ mod tests {
         let display = e.to_string();
         assert!(display.contains("WIKI-DOC-NOT-FOUND"));
         assert!(display.contains("根因"));
+    }
+
+    /// From 桥：WikiDocumentError 归因映射（P006-T002 首批）。
+    #[test]
+    fn wiki_doc_error_bridge() {
+        use crate::wiki_docs::WikiDocumentError;
+        let e: EngramError = (&WikiDocumentError::NotFound("文档 x 不存在".into())).into();
+        assert_eq!(e.code, "WIKI-DOC-NOT-FOUND");
+        assert_eq!(e.category, ErrorCategory::ExternalInput);
+        assert!(e.source.is_some());
+        let e: EngramError = (&WikiDocumentError::Storage("连接超时".into())).into();
+        assert_eq!(e.category, ErrorCategory::Network);
+        assert!(e.retryable());
     }
 
     #[test]

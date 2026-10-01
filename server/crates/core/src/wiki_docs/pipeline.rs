@@ -170,7 +170,7 @@ pub async fn chunk_job(ctx: JobContext) -> Result<serde_json::Value, JobError> {
 
     let chunks = chunk_text(&text);
     if chunks.is_empty() {
-        repo::mark_failed_document(pool, lib, doc_id, "解析后内容为空")
+        repo::mark_failed_document(pool, lib, doc_id, "[WIKI-DOC-PARSE-EMPTY] 解析后内容为空")
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
         return Ok(json!({"document_id": doc_id, "chunks": 0, "empty": true}));
