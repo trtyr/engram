@@ -8,6 +8,7 @@ use engram_api::routes;
 use engram_api::state::AppState;
 use engram_storage::PoolConfig;
 use tower_http::trace::TraceLayer;
+use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 /// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
@@ -15,8 +16,11 @@ use tracing_subscriber::EnvFilter;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 1. 结构化 JSON 日志（必须最先初始化——Config::from_env 的 data_root WARN 依赖它，
-    //    放在配置解析之后会让最早的告警静默丢失）
-    init_tracing();
+    //    放在配置解析之后会让最早的告警静默丢失）。
+    //    PG 落地层随 channel 一并注册（writer 在 pool 就绪后启动——启动期日志在
+    //    channel 排队不丢，P005-T001）。
+    let (pg_log_layer, log_rx) = engram_api::logging::channel();
+    init_tracing(pg_log_layer);
 
     // 2. 配置
     let cfg = Config::from_env()?;
@@ -24,6 +28,10 @@ async fn main() -> anyhow::Result<()> {
 
     // 3. 数据库连接 + 迁移 + 管理员播种 + 崩溃自愈（启动即跑，失败快速退出）
     let pool = init_db(&cfg).await?;
+
+    // P005-T001：日志批量写者 + 保留期清理（info 30 天 / debug 7 天，env 可覆盖）
+    engram_api::logging::spawn_log_writer(pool.clone(), log_rx);
+    engram_api::logging::spawn_logs_retention(pool.clone());
 
     // 4. 任务 runner：注册蒸馏链 + 知识摄取 handler（含 deep purge 定时执行器）
     let runner_handle = build_runner(&cfg, &pool).await?;
@@ -41,14 +49,19 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// 结构化 JSON 日志初始化（必须最先——配置解析的告警依赖它）。
-fn init_tracing() {
-    tracing_subscriber::fmt()
-        .json()
-        .flatten_event(true)
-        .with_current_span(true)
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+/// 叠加 PG 落地层（channel → 批量 writer，层内零 IO 不阻塞请求路径）。
+fn init_tracing(pg_layer: engram_api::logging::PgLogLayer) {
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .flatten_event(true)
+                .with_current_span(true)
+                .with_filter(env_filter),
         )
+        .with(pg_layer)
         .init();
 }
 
