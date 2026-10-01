@@ -60,6 +60,7 @@ use utoipa::OpenApi;
         wiki_docs_api::submit_url, wiki_docs_api::upload, wiki_docs_api::list_documents,
         wiki_docs_api::get_document, wiki_docs_api::document_chunks,
         wiki_docs_api::delete_document, wiki_docs_api::reembed, wiki_docs_api::search,
+        wiki_docs_api::webreader_status, wiki_docs_api::webreader_test,
         wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
         wiki_api::query_gaps,
