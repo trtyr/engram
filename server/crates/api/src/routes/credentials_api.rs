@@ -139,6 +139,7 @@ pub async fn put_credential(
         )
         .await
         .map_err(ce)?;
+    tracing::info!(audit = true, action = "credentials.put", target = %req.name, actor = ?principal, expires_at = ?meta.expires_at, "审计");
     Ok((
         StatusCode::CREATED,
         Json(serde_json::json!({
@@ -161,5 +162,6 @@ pub async fn delete_credential(
     if !deleted {
         return Err(ApiError::NotFound(format!("凭据不存在：{name}")));
     }
+    tracing::info!(audit = true, action = "credentials.delete", target = %name, actor = ?principal, "审计");
     Ok(Json(serde_json::json!({ "deleted": name })))
 }

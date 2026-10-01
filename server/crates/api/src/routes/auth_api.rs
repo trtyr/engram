@@ -76,10 +76,12 @@ pub async fn login_handler(
     {
         Ok((token, _hash)) => {
             crate::login_throttle::record_success(&req.username);
+            tracing::info!(audit = true, action = "auth.login", target = %req.username, actor = %req.username, outcome = "success", ip = ?ip, "审计");
             Ok(Json(LoginResponse { token }))
         }
         Err(e) => {
             crate::login_throttle::record_failure(&req.username);
+            tracing::warn!(audit = true, action = "auth.login", target = %req.username, outcome = "failure", error = %e, ip = ?ip, "审计");
             Err(e)
         }
     }

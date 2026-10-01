@@ -82,7 +82,7 @@ impl<S> Layer<S> for PgLogLayer
 where
     S: Subscriber,
 {
-    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         let mut visitor = FieldVisitor {
             message: None,
             fields: serde_json::Map::new(),
@@ -128,7 +128,7 @@ pub async fn request_id_mw(
     let start = std::time::Instant::now();
 
     let serve = REQUEST_ID.scope(rid.clone(), async {
-        let mut res = next.run(req).await;
+        let res = next.run(req).await;
         let latency_ms = start.elapsed().as_millis() as u64;
         let status = res.status().as_u16();
         tracing::info!(

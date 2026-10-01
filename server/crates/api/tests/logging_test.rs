@@ -5,8 +5,8 @@
 mod support;
 
 use axum::body::Body;
-use engram_api::logging;
 use axum::http::Request;
+use engram_api::logging;
 use support::{app, connect_with_retry, connection_url, start_pgvector};
 use tower::util::ServiceExt;
 use tracing_subscriber::prelude::*;
@@ -150,8 +150,6 @@ async fn request_log_lands_with_request_id() {
     tokio::time::sleep(std::time::Duration::from_millis(900)).await;
     writer.abort();
 
-
-
     let row: Option<(String, String, i64)> = sqlx::query_as(
         "SELECT fields->>'http_method', fields->>'http_path', (fields->>'latency_ms')::bigint \
          FROM logs WHERE message = 'http 请求' AND request_id = 'trace-abc-999' LIMIT 1",
@@ -163,4 +161,136 @@ async fn request_log_lands_with_request_id() {
     assert_eq!(method, "GET");
     assert!(!path.is_empty(), "路由模板/路径应在");
     assert!(latency >= 0);
+}
+
+/// P005-T004：业务审计动作——登录/凭据/API key 的写删操作打点
+/// （audit=true, action/target/actor 齐全，经 PgLogLayer 落 logs 表）。
+#[tokio::test]
+async fn audit_actions_land_in_logs() {
+    let container = start_pgvector().await.expect("测试库");
+    let url = connection_url(&container).await.unwrap();
+    let pool = connect_with_retry(&url).await.expect("连接");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
+
+    let (layer, rx) = logging::channel();
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let (app, _pg2) = app().await;
+    let writer = logging::spawn_log_writer(pool.clone(), rx);
+
+    // ① 登录（login handler 内部打点 auth.login）
+    let token = support::login_token(&app).await;
+
+    // ② 凭据写入 + 删除
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/credentials")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"name": "audit-test/key", "value": "v-审计"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::CREATED, "凭据写入");
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/credentials/audit-test%2Fkey")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK, "凭据删除");
+
+    // ③ API key 创建 + 撤销
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/api-keys")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"name": "audit-key", "scopes": ["wiki"]}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::CREATED, "key 创建");
+    let created: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let key_id = created["id"].as_str().expect("key id").to_string();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/settings/api-keys/{key_id}/revoke"))
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::NO_CONTENT,
+        "key 撤销"
+    );
+
+    // 等 writer flush
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    writer.abort();
+
+    // 断言：6 条审计（login/credentials.put/credentials.delete/apikey.create/apikey.revoke）+ request_id 关联
+    let actions: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT fields->>'action', fields->>'target', fields->>'actor' \
+         FROM logs WHERE fields->>'audit' = 'true' ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let actions_v: Vec<&str> = actions.iter().map(|(a, _, _)| a.as_str()).collect();
+    for expected in [
+        "auth.login",
+        "credentials.put",
+        "credentials.delete",
+        "apikey.create",
+        "apikey.revoke",
+    ] {
+        assert!(
+            actions_v.contains(&expected),
+            "审计缺 {expected}: {actions_v:?}"
+        );
+    }
+    // target 断言（哪个对象）
+    assert!(
+        actions
+            .iter()
+            .any(|(a, t, _)| a == "credentials.put" && t.as_deref() == Some("audit-test/key")),
+        "credentials.put 应带 target"
+    );
+    // actor 断言（谁）
+    assert!(
+        actions.iter().all(|(_, _, a)| a.is_some()),
+        "全部审计应带 actor: {actions:?}"
+    );
 }

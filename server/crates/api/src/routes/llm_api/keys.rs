@@ -33,6 +33,7 @@ pub async fn create_api_key_handler(
 ) -> Result<(StatusCode, Json<ApiKeyCreated>), ApiError> {
     require_admin(&principal)?;
     let (id, key) = create_api_key(&state.pool, &req.name, req.scopes, req.expires_at).await?;
+    tracing::info!(audit = true, action = "apikey.create", target = %req.name, key_id = %id, actor = ?principal, "审计");
     Ok((
         StatusCode::CREATED,
         Json(ApiKeyCreated {
@@ -80,6 +81,7 @@ pub async fn revoke_api_key(
     if deleted == 0 {
         return Err(ApiError::NotFound(format!("API key {id} 不存在")));
     }
+    tracing::info!(audit = true, action = "apikey.revoke", target = %id, actor = ?principal, "审计");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -179,6 +181,7 @@ pub async fn batch_revoke_api_keys(
         return Err(ApiError::BadRequest("ids 不能为空".into()));
     }
     let revoked = keys_repo::delete_api_keys(&state.pool, &req.ids).await?;
+    tracing::info!(audit = true, action = "apikey.batch_revoke", target = ?req.ids, revoked = revoked, actor = ?principal, "审计");
     Ok(Json(BatchRevokeResult {
         revoked: revoked as usize,
     }))
