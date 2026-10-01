@@ -260,18 +260,49 @@ pub fn from_args<T: serde::de::DeserializeOwned + schemars::JsonSchema>(
         Err(strict_err) => {
             let root = serde_json::to_value(rmcp::schemars::schema_for!(T)).unwrap_or(Value::Null);
             let defs = root.get("$defs").cloned().unwrap_or(Value::Null);
+            // EN-11 指路提示在 move 前算好：coerce 只转值不动键集，
+            // strict 与 coerced 的 missing field 判定等价
+            let hint = param_name_hint(&value, &root, &strict_err);
             let mut coerced = value;
             coerce_by_schema(&root, &defs, &mut coerced);
             serde_json::from_value::<T>(coerced).map_err(|coerced_err| {
                 mcp_err(
                     ErrorCode::INVALID_PARAMS,
                     format!(
-                        "{domain}.{action} 参数错误：{coerced_err}（宽容解析后仍失败；原始类型错误：{strict_err}）。用 action=\"help\" 查看该操作的参数说明。"
+                        "{domain}.{action} 参数错误：{coerced_err}（宽容解析后仍失败；原始类型错误：{strict_err}）{hint}。用 action=\"help\" 查看该操作的参数说明。"
                     ),
                 )
             })
         }
     }
+}
+
+/// EN-11 报错指路：missing field 时点名调用方传入的未识别参数。
+/// 跨域主键名不统一（jobs/tickets 用 id、assets 用 asset_id、codegraph register 用
+/// source_uri、location_add 用 asset 名字符串），调用方按相邻域直觉传名必踩一次
+/// missing field 打回——报错直接指出「你传的这些键本操作不认识」，打回即学会。
+/// 不做自动改名（D7 同哲学：宽容解析可以，静默改语义不行，掩盖真实错误）。
+fn param_name_hint(args: &Value, root_schema: &Value, err: &serde_json::Error) -> String {
+    if !err.to_string().contains("missing field") {
+        return String::new();
+    }
+    let (Some(map), Some(props)) = (
+        args.as_object(),
+        root_schema.get("properties").and_then(Value::as_object),
+    ) else {
+        return String::new();
+    };
+    let unknown: Vec<&str> = map
+        .keys()
+        .filter(|k| !props.contains_key(*k))
+        .map(String::as_str)
+        .collect();
+    if unknown.is_empty() {
+        return String::new();
+    }
+    format!(
+        "；你传入的这些参数本操作不认识：{unknown:?}——疑似参数名不匹配（对照 action=\"help\" 的参数手册改名重试）"
+    )
 }
 
 /// 按 inputSchema（JSON Schema Value 形态）递归做受控 string→原生 转换：
