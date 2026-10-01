@@ -9,6 +9,8 @@
 set -euo pipefail
 
 COMPOSE_FILE="$(cd "$(dirname "$0")/../deploy" && pwd)/docker-compose.yml"
+# 注意：fallback DSN 的角色（trtyr）与库名（engram）是本机专属值——换机器请用
+# AGENT_MEMORY_DATABASE_URL 或 ENGRAM_DATABASE_URL 覆盖，勿改此默认值。
 DSN="${AGENT_MEMORY_DATABASE_URL:-${ENGRAM_DATABASE_URL:-postgres://trtyr@127.0.0.1:5432/engram}}"
 DATA_DIR="${AGENT_MEMORY_DATA_DIR:-$HOME/.engram/app}"
 
@@ -60,8 +62,17 @@ pack_data() { # $1 = 输出 tar.gz
 
 unpack_data() { # $1 = data.tar.gz
   mkdir -p "$(dirname "$DATA_DIR")"
+  local staging="${DATA_DIR}.restore-tmp"
+  rm -rf "$staging" && mkdir -p "$staging"
+  # P003-T002 原子交换：先解到暂存区，解包成功才替换活数据——档损坏时活数据不被先删
+  if ! tar xzf "$1" -C "$staging"; then
+    rm -rf "$staging"
+    echo "错误：备份档解包失败，活数据未动（P003-T002 原子交换）。" >&2
+    exit 1
+  fi
   rm -rf "$DATA_DIR"
-  tar xzf "$1" -C "$(dirname "$DATA_DIR")"
+  mv "$staging"/* "$DATA_DIR"/
+  rmdir "$staging" 2>/dev/null || true
 }
 
 cmd="${1:?用法: backup.sh backup|restore}"

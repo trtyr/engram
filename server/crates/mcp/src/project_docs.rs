@@ -321,9 +321,10 @@ impl EngramMcpServer {
             match doc.content.matches(old).count() {
                 1 => {}
                 0 => {
+                    let preview: String = old.chars().take(80).collect();
                     return Err(mcp_err(
                         ErrorCode::INVALID_PARAMS,
-                        format!("old_text 零命中：{old:?}——用 doc_get 确认原文"),
+                        format!("old_text 零命中：{preview:?}——用 doc_get 确认原文"),
                     ));
                 }
                 k => {
@@ -338,11 +339,11 @@ impl EngramMcpServer {
             let new_text = dp
                 .content
                 .as_deref()
-                .filter(|c| !c.is_empty())
+                .filter(|c| !c.trim().is_empty())
                 .ok_or_else(|| {
                     mcp_err(
                         ErrorCode::INVALID_PARAMS,
-                        "mode=replace_text 需要 content 携带新文（收到缺失或空）——删除语义请用行级 mode=delete，不再静默删原文（EN-10）",
+                        "mode=replace_text 需要 content 携带新文（收到缺失、空或全空白）——删除语义请用行级 mode=delete，不再静默删原文（EN-10）",
                     )
                 })?;
             let new_full = doc.content.replacen(old, new_text, 1);

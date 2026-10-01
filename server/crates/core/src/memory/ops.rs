@@ -198,8 +198,8 @@ impl MemoryService {
     }
 
     /// P4 全量导出（数据主权）：记忆域五表完整快照，JSON 随身带走。
-    /// R4：sensitive 原子默认排除（隐私面不随导出扩大到文件系统），
-    /// include_sensitive=true 显式包含——与检索 reveal 同权。
+    /// sensitive 原子是否包含由调用方决定（决策 001 后生产路由默认包含——
+    /// 隐私面语义随决策 001 收敛为「标记不排除」；include_sensitive 只是开关）。
     pub async fn export(&self, include_sensitive: bool) -> Result<serde_json::Value, MemoryError> {
         let sessions = repo::list_all_sessions(&self.pool).await?;
         let atoms = repo::list_atoms_all(&self.pool, include_sensitive).await?;

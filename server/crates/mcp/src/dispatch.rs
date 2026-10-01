@@ -269,7 +269,7 @@ pub fn from_args<T: serde::de::DeserializeOwned + schemars::JsonSchema>(
                 mcp_err(
                     ErrorCode::INVALID_PARAMS,
                     format!(
-                        "{domain}.{action} 参数错误：{coerced_err}（宽容解析后仍失败；原始类型错误：{strict_err}）{hint}。用 action=\"help\" 查看该操作的参数说明。"
+                        "{domain}.{action} 参数错误：{coerced_err}（宽容解析后仍失败；首次严格错误：{strict_err}）{hint}。用 action=\"help\" 查看该操作的参数说明。"
                     ),
                 )
             })
@@ -300,8 +300,11 @@ fn param_name_hint(args: &Value, root_schema: &Value, err: &serde_json::Error) -
     if unknown.is_empty() {
         return String::new();
     }
+    let total = unknown.len();
+    let shown: Vec<&str> = unknown.into_iter().take(8).collect();
+    // 必须保持 {:?}（escape_debug 转义换行/控制字符）——改 {} 会丢转义，日志注入面重开
     format!(
-        "；你传入的这些参数本操作不认识：{unknown:?}——疑似参数名不匹配（对照 action=\"help\" 的参数手册改名重试）"
+        "；你传入的这些参数本操作不认识（共 {total} 个）：{shown:?}——疑似参数名不匹配（对照 action=\"help\" 的参数手册改名重试）"
     )
 }
 
@@ -890,13 +893,7 @@ mod probe_doc_get {
         .expect("真实 doc_get 结构体的 stringify 参数应被宽容解析");
         assert_eq!(got.start_line, Some(1));
         assert_eq!(got.with_line_numbers, Some(true));
-        // 顺手打印 schema 形态，确认 Option<i64> 的生成结构
-        let s = serde_json::to_value(rmcp::schemars::schema_for!(ProjectDocGetParams)).unwrap();
-        let sl = s
-            .get("properties")
-            .and_then(|p| p.get("start_line"))
-            .cloned();
-        println!("start_line schema = {}", sl.unwrap_or(Value::Null));
+        // 宽容解析的真实结构体契约测试（探针 println 已随 P003-T003 清理）
     }
 }
 

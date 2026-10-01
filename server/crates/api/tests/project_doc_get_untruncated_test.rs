@@ -124,14 +124,6 @@ async fn doc_get_long_content_untruncated_both_channels() {
         serde_json::to_string(&body).unwrap()
     );
     let mcp_content = body["content"].as_str().expect("doc_get 应有 content 字段");
-    eprintln!(
-        "DEBUG chars: expect={long_chars} actual={} last40={:?}",
-        mcp_content.chars().count(),
-        mcp_content
-            .chars()
-            .skip(mcp_content.chars().count().saturating_sub(40))
-            .collect::<String>()
-    );
     assert_eq!(
         mcp_content.chars().count(),
         long_chars,

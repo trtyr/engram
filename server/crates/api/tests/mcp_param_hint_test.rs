@@ -95,3 +95,46 @@ async fn valid_args_no_hint_and_still_work() {
         "string→int 宽容解析应继续生效：{v}"
     );
 }
+
+#[tokio::test]
+async fn non_missing_field_error_has_no_hint() {
+    let ctx = Ctx::new().await;
+    let key = create_key(&ctx.app, &ctx.token, &["todos"]).await;
+    mcp_initialize(&ctx.app, &key).await;
+
+    // 守卫分支：非 missing-field 错误（类型错）不得带指路话术
+    let (_, v) = mcp_rpc(
+        &ctx.app,
+        &key,
+        domain_call("todos", "add", json!({ "title": 123 })),
+    )
+    .await;
+    assert!(v.get("error").is_some(), "类型错应被打回：{v}");
+    let msg = v["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        !msg.contains("本操作不认识"),
+        "非 missing-field 错误不得带指路话术：{msg}"
+    );
+}
+
+#[tokio::test]
+async fn newline_in_key_is_escaped_in_error() {
+    let ctx = Ctx::new().await;
+    let key = create_key(&ctx.app, &ctx.token, &["memory"]).await;
+    mcp_initialize(&ctx.app, &key).await;
+
+    // 转义固化：键含 \n → 错误串无裸换行（{:?} escape_debug；改 {} 会重开日志注入面）
+    let (_, v) = mcp_rpc(
+        &ctx.app,
+        &key,
+        domain_call("jobs", "get", json!({ "jo\nb_id": "x" })),
+    )
+    .await;
+    assert!(v.get("error").is_some(), "错名参数应被打回：{v}");
+    let msg = v["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        !msg.contains('\n'),
+        "错误串不得含裸换行（Debug 转义必须保持）：{msg:?}"
+    );
+    assert!(msg.contains("本操作不认识"), "应带指路话术：{msg}");
+}
