@@ -333,9 +333,19 @@ impl EngramMcpServer {
                     ));
                 }
             }
-            let new_full = doc
+            // EN-10 静默数据丢失修复：content 缺失/空一律显式拒绝——
+            // 旧 unwrap_or("") 会把 anchor 原文替换成空串且回执照报成功（文档逐次变短）
+            let new_text = dp
                 .content
-                .replacen(old, dp.content.as_deref().unwrap_or(""), 1);
+                .as_deref()
+                .filter(|c| !c.is_empty())
+                .ok_or_else(|| {
+                    mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        "mode=replace_text 需要 content 携带新文（收到缺失或空）——删除语义请用行级 mode=delete，不再静默删原文（EN-10）",
+                    )
+                })?;
+            let new_full = doc.content.replacen(old, new_text, 1);
             // 整文直写（update_doc COALESCE 部分更新）——不走行级 patch：
             // 行模型按 \n 切分会给尾换行文档叠出幽灵空行（审计四驳③：曾产出 "gamma\n\n"）
             let doc = self
@@ -345,9 +355,15 @@ impl EngramMcpServer {
                 .map_err(from_project)?;
             let mut v = slim_doc(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})));
             v["total_lines"] = json!(doc.content.lines().count());
-            v["patched"] = json!({ "mode": "replace_text", "via_anchor": true });
+            v["patched"] = json!({
+                "mode": "replace_text",
+                "via_anchor": true,
+                "old_chars": old.chars().count(),
+                "new_chars": new_text.chars().count(),
+                "doc_chars": doc.content.chars().count(),
+            });
             v["hint"] = json!(
-                "replace_text 完成（old_text 唯一命中替换）——行号已变，继续 patch 用 anchor/anchor_end 锚点或重读 doc_get"
+                "replace_text 完成（old_text 唯一命中替换）——行号已变，继续 patch 用 anchor/anchor_end 锚点或重读 doc_get；建议携 expected_version 防并发覆盖；回执不可替代 doc_get 回读验证"
             );
             return ok_json(v);
         }
