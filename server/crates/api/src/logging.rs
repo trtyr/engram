@@ -73,8 +73,16 @@ impl Visit for FieldVisitor {
     }
 }
 
-impl<S: Subscriber> Layer<S> for PgLogLayer {
-    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+tokio::task_local! {
+    /// 当前 task 的 request-id（request_id_mw 设置——HTTP 范围内全部日志自动关联）。
+    static REQUEST_ID: String;
+}
+
+impl<S> Layer<S> for PgLogLayer
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         let mut visitor = FieldVisitor {
             message: None,
             fields: serde_json::Map::new(),
@@ -85,6 +93,10 @@ impl<S: Subscriber> Layer<S> for PgLogLayer {
         let message = visitor
             .message
             .unwrap_or_else(|| visitor.fields.remove("message").map(|v| v.to_string()).unwrap_or_default());
+        // task_local 贯穿：HTTP handler task 内的所有日志自动带 request_id
+        if let Ok(rid) = REQUEST_ID.try_with(|v| v.clone()) {
+            visitor.fields.insert("request_id".into(), serde_json::json!(rid));
+        }
         // channel 满即丢弃（logging 永不反压业务路径）
         let _ = self.tx.try_send(LogRecord {
             level,
@@ -93,6 +105,47 @@ impl<S: Subscriber> Layer<S> for PgLogLayer {
             fields: serde_json::Value::Object(visitor.fields),
         });
     }
+}
+
+/// x-request-id 贯穿 + HTTP 请求日志（P005-T002）。
+/// 无入站头则生成 uuid7；响应头回带；请求日志（方法/路由模板/状态/耗时）落 logs。
+pub async fn request_id_mw(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let rid = req
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .unwrap_or_else(|| uuid::Uuid::now_v7().simple().to_string());
+    let method = req.method().clone();
+    let path = req
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_else(|| req.uri().path().to_string());
+    let start = std::time::Instant::now();
+
+    let serve = REQUEST_ID.scope(rid.clone(), async {
+        let mut res = next.run(req).await;
+        let latency_ms = start.elapsed().as_millis() as u64;
+        let status = res.status().as_u16();
+        tracing::info!(
+            request_id = %rid,
+            http_method = %method,
+            http_path = %path,
+            http_status = status,
+            latency_ms,
+            "http 请求"
+        );
+        res
+    });
+    let mut res = serve.await;
+    if let Ok(v) = rid.parse() {
+        res.headers_mut().insert("x-request-id", v);
+    }
+    res
 }
 
 /// 建 layer + 接收端。pool 就绪后把 rx 交给 [`spawn_log_writer`]。
@@ -143,13 +196,20 @@ async fn flush(pool: &PgPool, batch: &mut Vec<LogRecord>) {
         return;
     }
     let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-        "INSERT INTO logs (level, target, message, fields) ",
+        "INSERT INTO logs (level, target, message, fields, request_id) ",
     );
     qb.push_values(batch.iter(), |mut b, rec| {
+        // fields["request_id"] 提升到列（idx_logs_request_id 索引查询面）
+        let rid = rec
+            .fields
+            .get("request_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         b.push_bind(&rec.level)
             .push_bind(&rec.target)
             .push_bind(&rec.message)
-            .push_bind(&rec.fields);
+            .push_bind(&rec.fields)
+            .push_bind(rid);
     });
     if let Err(e) = qb.build().execute(pool).await {
         tracing::warn!(error = %e, dropped = batch.len(), "logs 批量写入失败");

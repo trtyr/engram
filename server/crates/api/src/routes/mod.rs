@@ -138,6 +138,9 @@ pub fn router(state: AppState) -> Router {
         // 安全响应头（2026-09-27 Lighthouse 修复）：必须挂在 fallback 之后——
         // Router::layer 不作用于之后才注册的 fallback_service
         .layer(axum::middleware::from_fn(security_headers_mw))
+        // P005-T002：x-request-id 贯穿 + HTTP 请求日志——同样必须挂在 fallback 之后
+        // （07133dd 同款教训：Router::layer 不覆盖 fallback_service）
+        .layer(axum::middleware::from_fn(crate::logging::request_id_mw))
         .with_state(state)
 }
 
