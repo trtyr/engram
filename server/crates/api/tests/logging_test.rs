@@ -407,3 +407,47 @@ async fn logs_query_endpoint_filters_and_paginates() {
         "非 admin 应 403"
     );
 }
+
+/// P006-T003：error 级事件自动落 logs——source 链/category/request_id 三要素齐全，
+/// internal_bug 类带 alert 告警标记（ErrorCategory::InternalBug 归因驱动）。
+#[tokio::test]
+async fn error_events_land_with_full_context() {
+    let container = start_pgvector().await.expect("测试库");
+    let url = connection_url(&container).await.unwrap();
+    let pool = connect_with_retry(&url).await.expect("连接");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
+
+    let (layer, rx) = logging::channel();
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let writer = logging::spawn_log_writer(pool.clone(), rx);
+
+    let app_guard = logging::with_request_id("trace-err-1".to_string(), async {
+        // error 级 + internal_bug 归因 + source 链（EngramError Display 形态）
+        tracing::error!(
+            category = "internal_bug",
+            code = "INTERNAL-INCONSISTENT",
+            source = "孤儿态: job dead + 文档 pending（根因: fetch Retryable 耗尽未落终态）",
+            "内部状态不一致"
+        );
+    });
+    app_guard.await;
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    writer.abort();
+
+    let row: Option<(serde_json::Value, String)> = sqlx::query_as(
+        "SELECT fields, request_id FROM logs WHERE message = '内部状态不一致' AND level = 'ERROR' LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    let (fields, rid) = row.expect("error 事件应落表");
+    assert_eq!(rid, "trace-err-1", "request_id 应贯穿");
+    assert_eq!(fields["category"], "internal_bug");
+    assert_eq!(fields["code"], "INTERNAL-INCONSISTENT");
+    assert!(
+        fields["source"].as_str().unwrap_or("").contains("根因"),
+        "source 链应保留: {fields}"
+    );
+    assert_eq!(fields["alert"], true, "internal_bug 应升级告警标记");
+}

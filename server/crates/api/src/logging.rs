@@ -12,8 +12,8 @@ use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
-use tracing_subscriber::layer::Context;
 use tracing_subscriber::Layer;
+use tracing_subscriber::layer::Context;
 
 const CHANNEL_CAP: usize = 8192;
 const BATCH_SIZE: usize = 64;
@@ -43,8 +43,10 @@ impl Visit for FieldVisitor {
         if field.name() == "message" {
             self.message = Some(format!("{value:?}"));
         } else {
-            self.fields
-                .insert(field.name().to_string(), serde_json::json!(format!("{value:?}")));
+            self.fields.insert(
+                field.name().to_string(),
+                serde_json::json!(format!("{value:?}")),
+            );
         }
     }
 
@@ -52,30 +54,40 @@ impl Visit for FieldVisitor {
         if field.name() == "message" {
             self.message = Some(value.to_string());
         } else {
-            self.fields.insert(field.name().to_string(), serde_json::json!(value));
+            self.fields
+                .insert(field.name().to_string(), serde_json::json!(value));
         }
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.fields.insert(field.name().to_string(), serde_json::json!(value));
+        self.fields
+            .insert(field.name().to_string(), serde_json::json!(value));
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.fields.insert(field.name().to_string(), serde_json::json!(value));
+        self.fields
+            .insert(field.name().to_string(), serde_json::json!(value));
     }
 
     fn record_f64(&mut self, field: &Field, value: f64) {
-        self.fields.insert(field.name().to_string(), serde_json::json!(value));
+        self.fields
+            .insert(field.name().to_string(), serde_json::json!(value));
     }
 
     fn record_bool(&mut self, field: &Field, value: bool) {
-        self.fields.insert(field.name().to_string(), serde_json::json!(value));
+        self.fields
+            .insert(field.name().to_string(), serde_json::json!(value));
     }
 }
 
 tokio::task_local! {
     /// 当前 task 的 request-id（request_id_mw 设置——HTTP 范围内全部日志自动关联）。
     static REQUEST_ID: String;
+}
+
+/// 在 request-id 上下文内执行（测试与工具用——mw 内部自动设置）。
+pub async fn with_request_id<T>(rid: String, fut: impl std::future::Future<Output = T>) -> T {
+    REQUEST_ID.scope(rid, fut).await
 }
 
 impl<S> Layer<S> for PgLogLayer
@@ -90,12 +102,24 @@ where
         event.record(&mut visitor);
         let level = event.metadata().level().to_string();
         let target = event.metadata().target().to_string();
-        let message = visitor
-            .message
-            .unwrap_or_else(|| visitor.fields.remove("message").map(|v| v.to_string()).unwrap_or_default());
+        let message = visitor.message.unwrap_or_else(|| {
+            visitor
+                .fields
+                .remove("message")
+                .map(|v| v.to_string())
+                .unwrap_or_default()
+        });
         // task_local 贯穿：HTTP handler task 内的所有日志自动带 request_id
         if let Ok(rid) = REQUEST_ID.try_with(|v| v.clone()) {
-            visitor.fields.insert("request_id".into(), serde_json::json!(rid));
+            visitor
+                .fields
+                .insert("request_id".into(), serde_json::json!(rid));
+        }
+        // P006-T003：internal_bug 类（EngramError 归因）自动升级告警标记——必须人工跟进
+        if visitor.fields.get("category").and_then(|v| v.as_str()) == Some("internal_bug") {
+            visitor
+                .fields
+                .insert("alert".into(), serde_json::json!(true));
         }
         // channel 满即丢弃（logging 永不反压业务路径）
         let _ = self.tx.try_send(LogRecord {
@@ -276,5 +300,30 @@ mod tests {
         let r2 = rx.blocking_recv().expect("第二条");
         assert_eq!(r2.level, "WARN");
         assert_eq!(r2.fields["count"], 42);
+    }
+
+    /// P006-T003：internal_bug 类事件自动升级告警标记。
+    #[test]
+    fn internal_bug_events_get_alert_flag() {
+        let (layer, mut rx) = channel();
+        let subscriber = tracing_subscriber::registry().with(layer);
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::error!(
+                category = "internal_bug",
+                code = "INTERNAL-INCONSISTENT",
+                source = "孤儿态: job dead + 文档 pending",
+                "内部状态不一致"
+            );
+            tracing::error!(category = "upstream", "普通上游错误");
+        });
+        let r1 = rx.blocking_recv().expect("internal_bug 事件");
+        assert_eq!(r1.fields["alert"], true, "internal_bug 应升级告警");
+        assert_eq!(r1.fields["code"], "INTERNAL-INCONSISTENT");
+        assert_eq!(r1.fields["source"], "孤儿态: job dead + 文档 pending");
+        let r2 = rx.blocking_recv().expect("普通错误事件");
+        assert!(
+            r2.fields.get("alert").is_none(),
+            "非 internal_bug 不应有告警标记"
+        );
     }
 }
