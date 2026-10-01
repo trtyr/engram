@@ -271,6 +271,27 @@ pub(super) async fn embed_missing_chunks(
                     // K8：瞬态失败（429/5xx/超时）→ 整体重试，只补缺失保证进度不丢；
                     // 永久失败才降级 FTS（不阻塞 ready，可事后 re-embed 恢复）
                     if matches!(e, engram_llm::types::LlmError::Transient(_)) {
+                        // P004-T001（EN-32 孤儿态守卫）：最后一试时文档必须落终态——
+                        // 与 fetch 链路 W-1/W-2 同型（Retryable 耗尽前文档必须离开中间态，
+                        // 杜绝「job dead + 文档滞留 embedding」孤儿）。降级语义（Q003 已决）：
+                        // 缺失块 embed_failed + 文档 ready（FTS 先可检索，恢复后 re-embed 补）。
+                        if ctx.job.attempts >= ctx.job.max_attempts {
+                            for (cid, _) in chunks {
+                                repo::set_chunk_failed(pool, lib, *cid)
+                                    .await
+                                    .map_err(|e| JobError::Retryable(e.to_string()))?;
+                            }
+                            repo::set_ready_document(pool, lib, doc_id)
+                                .await
+                                .map_err(|e| JobError::Retryable(e.to_string()))?;
+                            ctx.emit(
+                                "嵌入重试耗尽——缺失块降级 FTS，文档提前 ready（可事后 re-embed 补）",
+                                Some(json!({"document_id": doc_id, "missing": missing, "degraded": true})),
+                            )
+                            .await
+                            .ok();
+                            return Ok(embedded);
+                        }
                         return Err(JobError::Retryable(format!("嵌入瞬态失败: {e}")));
                     }
                     tracing::warn!(error = %e, "嵌入批次失败，标记 embed_failed");

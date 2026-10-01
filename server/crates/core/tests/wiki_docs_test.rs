@@ -767,3 +767,68 @@ async fn search_hits_carry_neighbor_context() {
         last.context_next
     );
 }
+
+// ---------- T001（EN-32 孤儿态守卫）：embed 瞬态重试耗尽 → ready 非孤儿 ----------
+
+/// 不可达 embed provider（127.0.0.1:1 连接拒绝 = LlmError::Transient）下，
+/// embed_document 重试耗尽时文档必须落终态（缺失块 embed_failed + ready 降级 FTS），
+/// 不再滞留 embedding 中间态（W-1/W-2 同型守卫，2026-10-01 P004-T001）。
+#[tokio::test]
+async fn embed_transient_exhaustion_lands_ready_not_orphan() {
+    let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
+    let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
+    sqlx::query(
+        "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default) \
+         VALUES ($1, 'unreachable-embed', 'http://127.0.0.1:1', $2, 'dummy', 'embedding', true)",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(cipher.encrypt("dummy-key").unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let handle = run_jobs(pool.clone()).await;
+
+    let md = format!(
+        "# 瞬态故障韧性\n\n嵌入通道持续不可达时文档必须落终态而不是永久滞留。\n\n{}",
+        "韧性细节。".repeat(120)
+    );
+    let (id, _) = svc
+        .submit(
+            lib,
+            IngestSource::Bytes {
+                name: "resilience.md".into(),
+                content: md.into_bytes(),
+                content_type: Some("text/markdown".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+    let doc = wait_ready(&svc, lib, id).await;
+    assert_eq!(
+        doc.status, "ready",
+        "重试耗尽后应降级 ready（非孤儿态）: {:?}",
+        doc.error
+    );
+
+    // 全部块 embed_failed（降级 FTS 语义），且文档不在 embedding 中间态
+    let (total, failed): (i64, i64) = sqlx::query_as(
+        "SELECT count(*), count(*) FILTER (WHERE embed_failed) \
+         FROM wiki_chunks WHERE document_id = $1",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(total >= 1, "长文应至少 1 块");
+    assert_eq!(total, failed, "重试耗尽后缺失块应全部标 embed_failed");
+
+    // 降级后 FTS 仍可检索（Q003 语义）
+    let hits = svc.search(lib, "嵌入通道 韧性", 5).await.unwrap();
+    assert!(!hits.is_empty(), "降级后 FTS 应可检索");
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
