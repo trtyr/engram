@@ -52,19 +52,16 @@ pack_data() { # $1 = 输出 tar.gz
   if [ -d "$DATA_DIR" ]; then
     tar czf "$1" -C "$(dirname "$DATA_DIR")" "$(basename "$DATA_DIR")"
   else
-    echo "宿主数据目录不存在（${DATA_DIR}），落回 docker 数据卷 ..." >&2
-    docker run --rm -v engram_appdata:/data alpine tar czf - -C / data > "$1"
+    echo "错误：宿主数据目录不存在（${DATA_DIR}），无数据可打包。" >&2
+    echo "检查 AGENT_MEMORY_DATA_DIR；拒绝产出空备份（P001-T001：不再落回已弃用的 named volume）。" >&2
+    exit 1
   fi
 }
 
 unpack_data() { # $1 = data.tar.gz
-  if [ -d "$(dirname "$DATA_DIR")" ]; then
-    rm -rf "$DATA_DIR"
-    tar xzf "$1" -C "$(dirname "$DATA_DIR")"
-  else
-    docker run --rm -v engram_appdata:/data -v "$1":/b.tar.gz alpine \
-      sh -c "rm -rf /data/* && tar xzf /b.tar.gz -C /data"
-  fi
+  mkdir -p "$(dirname "$DATA_DIR")"
+  rm -rf "$DATA_DIR"
+  tar xzf "$1" -C "$(dirname "$DATA_DIR")"
 }
 
 cmd="${1:?用法: backup.sh backup|restore}"
