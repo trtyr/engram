@@ -24,15 +24,23 @@ const ROBOTS_TXT: &str = "User-agent: *\nDisallow: /\n";
 /// 安全响应头（静态路径在 handler 内直附——Router::layer 不覆盖 fallback_service）。
 fn with_security_headers(mut res: Response) -> Response {
     let h = res.headers_mut();
-    h.insert("x-frame-options", "DENY".parse().expect("static"));
-    h.insert("cross-origin-opener-policy", "same-origin".parse().expect("static"));
+    h.insert(
+        "x-frame-options",
+        axum::http::HeaderValue::from_static("DENY"),
+    );
+    h.insert(
+        "cross-origin-opener-policy",
+        axum::http::HeaderValue::from_static("same-origin"),
+    );
     h.insert(
         "content-security-policy",
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'".parse().expect("static"),
+        axum::http::HeaderValue::from_static(
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+        ),
     );
     h.insert(
         "strict-transport-security",
-        "max-age=31536000; includeSubDomains".parse().expect("static"),
+        axum::http::HeaderValue::from_static("max-age=31536000; includeSubDomains"),
     );
     res
 }
@@ -44,15 +52,17 @@ pub async fn static_handler(uri: Uri) -> Response {
 
     // robots.txt 优先于 SPA fallback（否则被 fallback 回 HTML，爬虫解析出几十条语法错误）
     if path == "robots.txt" {
-        return with_security_headers((
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
-                (header::CACHE_CONTROL, "public, max-age=86400"),
-            ],
-            ROBOTS_TXT,
-        )
-            .into_response());
+        return with_security_headers(
+            (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                    (header::CACHE_CONTROL, "public, max-age=86400"),
+                ],
+                ROBOTS_TXT,
+            )
+                .into_response(),
+        );
     }
 
     match WebAssets::get(path) {

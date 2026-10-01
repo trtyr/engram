@@ -6,7 +6,6 @@ mod support;
 
 use serde_json::{Value, json};
 use support::{app, create_key, login_token, mcp_initialize, mcp_rpc, rpc};
-use tower::util::ServiceExt;
 
 struct Ctx {
     app: axum::Router,

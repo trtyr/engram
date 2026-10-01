@@ -522,23 +522,26 @@ fn migrate_routes() -> Router<AppState> {
 /// 安全响应头中间件（2026-09-27 Lighthouse 修复）：全部响应统一附加。
 /// CSP 说明：index.html 有内联主题引导脚本（防闪烁，先于渲染执行）+ React 内联样式，
 /// 故 script/style 需 'unsafe-inline'——已比无 CSP 好一档（default-src 收紧其余方向）。
-async fn security_headers_mw(
-    req: axum::extract::Request,
-    next: Next,
-) -> axum::response::Response {
+async fn security_headers_mw(req: axum::extract::Request, next: Next) -> axum::response::Response {
     let mut res = next.run(req).await;
     let h = res.headers_mut();
-    h.insert("x-frame-options", "DENY".parse().expect("static"));
-    h.insert("cross-origin-opener-policy", "same-origin".parse().expect("static"));
+    h.insert(
+        "x-frame-options",
+        axum::http::HeaderValue::from_static("DENY"),
+    );
+    h.insert(
+        "cross-origin-opener-policy",
+        axum::http::HeaderValue::from_static("same-origin"),
+    );
     h.insert(
         "content-security-policy",
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
-            .parse()
-            .expect("static"),
+        axum::http::HeaderValue::from_static(
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+        ),
     );
     h.insert(
         "strict-transport-security",
-        "max-age=31536000; includeSubDomains".parse().expect("static"),
+        axum::http::HeaderValue::from_static("max-age=31536000; includeSubDomains"),
     );
     res
 }
