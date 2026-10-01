@@ -42,11 +42,8 @@ impl LlmProvider for MockProvider {
             }))
         }
     }
-    fn embed(
-        &self,
-        _req: EmbedRequest,
-    ) -> impl std::future::Future<Output = Result<EmbedResponse, LlmError>> + Send {
-        async { Err(LlmError::Permanent("mock 无嵌入".into())) }
+    async fn embed(&self, _req: EmbedRequest) -> Result<EmbedResponse, LlmError> {
+        Err(LlmError::Permanent("mock 无嵌入".into()))
     }
     fn name(&self) -> &str {
         "mock"
