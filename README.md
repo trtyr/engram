@@ -114,7 +114,8 @@ claude mcp add --transport http engram http://localhost:17654/mcp \
 
 ```bash
 git clone https://github.com/trtyr/engram && cd engram
-python3 scripts/setup.sh       # 体检依赖（缺什么给安装命令）→ 建库 → 生成配置 → 构建前端
+python3 scripts/setup.sh       # 体检依赖（缺什么给安装命令）→ 建库 → 生成配置（不构建不启动）
+cd web && pnpm install --frozen-lockfile && pnpm run build && cd ..   # 构建前端（产物被 rust-embed 编译期嵌入）
 python3 scripts/engramctl.py start   # 构建后端 → 安装 → 后台挂起 → http://localhost:17654
 ```
 
@@ -192,7 +193,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN_B" -H "Content-Type: application/j
   -d '{"source_url":"http://a-host:8080","source_admin_password":"…"}' http://b-host:8080/migrate/pull
 ```
 
-覆盖记忆 / 项目 / Wiki / 待办 / 工单 / KV 等业务数据（**assets 台账、credentials 凭据、LLM 供应商配置、API 密钥与管理员会话不随迁**——目标侧重配）；向量与 codegraph 索引为派生数据不迁移，导入端重建。
+覆盖记忆 / 项目 / Wiki / 待办 / 工单 / KV / assets 台账等业务数据（**credentials 凭据、LLM 供应商配置、API 密钥与管理员会话不随迁**——目标侧重配；资产先于项目位置导入，含敏感原子）；向量与 codegraph 索引为派生数据不迁移，导入端重建。
 控制台「设置 → 数据迁移」有同能力 UI。
 
 </details>
