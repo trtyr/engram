@@ -162,12 +162,23 @@ pub struct WikiWritePageParams {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiIngestParams {
-    /// 来源标题
-    #[schemars(description = "来源标题（如文档名、主题名）。")]
-    pub title: String,
-    /// 源文本（Markdown/纯文本；相同内容重复织入会被 sha 去重跳过）
-    #[schemars(description = "源文本全文。内容相同（sha 命中）会跳过。")]
-    pub text: String,
+    /// 任务指令（可选：不给则默认「阅读原料沉淀为 wiki 知识页」）
+    #[schemars(
+        description = "可选：给维护 Agent 的任务指令（如「整理成对比页」）。缺省为「阅读原料，沉淀为 wiki 知识页（建页/更新/互链）」。"
+    )]
+    pub instruction: Option<String>,
+    /// 二选一：原料 URL（harness 自主抓取）
+    #[schemars(
+        description = "二选一：原料 URL（harness 用 web-reader 自主抓取）。与 text 二选一。"
+    )]
+    pub url: Option<String>,
+    /// 二选一：原料文本
+    #[schemars(description = "二选一：原料文本全文（harness 阅读后建页/互链）。与 url 二选一。")]
+    pub text: Option<String>,
+    /// 可选：来源标题（字段名 `title` 或 `name` 均可）
+    #[schemars(description = "可选：来源标题（如文档名、主题名）。")]
+    #[serde(alias = "name")]
+    pub title: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

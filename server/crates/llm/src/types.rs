@@ -27,6 +27,8 @@ pub enum Purpose {
     WikiLint,
     /// 检索重排序（中档——R6：top 候选精排）
     SearchRerank,
+    /// Wiki 维护 Agent Harness（P004-T010；档位独立——可为它配专属模型分账）
+    WikiAgent,
 }
 
 impl Purpose {
@@ -42,6 +44,7 @@ impl Purpose {
             Purpose::WikiGeneration => "wiki_generation",
             Purpose::WikiLint => "wiki_lint",
             Purpose::SearchRerank => "search_rerank",
+            Purpose::WikiAgent => "wiki_agent",
         }
     }
 }
@@ -49,8 +52,14 @@ impl Purpose {
 /// 聊天消息。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
-    pub role: String, // system | user | assistant
+    pub role: String, // system | user | assistant | tool
     pub content: String,
+    /// assistant 消息的工具调用请求（tool-calling 循环用；None = 普通消息）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    /// tool 角色消息对应的调用 id（OpenAI tool_call_id）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl ChatMessage {
@@ -58,14 +67,54 @@ impl ChatMessage {
         Self {
             role: "system".into(),
             content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
     pub fn user(content: impl Into<String>) -> Self {
         Self {
             role: "user".into(),
             content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
+    /// assistant：携带工具调用请求（harness 循环回填用）。
+    pub fn assistant_with_tool_calls(content: impl Into<String>, calls: Vec<ToolCall>) -> Self {
+        Self {
+            role: "assistant".into(),
+            content: content.into(),
+            tool_calls: Some(calls),
+            tool_call_id: None,
+        }
+    }
+    /// tool：工具执行结果回填。
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: "tool".into(),
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.into()),
+        }
+    }
+}
+
+/// 工具定义（OpenAI function-calling 格式的中性表达）。
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolDef {
+    pub name: String,
+    pub description: String,
+    /// 参数 JSON Schema（object）
+    pub parameters: serde_json::Value,
+}
+
+/// 一次工具调用（响应侧解析 / 回填消息共用）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    /// OpenAI 格式：arguments 是 JSON 字符串
+    pub arguments: String,
 }
 
 /// 聊天请求。
@@ -78,12 +127,16 @@ pub struct ChatRequest {
     /// 强制 JSON 输出（OpenAI response_format 兼容；不支持时由提示词兜底）
     pub json_mode: bool,
     pub max_tokens: Option<u32>,
+    /// 可用工具（Some = 开启 tool-calling）
+    pub tools: Option<Vec<ToolDef>>,
 }
 
 /// 聊天响应。
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
     pub content: String,
+    /// 工具调用请求（Some = 模型要求调工具；content 可能为空）
+    pub tool_calls: Option<Vec<ToolCall>>,
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub model: String,

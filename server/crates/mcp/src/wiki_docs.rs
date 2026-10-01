@@ -78,6 +78,49 @@ impl EngramMcpServer {
         }))
     }
 
+    /// wiki ingest（P004-T010 同名换芯）：喂原料给 wiki 维护 Agent Harness（异步 job）。
+    pub(crate) async fn wiki_ingest(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(ip): Parameters<wiki::WikiIngestParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        wiki::require_wiki(&p)?;
+        let lib = self.resolve_wiki_lib().await?;
+        let has_url = ip.url.as_deref().is_some_and(|u| !u.trim().is_empty());
+        let has_text = ip.text.as_deref().is_some_and(|t| !t.trim().is_empty());
+        if has_url == has_text {
+            return Err(rmcp::ErrorData::invalid_params(
+                "text 与 url 二选一".to_string(),
+                None,
+            ));
+        }
+        let task = engram_core::wiki_agent::AgentTask {
+            lib,
+            instruction: ip
+                .instruction
+                .clone()
+                .unwrap_or_else(|| "阅读下方原料，沉淀为 wiki 知识页（建页/更新/互链）。".into()),
+            source_url: ip
+                .url
+                .as_deref()
+                .map(str::trim)
+                .map(str::to_string)
+                .filter(|s| !s.is_empty()),
+            source_text: ip.text.clone().filter(|t| !t.trim().is_empty()),
+            source_name: ip.title.clone(),
+        };
+        let queue = engram_jobs::JobQueue::new(self.state.pool.clone());
+        let job_id = engram_core::wiki_agent::enqueue_agent_task(&queue, &task)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+        ok_json(serde_json::json!({
+            "job_id": job_id,
+            "accepted": true,
+            "hint": "维护 Agent 已接单（异步）——jobs 工具看进度；完成后 wiki_search 查看新页",
+        }))
+    }
+
     /// 文档状态（document_get）：看处理进度（status/error）。
     pub(crate) async fn wiki_document_get(
         &self,

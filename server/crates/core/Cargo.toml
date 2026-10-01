@@ -32,6 +32,7 @@ hmac.workspace = true
 scraper.workspace = true   # URL 摄取提取 <title>（正文解析在 parsing crate）
 
 [dev-dependencies]
+tracing-subscriber.workspace = true
 anyhow.workspace = true
 tempfile = "3"
 # 测试夹具直连 PG 造数（src 层零 SQL；持久化收口 engram-storage::repo）

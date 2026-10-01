@@ -1,6 +1,7 @@
 //! `provider` 的实现切片（架构治理 2026-09-21：自 provider.rs 纯搬移，零行为变化）。
 
 use super::*;
+use crate::types::ToolCall;
 
 impl OpenAiCompatProvider {
     pub fn new(
@@ -104,6 +105,21 @@ impl LlmProvider for OpenAiCompatProvider {
         if req.json_mode {
             body["response_format"] = serde_json::json!({ "type": "json_object" });
         }
+        // P004-T010：tool-calling（OpenAI function 格式）
+        if let Some(tools) = &req.tools {
+            body["tools"] = serde_json::json!(
+                tools.iter()
+                    .map(|t| serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": t.parameters,
+                        }
+                    }))
+                    .collect::<Vec<_>>()
+            );
+        }
 
         let resp = self
             .post_with_retry("/v1/chat/completions", self.chat_timeout, &body)
@@ -124,14 +140,25 @@ impl LlmProvider for OpenAiCompatProvider {
             .json()
             .await
             .map_err(|e| LlmError::Permanent(format!("响应解析失败: {e}")))?;
-        let content = api
-            .choices
-            .first()
-            .and_then(|c| c.message.as_ref())
+        // 工具调用轮 content 可能为 null——不再强制要求
+        let first = api.choices.first().and_then(|c| c.message.as_ref());
+        let content = first
             .and_then(|m| m.get("content"))
             .and_then(|c| c.as_str())
-            .ok_or_else(|| LlmError::Permanent("响应缺少 content".into()))?
+            .unwrap_or("")
             .to_string();
+        // OpenAI tool_calls：[{"id","type":"function","function":{"name","arguments"}}]
+        let tool_calls: Option<Vec<ToolCall>> = first.and_then(|m| m.get("tool_calls")).and_then(|tc| tc.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|c| {
+                    Some(ToolCall {
+                        id: c["id"].as_str()?.to_string(),
+                        name: c["function"]["name"].as_str()?.to_string(),
+                        arguments: c["function"]["arguments"].as_str().unwrap_or("{}").to_string(),
+                    })
+                })
+                .collect()
+        });
         let usage = api.usage.unwrap_or(ApiUsage {
             prompt_tokens: 0,
             completion_tokens: 0,
@@ -144,6 +171,7 @@ impl LlmProvider for OpenAiCompatProvider {
             .record_success();
         Ok(ChatResponse {
             content,
+            tool_calls,
             input_tokens: usage.prompt_tokens,
             output_tokens: usage.completion_tokens,
             model: req.model,

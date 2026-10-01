@@ -341,6 +341,19 @@ pub(super) async fn embed_missing_chunks(
                             repo::set_ready_document(pool, lib, doc_id)
                                 .await
                                 .map_err(|e| JobError::Retryable(e.to_string()))?;
+                            // P004-T010 拍板③：降级 ready 也接力 harness
+                            if let Ok(sample) = tokio::fs::read_to_string(
+                                crate::wiki_docs::pipeline::data_uploads()
+                                    .join(format!("{doc_id}.extracted.txt")),
+                            )
+                            .await
+                            {
+                                let sample: String = sample.chars().take(1500).collect();
+                                crate::wiki_agent::enqueue_relay_after_ready(
+                                    ctx, lib, doc_id, &sample,
+                                )
+                                .await;
+                            }
                             ctx.emit(
                                 "[WIKI-DOC-EMBED-DEGRADED] 嵌入重试耗尽——缺失块降级 FTS，文档提前 ready（可事后 re-embed 补）",
                                 Some(json!({"document_id": doc_id, "missing": missing, "degraded": true})),

@@ -145,6 +145,18 @@ async fn build_runner(
             .expect("主密钥格式恒合法"),
         ),
     );
+    // P004-T010：wiki 维护 Agent Harness（拍板④ per-kind 串行；registry 独立档位解析）
+    let runner = engram_core::wiki_agent::register_agent_handler(
+        runner,
+        engram_llm::ProviderRegistry::new(
+            pool.clone(),
+            engram_llm::KeyCipher::from_hex_master(
+                &cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32)),
+            )
+            .expect("主密钥格式恒合法"),
+        ),
+        cfg.data_dir.clone().into(),
+    );
     let wiki_llm = engram_distill::gateway_llm(
         pool.clone(),
         engram_llm::KeyCipher::from_hex_master(

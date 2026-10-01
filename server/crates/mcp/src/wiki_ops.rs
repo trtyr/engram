@@ -639,6 +639,13 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "ingest" => {
+                self.wiki_ingest(
+                    ctx,
+                    Parameters(dispatch::from_args("wiki", "ingest", call.args)?),
+                )
+                .await
+            }
             "document_add" => {
                 self.wiki_document_add(
                     ctx,

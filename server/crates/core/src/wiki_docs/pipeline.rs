@@ -246,7 +246,14 @@ pub async fn embed_job(
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
     // P004-T009：织入流水线已退役（Q005 拍板 C+）——文档 ready 不再自动织入；
-    // 维护由 Agent Harness（T010）接管。wiki_sources 留表停写。
+    // 维护由 Agent Harness（T010）接管（下方接力）。wiki_sources 留表停写。
+    // P004-T010 拍板③：ready 后自动接力 harness（extracted 删除前取样）
+    if let Ok(sample) =
+        tokio::fs::read_to_string(data_uploads().join(format!("{doc_id}.extracted.txt"))).await
+    {
+        let sample: String = sample.chars().take(1500).collect();
+        crate::wiki_agent::enqueue_relay_after_ready(&ctx, lib, doc_id, &sample).await;
+    }
 
     // 清理 extracted 临时文件
     let _ = tokio::fs::remove_file(data_uploads().join(format!("{doc_id}.extracted.txt"))).await; // 有意忽略：best-effort 清理/建目录（失败由后续步骤或下次运行暴露）

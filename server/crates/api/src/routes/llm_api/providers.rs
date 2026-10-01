@@ -357,6 +357,7 @@ pub async fn test_provider(
                     temperature: None,
                     json_mode: false,
                     max_tokens: Some(1),
+                tools: None,
                 })
                 .await,
         );

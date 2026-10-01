@@ -253,6 +253,7 @@ impl GatewayLlm {
                 temperature: Some(0.1),
                 json_mode: true,
                 max_tokens: None,
+            tools: None,
             })
             .await
             .map_err(|e| {

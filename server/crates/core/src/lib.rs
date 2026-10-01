@@ -19,6 +19,7 @@ pub mod todos;
 pub mod transfer;
 pub mod unified;
 pub mod wiki;
+pub mod wiki_agent;
 pub mod wiki_docs;
 
 pub use assets::{
