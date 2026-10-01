@@ -155,7 +155,7 @@ async fn build_runner(
             )
             .expect("主密钥格式恒合法"),
         ),
-        cfg.data_dir.clone().into(),
+        cfg.data_dir.clone(),
     );
     let wiki_llm = engram_distill::gateway_llm(
         pool.clone(),
