@@ -78,40 +78,91 @@ pub(super) async fn fetch_document_bytes(
     doc_id: Uuid,
 ) -> Result<(String, Vec<u8>, Option<String>), JobError> {
     let (name, bytes, ctype) = if raw_path.is_empty() {
-        // URL
-        ctx.emit(&format!("抓取 {source_uri}"), None).await.ok();
-        match super::super::ssrf::safe_fetch(
-            source_uri,
-            20 * 1024 * 1024,
-            std::time::Duration::from_secs(30),
-        )
-        .await
-        {
-            Ok(page) => {
-                // 抓取成功后内容落盘（重试不重复抓）
-                let uploads = data_uploads();
-                let _ = tokio::fs::create_dir_all(&uploads).await; // 有意忽略：目录已存在不算失败；后续写入会暴露真错误
-                let path = uploads.join(format!("{doc_id}_url.html"));
-                if let Err(e) = tokio::fs::write(&path, &page.bytes).await {
-                    tracing::warn!(path = %path.display(), error = %e, "上传件落盘失败");
+        // URL：优先智谱 web-reader（结构化 markdown，质量高于本地裸 HTML——Q002 已决）；
+        // 未配置 key 或调用失败 → 回落本地 safe_fetch（降级标注走 job 事件）。
+        let mut degraded_note: Option<String> = None;
+        let via_reader = match crate::wiki_docs::web_reader::WebReaderClient::from_pool(pool).await {
+            Some(client) => match client.read_url(source_uri).await {
+                Ok(page) => {
+                    ctx.emit(
+                        &format!("web-reader 抓取成功（{} 字 markdown）", page.content_markdown.chars().count()),
+                        None,
+                    )
+                    .await
+                    .ok();
+                    let uploads = data_uploads();
+                    let _ = tokio::fs::create_dir_all(&uploads).await;
+                    let path = uploads.join(format!("{doc_id}_webreader.md"));
+                    if let Err(e) = tokio::fs::write(&path, &page.content_markdown).await {
+                        tracing::warn!(path = %path.display(), error = %e, "web-reader 产物落盘失败");
+                    }
+                    let title = page.title.clone().or(Some(source_uri.to_string()));
+                    if let Err(e) = repo::update_document_fetch_result(
+                        pool,
+                        lib,
+                        doc_id,
+                        path.to_string_lossy().as_ref(),
+                        Some("text/markdown"),
+                        title.as_deref(),
+                    )
+                    .await
+                    {
+                        tracing::warn!(doc = %doc_id, error = %e, "抓取结果落库失败");
+                    }
+                    Some((
+                        format!("{doc_id}_webreader.md"),
+                        page.content_markdown.into_bytes(),
+                        Some("text/markdown".to_string()),
+                    ))
                 }
-                let title = extract_title_from_html(&page.bytes).or(Some(source_uri.to_string()));
-                // 错误上浮：抓取结果落库失败必须可见（否则成功被抓取的文档状态失真）
-                if let Err(e) = repo::update_document_fetch_result(
-                    pool,
-                    lib,
-                    doc_id,
-                    path.to_string_lossy().as_ref(),
-                    page.content_type.as_deref(),
-                    title.as_deref(),
+                Err(e) => {
+                    degraded_note = Some(format!("web-reader 失败（{e}）——回落本地抓取（质量降级）"));
+                    None
+                }
+            },
+            None => None, // 未配置 key：静默走本地路径（首次配置前的默认行为）
+        };
+        if let Some(note) = degraded_note {
+            ctx.emit(&note, None).await.ok();
+        }
+        match via_reader {
+            Some(triple) => triple,
+            None => {
+                ctx.emit(&format!("抓取 {source_uri}"), None).await.ok();
+                match super::super::ssrf::safe_fetch(
+                    source_uri,
+                    20 * 1024 * 1024,
+                    std::time::Duration::from_secs(30),
                 )
                 .await
                 {
-                    tracing::warn!(doc = %doc_id, error = %e, "抓取结果落库失败（文档状态可能失真）");
+                    Ok(page) => {
+                        // 抓取成功后内容落盘（重试不重复抓）
+                        let uploads = data_uploads();
+                        let _ = tokio::fs::create_dir_all(&uploads).await; // 有意忽略：目录已存在不算失败；后续写入会暴露真错误
+                        let path = uploads.join(format!("{doc_id}_url.html"));
+                        if let Err(e) = tokio::fs::write(&path, &page.bytes).await {
+                            tracing::warn!(path = %path.display(), error = %e, "上传件落盘失败");
+                        }
+                        let title = extract_title_from_html(&page.bytes).or(Some(source_uri.to_string()));
+                        // 错误上浮：抓取结果落库失败必须可见（否则成功被抓取的文档状态失真）
+                        if let Err(e) = repo::update_document_fetch_result(
+                            pool,
+                            lib,
+                            doc_id,
+                            path.to_string_lossy().as_ref(),
+                            page.content_type.as_deref(),
+                            title.as_deref(),
+                        )
+                        .await
+                        {
+                            tracing::warn!(doc = %doc_id, error = %e, "抓取结果落库失败（文档状态可能失真）");
+                        }
+                        (format!("{doc_id}_url.html"), page.bytes, page.content_type)
+                    }
+                    Err(e) => return Err(fetch_failure_error(ctx, lib, doc_id, e).await),
                 }
-                (format!("{doc_id}_url.html"), page.bytes, page.content_type)
             }
-            Err(e) => return Err(fetch_failure_error(ctx, lib, doc_id, e).await),
         }
     } else {
         let path = PathBuf::from(&raw_path);

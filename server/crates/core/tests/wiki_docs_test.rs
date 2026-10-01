@@ -768,6 +768,151 @@ async fn search_hits_carry_neighbor_context() {
     );
 }
 
+// ---------- T005：web-reader 优先 / 本地回落（Q002 已决） ----------
+
+/// 未配置 web-reader key：URL 抓取直接走本地 safe_fetch（私网目标 → SSRF Permanent failed），
+/// 无任何 web-reader 事件（首次配置前的默认行为）。
+#[tokio::test]
+async fn url_fetch_without_webreader_key_goes_straight_to_local() {
+    let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
+    let handle = run_jobs(pool.clone()).await;
+
+    let (id, _) = svc
+        .submit(
+            lib,
+            IngestSource::Url("http://127.0.0.1:1/no-key-path".into()),
+        )
+        .await
+        .unwrap();
+    let doc = wait_ready(&svc, lib, id).await;
+    assert_eq!(doc.status, "failed", "私网 URL 应被 SSRF 拒绝落 failed");
+
+    let wr_events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM job_events WHERE message LIKE '%web-reader%'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(wr_events, 0, "未配 key 不应有 web-reader 事件");
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
+
+/// web-reader 配置了不可达端点（settings 覆盖 base_url）：抓取失败必须回落本地抓取，
+/// job 事件留「质量降级」标注（回执降级标注契约）。
+#[tokio::test]
+async fn url_fetch_webreader_failure_degrades_with_event() {
+    // from_pool 从 env 读 master key——测试 put/get 必须同一密钥
+    unsafe { std::env::set_var("AGENT_MEMORY_MASTER_KEY", "ab".repeat(32)) };
+    let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
+    // 配置：key 存在（启用）+ 端点指向不可达地址
+    let cipher = engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
+    let creds = engram_core::credentials::CredentialsService::new(pool.clone(), cipher);
+    creds
+        .put(
+            "zhipu/web_reader_key",
+            "test-key",
+            Some("T005 测试注入"),
+            "test",
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+    engram_storage::repo::settings::put_json(
+        &pool,
+        "webreader_base_url",
+        &"http://127.0.0.1:1/mcp".to_string(),
+    )
+    .await
+    .unwrap();
+    let handle = run_jobs(pool.clone()).await;
+
+    let (id, _) = svc
+        .submit(
+            lib,
+            IngestSource::Url("http://127.0.0.1:1/degrade-path".into()),
+        )
+        .await
+        .unwrap();
+    let doc = wait_ready(&svc, lib, id).await;
+    assert_eq!(
+        doc.status, "failed",
+        "web-reader 挂 + 本地 SSRF 拒 → failed"
+    );
+
+    // 降级标注：回落事件必须可见
+    let degrade: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM job_events WHERE message LIKE '%回落本地抓取%'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(degrade >= 1, "web-reader 失败必须留降级事件");
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
+
+// ---------- T005 真网抓取（手动：--ignored webreader_real_fetch） ----------
+
+/// 真实智谱 web-reader 抓取（需 AM_WEBREADER_KEY env 与外网）。默认 ignore。
+#[tokio::test]
+#[ignore = "真网+真 key：本地验证用"]
+async fn webreader_real_fetch_langchain_page() {
+    unsafe { std::env::set_var("AGENT_MEMORY_MASTER_KEY", "ab".repeat(32)) };
+    let (pool, svc, _pg) = setup().await;
+    let lib = main_lib(&pool).await;
+    let key = std::env::var("AM_WEBREADER_KEY").expect("设 AM_WEBREADER_KEY");
+    let cipher = engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
+    let creds = engram_core::credentials::CredentialsService::new(pool.clone(), cipher);
+    creds
+        .put("zhipu/web_reader_key", &key, None, "manual", &[], None)
+        .await
+        .unwrap();
+    let handle = run_jobs(pool.clone()).await;
+
+    let (id, _) = svc
+        .submit(
+            lib,
+            IngestSource::Url("https://python.langchain.com/docs/concepts/text_splitters/".into()),
+        )
+        .await
+        .unwrap();
+    let doc = wait_ready(&svc, lib, id).await;
+    assert_eq!(doc.status, "ready", "真网抓取应 ready: {:?}", doc.error);
+    let raw_path: Option<String> =
+        sqlx::query_scalar("SELECT raw_path FROM wiki_documents WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        raw_path
+            .clone()
+            .unwrap_or_default()
+            .contains("webreader.md"),
+        "应走 web-reader 产物路径: {raw_path:?}"
+    );
+    let n_chunks: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wiki_chunks WHERE document_id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(n_chunks >= 3, "长文应分多块: {n_chunks}");
+    // 该页正文用词为 splitting/chunks（无 chunking 一词）——查询词与正文对齐
+    let hits = svc.search(lib, "splitting documents", 5).await.unwrap();
+    assert!(!hits.is_empty(), "真网抓取的正文应可检索");
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
+
 // ---------- T001（EN-32 孤儿态守卫）：embed 瞬态重试耗尽 → ready 非孤儿 ----------
 
 /// 不可达 embed provider（127.0.0.1:1 连接拒绝 = LlmError::Transient）下，

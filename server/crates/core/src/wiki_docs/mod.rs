@@ -7,6 +7,7 @@
 pub mod chunking;
 pub mod pipeline;
 pub mod ssrf;
+pub mod web_reader;
 
 use chrono::{DateTime, Utc};
 use engram_jobs::JobQueue;
