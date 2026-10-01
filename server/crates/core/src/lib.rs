@@ -8,6 +8,7 @@
 
 pub mod assets;
 pub mod auth;
+pub mod errors;
 pub mod codegraph;
 pub mod credentials;
 pub mod memory;
