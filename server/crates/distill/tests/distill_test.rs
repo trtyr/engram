@@ -2089,3 +2089,126 @@ async fn jobs_mock_consolidate_main_and_error() {
     );
     env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
 }
+
+/// P003-T001 回归（决策 001 收敛判据）：标敏感成员不再把场景判 stale。
+/// 病根复盘：bde6092 让敏感成员进 atom_refs 后，fetch_stale_scenarios 的
+/// `OR a.sensitive` 判据未同步——场景被判 stale → 重算刷新 updated_at → 下一轮
+/// 再判 stale → 永动烧 LLM + removed_texts 反复把敏感内容当「已移除」喂画像。
+#[tokio::test]
+async fn sensitive_member_does_not_mark_scenario_stale() {
+    let env = setup(vec![
+        // 阶段 2 第 1 发：场景 S 收敛重算（a2 归档后触发）
+        json!({ "topic": "骑行", "summary": "仅活跃成员的新摘要", "body": "新正文" }),
+        // 阶段 2 第 2 发：主组织段空动作兜底
+        json!({ "actions": [] }),
+    ])
+    .await;
+
+    let a1 = Uuid::now_v7();
+    let a2 = Uuid::now_v7();
+    for (id, content) in [(a1, "成员甲（将标敏感）"), (a2, "成员乙")] {
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, needs_review) \
+             VALUES ($1, 'fact', $2, 0.9, 'active', false)",
+        )
+        .bind(id)
+        .bind(content)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
+    let sa = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO scenarios (id, topic, summary, body, atom_refs, version) \
+         VALUES ($1, '骑行', '摘要', '正文', $2, 1)",
+    )
+    .bind(sa)
+    .bind(sqlx::types::Json(vec![a1, a2]))
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    // 归组（scenario_id 回填）——否则 organize 主流程会把未归组原子再组织（干扰收敛判据观测）
+    sqlx::query("UPDATE atoms SET scenario_id = $1 WHERE id = ANY($2)")
+        .bind(sa)
+        .bind(&[a1, a2][..])
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    // 标敏感 a1（直 SQL——本测试聚焦收敛判据，不走 core 入队层）
+    sqlx::query("UPDATE atoms SET sensitive = true WHERE id = $1")
+        .bind(a1)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    let before: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT updated_at FROM scenarios WHERE id = $1")
+            .bind(sa)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+
+    // 阶段 1：S 含敏感成员 → 不应判 stale（零 LLM 调用、updated_at 不动）
+    env.queue
+        .enqueue(JobTemplate::new("organize_scenarios").with_payload(json!({})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "organize_scenarios").await;
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "organize 应成功：{}",
+        j.error.unwrap_or_default()
+    );
+    {
+        let sent = env.llm.sent_user.lock().unwrap();
+        assert!(
+            sent.is_empty(),
+            "标敏感不得触发场景收敛重算（P003-T001 永动机回归）：{sent:?}"
+        );
+    }
+    let after: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT updated_at FROM scenarios WHERE id = $1")
+            .bind(sa)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(after, before, "未判 stale 则 updated_at 不应刷新");
+
+    // 阶段 2（对照）：归档 a2 → S 判 stale 并重算。wait_done 按 kind 匹配第一个
+    // 终态会撞上阶段 1 的 job（二义性）——这里直接轮询最终效果（atom_refs 重算）。
+    sqlx::query("UPDATE atoms SET status = 'archived' WHERE id = $1")
+        .bind(a2)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    env.queue
+        .enqueue(JobTemplate::new("organize_scenarios").with_payload(json!({})))
+        .await
+        .unwrap();
+    let mut refs: sqlx::types::Json<Vec<Uuid>> =
+        sqlx::query_scalar("SELECT atom_refs FROM scenarios WHERE id = $1")
+            .bind(sa)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    for _ in 0..150 {
+        if refs.0 == vec![a1] {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        refs = sqlx::query_scalar("SELECT atom_refs FROM scenarios WHERE id = $1")
+            .bind(sa)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        refs.0,
+        vec![a1],
+        "重算后应只剩活跃成员 a1（敏感成员在位保留——决策 001；15s 超时未重算即永动机/漏触发）：{:?}",
+        refs.0
+    );
+    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
+}

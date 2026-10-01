@@ -89,7 +89,7 @@ pub(crate) fn build_persona_prompt(
         .ok();
     }
     if !removed_texts.is_empty() {
-        writeln!(user, "\n== 已从记忆移除的表述（成员原子已归档/标敏感）==").ok();
+        writeln!(user, "\n== 已从记忆移除的表述（成员原子已归档）==").ok();
         for t in removed_texts.iter().take(40) {
             writeln!(user, "- {t}").ok();
         }

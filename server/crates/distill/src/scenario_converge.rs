@@ -78,7 +78,7 @@ async fn fetch_stale_scenarios(
          WHERE EXISTS ( \
             SELECT 1 FROM jsonb_array_elements_text(s.atom_refs) r \
             LEFT JOIN atoms a ON a.id = r::uuid \
-            WHERE a.id IS NULL OR a.status != 'active' OR a.sensitive) \
+            WHERE a.id IS NULL OR a.status != 'active') \
          ORDER BY s.updated_at DESC LIMIT 20",
     )
     .fetch_all(pool)
@@ -104,7 +104,7 @@ pub fn parse_members(members: &Option<Value>) -> Vec<(Uuid, String, String)> {
         .unwrap_or_default()
 }
 
-/// 被移除表述（归档/标敏感成员内容）——传给画像分面明确剔除（F4 治）。
+/// 被移除表述（归档成员内容）——传给画像分面明确剔除（F4 治）。
 async fn collect_removed_texts(
     pool: &sqlx::PgPool,
     sid: Uuid,
@@ -113,7 +113,7 @@ async fn collect_removed_texts(
     let removed: Vec<String> = sqlx::query_scalar(
         "SELECT a.content FROM scenarios s, jsonb_array_elements_text(s.atom_refs) r(id) \
          JOIN atoms a ON a.id = r.id::uuid \
-         WHERE s.id = $1 AND (a.status != 'active' OR a.sensitive) LIMIT 20",
+         WHERE s.id = $1 AND (a.status != 'active') LIMIT 20",
     )
     .bind(sid)
     .fetch_all(pool)
