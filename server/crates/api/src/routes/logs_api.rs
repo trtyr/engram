@@ -1,8 +1,8 @@
 //! 日志查询端点（P005-T005，admin 专属）——logs 表的读取面：
 //! level/q/时间范围/request_id/audit_only 过滤 + limit/offset 分页。
 
-use axum::extract::{Query, State};
 use axum::Json;
+use axum::extract::{Query, State};
 use serde::Deserialize;
 use utoipa::IntoParams;
 
@@ -40,34 +40,14 @@ pub async fn list_logs(
     Query(p): Query<LogsQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&principal)?;
-    let parse_time = (|s: &Option<String>| {
-        s.as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|s| {
-                chrono::DateTime::parse_from_rfc3339(s)
-                    .map(|d| d.with_timezone(&chrono::Utc))
-                    .map_err(|_| ApiError::BadRequest("时间需 RFC3339（如 2026-10-01T00:00:00Z）".into()))
-            })
-            .transpose()
-    })(&p.since)?;
-    let until = (|s: &Option<String>| {
-        s.as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|s| {
-                chrono::DateTime::parse_from_rfc3339(s)
-                    .map(|d| d.with_timezone(&chrono::Utc))
-                    .map_err(|_| ApiError::BadRequest("时间需 RFC3339".into()))
-            })
-            .transpose()
-    })(&p.until)?;
+    let since = parse_rfc3339_opt(&p.since, "since")?;
+    let until = parse_rfc3339_opt(&p.until, "until")?;
 
     let filter = engram_storage::repo::logs::LogFilter {
         level: p.level.as_deref(),
         q: p.q.as_deref(),
         request_id: p.request_id.as_deref(),
-        since: parse_time,
+        since,
         until,
         audit_only: p.audit.as_deref() == Some("true"),
         limit: p.limit.unwrap_or(100),
@@ -77,6 +57,24 @@ pub async fn list_logs(
         .await
         .map_err(|e| ApiError::Unavailable(e.to_string()))?;
     Ok(Json(serde_json::json!({ "logs": rows })))
+}
+
+/// 可选 RFC3339 解析（空串=None；错误带字段名定位）。
+fn parse_rfc3339_opt(
+    raw: &Option<String>,
+    field: &str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApiError> {
+    raw.as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map(|d| d.with_timezone(&chrono::Utc))
+                .map_err(|_| {
+                    ApiError::BadRequest(format!("{field} 需 RFC3339（如 2026-10-01T00:00:00Z）"))
+                })
+        })
+        .transpose()
 }
 
 pub fn logs_routes() -> axum::Router<AppState> {

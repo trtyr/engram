@@ -225,8 +225,10 @@ fn auth_error(message: &str) -> Response {
         axum::Json(ErrorEnvelope {
             error: ErrorBody {
                 code: "unauthorized",
+                category: "auth",
                 message: message.into(),
                 retryable: false,
+                request_id: crate::logging::current_request_id(),
                 details: None,
             },
         }),

@@ -451,3 +451,86 @@ async fn error_events_land_with_full_context() {
     );
     assert_eq!(fields["alert"], true, "internal_bug 应升级告警标记");
 }
+
+/// P006-T004：边界错误信封四要素——code/category/message/request_id 齐全 + 密钥痕迹零出现。
+#[tokio::test]
+async fn error_envelope_carries_code_category_rid_no_secrets() {
+    let (app, _pg) = app().await;
+    let token = support::login_token(&app).await;
+
+    // 先 put 一个带特征值的凭据（值只此一次出现——之后任何错误响应都不得回显）
+    let secret = "secret-value-xyz-审计-9f2";
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/credentials")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"name": "envelope-test/key", "value": secret}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::CREATED);
+
+    // 触发错误：非 admin（wiki-only key）查 /logs → 403 + 四要素
+    let key = support::create_key(&app, &token, &["wiki"]).await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/logs")
+                .header("authorization", format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::FORBIDDEN);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let err = &body["error"];
+    assert_eq!(err["code"], "forbidden", "HTTP 语义码: {body}");
+    assert_eq!(err["category"], "auth", "归因类别: {body}");
+    assert!(
+        err["message"].as_str().is_some_and(|m| !m.is_empty()),
+        "人读消息"
+    );
+    assert!(
+        err["request_id"].as_str().is_some_and(|v| !v.is_empty()),
+        "request_id 应注入错误体: {body}"
+    );
+
+    // 密钥痕迹零出现：再触发一个错误（404 删除不存在凭据），响应体不得含 secret
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/credentials/no-such-key")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND);
+    let body_text = String::from_utf8(
+        axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        !body_text.contains(secret),
+        "错误响应不得回显凭据值: {body_text}"
+    );
+}

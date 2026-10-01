@@ -90,6 +90,11 @@ pub async fn with_request_id<T>(rid: String, fut: impl std::future::Future<Outpu
     REQUEST_ID.scope(rid, fut).await
 }
 
+/// 当前 task 的 request-id（HTTP 范围内 Some；错误信封注入用）。
+pub fn current_request_id() -> Option<String> {
+    REQUEST_ID.try_with(|v| v.clone()).ok()
+}
+
 impl<S> Layer<S> for PgLogLayer
 where
     S: Subscriber,

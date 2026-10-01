@@ -18,8 +18,13 @@ pub struct ErrorEnvelope {
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ErrorBody {
     pub code: &'static str,
+    /// P006-T004：归因类别（external_input/upstream/network/auth/internal_bug）
+    pub category: &'static str,
     pub message: String,
     pub retryable: bool,
+    /// P006-T004：请求贯穿 id（与响应头 x-request-id 同值）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
 }
@@ -61,17 +66,18 @@ pub enum ApiError {
 }
 
 impl ApiError {
-    fn parts(&self) -> (StatusCode, &'static str, bool) {
+    /// (状态码, HTTP 语义码, 可重试, P006 归因类别)
+    fn parts(&self) -> (StatusCode, &'static str, bool, &'static str) {
         match self {
-            ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request", false),
-            ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found", false),
-            ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict", false),
-            ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized", false),
-            ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden", false),
-            ApiError::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests", true),
-            ApiError::Database(_) => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", true),
-            ApiError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", true),
-            ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", false),
+            ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request", false, "external_input"),
+            ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found", false, "external_input"),
+            ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict", false, "external_input"),
+            ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized", false, "auth"),
+            ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden", false, "auth"),
+            ApiError::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests", true, "auth"),
+            ApiError::Database(_) => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable", true, "network"),
+            ApiError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", true, "upstream"),
+            ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", false, "internal_bug"),
         }
     }
 
@@ -86,10 +92,11 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, code, retryable) = self.parts();
+        let (status, code, retryable, category) = self.parts();
         // 内部细节（Debug 格式含 source 链）进日志，一次性记录
         tracing::error!(
             code,
+            category,
             status = status.as_u16(),
             error = ?self,
             "API 错误"
@@ -97,8 +104,10 @@ impl IntoResponse for ApiError {
         let body = ErrorEnvelope {
             error: ErrorBody {
                 code,
+                category,
                 message: self.safe_message(),
                 retryable,
+                request_id: crate::logging::current_request_id(),
                 details: None,
             },
         };
