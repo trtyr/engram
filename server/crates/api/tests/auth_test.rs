@@ -1808,7 +1808,6 @@ async fn openapi_snapshot() {
             "/wiki/documents/{id}/re-embed",
             "/wiki/duplicates",
             "/wiki/graph",
-            "/wiki/ingest",
             "/wiki/insights",
             "/wiki/insights/dismiss",
             "/wiki/insights/reset",

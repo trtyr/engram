@@ -719,7 +719,6 @@ async fn wiki_mcp_tools_listed() {
         "- list_pages：",
         "- get_page：",
         "- write_page：",
-        "- ingest：",
         "- archive_query：",
         "- graph：",
         "- lint：",
@@ -759,8 +758,8 @@ async fn wiki_mcp_tools_listed() {
     assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
     assert_eq!(
         wiki_tools[0]["actions"].as_array().unwrap().len(),
-        28,
-        "wiki 域应展示 28 个操作（文档 RAG 三动作 + EN-59 晋升两 action + EN-61 purpose/insights + 收录哲学线 merge；单库终局 28→27 后又随实现演进 +1，P001 口径对齐）"
+        27,
+        "wiki 域应展示 27 个操作（P004-T009 ingest 退役后：28→27——文档 RAG 三动作 + EN-59 晋升两 action + EN-61 purpose/insights + 收录哲学线 merge 等）"
     );
 
     // instructions 应覆盖 wiki 域
@@ -952,21 +951,21 @@ async fn wiki_mcp_journey_write_read_search_archive() {
     );
 
     // 织入（入队即返回；测试环境无 worker 不消费）
+    // P004-T009：ingest action 已随织入流水线退役（Q005 C+）——原料入库走 document_add
     let (_, v) = mcp_rpc(
         &app,
         &key,
         call(
             11,
             "wiki",
-            "ingest",
-            json!({"title": "一份新文档", "text": "# 新文档\n\n正文内容供 LLM 织入。这里补足一段有实质内容的知识正文：织入流水线会先分析源文档的实体与概念，再按页型生成或更新页面，收录判据要求原料具备足够的实质内容才允许进入织入流程。"}),
+            "document_add",
+            json!({"name": "一份新文档", "text": "# 新文档\n\n正文内容供原文 RAG。这里补足一段有实质内容的知识正文：摄取管道会先解析源文档，再分块、嵌入，供 documents_search 检索。"}),
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call wiki ingest");
-    let ingested: Value =
-        serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(ingested["skipped"], json!(false), "新内容首次织入不应跳过");
+    let out = expect_result(&v, "tools/call wiki document_add");
+    let added: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(added["deduped"], json!(false), "新内容首次入库不应去重");
 
     // 非法 slug → JSON-RPC 层 invalid_params
     let (_, v) = mcp_rpc(

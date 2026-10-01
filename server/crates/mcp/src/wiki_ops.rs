@@ -121,17 +121,8 @@ impl EngramMcpServer {
         // P0-1：刚发送的正文不回显；版本历史在覆盖时自动留快照
         let mut v = wiki::trim_page(serde_json::to_value(&page).unwrap_or(serde_json::json!({})));
         v["content_omitted"] = json!(true);
-        // 写入即处理（2026-09-13）：AI 写页自动入队轻量再摄取（页面当原料吸收概念/互链；
-        // 同 sha 去重；摄取失败不影响页面本身，失败会落 reviews via=ingest_failed 可见）
-        match wiki::svc(&self.state)
-            .auto_ingest_page(lib, &wp.title, &wp.content)
-            .await
-        {
-            Ok(ingest) => v["auto_ingest"] = ingest,
-            Err(e) => {
-                v["auto_ingest"] = json!({"state": "failed", "hint": format!("织入入队失败（页面本身已保存）: {e}")});
-            }
-        }
+        // P004-T009：auto_ingest（自动轻量织入）已随织入流水线退役（Q005 拍板 C+）——
+        // 页面维护由 Agent Harness（T010）接管；write_page 只写页本体。
         // EN-236②：写入→后续动作提示（页面已入链接图——体检与组织入口）
         if v.get("hint").is_none() {
             v["hint"] = json!(
@@ -527,7 +518,7 @@ impl EngramMcpServer {
 
     /// Wiki 域（单一入口）：世界知识库——Markdown 页面 + [[wikilink]] + 混合检索。
     /// 查证「客观知识」用 "search"；用户要求沉淀时：单条结论 "archive_query"、
-    /// 整篇文档 "ingest"（异步）、明确要页面 "write_page"。操作全景：action="help"。
+    /// 明确要页面 "write_page"。操作全景：action="help"。
     #[tool(
         name = "wiki",
         annotations(
@@ -575,13 +566,6 @@ impl EngramMcpServer {
                 self.wiki_write_page(
                     ctx,
                     Parameters(dispatch::from_args("wiki", "write_page", call.args)?),
-                )
-                .await
-            }
-            "ingest" => {
-                self.wiki_ingest(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "ingest", call.args)?),
                 )
                 .await
             }

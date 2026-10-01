@@ -151,7 +151,6 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "list_pages", false, "浏览页面列表（可按页型过滤；不含正文）" => crate::wiki::WikiListPagesParams;
             "get_page", false, "读页面全文（含 frontmatter 与版本）" => crate::wiki::WikiGetPageParams;
             "write_page", false, "写/覆盖一个页面（正文字段 content，Markdown + [[wikilink]]；覆盖前先 get_page，旧文自动留版本快照）" => crate::wiki::WikiWritePageParams;
-            "ingest", false, "整篇源文本织入 Wiki（异步 LLM 流水线，sha 去重）" => crate::wiki::WikiIngestParams;
             "archive_query", false, "把一条问答存档为 queries 页（幂等跳过重复）" => crate::wiki::WikiArchiveQueryParams;
             "versions", false, "页面版本列表（含已删除页的最后状态快照）" => crate::wiki::WikiVersionsParams;
             "version_content", false, "读某版本快照的正文（回滚前预览）" => crate::wiki::WikiVersionContentParams;
@@ -433,7 +432,6 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
             | (
                 "wiki",
                 "write_page"
-                    | "ingest"
                     | "archive_query"
                     | "restore_version"
                     | "delete_source"
@@ -651,8 +649,8 @@ fn wiki_groups_hint() -> Value {
         ),
         (
             "织入",
-            "原料通道：整篇织入/直传文档/状态",
-            &["ingest", "document_add", "document_get", "document_delete"],
+            "原料通道：直传文档/状态（织入流水线已退役——维护走 Agent Harness）",
+            &["document_add", "document_get", "document_delete"],
         ),
         (
             "体检",

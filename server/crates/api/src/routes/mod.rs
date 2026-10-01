@@ -60,7 +60,7 @@ use utoipa::OpenApi;
         wiki_docs_api::submit_url, wiki_docs_api::upload, wiki_docs_api::list_documents,
         wiki_docs_api::get_document, wiki_docs_api::document_chunks,
         wiki_docs_api::delete_document, wiki_docs_api::reembed, wiki_docs_api::search,
-        wiki_api::ingest, wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
+        wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
         wiki_api::query_gaps,
         wiki_api::rebuild_links,
@@ -307,7 +307,8 @@ fn wiki_routes() -> Router<AppState> {
             "/wiki/documents/{id}/re-embed",
             post(wiki_docs_api::reembed),
         )
-        .route("/wiki/ingest", post(wiki_api::ingest))
+        // P004-T009：/wiki/ingest 端点已随织入流水线退役（Q005 拍板 C+）——
+        // ingest 入口语义由 Agent Harness（T010）以新实现接管。
         .route("/wiki/pages", get(wiki_api::list_pages))
         .route("/wiki/folders", get(wiki_api::list_folders))
         .route(

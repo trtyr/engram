@@ -6,62 +6,6 @@ use super::*;
 
 #[tool_router(router = wiki_docs_router)]
 impl EngramMcpServer {
-    /// 把一段源文本织入 Wiki（异步：入队 LLM 流水线，自动抽取实体/概念并互链）。
-    ///
-    /// 何时用：有一篇完整文档 / 长文本值得沉淀进知识库时。内容相同（sha 命中）会跳过。
-    /// 注意：织入是异步任务（前端「任务」页可见），立即返回 skipped 只代表入队/去重结果；
-    /// 单条问答式的结论用 wiki_archive_query 更合适。
-    pub(crate) async fn wiki_ingest(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<wiki::WikiIngestParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let wp = params.0;
-        let lib = self.resolve_wiki_lib().await?;
-        let outcome = wiki::svc(&self.state)
-            .ingest(lib, &wp.title, &wp.text)
-            .await
-            .map_err(wiki::from_wiki)?;
-        // D27 三态：已就绪（跳过）/ 在途（勿重提也非丢失）/ 新入队——此前三者不可分，
-        // sha 去重封锁重试，在途窗口任务表现如「丢失」
-        use engram_core::wiki::IngestOutcome;
-        let job_id = outcome.job_id();
-        let (skipped, status, message) = match &outcome {
-            IngestOutcome::AlreadyReady(_) => (
-                true,
-                "ready",
-                "内容已存在（sha 命中），本次跳过".to_string(),
-            ),
-            IngestOutcome::InFlight(_, _) => (
-                false,
-                "in_flight",
-                "同内容任务正在处理中——无需重复提交（sha 去重会挡住），稍后可在 Wiki 页面看到产物"
-                    .to_string(),
-            ),
-            IngestOutcome::Enqueued(_, _) => (
-                false,
-                "enqueued",
-                "已入队织入任务——LLM 流水线异步处理，稍后可在 Wiki 页面看到产物".to_string(),
-            ),
-        };
-        let mut out = serde_json::json!({
-            "skipped": skipped,
-            "status": status,
-            "source_id": outcome.source_id(),
-            "async": true,
-            "message": message,
-        });
-        // R8 观察 3：进度通道落到具体 id——GET /jobs/{job_id}（任意 scope 的 key 可读）
-        if let Some(j) = job_id {
-            out["job_id"] = serde_json::json!(j);
-            out["message"] =
-                serde_json::json!(format!("{message}；进度：GET /jobs/{j}（或任务页）"));
-        }
-        ok_json(out)
-    }
-
     /// 删除一条文档 RAG 原料（document_add 返回的 id；documents 体系——非 delete_source 的 sources 体系）。
     ///
     /// 何时用：撤销一次入库（连同分块/嵌入一起删）。

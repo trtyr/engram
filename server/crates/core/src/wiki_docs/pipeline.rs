@@ -245,13 +245,8 @@ pub async fn embed_job(
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-    // 自动织入 Wiki：文档 ready 后织成互链页面（upload 文档读原文件重解析；
-    // URL 文档 raw_path 空时用已分块文本拼接——2026-09-04 补，此前静默跳过）。
-    // best-effort（sha256 去重 + 失败不影响文档 ready，页面层降级为空）。
-    {
-        let wiki = crate::wiki::WikiService::new(pool.clone(), registry.clone());
-        let _ = wiki.ingest_document(lib, doc_id).await; // 有意忽略：织入 Wiki 是 best-effort（见上方注释）
-    }
+    // P004-T009：织入流水线已退役（Q005 拍板 C+）——文档 ready 不再自动织入；
+    // 维护由 Agent Harness（T010）接管。wiki_sources 留表停写。
 
     // 清理 extracted 临时文件
     let _ = tokio::fs::remove_file(data_uploads().join(format!("{doc_id}.extracted.txt"))).await; // 有意忽略：best-effort 清理/建目录（失败由后续步骤或下次运行暴露）
