@@ -1832,6 +1832,8 @@ async fn openapi_snapshot() {
             "/wiki/sources/{id}",
             "/wiki/tsv/rebuild",
             "/wiki/upload",
+        "/wiki/webreader/status",
+        "/wiki/webreader/test",
         ],
         "API 端点集合发生变化时必须同步更新快照"
     );

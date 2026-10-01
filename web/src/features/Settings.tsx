@@ -6,12 +6,13 @@ import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@
 import { fmtTime, inputCls, selectCls, relTime } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'providers' | 'routing' | 'rhythm' | 'danger' | 'migrate'
+type Tab = 'providers' | 'routing' | 'rhythm' | 'webreader' | 'danger' | 'migrate'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'routing', label: 'AI 功能' },
   { value: 'providers', label: '供应商' },
   { value: 'rhythm', label: '节律' },
+  { value: 'webreader', label: '网页读取' },
   { value: 'danger', label: '危险操作' },
   { value: 'migrate', label: '数据迁移' },
 ]
@@ -36,6 +37,7 @@ export default function Settings() {
       {tab === 'routing' && <Routing />}
       {tab === 'providers' && <Providers />}
       {tab === 'rhythm' && <RhythmPane />}
+      {tab === 'webreader' && <WebReaderPane />}
       {tab === 'danger' && <DangerZone />}
       {tab === 'migrate' && <MigratePane />}
     </div>
@@ -688,6 +690,132 @@ function Routing() {
 }
 
 /** 危险操作 tab：主密钥重加密 + 清空记忆库（从设置页底部移入独立子 tab）。 */
+/** 网页读取（web-reader，admin）：智谱 key 配置 + 连通性测试（P004-T006）。 */
+function WebReaderPane() {
+  const [configured, setConfigured] = useState<boolean | null>(null)
+  const [key, setKey] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const load = () =>
+    api
+      .get<{ configured: boolean }>('/wiki/webreader/status')
+      .then((r) => setConfigured(r.configured))
+      .catch(() => setConfigured(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load()
+  }, [])
+
+  const save = async () => {
+    if (!key.trim()) return
+    setBusy(true)
+    try {
+      await api.post('/credentials', {
+        name: 'zhipu/web_reader_key',
+        value: key.trim(),
+        description: '智谱 web-reader MCP key（设置页配置）',
+      })
+      setKey('')
+      setMsg('已保存')
+      load()
+    } catch (e) {
+      setMsg(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const test = async () => {
+    setBusy(true)
+    setMsg('')
+    try {
+      const r = await api.post<{
+        ok: boolean
+        title?: string
+        chars?: number
+        error?: string
+        elapsed_ms?: number
+      }>('/wiki/webreader/test', {})
+      setMsg(
+        r.ok
+          ? `连通 OK：「${r.title ?? ''}」 ${r.chars ?? 0} 字（${r.elapsed_ms}ms）`
+          : `失败：${r.error ?? '未知错误'}`,
+      )
+    } catch (e) {
+      setMsg(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const disable = async () => {
+    if (!confirm('停用网页读取？（删除 zhipu/web_reader_key 凭据）')) return
+    setBusy(true)
+    try {
+      await api.del(`/credentials/${encodeURIComponent('zhipu/web_reader_key')}`)
+      setMsg('已停用')
+      load()
+    } catch (e) {
+      setMsg(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-3">
+        <div>
+          <div className="font-medium">网页读取（web-reader）</div>
+          <div className="text-sm text-muted-foreground mt-1">
+            配置智谱 web-reader key 后，URL 摄取与维护 Agent 用其抓取网页正文（SPA/JS
+            渲染页支持）；未配置时回落本地抓取（质量降级）。
+          </div>
+        </div>
+        <div className="text-sm">
+          状态：
+          {configured === null ? (
+            <span className="text-muted-foreground">加载中…</span>
+          ) : configured ? (
+            <span className="text-emerald-600">已启用</span>
+          ) : (
+            <span className="text-muted-foreground">未配置（回落本地抓取）</span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="password"
+            placeholder="粘贴智谱 web-reader key"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            className={inputCls + ' max-w-sm'}
+          />
+          <Button size="sm" disabled={busy || !key.trim()} onClick={save}>
+            保存 key
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || configured === false}
+            onClick={test}
+          >
+            连通性测试
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={busy || configured === false}
+            onClick={disable}
+          >
+            停用
+          </Button>
+        </div>
+        {msg && <div className="text-sm text-muted-foreground">{msg}</div>}
+      </Card>
+    </div>
+  )
+}
+
 function DangerZone() {
   return (
     <div className="space-y-4">

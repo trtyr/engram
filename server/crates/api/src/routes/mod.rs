@@ -309,6 +309,11 @@ fn wiki_routes() -> Router<AppState> {
         )
         // P004-T009：/wiki/ingest 端点已随织入流水线退役（Q005 拍板 C+）——
         // ingest 入口语义由 Agent Harness（T010）以新实现接管。
+        .route("/wiki/webreader/status", get(wiki_docs_api::webreader_status))
+        .route(
+            "/wiki/webreader/test",
+            post(wiki_docs_api::webreader_test),
+        )
         .route("/wiki/pages", get(wiki_api::list_pages))
         .route("/wiki/folders", get(wiki_api::list_folders))
         .route(

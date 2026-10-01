@@ -266,3 +266,75 @@ pub async fn search(
             .map_err(ke)?,
     ))
 }
+
+// ---------- 网页读取（web-reader）配置面（admin；P004-T006） ----------
+
+fn require_admin(p: &Principal) -> Result<(), ApiError> {
+    match p {
+        Principal::Admin => Ok(()),
+        _ => Err(ApiError::Forbidden("仅管理员可管理网页读取配置".into())),
+    }
+}
+
+/// web-reader 配置状态：只回 configured 布尔，永不回显 key。
+#[utoipa::path(
+    get,
+    path = "/wiki/webreader/status",
+    responses((status = 200, body = serde_json::Value))
+)]
+pub(crate) async fn webreader_status(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_admin(&principal)?;
+    let configured = engram_core::wiki_docs::web_reader::WebReaderClient::from_pool(&state.pool)
+        .await
+        .is_some();
+    Ok(Json(serde_json::json!({ "configured": configured })))
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct WebReaderTestRequest {
+    /// 可选：测试 URL（缺省 example.com）
+    pub url: Option<String>,
+}
+
+/// web-reader 连通性测试：用已存 key 实抓一次；结果含标题/字数/耗时，不落 key。
+#[utoipa::path(
+    post,
+    path = "/wiki/webreader/test",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value))
+)]
+pub(crate) async fn webreader_test(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Json(req): Json<WebReaderTestRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_admin(&principal)?;
+    let Some(client) = engram_core::wiki_docs::web_reader::WebReaderClient::from_pool(&state.pool)
+        .await
+    else {
+        return Ok(Json(
+            serde_json::json!({ "ok": false, "error": "未配置 zhipu/web_reader_key 凭据" }),
+        ));
+    };
+    let url = req
+        .url
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| "https://example.com".into());
+    let t0 = std::time::Instant::now();
+    match client.read_url(&url).await {
+        Ok(page) => Ok(Json(serde_json::json!({
+            "ok": true,
+            "title": page.title,
+            "chars": page.content_markdown.chars().count(),
+            "elapsed_ms": t0.elapsed().as_millis() as i64,
+        }))),
+        Err(e) => Ok(Json(serde_json::json!({
+            "ok": false,
+            "error": e.to_string(),
+            "elapsed_ms": t0.elapsed().as_millis() as i64,
+        }))),
+    }
+}
