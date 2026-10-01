@@ -17,3 +17,4 @@ pub mod todos;
 pub mod transfer;
 pub mod wiki_docs;
 pub mod wiki_promotions;
+pub mod logs;

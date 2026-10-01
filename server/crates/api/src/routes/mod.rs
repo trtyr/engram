@@ -7,6 +7,7 @@ pub mod credentials_api;
 pub mod health;
 pub mod jobs_api;
 pub mod llm_api;
+pub mod logs_api;
 pub mod memory_api;
 pub mod migrate_api;
 pub mod project_api;
@@ -105,6 +106,7 @@ pub fn router(state: AppState) -> Router {
         .merge(account_routes())
         .merge(jobs_routes())
         .merge(settings_routes())
+    .merge(logs_api::logs_routes())
         .merge(llm_routes())
         .merge(memory_routes())
         .merge(search_routes())

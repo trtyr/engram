@@ -294,3 +294,116 @@ async fn audit_actions_land_in_logs() {
         "全部审计应带 actor: {actions:?}"
     );
 }
+
+/// P005-T005：GET /logs 查询面——level/q/request_id 过滤 + 分页（admin 专属）。
+#[tokio::test]
+async fn logs_query_endpoint_filters_and_paginates() {
+    let (app, pg2) = app().await;
+    let url = connection_url(&pg2).await.unwrap();
+    let pool = connect_with_retry(&url).await.expect("连接");
+
+    // 造数：3 条不同 level/rid + 1 条审计
+    sqlx::query(
+        "INSERT INTO logs (level, target, message, fields, request_id) VALUES
+         ('INFO', 't', 'alpha 消息', '{}', 'rid-1'),
+         ('WARN', 't', 'beta 消息', '{}', 'rid-2'),
+         ('ERROR', 't', 'gamma 错误', '{}', 'rid-1'),
+         ('INFO', 't', '审计动作', '{\"audit\": \"true\"}', 'rid-3')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let token = support::login_token(&app).await;
+    let get = |query: &str| {
+        let app = app.clone();
+        let token = token.clone();
+        let uri = format!("/logs?{query}");
+        async move {
+            app.oneshot(
+                axum::http::Request::builder()
+                    .uri(uri)
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // level 过滤
+    let resp = get("level=ERROR").await;
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["logs"].as_array().unwrap().len(), 1);
+    assert_eq!(v["logs"][0]["level"], "ERROR");
+
+    // request_id 过滤
+    let resp = get("request_id=rid-1").await;
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["logs"].as_array().unwrap().len(), 2, "rid-1 应两条");
+
+    // q 模糊
+    let resp = get("q=beta").await;
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["logs"].as_array().unwrap().len(), 1);
+
+    // audit_only
+    let resp = get("audit=true").await;
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["logs"].as_array().unwrap().len(), 1);
+    assert_eq!(v["logs"][0]["message"], "审计动作");
+
+    // 分页
+    let resp = get("limit=2&offset=2").await;
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        v["logs"].as_array().unwrap().len(),
+        2,
+        "4 行 limit2 offset2 应剩 2"
+    );
+
+    // 非 admin 拒绝
+    let key = support::create_key(&app, &token, &["wiki"]).await;
+    let resp = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/logs")
+                .header("authorization", format!("Bearer {key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::FORBIDDEN,
+        "非 admin 应 403"
+    );
+}
