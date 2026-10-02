@@ -23,3 +23,4 @@ web 前端 Wiki.tsx 及相关组件重设计，对齐 P004 后的 agent-first wi
 
 ## 文件
 - roadmap.md：任务拆分与状态
+- evidence/README.md：门禁留档索引 + 审计驳回与修正记录
