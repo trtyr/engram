@@ -62,7 +62,8 @@ use utoipa::OpenApi;
         memory_api::attach_atom, memory_api::detach_atom, memory_api::merge_entity, memory_api::entity_revisions,
         memory_api::list_entity_relations, memory_api::create_entity_relation, memory_api::delete_entity_relation,
         search_api::search,
-        wiki_docs_api::submit_url, wiki_docs_api::upload, wiki_docs_api::list_documents,
+        wiki_docs_api::submit_url, wiki_docs_api::upload,
+ wiki_docs_api::ingest, wiki_docs_api::list_documents,
         wiki_docs_api::get_document, wiki_docs_api::document_chunks,
         wiki_docs_api::delete_document, wiki_docs_api::reembed, wiki_docs_api::search,
         wiki_docs_api::webreader_status, wiki_docs_api::webreader_test,
@@ -298,6 +299,7 @@ fn wiki_routes() -> Router<AppState> {
             post(wiki_docs_api::submit_url).get(wiki_docs_api::list_documents),
         )
         .route("/wiki/upload", post(wiki_docs_api::upload))
+        .route("/wiki/ingest", post(wiki_docs_api::ingest))
         // search 先于 {id}，避免 "search" 被当作 id 解析
         .route("/wiki/documents/search", post(wiki_docs_api::search))
         .route(

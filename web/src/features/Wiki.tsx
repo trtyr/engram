@@ -11,7 +11,7 @@ import InsightsPanel from '@/components/InsightsPanel'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { useSearchParams } from 'react-router-dom'
 import { api, type GraphDto, type LintReport, type Purpose, type WikiPage, type WikiPageMeta } from '@/lib/api'
-import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
+import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, relTime, selectCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -707,14 +707,203 @@ function GraphPane({ libSlug }: { libSlug: string }) {
 
 // ---------- 运维二级入口 ----------
 
-type OpsSection = 'insights' | 'lint' | 'sources' | 'purpose'
+type OpsSection = 'agent' | 'insights' | 'lint' | 'sources' | 'purpose'
 
 const OPS_SECTIONS: { value: OpsSection; label: string }[] = [
+  { value: 'agent', label: '维护 Agent' },
   { value: 'insights', label: '洞察' },
   { value: 'lint', label: 'Lint' },
   { value: 'sources', label: '原料' },
   { value: 'purpose', label: '目标' },
 ]
+
+interface AgentJobRow {
+  id: string
+  kind: string
+  status: string
+  progress: { rounds?: number; llm_calls?: number; pages_touched?: string[]; degraded?: boolean; summary?: string } | null
+  created_at: string
+  finished_at: string | null
+}
+
+/** 维护 Agent 面板：下发原料 + 内联 job 进度 + agent 报告 + 历史 run。 */
+function AgentPanel() {
+  const [mode, setMode] = useState<'url' | 'text'>('url')
+  const [url, setUrl] = useState('')
+  const [text, setText] = useState('')
+  const [title, setTitle] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [runId, setRunId] = useState<string | null>(null)
+  const [run, setRun] = useState<AgentJobRow | null>(null)
+  const [history, setHistory] = useState<AgentJobRow[]>([])
+
+  const loadHistory = useCallback(() => {
+    api
+      .get<AgentJobRow[]>(`/jobs?kind=wiki_agent&limit=10`)
+      .then(setHistory)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    loadHistory()
+  }, [loadHistory])
+
+  // 轮询当前 run
+  useEffect(() => {
+    if (!runId) return
+    let stop = false
+    const tick = () => {
+      api
+        .get<AgentJobRow>(`/jobs/${runId}`)
+        .then((j) => {
+          if (stop) return
+          setRun(j)
+          if (j.status !== 'pending' && j.status !== 'running') loadHistory()
+        })
+        .catch(() => {})
+    }
+    tick()
+    const t = setInterval(tick, 2500)
+    return () => {
+      stop = true
+      clearInterval(t)
+    }
+  }, [runId, loadHistory])
+
+  const submit = async () => {
+    setErr('')
+    const payload =
+      mode === 'url'
+        ? { url: url.trim(), title: title.trim() || undefined }
+        : { text: text, title: title.trim() || undefined }
+    if (mode === 'url' && !payload.url) return
+    if (mode === 'text' && !text.trim()) return
+    setBusy(true)
+    try {
+      const v = await api.post<{ job_id: string }>('/wiki/ingest', payload)
+      setRunId(v.job_id)
+      setRun(null)
+      setUrl('')
+      setText('')
+      setTitle('')
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const done = run && run.status !== 'pending' && run.status !== 'running'
+  const report = run?.progress ?? null
+
+  return (
+    <div className="space-y-4">
+      {/* 下发区 */}
+      <Card className="p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Tabs
+            items={[
+              { value: 'url', label: 'URL' },
+              { value: 'text', label: '文本' },
+            ]}
+            value={mode}
+            onChange={(v) => setMode(v as 'url' | 'text')}
+          />
+          <input
+            className={inputCls + ' max-w-xs'}
+            placeholder="标题（可选）"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </div>
+        {mode === 'url' ? (
+          <input
+            className={inputCls}
+            placeholder="https://example.com/article ——Agent 会抓取并沉淀为知识页"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        ) : (
+          <textarea
+            className={inputCls + ' min-h-28'}
+            placeholder="粘贴原料文本——Agent 会整理成互链知识页"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+        )}
+        {err && <ErrorBox msg={err} />}
+        <Button size="sm" disabled={busy} onClick={submit}>
+          {busy ? '下发中…' : '喂给维护 Agent'}
+        </Button>
+      </Card>
+
+      {/* 当前 run 进度/报告 */}
+      {runId && (
+        <Card className="p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <StatusBadge status={run?.status ?? 'running'} />
+            <span className="text-xs text-muted-foreground">job {runId.slice(0, 8)}…</span>
+          </div>
+          {!done && <Spinner />}
+          {done && report && (
+            <div className="space-y-1 text-sm">
+              {typeof report.rounds === 'number' && (
+                <div>
+                  完成：{report.rounds} 轮 · {report.llm_calls ?? '-'} 次 LLM 调用
+                  {report.degraded ? ' · ⚠️ 降级' : ''}
+                </div>
+              )}
+              {report.summary && <div className="text-muted-foreground">{report.summary}</div>}
+              {!!report.pages_touched?.length && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {report.pages_touched.map((slug) => (
+                    <a
+                      key={slug}
+                      className="rounded border px-2 py-0.5 text-xs hover:border-foreground/40"
+                      href={`/wiki?slug=${encodeURIComponent(slug)}`}
+                    >
+                      {slug}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* 历史 run */}
+      <Card className="p-4">
+        <div className="text-sm font-medium mb-2">最近维护任务</div>
+        {history.length === 0 ? (
+          <Empty text="还没有维护任务——上面喂一份原料试试" />
+        ) : (
+          <table className={tableCls.root}>
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>时间</th>
+                <th>产出页数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((j) => (
+                <tr key={j.id} className="cursor-pointer" onClick={() => setRunId(j.id)}>
+                  <td>
+                    <StatusBadge status={j.status} />
+                  </td>
+                  <td className="text-xs text-muted-foreground">{fmtTime(j.created_at)}</td>
+                  <td className="text-xs">{j.progress?.pages_touched?.length ?? '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  )
+}
 
 function OpsPanel({ lib }: { lib: string }) {
   const [section, setSection] = useState<OpsSection>('insights')
@@ -722,6 +911,7 @@ function OpsPanel({ lib }: { lib: string }) {
     <div className="space-y-4">
       <h2 className="text-sm font-semibold">运维</h2>
       <Tabs items={OPS_SECTIONS} value={section} onChange={setSection} />
+      {section === 'agent' && <AgentPanel />}
       {section === 'insights' && <InsightsPanel onHighlight={() => {}} libSlug={lib} />}
       {section === 'lint' && <LintPane libSlug={lib} />}
       {section === 'sources' && <SourcesPane libSlug={lib} />}
