@@ -337,36 +337,8 @@ pub(super) async fn mark_source_failed(
     {
         tracing::warn!(source = %sid, error = %e, "标记 source 失败态写库失败");
     }
-    // 织入失败可见（工单「write_page 哑写」②）：失败落人审队列 flag（via=ingest_failed）——
-    // 人能在 reviews 里看到「这条原料织不进来」，而不是只有 source 表里一行 failed
-    let row: Option<(Uuid, Option<String>)> =
-        sqlx::query_as("SELECT library_id, title FROM wiki_sources WHERE id = $1")
-            .bind(sid)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
-    if let Some((lib, title)) = row {
-        // 让「织不进来」在日志里可见（失败不再静默）
-        if let Err(e) = sqlx::query(
-            "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries, source_id) \
-             VALUES ($1, $2, 'flag', $3, '[]'::jsonb, $4)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(lib)
-        .bind(serde_json::json!({
-            "via": "ingest_failed",
-            "source_id": sid,
-            "title": title,
-            "reason": format!("织入失败：{msg}——修复后可重新 ingest 同内容（sha 变更即重试）"),
-        }))
-        .bind(sid)
-        .execute(pool)
-        .await
-        {
-            tracing::warn!(source = %sid, error = %e, "落人审 flag 失败（原料织不进来这件事将不可见）");
-        }
-    }
+    // 失败可见（工单「write_page 哑写」②）：写结构化告警日志，不再落人审队列（已退役）。
+    tracing::warn!(source = %sid, error = %msg, "原料处理失败——详见 wiki_sources 行状态");
 }
 
 /// source 标 failed 的判定：Permanent 立即标；Retryable 在末次尝试（重试耗尽将转 dead）也标，

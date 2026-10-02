@@ -1,8 +1,7 @@
 //! 语义 lint（lint_deep）：LLM 深度检查页面间的矛盾声明、过时声明、重要概念缺页。
 //!
 //! 与结构 lint（lint.rs，纯 SQL 查死链/孤儿）互补——语义维度只有 LLM 能做。
-//! 结果写入 wiki_review_items（kind=flag，via=semantic_lint），走现有人审队列，
-//! 不自动改写任何页面。
+//! 结果随 job report 返回（人审队列已退役，2026-10-02 P008），不自动改写任何页面。
 //!
 //! 模式出处：karpathy LLM Wiki（gist 442a6bf555914893e9891c11519de94f）的 lint 操作——
 //! 「矛盾已被标记、综合已反映你所读的一切」是 wiki 复利的前提。
@@ -57,7 +56,7 @@ struct LlmIssues {
     issues: Vec<SemanticIssue>,
 }
 
-/// 入队语义 lint 任务（返回 job_id；重复跑安全——检查是只读+review 落库）。
+/// 入队语义 lint 任务（返回 job_id；重复跑安全——检查全程只读，结果随 job report 返回）。
 pub async fn enqueue(
     pool: &PgPool,
     lib: Uuid,

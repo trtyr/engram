@@ -671,8 +671,8 @@ fn wiki_groups_hint() -> Value {
             &["write_page", "archive", "archive_query"],
         ),
         (
-            "织入",
-            "原料通道：直传文档/状态（织入流水线已退役——ingest 走 Agent Harness，document_add 入原文 RAG）",
+            "原料",
+            "原料通道：喂给维护 Agent / 原文入库（ingest 走 Agent Harness，document_add 入原文 RAG）",
             &["ingest", "document_add", "document_get", "document_delete"],
         ),
         (

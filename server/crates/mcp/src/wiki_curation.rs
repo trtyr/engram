@@ -47,7 +47,7 @@ impl EngramMcpServer {
     /// 语义 lint（LLM 深度检查：页面间矛盾 / 过时声明 / 重要概念缺页）。
     ///
     /// 何时用：结构 lint（lint action）干净后的进阶健康检查——语义维度只有 LLM 能做。
-    /// 异步任务：入队返回 job_id，产出写入人审队列（控制台 ReviewQueue 处理），
+    /// 异步任务：入队返回 job_id，结果随 job report 查看（人审队列已退役），
     /// 不自动改写页面。slugs 可限定范围控制 LLM 成本。
     pub(crate) async fn wiki_lint_deep(
         &self,

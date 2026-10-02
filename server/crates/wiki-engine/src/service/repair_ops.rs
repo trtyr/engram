@@ -7,7 +7,7 @@ impl WikiService {
         Ok(lint::lint(&self.pool, lib).await?)
     }
 
-    /// 入队语义 lint（lint_deep）任务——LLM 深度检查矛盾/过时/缺页，产出入人审队列。
+    /// 入队语义 lint（lint_deep）任务——LLM 深度检查矛盾/过时/缺页，结果随 job report 返回。
     pub async fn lint_deep_enqueue(
         &self,
         lib: Uuid,
@@ -401,7 +401,6 @@ impl WikiService {
         let report = crate::cascade::cascade_delete_source(&self.pool, source_id)
             .await
             .map_err(WikiError::from)?;
-        // 腐烂治理（工单「人审队列腐烂」）：指向该源的 open 提案自动 dismissed（可审计不删数据）
         // 破坏性操作落审计行（与 memory 域「job 行即审计链」同哲学）——best-effort，不阻断返回
         self.audit(
             "wiki_source_cascade_delete",
