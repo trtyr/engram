@@ -159,6 +159,15 @@ fn tool_defs() -> Vec<ToolDef> {
         def("merge_pages", "【破坏性】把 duplicate 页并入 primary 页（内容拼接+重定向），删除 duplicate。",
             json!({"primary": {"type": "string"}, "duplicate": {"type": "string"}}),
             &["primary", "duplicate"]),
+        def("study_list", "列出学习路线图全部领域与知识点（id/name/status）。维护指令涉及学习进度时先查这里拿 item_id。",
+            json!({}), &[]),
+        def("study_update_item", "更新学习路线图知识点：设置状态（not_started/learning/learned）或挂 wiki 页互链。",
+            json!({
+                "item_id": {"type": "string", "description": "study_list 返回的知识点 id"},
+                "status": {"type": "string", "description": "not_started|learning|learned（可选）"},
+                "wiki_slugs": {"type": "array", "items": {"type": "string"}, "description": "挂链 wiki 页 slug 列表（可选，整体替换）"}
+            }),
+            &["item_id"]),
     ]
 }
 
@@ -353,6 +362,44 @@ async fn execute_tool(
             }
             Ok(json!({"merged_into": primary, "detail": result}).to_string())
         }
+        "study_list" => {
+            let svc = crate::study::StudyService::new(deps.pool.clone());
+            let topics = svc.topic_list().await.map_err(|e| e.to_string())?;
+            let mut out = Vec::new();
+            for t in topics {
+                if let Ok(Some(full)) = svc.topic_get(t.id).await {
+                    out.push(json!({
+                        "topic": {"id": full.track.id, "name": full.track.name, "status": full.track.status},
+                        "items": full
+                            .items
+                            .iter()
+                            .map(|i| json!({"id": i.id, "name": i.name, "status": i.status}))
+                            .collect::<Vec<_>>(),
+                    }));
+                }
+            }
+            Ok(truncate(serde_json::to_string(&out).unwrap_or_default()))
+        }
+        "study_update_item" => {
+            let id = args["item_id"].as_str().ok_or("缺 item_id")?;
+            let item_id = uuid::Uuid::parse_str(id).map_err(|e| format!("item_id 非法: {e}"))?;
+            let svc = crate::study::StudyService::new(deps.pool.clone());
+            if let Some(status) = args["status"].as_str() {
+                svc.item_set_status(item_id, status)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            if let Some(slugs) = args["wiki_slugs"].as_array() {
+                let list: Vec<String> = slugs
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+                svc.item_link(item_id, Some(list), None)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(json!({"ok": true, "item_id": item_id}).to_string())
+        }
         other => Err(format!("未知工具 {other}")),
     }
 }
@@ -372,6 +419,7 @@ fn build_system_static(deps: &AgentDeps, _lib: Uuid) -> String {
 - 页面内容用 markdown；跨页引用一律 [[slug]] 互链；一页一个概念，标题即概念名。\n\
 - 原始资料用 document_add 入库，提炼后的知识写成 wiki 页；引用原文时用 documents_search 查证。\n\
 - delete_page / merge_pages 是破坏性操作，仅在确凿重复或错误时使用。\n\
+- 学习协同：若任务涉及学习路线图（如「把 X 标为已学」「给知识点挂链」），先 study_list 定位知识点 item_id，再用 study_update_item 更新；找不到对应知识点时跳过并在总结中说明，不要臆造 id。\n\
 - 遇到工具报错，调整参数重试或换路径，不要重复同一失败调用。\n\
 - 任务完成后不再调用工具，直接输出最终总结（做了什么、建/改了哪些页、遗留问题）。"
     )

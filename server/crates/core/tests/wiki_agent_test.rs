@@ -458,3 +458,48 @@ async fn probe_reqwest_raw_dump_body() {
     }
 }
 
+#[tokio::test]
+async fn harness_study_coordination_updates_item() {
+    // P007-T010 学习协同：harness 经 study_list/study_update_item 工具更新学习路线图状态
+    let (deps, lib, _dir, _pg) = setup_deps().await;
+
+    // 先建「RAG 入门」track + 一个知识点
+    let svc = engram_core::study::StudyService::new(deps.pool.clone());
+    let topic = svc.topic_create("RAG 入门", "能设计切分管线").await.unwrap();
+    let item = svc.item_add(topic, "基础流程", Some(10)).await.unwrap();
+
+    // 两轮：① study_list 定位 ② study_update_item 标 learned
+    let mock = Arc::new(MockProvider::new(vec![
+        resp("查学习路线图", vec![tc("c1", "study_list", serde_json::json!({}))]),
+        resp("标记已学", vec![tc(
+            "c2",
+            "study_update_item",
+            serde_json::json!({"item_id": item.to_string(), "status": "learned"}),
+        )]),
+    ]));
+    let report = run_agent(
+        mock.clone(),
+        "mock-model".into(),
+        &deps,
+        &AgentTask {
+            lib,
+            instruction: "把「基础流程」知识点标为已学，并挂 wiki 页 rag-basic-pipeline".into(),
+            source_url: None,
+            source_text: None,
+            source_name: None,
+        },
+        AgentBudget::default(),
+        None,
+    )
+    .await
+    .expect("run_agent");
+
+    assert_eq!(report.tool_calls, 2, "两次工具调用");
+    assert!(report.pages_touched.is_empty());
+
+    // DB 断言：状态真的变了 + learned_at 落了
+    let full = svc.topic_get(topic).await.unwrap().unwrap();
+    let it = full.items.iter().find(|i| i.id == item).unwrap();
+    assert_eq!(it.status, "learned", "study_update_item 应生效");
+    assert!(it.learned_at.is_some());
+}
