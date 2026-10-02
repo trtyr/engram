@@ -155,12 +155,12 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
                   "versions", false, "页面版本列表（含已删除页的最后状态快照）" => crate::wiki::WikiVersionsParams;
                   "version_content", false, "读某版本快照的正文（回滚前预览）" => crate::wiki::WikiVersionContentParams;
                   "restore_version", false, "回滚到历史版本（已删除页面从快照重建）" => crate::wiki::WikiRestoreVersionParams;
-                  "sources", false, "列出织入原料（wiki_sources 及其状态；stale_source 清理的入口）" => crate::wiki::WikiSourcesParams;
+                  "sources", false, "列出来源记录（wiki_sources 及其状态；delete_source 级联清理的入口）" => crate::wiki::WikiSourcesParams;
                   "delete_source", true, "删除一条织入原料及其全部产出（级联，不可逆）" => crate::wiki::WikiDeleteSourceParams;
                   "graph", false, "Wiki 链接图全貌（节点/边/社区划分；按库）" => crate::wiki::WikiLibParams;
                   "lint", false, "Wiki 体检（死链/孤页/缺源；只报告不修改；按库）" => crate::wiki::WikiLibParams;
                   "lint_deep", false, "语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步任务，结果随 job report 查看；slugs 可限定范围控成本）" => crate::wiki::WikiLintDeepParams;
-                  "merge", false, "合并页面：duplicate 并入 primary（冗余丢弃或内容并入 + 全库链接改指 + 快照兜底删除）——处置重复页 flag 用" => crate::wiki::WikiMergeParams;
+                  "merge", false, "合并页面：duplicate 并入 primary（冗余丢弃或内容并入 + 全库链接改指 + 快照兜底删除）——处置重复页用" => crate::wiki::WikiMergeParams;
                   "ingest", false, "喂原料给 wiki 维护 Agent Harness（url 或 text 二选一）——harness 自主抓取/检索/建页/互链（异步 job，返回 job_id）" => crate::wiki::WikiIngestParams;
         "document_add", false, "入库文档（text 或 url）——分块+嵌入进原文 RAG 并触发织入；幂等去重" => crate::wiki::WikiDocumentAddParams;
                   "document_delete", true, "删除一条入库文档及其分块/嵌入（document_add 返回的 id；documents 体系，非 delete_source）" => crate::wiki::WikiDocumentDeleteParams;
@@ -169,7 +169,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
                   "index", false, "内容目录（按页型分组的全库目录：slug/标题/入链数/首段摘要；只读动态聚合）" => crate::wiki::WikiLibParams;
                   "archive", false, "问答/分析产物归档为 analysis 页（related 自动建双向 wikilinks——好答案不该消失在聊天记录里）" => crate::wiki::WikiArchiveParams;
                   "purpose", false, "读取库的方向意图（每库一份——写页前先读，避免写跑题）" => crate::wiki::WikiLibParams;
-                  "insights", false, "列出库的洞察（AI 评审产出的观察项，可与 reviews 对照看）" => crate::wiki::WikiLibParams;
+                  "insights", false, "列出库的洞察（图结构异常与稀疏社区的观察项）" => crate::wiki::WikiLibParams;
                   "promote", false, "知识晋升（EN-59）：把项目文档里的一条跨项目知识提炼成 synthesis 页（frontmatter 带源回链）+ 源文档自动追加 ⛳ 标记——提炼由调用方完成。必填 7 项一次给全：project、doc_id、anchor（源文定位短语）、slug、title、content（提炼正文）、library 缺省 main" => crate::wiki::WikiPromoteParams;
                   "promotions", false, "晋升登记列表（谁家的哪些知识晋升成了 wiki 页；按项目过滤）" => crate::wiki::WikiPromotionsParams;
                   "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
