@@ -4,17 +4,18 @@ mod support;
 
 use uuid::Uuid;
 
-async fn setup() -> sqlx::PgPool {
+/// 每测试独立库；TestPg 必须随返回值保活（容器 drop 即断连——57P01 教训）。
+async fn setup() -> (sqlx::PgPool, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
-    pool
+    (pool, container)
 }
 
 #[tokio::test]
 async fn track_crud_roundtrip() {
-    let pool = setup().await;
+    let (pool, _pg) = setup().await;
     let id = Uuid::now_v7();
 
     engram_storage::repo::study::track_create(&pool, id, "RAG 入门", "掌握到能设计切分管线")
@@ -47,7 +48,7 @@ async fn track_crud_roundtrip() {
 
 #[tokio::test]
 async fn item_status_machine_learned_at_semantics() {
-    let pool = setup().await;
+    let (pool, _pg) = setup().await;
     let track = Uuid::now_v7();
     engram_storage::repo::study::track_create(&pool, track, "T", "").await.unwrap();
 
@@ -103,7 +104,7 @@ async fn item_status_machine_learned_at_semantics() {
 
 #[tokio::test]
 async fn items_order_and_progress() {
-    let pool = setup().await;
+    let (pool, _pg) = setup().await;
     let track = Uuid::now_v7();
     engram_storage::repo::study::track_create(&pool, track, "T", "").await.unwrap();
 
@@ -135,7 +136,7 @@ async fn items_order_and_progress() {
 #[tokio::test]
 async fn srs_review_queue_semantics() {
     // P007 二期 T011：needs_review/review_due_at + 复习队列（到期才命中）
-    let pool = setup().await;
+    let (pool, _pg) = setup().await;
     let tid = Uuid::now_v7();
     let iid = Uuid::now_v7();
     engram_storage::repo::study::track_create(&pool, tid, "RAG 入门", "").await.unwrap();
@@ -172,7 +173,7 @@ async fn srs_review_queue_semantics() {
 #[tokio::test]
 async fn journal_add_and_list() {
     // P007 二期 T012：journal 记录+时间线（新→旧）+级联删
-    let pool = setup().await;
+    let (pool, _pg) = setup().await;
     let tid = Uuid::now_v7();
     engram_storage::repo::study::track_create(&pool, tid, "RAG 入门", "").await.unwrap();
 
