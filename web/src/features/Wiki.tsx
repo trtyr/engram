@@ -1,5 +1,5 @@
 /** Wiki 域：Obsidian 式浏览 —— 目录树（folder 层级）+ Markdown 阅读 + 图谱独立视图。
- *  文档 = 收件箱入口；洞察/Lint/提案/原料/目标 = 运维二级入口。
+ *  洞察/Lint/原料/目标 = 运维二级入口（人审面板随人审机制移除退役）。
  *  单库终局（2026-09-20）：库选择/建库/删库 UI 已移除，lib 固定 main，/wiki/* 请求仍带 ?lib=；
  *  POST /wiki/search 例外走 body.library（当前前端无该调用点）。
  *  2026-09-03 审计 28 项全修：布局骨架 / 状态提升与 URL / 视觉层次 / 排版 / 可访问性 / 健壮性。 */
@@ -8,9 +8,7 @@ import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react'
 import { ChevronRight, FileText, Folder, FolderOpen, Inbox } from 'lucide-react'
 import WikiGraph from '@/components/WikiGraph'
 import InsightsPanel from '@/components/InsightsPanel'
-import ReviewQueue from '@/components/ReviewQueue'
 import WikiMarkdown from '@/components/WikiMarkdown'
-import { DocumentsPane } from './DocumentsPane'
 import { useSearchParams } from 'react-router-dom'
 import { api, type GraphDto, type LintReport, type Purpose, type WikiPage, type WikiPageMeta } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
@@ -19,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 type View = 'tree' | 'graph'
-type Panel = 'none' | 'inbox' | 'ops'
+type Panel = 'none' | 'ops'
 const TREE_W_MIN = 220
 const TREE_W_MAX = 480
 
@@ -49,7 +47,7 @@ export default function Wiki() {
   const [params, setParams] = useSearchParams()
   // —— 单库终局（2026-09-20）：库选择 UI 已移除，lib 固定 main（API ?lib= 参数保留兼容）——
   const [lib] = useState('main')
-  // —— 状态提升（审计 #4）：切图谱 / 收件箱 / 运维再回来，选中与折叠不丢 ——
+  // —— 状态提升（审计 #4）：切图谱 / 运维再回来，选中与折叠不丢 ——
   const [pages, setPages] = useState<WikiPageMeta[] | null>(null)
   // 目录骨架索引（folder → 页数，规模化 2026-09-20 懒加载）：先渲染结构，页面按需拉
   const [folderIndex, setFolderIndex] = useState<Record<string, number>>({})
@@ -230,7 +228,7 @@ export default function Wiki() {
     window.addEventListener('mouseup', onUp)
   }
 
-  // 高度实算（#2）：工作区只在树/图视图锁定视口高度（3rem = main 上下 py-6），收件箱/运维自然流不受限
+  // 高度实算（#2）：工作区只在树/图视图锁定视口高度（3rem = main 上下 py-6），运维自然流不受限
   const bounded = panel === 'none'
   return (
     <div className={cn('flex flex-col gap-4 lg:gap-5', bounded && 'lg:h-[calc(100vh-3rem)]')}>
@@ -250,9 +248,6 @@ export default function Wiki() {
                 value={view}
                 onChange={setView}
               />
-              <Button size="sm" variant="outline" onClick={() => setPanel('inbox')}>
-                收件箱
-              </Button>
               <Button size="sm" variant="outline" onClick={() => setPanel('ops')}>
                 运维
               </Button>
@@ -260,7 +255,6 @@ export default function Wiki() {
           )}
         </PageHeader>
       </div>
-      {panel === 'inbox' && <InboxPane libSlug={lib} />}
       {panel === 'ops' && <OpsPanel lib={lib} />}
       {panel === 'none' && view === 'tree' && (
         <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
@@ -293,7 +287,6 @@ export default function Wiki() {
               openErr={openErr}
               hasPages={!!pages && pages.length > 0}
               libSlug={lib}
-              onOpenInbox={() => setPanel('inbox')}
               onSaved={load}
               onNavigateSlug={onSelect}
             />
@@ -305,29 +298,12 @@ export default function Wiki() {
   )
 }
 
-/** 文档收件箱：上传 / URL / 列表 / 阅读，织入后页面进目录树。key=libSlug 切库时重挂载刷新。 */
-function InboxPane({ libSlug }: { libSlug: string }) {
-  return (
-    <div className="space-y-3">
-      <h2 className="text-sm font-semibold">收件箱</h2>
-      <p className="text-sm text-muted-foreground">
-        上传或粘贴文档 → 自动解析、分块、织入 Wiki 页面树（原料可检索原文，页面由 LLM 增量维护）。
-      </p>
-      <DocumentsPane key={libSlug} libSlug={libSlug} />
-    </div>
-  )
-}
-
-// ---------- 目录树 + 阅读 ----------
-
 interface FolderNode {
   name: string
   folders: FolderNode[]
   pages: WikiPageMeta[]
 }
 
-/** 按 folder（/ 分隔多级）把页面聚成嵌套树；folder='' 的页面落在根。
- *  懒加载（2026-09-20）：额外接收目录索引——尚未拉取的 folder 也先渲染成节点。 */
 function buildFolders(pages: WikiPageMeta[], index: Record<string, number> = {}): FolderNode {
   const root: FolderNode = { name: '', folders: [], pages: [] }
   const ensure = (node: FolderNode, parts: string[]): FolderNode => {
@@ -528,7 +504,6 @@ function PageReader({
   openErr,
   hasPages,
   libSlug,
-  onOpenInbox,
   onSaved,
   onNavigateSlug,
 }: {
@@ -537,7 +512,6 @@ function PageReader({
   openErr: string
   hasPages: boolean
   libSlug: string
-  onOpenInbox: () => void
   onSaved: () => void
   onNavigateSlug: (slug: string) => void
 }) {
@@ -569,9 +543,6 @@ function PageReader({
             <p className="text-sm text-muted-foreground">从左侧目录树选一页开始阅读；正文里的 wikilink 可直接跳转</p>
           )}
           {hasPages && <p className="text-xs text-muted-foreground/80">织入的页面按文件夹层级自动归档</p>}
-          <Button size="sm" variant="outline" onClick={onOpenInbox}>
-            上传第一份文档
-          </Button>
         </div>
       </Card>
     )
@@ -736,11 +707,11 @@ function GraphPane({ libSlug }: { libSlug: string }) {
 
 // ---------- 运维二级入口 ----------
 
-type OpsSection = 'insights' | 'lint' | 'proposals' | 'sources' | 'purpose'
+type OpsSection = 'insights' | 'lint' | 'sources' | 'purpose'
+
 const OPS_SECTIONS: { value: OpsSection; label: string }[] = [
   { value: 'insights', label: '洞察' },
   { value: 'lint', label: 'Lint' },
-  { value: 'proposals', label: '提案' },
   { value: 'sources', label: '原料' },
   { value: 'purpose', label: '目标' },
 ]
@@ -753,7 +724,6 @@ function OpsPanel({ lib }: { lib: string }) {
       <Tabs items={OPS_SECTIONS} value={section} onChange={setSection} />
       {section === 'insights' && <InsightsPanel onHighlight={() => {}} libSlug={lib} />}
       {section === 'lint' && <LintPane libSlug={lib} />}
-      {section === 'proposals' && <ReviewAndProposals libSlug={lib} />}
       {section === 'sources' && <SourcesPane libSlug={lib} />}
       {section === 'purpose' && <PurposePane libSlug={lib} />}
     </div>
@@ -761,22 +731,6 @@ function OpsPanel({ lib }: { lib: string }) {
 }
 
 /** Review 队列 + 人工页提案合流 */
-function ReviewAndProposals({ libSlug }: { libSlug: string }) {
-  return (
-    <div className="space-y-6">
-      <section>
-        <h2 className="mb-2 text-sm font-medium">人审队列</h2>
-        <ReviewQueue libSlug={libSlug} />
-      </section>
-      <section>
-        <h2 className="mb-2 text-sm font-medium">人工页更新提案</h2>
-        <ProposalsPane libSlug={libSlug} />
-      </section>
-    </div>
-  )
-}
-
-/** sources 管理（级联删除） */
 function SourcesPane({ libSlug }: { libSlug: string }) {
   const [rows, setRows] = useState<{ id: string; title: string | null; status: string }[] | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -896,62 +850,6 @@ function LintPane({ libSlug }: { libSlug: string }) {
   )
 }
 
-function ProposalsPane({ libSlug }: { libSlug: string }) {
-  const [events, setEvents] = useState<
-    { job_id: string; data: { page_slug: string; proposal_content: string }; ts: string }[] | null
-  >(null)
-  const load = useCallback(async () => {
-    // 服务端聚合（GET /wiki/proposals 一条 SQL 每job取最新提案）——替代 jobs + 逐 job events 的 N+1
-    const rows = await api.get<
-      { job_id: string; data: unknown; ts: string; message: string }[]
-    >(withLib('/wiki/proposals', libSlug))
-    const all = rows
-      .filter((ev) => ev.message.includes('提案'))
-      .map((ev) => ({
-        job_id: ev.job_id,
-        data: ev.data as { page_slug: string; proposal_content: string },
-        ts: ev.ts,
-      }))
-    setEvents(all)
-  }, [libSlug])
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- load 异步拉取，setEvents 在 await 之后，非同步级联（误报）
-    void load()
-  }, [load])
-  if (!events) return <Spinner />
-  if (events.length === 0) return <Empty text="无待审提案" />
-  return (
-    <div className="space-y-3">
-      {events.map((e, i) => (
-        <Card key={i} className="p-4">
-          <p className="text-sm font-medium">
-            {e.data.page_slug} <span className="ml-2 text-xs font-normal text-muted-foreground">{fmtTime(e.ts)}</span>
-          </p>
-          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-xs">
-            {e.data.proposal_content}
-          </pre>
-          <Button
-            size="sm"
-            className="mt-2"
-            onClick={async () => {
-              const page = await api.get<WikiPage>(withLib(`/wiki/pages/${encodeURIComponent(e.data.page_slug)}`, libSlug))
-              await api.post(withLib('/wiki/proposals/apply', libSlug), {
-                slug: e.data.page_slug,
-                title: page.title,
-                content: e.data.proposal_content,
-              })
-              load()
-            }}
-          >
-            合入
-          </Button>
-        </Card>
-      ))}
-    </div>
-  )
-}
-
-/** Wiki 目标（purpose）：goals / key_questions / scope 三栏，每行一条。 */
 function PurposePane({ libSlug }: { libSlug: string }) {
   const [p, setP] = useState<Purpose | null>(null)
   const [goals, setGoals] = useState('')

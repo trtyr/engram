@@ -21,7 +21,6 @@ pub mod prompts;
 pub mod purpose;
 pub mod relevance;
 pub mod repair;
-pub mod review;
 
 /// 数据根解析唯一收口（EN-47）——顶层 re-export，供 core/api/mcp 调用。
 pub use ingest::data_root;

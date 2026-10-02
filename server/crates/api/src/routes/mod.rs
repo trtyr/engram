@@ -67,13 +67,11 @@ use utoipa::OpenApi;
         wiki_docs_api::delete_document, wiki_docs_api::reembed, wiki_docs_api::search,
         wiki_docs_api::webreader_status, wiki_docs_api::webreader_test,
         wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
-        wiki_api::graph, wiki_api::lint, wiki_api::apply_proposal, wiki_api::search,
+        wiki_api::graph, wiki_api::lint, wiki_api::search,
         wiki_api::query_gaps,
         wiki_api::rebuild_links,
         wiki_api::duplicates,
-        wiki_api::list_proposals,
         wiki_api::get_purpose, wiki_api::set_purpose,
-        wiki_api::list_reviews, wiki_api::resolve_review,
         wiki_api::repair,
         wiki_api::repair_async,
         wiki_api::merge_pages,
@@ -338,15 +336,11 @@ fn wiki_routes() -> Router<AppState> {
         .route("/wiki/tsv/rebuild", post(wiki_api::rebuild_tsv))
         .route("/wiki/promote", post(wiki_api::promote))
         .route("/wiki/promotions", get(wiki_api::promotions))
-        .route("/wiki/proposals", get(wiki_api::list_proposals))
-        .route("/wiki/proposals/apply", post(wiki_api::apply_proposal))
         .route("/wiki/search", post(wiki_api::search))
         .route(
             "/wiki/purpose",
             get(wiki_api::get_purpose).put(wiki_api::set_purpose),
         )
-        .route("/wiki/reviews", get(wiki_api::list_reviews))
-        .route("/wiki/reviews/{id}/resolve", post(wiki_api::resolve_review))
         .route("/wiki/repair", post(wiki_api::repair))
         .route("/wiki/repair/async", post(wiki_api::repair_async))
         .route("/wiki/queries/archive", post(wiki_api::archive_query))

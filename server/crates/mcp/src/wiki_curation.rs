@@ -63,49 +63,7 @@ impl EngramMcpServer {
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::json!({
             "job_id": job_id,
-            "hint": "语义 lint 异步执行（LLM 逐批检查）——产出写入人审队列，稍后用 wiki action=reviews 查看发现、action=review_resolve 处置",
-        }))
-    }
-
-    /// 人审队列（reviews）：列出待审提案（lint 深检/织入期 LLM 旗标）。
-    ///
-    /// 何时用：lint_deep 或 ingest 产出人审项后，读取发现内容（kind/payload/来源）再决定处置。
-    pub(crate) async fn wiki_reviews(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(libp): Parameters<wiki::WikiReviewsParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let items = wiki::svc(&self.state)
-            .reviews(lib, libp.status.as_deref())
-            .await
-            .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::json!({
-            "count": items.len(),
-            "items": items,
-        }))
-    }
-
-    /// 处置评审项（review_resolve）：标记已处理（resolved）或驳回作废（dismiss），可附动作标签。
-    pub(crate) async fn wiki_review_resolve(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(dp): Parameters<wiki::WikiReviewResolveParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let id = uuid::Uuid::parse_str(&dp.id).map_err(|_| {
-            rmcp::ErrorData::invalid_params(format!("评审项 id 不是合法 UUID: {}", dp.id), None)
-        })?;
-        wiki::svc(&self.state)
-            .review_resolve(id, dp.action.as_deref(), dp.dismiss.unwrap_or(false))
-            .await
-            .map_err(wiki::from_wiki)?; // 不存在或已处理时 service 层返回 NotFound
-        ok_json(serde_json::json!({
-            "id": id,
-            "status": if dp.dismiss.unwrap_or(false) { "dismissed" } else { "resolved" },
+            "hint": "语义 lint 异步执行（LLM 逐批检查）——结果随 job report 查看",
         }))
     }
 

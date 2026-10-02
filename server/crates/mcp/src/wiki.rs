@@ -214,25 +214,6 @@ pub struct WikiDocumentsSearchParams {
     pub limit: Option<i64>,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct WikiReviewsParams {
-    /// 可选：按状态过滤（open/resolved/dismissed；缺省 open）
-    #[schemars(description = "可选：按状态过滤（open/resolved/dismissed；缺省 open）。")]
-    pub status: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct WikiReviewResolveParams {
-    /// 评审项 id（reviews 返回的 id）
-    #[schemars(description = "评审项 id（reviews 返回的 id）。")]
-    pub id: String,
-    /// 可选：处置动作标签（如 create_page / deep_research / skip——记录到提案）
-    #[schemars(description = "可选：处置动作标签（如 create_page / deep_research / skip）。")]
-    pub action: Option<String>,
-    /// 是否驳回作废（缺省 false = 标记已处理 resolved）
-    #[schemars(description = "可选：是否驳回作废（dismiss）；缺省 false = 已处理（resolved）。")]
-    pub dismiss: Option<bool>,
-}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiMergeParams {
@@ -404,23 +385,6 @@ pub struct WikiPurposeSetParams {
     /// 当前中心论点（可选）
     #[schemars(description = "可选：当前中心论点。")]
     pub thesis: Option<String>,
-}
-
-/// 人审合入提案参数（proposals 列表里的提案内容写入页面）。
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct WikiProposalApplyParams {
-    /// 目标页 slug
-    #[schemars(description = "目标页 slug（提案将写入的页面）。")]
-    pub slug: String,
-    /// 页面标题
-    #[schemars(description = "页面标题。")]
-    pub title: String,
-    /// 提案正文（Markdown）
-    #[schemars(description = "提案正文（Markdown）。")]
-    pub content: String,
-    /// 可选：执行者标记（AI 代执行传 "ai"，落 frontmatter.via）
-    #[schemars(description = "可选：执行者标记（AI 代执行传 ai）。")]
-    pub via: Option<String>,
 }
 
 /// dismiss 图洞察参数（不再出现）。

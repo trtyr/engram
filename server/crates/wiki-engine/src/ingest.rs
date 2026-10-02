@@ -362,40 +362,6 @@ pub async fn analyze_job(
 
     ctx.emit("分析完成", Some(out.clone())).await.ok();
 
-    // review flag 落库（llm_wiki 异步人审：不阻塞 ingest）
-    if let Some(flags) = out.get("reviews").and_then(|v| v.as_array()) {
-        let parsed: Vec<crate::review::LlmReviewFlag> = flags
-            .iter()
-            .filter_map(|f| serde_json::from_value(f.clone()).ok())
-            .collect();
-        if !parsed.is_empty() {
-            let n = crate::review::create_items(pool, lib, source_id, &parsed)
-                .await?
-                .len();
-            ctx.emit(&format!("人审项 {n} 个已入队"), None).await.ok();
-        }
-    }
-
-    // purpose 建议（llm_wiki：LLM 可建议更新 purpose——经人审队列，不直接改）。
-    // 建议项挂源所属库（wiki_review_items.library_id）。
-    if let Some(sugg) = out.get("purpose_suggestion").filter(|v| v.is_object()) {
-        let pid = Uuid::now_v7();
-        sqlx::query(
-            "INSERT INTO wiki_review_items (id, library_id, kind, payload, search_queries, source_id) \
-             VALUES ($1, $2, 'flag', $3, '[]'::jsonb, $4)",
-        )
-        .bind(pid)
-        .bind(lib)
-        .bind(sqlx::types::Json(sugg))
-        .bind(source_id)
-        .execute(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
-        ctx.emit("purpose 更新建议已入人审队列", Some(sugg.clone()))
-            .await
-            .ok();
-    }
-
     // 链式入队生成
     ctx.enqueue_next(
         JobTemplate::new("wiki_generate")

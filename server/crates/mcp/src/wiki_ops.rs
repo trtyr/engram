@@ -337,38 +337,6 @@ impl EngramMcpServer {
         ok_json(serde_json::to_value(&folders).unwrap_or(serde_json::json!([])))
     }
 
-    /// 待审提案聚合（wiki_generate 任务的最新提案事件）——人审后用 proposal_apply 合入。
-    pub(crate) async fn wiki_proposals(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(_): Parameters<wiki::WikiLibParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let rows = engram_jobs::admin::latest_wiki_proposals(&self.state.pool)
-            .await
-            .map_err(|e| mcp_err(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string()))?;
-        ok_json(serde_json::to_value(&rows).unwrap_or(serde_json::json!([])))
-    }
-
-    /// 人审合入提案（把 proposals 里的提案内容写入页面）。
-    pub(crate) async fn wiki_proposal_apply(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<wiki::WikiProposalApplyParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let ap = params.0;
-        let lib = self.resolve_wiki_lib().await?;
-        let page = wiki::svc(&self.state)
-            .apply_proposal(lib, &ap.slug, &ap.content, &ap.title, ap.via.as_deref())
-            .await
-            .map_err(wiki::from_wiki)?;
-        let mut v = serde_json::to_value(&page).unwrap_or(serde_json::json!({}));
-        v["content_omitted"] = json!(true);
-        ok_json(v)
-    }
 
     /// 确定性修复（lint 修而不只报）：死链改写/去链接化/建 stub/孤页回挂/重复合并。
     pub(crate) async fn wiki_repair(
@@ -674,20 +642,6 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "reviews" => {
-                self.wiki_reviews(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "reviews", call.args)?),
-                )
-                .await
-            }
-            "review_resolve" => {
-                self.wiki_review_resolve(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "review_resolve", call.args)?),
-                )
-                .await
-            }
             "index" => {
                 self.wiki_index(
                     ctx,
@@ -762,20 +716,6 @@ impl EngramMcpServer {
                 self.wiki_folders(
                     ctx,
                     Parameters(dispatch::from_args("wiki", "folders", call.args)?),
-                )
-                .await
-            }
-            "proposals" => {
-                self.wiki_proposals(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "proposals", call.args)?),
-                )
-                .await
-            }
-            "proposal_apply" => {
-                self.wiki_proposal_apply(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "proposal_apply", call.args)?),
                 )
                 .await
             }

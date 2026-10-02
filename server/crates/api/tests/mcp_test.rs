@@ -758,8 +758,8 @@ async fn wiki_mcp_tools_listed() {
     assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
     assert_eq!(
         wiki_tools[0]["actions"].as_array().unwrap().len(),
-        28,
-        "wiki 域应展示 28 个操作（P004-T010 ingest 换芯回归：Agent Harness 版——织入退役后 27，harness 接管 +1 还原）"
+        26,
+        "wiki 域应展示 26 个操作（P008 人审移除：reviews/review_resolve 退役）"
     );
 
     // instructions 应覆盖 wiki 域

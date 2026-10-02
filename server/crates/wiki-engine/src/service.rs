@@ -399,18 +399,6 @@ impl WikiService {
         self
     }
 
-    /// 提案合入（人审通过：把 job_events 里的 proposal 内容写入页面）。
-    pub async fn apply_proposal(
-        &self,
-        lib: Uuid,
-        slug: &str,
-        content: &str,
-        title: &str,
-        via: Option<&str>,
-    ) -> Result<WikiPageDto, WikiError> {
-        // human 合入：保持 origin=human 语义（人确认的内容）；via 落 frontmatter 区分执行者
-        self.put_page(lib, slug, title, content, None, via).await
-    }
 
     // ---------- purpose（wiki 灵魂；每库一份，键 wiki_purpose:{lib}） ----------
 

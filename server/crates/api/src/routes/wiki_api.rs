@@ -4,21 +4,20 @@
 mod ingest;
 mod ops;
 mod pages;
-mod repair_review;
+mod repair_ops;
 mod search_graph;
 pub use ingest::*;
 pub(crate) use ops::*;
 pub use pages::*;
-pub use repair_review::*;
+pub use repair_ops::*;
 pub use search_graph::*;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use engram_core::wiki::libraries;
-use engram_core::wiki::{CascadeReport, InsightsReport, Purpose, ReviewItem};
+use engram_core::wiki::{CascadeReport, InsightsReport, Purpose};
 use engram_core::wiki::{LintReport, WikiError, WikiPageDto, WikiPageMetaDto, WikiService};
-use engram_jobs::types::JobEvent;
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;

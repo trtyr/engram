@@ -148,13 +148,10 @@ pub async fn lint_deep_job(
     let known: std::collections::HashSet<String> = pages.iter().map(|(s, ..)| s.clone()).collect();
     all_issues.retain(|it| it.pages.is_empty() || it.pages.iter().all(|p| known.contains(p)));
 
-    let ids = crate::review::create_lint_items(&pool, lib, &all_issues).await?;
-
     Ok(serde_json::json!({
         "checked_pages": pages.len(),
         "batches": batches,
         "issues": all_issues.len(),
-        "review_item_ids": ids,
     }))
 }
 

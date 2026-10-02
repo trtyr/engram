@@ -159,15 +159,13 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
                   "delete_source", true, "删除一条织入原料及其全部产出（级联，不可逆）" => crate::wiki::WikiDeleteSourceParams;
                   "graph", false, "Wiki 链接图全貌（节点/边/社区划分；按库）" => crate::wiki::WikiLibParams;
                   "lint", false, "Wiki 体检（死链/孤页/缺源；只报告不修改；按库）" => crate::wiki::WikiLibParams;
-                  "lint_deep", false, "语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步任务，产出入人审队列；slugs 可限定范围控成本）" => crate::wiki::WikiLintDeepParams;
+                  "lint_deep", false, "语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步任务，结果随 job report 查看；slugs 可限定范围控成本）" => crate::wiki::WikiLintDeepParams;
                   "merge", false, "合并页面：duplicate 并入 primary（冗余丢弃或内容并入 + 全库链接改指 + 快照兜底删除）——处置重复页 flag 用" => crate::wiki::WikiMergeParams;
                   "ingest", false, "喂原料给 wiki 维护 Agent Harness（url 或 text 二选一）——harness 自主抓取/检索/建页/互链（异步 job，返回 job_id）" => crate::wiki::WikiIngestParams;
         "document_add", false, "入库文档（text 或 url）——分块+嵌入进原文 RAG 并触发织入；幂等去重" => crate::wiki::WikiDocumentAddParams;
                   "document_delete", true, "删除一条入库文档及其分块/嵌入（document_add 返回的 id；documents 体系，非 delete_source）" => crate::wiki::WikiDocumentDeleteParams;
                   "document_get", false, "文档状态（status/error 即处理进度）" => crate::wiki::WikiDocumentGetParams;
                   "documents_search", false, "原文检索（chunk 级 FTS+向量混合——与页面级 search 互补）" => crate::wiki::WikiDocumentsSearchParams;
-                  "reviews", false, "人审队列：列出审查项（lint 深检/织入期 LLM 旗标的发现——kind/payload/来源；status 可过滤 open/resolved/dismissed，缺省 open）" => crate::wiki::WikiReviewsParams;
-                  "review_resolve", false, "处置评审项：标记已处理（resolved）或驳回作废（dismiss），可附动作标签" => crate::wiki::WikiReviewResolveParams;
                   "index", false, "内容目录（按页型分组的全库目录：slug/标题/入链数/首段摘要；只读动态聚合）" => crate::wiki::WikiLibParams;
                   "archive", false, "问答/分析产物归档为 analysis 页（related 自动建双向 wikilinks——好答案不该消失在聊天记录里）" => crate::wiki::WikiArchiveParams;
                   "purpose", false, "读取库的方向意图（每库一份——写页前先读，避免写跑题）" => crate::wiki::WikiLibParams;
@@ -466,7 +464,6 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                     | "ingest"
                     | "document_add"
                     | "document_delete"
-                    | "review_resolve"
                     | "archive"
                     | "promote"
                     | "delete_page"
@@ -546,7 +543,6 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                     | "lint"
                     | "document_get"
                     | "documents_search"
-                    | "reviews"
                     | "index"
                     | "purpose"
                     | "insights"
@@ -657,7 +653,7 @@ pub fn render_manual(domain: &str, disabled: &[String]) -> Value {
     root
 }
 
-/// EN-236：wiki 九任务组导航（找/读/写/织入/体检/人审/版本/整理/晋升）——全部 28 动作入组不重不漏
+/// EN-236：wiki 任务组导航（找/读/写/织入/体检/版本/整理/晋升）——全部动作入组不重不漏（人审组随人审移除退役）
 ///（含工单后增动作：list_pages 归读、document_delete 归织入——验收③数量不减，按组可导航到每个动作）。
 fn wiki_groups_hint() -> Value {
     let groups: &[(&str, &str, &[&str])] = &[
@@ -685,11 +681,6 @@ fn wiki_groups_hint() -> Value {
             "体检",
             "质量：lint 快检/LLM 深检/链接图/洞察",
             &["lint", "lint_deep", "graph", "insights"],
-        ),
-        (
-            "人审",
-            "织入建议与深检发现的处置",
-            &["reviews", "review_resolve"],
         ),
         (
             "版本",

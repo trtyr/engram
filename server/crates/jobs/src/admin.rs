@@ -8,7 +8,6 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::types::JobEvent;
 
 /// 取消 pending 的 deep_purge job（后悔药）。返回生效行数（0 = 不存在或已执行/已取消）。
 pub async fn cancel_pending_deep_purge(pool: &PgPool, job_id: Uuid) -> Result<u64, sqlx::Error> {
@@ -53,19 +52,4 @@ pub async fn complete_deep_purge(
     .execute(pool)
     .await?;
     Ok(())
-}
-
-/// 待审 wiki 提案聚合——一条 SQL 取回全部 wiki_generate 任务的最新提案事件
-/// （替代前端 jobs + 逐 job events 的 N+1 请求）。
-pub async fn latest_wiki_proposals(pool: &PgPool) -> Result<Vec<JobEvent>, sqlx::Error> {
-    sqlx::query_as(
-        r#"SELECT t.* FROM (
-             SELECT DISTINCT ON (e.job_id) e.*
-             FROM jobs j JOIN job_events e ON e.job_id = j.id
-             WHERE j.kind = 'wiki_generate' AND e.message LIKE '%提案%'
-             ORDER BY e.job_id, e.id DESC
-           ) t ORDER BY t.id DESC LIMIT 50"#,
-    )
-    .fetch_all(pool)
-    .await
 }

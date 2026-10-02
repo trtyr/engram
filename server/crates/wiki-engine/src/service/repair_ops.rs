@@ -16,39 +16,6 @@ impl WikiService {
         Ok(crate::lint_deep::enqueue(&self.pool, lib, slugs).await?)
     }
 
-    // ---------- Review ----------
-
-    pub async fn reviews(
-        &self,
-        lib: Uuid,
-        status: Option<&str>,
-    ) -> Result<Vec<crate::review::ReviewItem>, WikiError> {
-        let items = crate::review::list_by_status(&self.pool, lib, status)
-            .await
-            .map_err(WikiError::from)?;
-        // 腐烂标注：提案指向的页面已删除 → stale 字段列出已删 slug
-        crate::review::annotate_stale(&self.pool, lib, items)
-            .await
-            .map_err(WikiError::from)
-    }
-
-    pub async fn review_resolve(
-        &self,
-        id: Uuid,
-        action: Option<&str>,
-        dismiss: bool,
-    ) -> Result<(), WikiError> {
-        let hit = crate::review::resolve(&self.pool, id, action, dismiss)
-            .await
-            .map_err(WikiError::from)?;
-        if !hit {
-            // 未命中（不存在或已处理）按 404 语义返回，并给下一步指引（错误文案三问）
-            return Err(WikiError::NotFound(format!(
-                "review {id} 不存在或已处理——可 GET /wiki/reviews 查看当前待审列表"
-            )));
-        }
-        Ok(())
-    }
 
     /// Repair：lint 修而不只报（wiki 收录哲学线工单③）。
     /// 边界三级（roadmap v6）：自动做（变体死链改写 / 去链接化 / ≥3 页引用建 stub / 孤页沿出链回挂）、
@@ -435,7 +402,6 @@ impl WikiService {
             .await
             .map_err(WikiError::from)?;
         // 腐烂治理（工单「人审队列腐烂」）：指向该源的 open 提案自动 dismissed（可审计不删数据）
-        let _ = crate::review::cascade_dismiss(&self.pool, lib, None, Some(source_id)).await; // 有意忽略：派生审查项清理 best-effort
         // 破坏性操作落审计行（与 memory 域「job 行即审计链」同哲学）——best-effort，不阻断返回
         self.audit(
             "wiki_source_cascade_delete",
