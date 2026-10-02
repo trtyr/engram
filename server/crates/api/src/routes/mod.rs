@@ -8,6 +8,7 @@ pub mod health;
 pub mod jobs_api;
 pub mod llm_api;
 pub mod logs_api;
+pub mod study_api;
 pub mod memory_api;
 pub mod migrate_api;
 pub mod project_api;
@@ -20,7 +21,7 @@ use crate::state::AppState;
 
 mod memory_groups;
 use axum::middleware::{Next, from_fn_with_state};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use memory_groups::*;
 use utoipa::OpenApi;
@@ -31,6 +32,9 @@ use utoipa::OpenApi;
         description = "单用户 AI 长期记忆平台。平台即工具：AI 通过本 API 操纵记忆。"),
     paths(
         health::health, health::ready,
+        study_api::list_topics, study_api::create_topic, study_api::get_topic,
+        study_api::update_topic, study_api::delete_topic, study_api::add_item,
+        study_api::patch_item, study_api::delete_item,
         auth_api::login_handler, auth_api::status, auth_api::init_account,
         auth_api::change_credentials, auth_api::list_sessions, auth_api::revoke_session,
         auth_api::revoke_others, auth_api::username, auth_api::logout,
@@ -108,6 +112,7 @@ pub fn router(state: AppState) -> Router {
         .merge(jobs_routes())
         .merge(settings_routes())
     .merge(logs_api::logs_routes())
+    .merge(study_routes())
         .merge(llm_routes())
         .merge(memory_routes())
         .merge(search_routes())
@@ -481,6 +486,25 @@ fn projects_routes() -> Router<AppState> {
 }
 
 /// `/credentials` 域路由组：台账/取用流水/显式揭示/写删（值永不进列表响应）。
+fn study_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/study/topics",
+            get(study_api::list_topics).post(study_api::create_topic),
+        )
+        .route(
+            "/study/topics/{id}",
+            get(study_api::get_topic)
+                .patch(study_api::update_topic)
+                .delete(study_api::delete_topic),
+        )
+        .route("/study/topics/{id}/items", post(study_api::add_item))
+        .route(
+            "/study/items/{id}",
+            patch(study_api::patch_item).delete(study_api::delete_item),
+        )
+}
+
 fn credentials_routes() -> Router<AppState> {
     Router::new()
         .route(
