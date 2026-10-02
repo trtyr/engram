@@ -521,6 +521,7 @@ function PageReader({
   const [folder, setFolder] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveErr, setSaveErr] = useState('')
+  const [showVersions, setShowVersions] = useState(false)
   if (opening && !page) {
     return (
       <Card className="flex min-h-0 flex-1 items-center justify-center">
@@ -559,6 +560,10 @@ function PageReader({
               {page.folder && ` · ${page.folder}`}
             </p>
           </div>
+          <div className="flex shrink-0 gap-2">
+          <Button size="sm" variant="outline" onClick={() => setShowVersions(true)}>
+            历史
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -572,12 +577,22 @@ function PageReader({
           >
             编辑
           </Button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable] md:p-6">
-          <div className="mx-auto w-full max-w-4xl">
-            <WikiMarkdown content={page.content} onNavigateSlug={onNavigateSlug} />
           </div>
         </div>
+        {showVersions ? (
+          <VersionsPanel
+            slug={page.slug}
+            currentContent={page.content}
+            onClose={() => setShowVersions(false)}
+            onRestored={onSaved}
+          />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable] md:p-6">
+            <div className="mx-auto w-full max-w-4xl">
+              <WikiMarkdown content={page.content} onNavigateSlug={onNavigateSlug} />
+            </div>
+          </div>
+        )}
       </Card>
     )
   }
@@ -641,6 +656,119 @@ function PageReader({
 }
 
 // ---------- 图谱独立视图 ----------
+
+interface PageVersionRow {
+  version: number
+  created_at: string
+  via?: string | null
+  title?: string | null
+  [k: string]: unknown
+}
+
+/** 版本历史：时间线+预览对比+回滚。 */
+function VersionsPanel({
+  slug,
+  currentContent,
+  onClose,
+  onRestored,
+}: {
+  slug: string
+  currentContent: string
+  onClose: () => void
+  onRestored: () => void
+}) {
+  const [rows, setRows] = useState<PageVersionRow[] | null>(null)
+  const [sel, setSel] = useState<number | null>(null)
+  const [selContent, setSelContent] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const load = useCallback(() => {
+    api
+      .get<{ versions: PageVersionRow[] }>(
+        `/wiki/pages/${encodeURIComponent(slug)}/versions`,
+      )
+      .then((v) => setRows(v.versions))
+      .catch((e) => setErr(String(e)))
+  }, [slug])
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const preview = (v: number) => {
+    setSel(v)
+    api
+      .get<{ content?: string; content_markdown?: string }>(
+        `/wiki/pages/${encodeURIComponent(slug)}/versions/${v}`,
+      )
+      .then((r) => setSelContent(r.content ?? r.content_markdown ?? ''))
+      .catch((e) => setErr(String(e)))
+  }
+
+  const restore = async (v: number) => {
+    if (!window.confirm(`回滚到 v${v}？当前内容会先生成新快照，可再滚回来。`)) return
+    setBusy(true)
+    setErr('')
+    try {
+      await api.post(`/wiki/pages/${encodeURIComponent(slug)}/restore`, { version: v })
+      onRestored()
+      onClose()
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">版本历史 · {slug}</h3>
+        <Button size="sm" variant="outline" onClick={onClose}>
+          ← 返回页面
+        </Button>
+      </div>
+      {err && <ErrorBox msg={err} />}
+      {rows === null ? (
+        <Spinner />
+      ) : rows.length === 0 ? (
+        <Empty text="还没有历史版本" />
+      ) : (
+        <div className="space-y-4">
+          <ol className="space-y-1">
+            {rows.map((r) => (
+              <li key={r.version} className="flex items-center gap-3 rounded border px-3 py-2 text-sm">
+                <span className="font-mono text-xs">v{r.version}</span>
+                <span className="text-xs text-muted-foreground">{fmtTime(String(r.created_at))}</span>
+                {r.via && <span className="text-xs opacity-60">{String(r.via)}</span>}
+                <div className="ml-auto flex gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => preview(r.version)}>
+                    预览
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => restore(r.version)}>
+                    回滚到此版
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ol>
+          {sel !== null && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-medium">v{sel} 快照</div>
+                <textarea readOnly className={inputCls + ' h-72 font-mono text-xs'} value={selContent} />
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-medium">当前内容</div>
+                <textarea readOnly className={inputCls + ' h-72 font-mono text-xs'} value={currentContent} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function GraphPane({ libSlug }: { libSlug: string }) {
   const [g, setG] = useState<GraphDto | null>(null)

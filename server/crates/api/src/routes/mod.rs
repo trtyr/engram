@@ -67,7 +67,8 @@ use utoipa::OpenApi;
         wiki_docs_api::get_document, wiki_docs_api::document_chunks,
         wiki_docs_api::delete_document, wiki_docs_api::reembed, wiki_docs_api::search,
         wiki_docs_api::webreader_status, wiki_docs_api::webreader_test,
-        wiki_api::list_pages, wiki_api::get_page, wiki_api::put_page,
+        wiki_api::list_pages,
+        wiki_api::list_versions, wiki_api::version_content, wiki_api::restore_version, wiki_api::get_page, wiki_api::put_page,
         wiki_api::graph, wiki_api::lint, wiki_api::search,
         wiki_api::query_gaps,
         wiki_api::rebuild_links,
@@ -323,6 +324,15 @@ fn wiki_routes() -> Router<AppState> {
         )
         .route("/wiki/pages", get(wiki_api::list_pages))
         .route("/wiki/folders", get(wiki_api::list_folders))
+        .route(
+            "/wiki/pages/{slug}/versions",
+            get(wiki_api::list_versions),
+        )
+        .route(
+            "/wiki/pages/{slug}/versions/{version}",
+            get(wiki_api::version_content),
+        )
+        .route("/wiki/pages/{slug}/restore", post(wiki_api::restore_version))
         .route(
             "/wiki/pages/{slug}",
             get(wiki_api::get_page)
