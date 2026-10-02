@@ -162,9 +162,8 @@ fn tool_defs() -> Vec<ToolDef> {
     ]
 }
 
-/// 工具结果截断（防上下文爆炸；兼防大 body 请求触发网关响应聚合坏帧——
-/// 实测 >15KB 的第二轮请求在新api 链路稳定 500 bad_response_body，P004-T010 demo 实证）
-const TOOL_RESULT_MAX: usize = 4_000;
+/// 工具结果截断（防上下文爆炸）
+const TOOL_RESULT_MAX: usize = 16_000;
 
 fn truncate(s: String) -> String {
     if s.chars().count() <= TOOL_RESULT_MAX {
@@ -416,16 +415,10 @@ pub async fn run_agent<P: LlmProvider + 'static>(
         data_dir: deps.data_dir.clone(),
     };
     let defs = tool_defs();
-    // 工具记录累积进单条 user 消息（不用 assistant tool_calls / tool 角色回填——
-    // 部分网关渠道对 tool 角色回填的上游转发存在坏响应 bug，P004-T010 demo 实证；
-    // 文本协议回填对任何 OpenAI 兼容上游稳定）
-    let mut user_accum = build_user_msg(task);
-    let rebuild = |user_accum: &str| -> Vec<ChatMessage> {
-        vec![
-            ChatMessage::system(build_system_static(&deps, lib)),
-            ChatMessage::user(user_accum.to_string()),
-        ]
-    };
+    let mut messages = vec![
+        ChatMessage::system(build_system_static(&deps, lib)),
+        ChatMessage::user(build_user_msg(task)),
+    ];
     let mut report = AgentReport {
         rounds: 0,
         llm_calls: 0,
@@ -460,7 +453,7 @@ pub async fn run_agent<P: LlmProvider + 'static>(
 
         let req = ChatRequest {
             model: model.clone(),
-            messages: rebuild(&user_accum),
+            messages: messages.clone(),
             temperature: Some(0.3),
             json_mode: false,
             // 限响应长度：部分网关对长非流式响应的聚合转发不稳（bad_response_body）
@@ -485,7 +478,10 @@ pub async fn run_agent<P: LlmProvider + 'static>(
 
         match resp.tool_calls {
             Some(calls) if !calls.is_empty() => {
-                user_accum.push_str(&format!("\n\n## 第 {} 轮工具调用\n", report.rounds));
+                messages.push(ChatMessage::assistant_with_tool_calls(
+                    resp.content.clone(),
+                    calls.clone(),
+                ));
                 for call in calls {
                     let t1 = Instant::now();
                     let destructive = matches!(call.name.as_str(), "delete_page" | "merge_pages");
@@ -507,10 +503,7 @@ pub async fn run_agent<P: LlmProvider + 'static>(
                         Ok(s) => s,
                         Err(e) => format!("{{\"error\": {}}}", serde_json::to_string(&e).unwrap_or_default()),
                     };
-                    user_accum.push_str(&format!(
-                        "\n### {}\n{}\n",
-                        call.name, content
-                    ));
+                    messages.push(ChatMessage::tool_result(call.id.clone(), content));
                 }
             }
             _ => {

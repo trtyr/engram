@@ -112,6 +112,31 @@ impl LlmProvider for OpenAiCompatProvider {
         if req.json_mode {
             body["response_format"] = serde_json::json!({ "type": "json_object" });
         }
+        // 回填消息里的 assistant.tool_calls 标准化：内部 ToolCall 是平铺 {id,name,arguments}，
+        // OpenAI 线格式要求 {id,type:"function",function:{name,arguments}}——非标会被部分
+        // 渠道上游按异常路径处理（P004-T010 demo 实证：非标+tool 回填稳定坏响应）
+        if let Some(msgs) = body["messages"].as_array_mut() {
+            for m in msgs.iter_mut() {
+                if m["role"] == "assistant"
+                    && let Some(calls) = m.get("tool_calls").and_then(|t| t.as_array()).cloned()
+                {
+                    let wrapped: Vec<serde_json::Value> = calls
+                        .iter()
+                        .map(|c| {
+                            serde_json::json!({
+                                "id": c["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": c["name"],
+                                    "arguments": c["arguments"]
+                                }
+                            })
+                        })
+                        .collect();
+                    m["tool_calls"] = serde_json::json!(wrapped);
+                }
+            }
+        }
         // P004-T010：tool-calling（OpenAI function 格式）
         if let Some(tools) = &req.tools {
             body["tools"] = serde_json::json!(
