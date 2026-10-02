@@ -35,6 +35,7 @@ use utoipa::OpenApi;
         study_api::list_topics, study_api::create_topic, study_api::get_topic,
         study_api::update_topic, study_api::delete_topic, study_api::add_item,
         study_api::patch_item, study_api::delete_item,
+        study_api::reviews_due, study_api::journal_add, study_api::journal_list,
         auth_api::login_handler, auth_api::status, auth_api::init_account,
         auth_api::change_credentials, auth_api::list_sessions, auth_api::revoke_session,
         auth_api::revoke_others, auth_api::username, auth_api::logout,
@@ -499,6 +500,11 @@ fn study_routes() -> Router<AppState> {
                 .delete(study_api::delete_topic),
         )
         .route("/study/topics/{id}/items", post(study_api::add_item))
+        .route("/study/reviews", get(study_api::reviews_due))
+        .route(
+            "/study/topics/{id}/journal",
+            post(study_api::journal_add).get(study_api::journal_list),
+        )
         .route(
             "/study/items/{id}",
             patch(study_api::patch_item).delete(study_api::delete_item),

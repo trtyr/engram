@@ -131,3 +131,66 @@ async fn items_order_and_progress() {
     let left = engram_storage::repo::study::items_by_track(&pool, track).await.unwrap();
     assert!(left.is_empty(), "track 删除应级联 items");
 }
+
+#[tokio::test]
+async fn srs_review_queue_semantics() {
+    // P007 二期 T011：needs_review/review_due_at + 复习队列（到期才命中）
+    let pool = setup().await;
+    let tid = Uuid::now_v7();
+    let iid = Uuid::now_v7();
+    engram_storage::repo::study::track_create(&pool, tid, "RAG 入门", "").await.unwrap();
+    engram_storage::repo::study::item_create(&pool, iid, tid, "基础流程", 10).await.unwrap();
+
+    // 标记复习、到期时间过去 → 队列命中
+    let past = chrono::Utc::now() - chrono::Duration::hours(1);
+    engram_storage::repo::study::item_set_review(&pool, iid, true, Some(past))
+        .await
+        .unwrap();
+    let due = engram_storage::repo::study::reviews_due(&pool).await.unwrap();
+    assert_eq!(due.len(), 1, "过期复习应命中");
+    assert_eq!(due[0].id, iid);
+
+    // 推迟到期 → 不命中
+    let future = chrono::Utc::now() + chrono::Duration::days(3);
+    engram_storage::repo::study::item_set_review(&pool, iid, true, Some(future))
+        .await
+        .unwrap();
+    let due = engram_storage::repo::study::reviews_due(&pool).await.unwrap();
+    assert!(due.is_empty(), "未到期不应命中");
+
+    // 关掉复习 → 不命中
+    engram_storage::repo::study::item_set_review(&pool, iid, false, None).await.unwrap();
+    let due = engram_storage::repo::study::reviews_due(&pool).await.unwrap();
+    assert!(due.is_empty(), "关闭后不应命中");
+
+    // 重新开+无到期时间 → NULL=立即到期，命中
+    engram_storage::repo::study::item_set_review(&pool, iid, true, None).await.unwrap();
+    let due = engram_storage::repo::study::reviews_due(&pool).await.unwrap();
+    assert_eq!(due.len(), 1, "NULL 到期=立即到期");
+}
+
+#[tokio::test]
+async fn journal_add_and_list() {
+    // P007 二期 T012：journal 记录+时间线（新→旧）+级联删
+    let pool = setup().await;
+    let tid = Uuid::now_v7();
+    engram_storage::repo::study::track_create(&pool, tid, "RAG 入门", "").await.unwrap();
+
+    for note in ["第一课学完", "卡在向量检索", "继续切分策略"] {
+        engram_storage::repo::study::journal_add(&pool, Uuid::now_v7(), tid, note)
+            .await
+            .unwrap();
+    }
+    let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 10).await.unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].note, "继续切分策略", "新→旧排序");
+
+    // limit 生效
+    let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 2).await.unwrap();
+    assert_eq!(rows.len(), 2);
+
+    // track 级联删 journal
+    engram_storage::repo::study::track_delete(&pool, tid).await.unwrap();
+    let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 10).await.unwrap();
+    assert!(rows.is_empty(), "级联删除");
+}

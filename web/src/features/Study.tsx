@@ -24,6 +24,14 @@ interface TopicFull {
   progress: { total: number; learned: number }
   next_up: StudyItem[]
   in_progress: StudyItem[]
+  recent_journal: StudyJournalRow[]
+}
+
+interface StudyJournalRow {
+  id: string
+  track_id: string
+  note: string
+  created_at: string
 }
 
 interface TopicBrief {
@@ -52,6 +60,7 @@ function statusChip(status: string) {
 
 export default function Study() {
   const [topics, setTopics] = useState<TopicBrief[] | null>(null)
+  const [dueCount, setDueCount] = useState(0)
   const [err, setErr] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [full, setFull] = useState<TopicFull | null>(null)
@@ -68,6 +77,10 @@ export default function Study() {
 
   useEffect(() => {
     loadTopics()
+    api
+      .get<{ count: number }>('/study/reviews')
+      .then((v) => setDueCount(v.count))
+      .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -137,6 +150,13 @@ export default function Study() {
   return (
     <div className="space-y-6">
       <PageHeader title="学习" desc="学习路线图跟踪：领域→知识点状态机→挂 wiki 页。知识本体在 wiki，这里只管学到哪。" />
+
+      {dueCount > 0 && (
+        <Card className="p-3 text-sm">
+          📚 有 <span className="font-semibold text-amber-600 dark:text-amber-400">{dueCount}</span>{' '}
+          个知识点到复习期了（learned 后的记忆保持）
+        </Card>
+      )}
 
       {err && <ErrorBox msg={err} />}
 
@@ -291,6 +311,24 @@ export default function Study() {
                           <div className="text-xs text-muted-foreground">
                             下一步：
                             {full.next_up.map((n) => n.name).join(' → ')}
+                          </div>
+                        )}
+
+                        {/* 进度时间线 */}
+                        {full.recent_journal && full.recent_journal.length > 0 && (
+                          <div className="border-t pt-2">
+                            <div className="text-xs font-medium text-muted-foreground mb-1">
+                              进度时间线
+                            </div>
+                            <div className="space-y-0.5">
+                              {full.recent_journal.map((j) => (
+                                <div key={j.id} className="text-xs text-muted-foreground">
+                                  <span className="opacity-70">{fmtTime(j.created_at)}</span>
+                                  {' — '}
+                                  {j.note}
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </>

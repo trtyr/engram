@@ -28,8 +28,19 @@ pub struct StudyItemRow {
     pub wiki_slugs: serde_json::Value,
     pub doc_ids: serde_json::Value,
     pub learned_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub needs_review: bool,
+    pub review_due_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// journal 进度时间线条目（P007 二期 T012）。
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct StudyJournalRow {
+    pub id: Uuid,
+    pub track_id: Uuid,
+    pub note: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 // ---------- track ----------
@@ -128,7 +139,7 @@ pub async fn item_create(
 /// track 全部 items（position ASC, created 稳定排序）。
 pub async fn items_by_track(pool: &PgPool, track_id: Uuid) -> StoreResult<Vec<StudyItemRow>> {
     let rows = sqlx::query_as::<_, StudyItemRow>(
-        "SELECT id, track_id, name, status, position, wiki_slugs, doc_ids, learned_at, \
+        "SELECT id, track_id, name, status, position, wiki_slugs, doc_ids, learned_at, needs_review, review_due_at, \
          created_at, updated_at \
          FROM study_track_items WHERE track_id = $1 ORDER BY position ASC, created_at ASC",
     )
@@ -140,7 +151,7 @@ pub async fn items_by_track(pool: &PgPool, track_id: Uuid) -> StoreResult<Vec<St
 
 pub async fn item_get(pool: &PgPool, id: Uuid) -> StoreResult<Option<StudyItemRow>> {
     let row = sqlx::query_as::<_, StudyItemRow>(
-        "SELECT id, track_id, name, status, position, wiki_slugs, doc_ids, learned_at, \
+        "SELECT id, track_id, name, status, position, wiki_slugs, doc_ids, learned_at, needs_review, review_due_at, \
          created_at, updated_at \
          FROM study_track_items WHERE id = $1",
     )
@@ -204,4 +215,71 @@ pub async fn track_progress(
     .fetch_one(pool)
     .await?;
     Ok((total, learned))
+}
+
+/// SRS 复习标记（P007 二期 T011）：needs_review 开关 + 到期时间。
+pub async fn item_set_review(
+    pool: &PgPool,
+    id: Uuid,
+    needs_review: bool,
+    due: Option<chrono::DateTime<chrono::Utc>>,
+) -> StoreResult<()> {
+    sqlx::query(
+        "UPDATE study_track_items SET needs_review = $2, review_due_at = $3, updated_at = now() \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(needs_review)
+    .bind(due)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 复习队列：已标记且（无到期时间=立即到期 或 已到期），按到期时间升序。
+pub async fn reviews_due(pool: &PgPool) -> StoreResult<Vec<StudyItemRow>> {
+    let rows = sqlx::query_as::<_, StudyItemRow>(
+        "SELECT id, track_id, name, status, position, wiki_slugs, doc_ids, learned_at, \
+         needs_review, review_due_at, created_at, updated_at \
+         FROM study_track_items \
+         WHERE needs_review = TRUE AND (review_due_at IS NULL OR review_due_at <= now()) \
+         ORDER BY review_due_at ASC NULLS FIRST",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+// ---------- journal（P007 二期 T012） ----------
+
+pub async fn journal_add(
+    pool: &PgPool,
+    id: Uuid,
+    track_id: Uuid,
+    note: &str,
+) -> StoreResult<()> {
+    sqlx::query("INSERT INTO study_track_journal (id, track_id, note) VALUES ($1, $2, $3)")
+        .bind(id)
+        .bind(track_id)
+        .bind(note)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// track 最近时间线（新→旧）。
+pub async fn journal_by_track(
+    pool: &PgPool,
+    track_id: Uuid,
+    limit: i64,
+) -> StoreResult<Vec<StudyJournalRow>> {
+    let rows = sqlx::query_as::<_, StudyJournalRow>(
+        "SELECT id, track_id, note, created_at FROM study_track_journal \
+         WHERE track_id = $1 ORDER BY created_at DESC LIMIT $2",
+    )
+    .bind(track_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }

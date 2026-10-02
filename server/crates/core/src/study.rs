@@ -22,6 +22,8 @@ pub struct TopicFull {
     pub next_up: Vec<repo::study::StudyItemRow>,
     /// 进行中节点
     pub in_progress: Vec<repo::study::StudyItemRow>,
+    /// 最近进度时间线（journal 新→旧，最多 10 条；P007 二期 T012）
+    pub recent_journal: Vec<repo::study::StudyJournalRow>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -91,12 +93,14 @@ impl StudyService {
             .filter(|i| i.status == "learning")
             .cloned()
             .collect();
+        let recent_journal = repo::study::journal_by_track(&self.pool, id, 10).await?;
         Ok(Some(TopicFull {
             track,
             items,
             progress: Progress { total, learned },
             next_up,
             in_progress,
+            recent_journal,
         }))
     }
 
@@ -199,5 +203,57 @@ impl StudyService {
 
     async fn exists_track(&self, id: Uuid) -> Result<bool, StudyError> {
         Ok(repo::study::track_get(&self.pool, id).await?.is_some())
+    }
+
+    /// SRS 复习标记（P007 二期 T011）。
+    pub async fn item_set_review(
+        &self,
+        item_id: Uuid,
+        needs_review: bool,
+        due: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), StudyError> {
+        let exists = engram_storage::repo::study::item_get(&self.pool, item_id)
+            .await
+            .map_err(StudyError::from)?
+            .ok_or_else(|| StudyError::NotFound(format!("知识点 {item_id} 不存在")))?;
+        let _ = exists;
+        engram_storage::repo::study::item_set_review(&self.pool, item_id, needs_review, due)
+            .await
+            .map_err(StudyError::from)
+    }
+
+    /// 复习队列：已标记且到期的知识点。
+    pub async fn reviews_due(&self) -> Result<Vec<engram_storage::repo::study::StudyItemRow>, StudyError> {
+        engram_storage::repo::study::reviews_due(&self.pool)
+            .await
+            .map_err(StudyError::from)
+    }
+
+    /// journal 进度时间线（P007 二期 T012）。
+    pub async fn journal_add(&self, track_id: Uuid, note: &str) -> Result<Uuid, StudyError> {
+        if note.trim().is_empty() {
+            return Err(StudyError::BadRequest("note 不能为空".into()));
+        }
+        // track 存在性校验
+        engram_storage::repo::study::track_get(&self.pool, track_id)
+            .await
+            .map_err(StudyError::from)?
+            .ok_or_else(|| StudyError::NotFound(format!("topic {track_id} 不存在")))?;
+        let id = Uuid::now_v7();
+        engram_storage::repo::study::journal_add(&self.pool, id, track_id, note)
+            .await
+            .map_err(StudyError::from)?;
+        Ok(id)
+    }
+
+    /// track 最近时间线（新→旧）。
+    pub async fn journal_list(
+        &self,
+        track_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<engram_storage::repo::study::StudyJournalRow>, StudyError> {
+        engram_storage::repo::study::journal_by_track(&self.pool, track_id, limit.clamp(1, 200))
+            .await
+            .map_err(StudyError::from)
     }
 }

@@ -106,7 +106,7 @@ async fn study_http_crud_full_flow() {
     )
     .await;
     assert_eq!(st, StatusCode::OK);
-    let (st, v) = req_empty(&app, "GET", &format!("/study/topics/{topic}"), &admin).await;
+    let (_st, v) = req_empty(&app, "GET", &format!("/study/topics/{topic}"), &admin).await;
     assert_eq!(v["progress"]["learned"], json!(1));
     assert_eq!(v["next_up"].as_array().unwrap().len(), 1);
 
@@ -171,4 +171,71 @@ async fn study_http_wrong_scope_rejected() {
 
     let (st, _) = req_empty(&app, "GET", "/study/topics", &other).await;
     assert_eq!(st, StatusCode::FORBIDDEN, "非 study scope 应 403");
+}
+
+#[tokio::test]
+async fn study_http_reviews_and_journal() {
+    // P007 二期 T011/T012：复习队列端点 + journal 时间线端点
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // 建题+知识点
+    let (st, v) = req_json(
+        &app,
+        "POST",
+        "/study/topics",
+        &admin,
+        Some(json!({"name": "RAG 入门"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED);
+    let topic = v["id"].as_str().unwrap().to_string();
+    let (_st, v) = req_json(
+        &app,
+        "POST",
+        &format!("/study/topics/{topic}/items"),
+        &admin,
+        Some(json!({"name": "基础流程"})),
+    )
+    .await;
+    let item = v["id"].as_str().unwrap().to_string();
+
+    // 标复习（立即到期）→ GET /study/reviews 命中
+    let (st, _) = req_json(
+        &app,
+        "PATCH",
+        &format!("/study/items/{item}"),
+        &admin,
+        Some(json!({"needs_review": true})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, v) = req_empty(&app, "GET", "/study/reviews", &admin).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["count"], json!(1), "立即到期应命中");
+
+    // journal 记两笔 → GET 时间线（新→旧）+ topic_get 带 recent_journal
+    for note in ["学了基础流程", "开始切分策略"] {
+        let (st, _) = req_json(
+            &app,
+            "POST",
+            &format!("/study/topics/{topic}/journal"),
+            &admin,
+            Some(json!({"note": note})),
+        )
+        .await;
+        assert_eq!(st, StatusCode::CREATED);
+    }
+    let (st, v) = req_empty(&app, "GET", &format!("/study/topics/{topic}/journal"), &admin).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["count"], json!(2));
+    assert_eq!(v["journal"][0]["note"], "开始切分策略", "新→旧");
+
+    let (st, v) = req_empty(&app, "GET", &format!("/study/topics/{topic}"), &admin).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(
+        v["recent_journal"].as_array().unwrap().len(),
+        2,
+        "topic_get 应带时间线"
+    );
 }

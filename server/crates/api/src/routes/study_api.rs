@@ -49,6 +49,9 @@ pub struct StudyItemPatchRequest {
     pub status: Option<String>,
     pub wiki_slugs: Option<Vec<String>>,
     pub doc_ids: Option<Vec<String>>,
+    pub needs_review: Option<bool>,
+    /// RFC3339；needs_review=true 且缺省时立即到期
+    pub review_due_at: Option<String>,
 }
 
 /// 全部学习领域（简报）。
@@ -172,6 +175,17 @@ pub async fn patch_item(
             .await
             .map_err(se)?;
     }
+    if let Some(nr) = req.needs_review {
+        let due = match &req.review_due_at {
+            Some(raw) => Some(
+                chrono::DateTime::parse_from_rfc3339(raw)
+                    .map_err(|e| ApiError::BadRequest(format!("review_due_at 非法: {e}")))?
+                    .with_timezone(&chrono::Utc),
+            ),
+            None => None,
+        };
+        svc(&state).item_set_review(id, nr, due).await.map_err(se)?;
+    }
     Ok(Json(serde_json::json!({ "id": id, "ok": true })))
 }
 
@@ -188,4 +202,48 @@ pub async fn delete_item(
         .await
         .map_err(|e| ApiError::Unavailable(e.to_string()))?;
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+/// 复习队列（已标记且到期，review_due_at 升序）。
+#[utoipa::path(get, path = "/study/reviews",
+    responses((status = 200, body = serde_json::Value)))]
+pub async fn reviews_due(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_scope_read(&principal, "study")?;
+    let rows = svc(&state).reviews_due().await.map_err(se)?;
+    Ok(Json(serde_json::json!({ "reviews": rows, "count": rows.len() })))
+}
+
+/// journal 进度时间线：记一笔。
+#[utoipa::path(post, path = "/study/topics/{id}/journal",
+    request_body = serde_json::Value,
+    responses((status = 201, body = serde_json::Value)))]
+pub async fn journal_add(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<std::collections::HashMap<String, String>>,
+) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
+    require_scope(&principal, "study")?;
+    let note = req.get("note").map(String::as_str).unwrap_or("");
+    let jid = svc(&state).journal_add(id, note).await.map_err(se)?;
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(serde_json::json!({ "id": jid, "ok": true })),
+    ))
+}
+
+/// journal 进度时间线：查最近（新→旧）。
+#[utoipa::path(get, path = "/study/topics/{id}/journal",
+    responses((status = 200, body = serde_json::Value)))]
+pub async fn journal_list(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_scope_read(&principal, "study")?;
+    let rows = svc(&state).journal_list(id, 50).await.map_err(se)?;
+    Ok(Json(serde_json::json!({ "journal": rows, "count": rows.len() })))
 }

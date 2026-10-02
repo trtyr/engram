@@ -124,6 +124,42 @@ pub struct StudyTopicDeleteParams {
     pub id: String,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct StudyItemSetReviewParams {
+    /// item id
+    #[schemars(description = "item id。")]
+    pub item_id: String,
+    /// 是否需要复习（learned 后想保持记忆就开）
+    #[schemars(description = "是否需要复习（learned 后想保持记忆就开；关掉即移出复习队列）。")]
+    pub needs_review: bool,
+    /// 到期时间（RFC3339；缺省=立即到期）
+    #[schemars(description = "可选：复习到期时间 RFC3339（如 2026-10-09T00:00:00Z）；缺省=立即到期。")]
+    pub review_due_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct StudyReviewsDueParams {}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct StudyJournalAddParams {
+    /// topic id
+    #[schemars(description = "topic id。")]
+    pub topic_id: String,
+    /// 进度备注（学了什么/卡在哪/下一步）
+    #[schemars(description = "进度备注（学了什么/卡在哪/下一步）。")]
+    pub note: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct StudyJournalListParams {
+    /// topic id
+    #[schemars(description = "topic id。")]
+    pub topic_id: String,
+    /// 条数上限（默认 20）
+    #[schemars(description = "可选：条数上限（默认 20，最大 200）。")]
+    pub limit: Option<i64>,
+}
+
 // ---------- 工具面 ----------
 
 #[tool_router(router = study_router)]
@@ -203,6 +239,34 @@ impl EngramMcpServer {
                 self.study_item_link(
                     ctx,
                     Parameters(dispatch::from_args("study", "item_link", call.args)?),
+                )
+                .await
+            }
+            "item_set_review" => {
+                self.study_item_set_review(
+                    ctx,
+                    Parameters(dispatch::from_args("study", "item_set_review", call.args)?),
+                )
+                .await
+            }
+            "reviews_due" => {
+                self.study_reviews_due(
+                    ctx,
+                    Parameters(dispatch::from_args("study", "reviews_due", call.args)?),
+                )
+                .await
+            }
+            "journal_add" => {
+                self.study_journal_add(
+                    ctx,
+                    Parameters(dispatch::from_args("study", "journal_add", call.args)?),
+                )
+                .await
+            }
+            "journal_list" => {
+                self.study_journal_list(
+                    ctx,
+                    Parameters(dispatch::from_args("study", "journal_list", call.args)?),
                 )
                 .await
             }
@@ -347,6 +411,82 @@ impl EngramMcpServer {
             .await
             .map_err(from_study)?;
         ok_json(serde_json::json!({ "item_id": lp.item_id, "ok": true }))
+    }
+
+    /// SRS 复习标记（P007 二期 T011）。
+    pub(crate) async fn study_item_set_review(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(rp): Parameters<StudyItemSetReviewParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_study(&p)?;
+        let item_id = uuid::Uuid::parse_str(&rp.item_id).map_err(|_| {
+            rmcp::ErrorData::invalid_params(format!("item_id 非法: {}", rp.item_id), None)
+        })?;
+        let due = match &rp.review_due_at {
+            Some(raw) => Some(
+                chrono::DateTime::parse_from_rfc3339(raw)
+                    .map_err(|e| {
+                        rmcp::ErrorData::invalid_params(format!("review_due_at 非法: {e}"), None)
+                    })?
+                    .with_timezone(&chrono::Utc),
+            ),
+            None => None,
+        };
+        study_svc(&self.state)
+            .item_set_review(item_id, rp.needs_review, due)
+            .await
+            .map_err(from_study)?;
+        ok_json(serde_json::json!({ "item_id": rp.item_id, "needs_review": rp.needs_review, "ok": true }))
+    }
+
+    /// 复习队列（已标记且到期）。
+    pub(crate) async fn study_reviews_due(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(_rp): Parameters<StudyReviewsDueParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_study_read(&p)?;
+        let rows = study_svc(&self.state).reviews_due().await.map_err(from_study)?;
+        ok_json(serde_json::json!({ "reviews": rows, "count": rows.len() }))
+    }
+
+    /// journal 进度时间线：记一笔（P007 二期 T012）。
+    pub(crate) async fn study_journal_add(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(jp): Parameters<StudyJournalAddParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_study(&p)?;
+        let topic_id = uuid::Uuid::parse_str(&jp.topic_id).map_err(|_| {
+            rmcp::ErrorData::invalid_params(format!("topic_id 非法: {}", jp.topic_id), None)
+        })?;
+        let id = study_svc(&self.state)
+            .journal_add(topic_id, &jp.note)
+            .await
+            .map_err(from_study)?;
+        ok_json(serde_json::json!({ "id": id, "topic_id": jp.topic_id, "ok": true }))
+    }
+
+    /// journal 进度时间线：查最近（新→旧）。
+    pub(crate) async fn study_journal_list(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(jp): Parameters<StudyJournalListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_study_read(&p)?;
+        let topic_id = uuid::Uuid::parse_str(&jp.topic_id).map_err(|_| {
+            rmcp::ErrorData::invalid_params(format!("topic_id 非法: {}", jp.topic_id), None)
+        })?;
+        let rows = study_svc(&self.state)
+            .journal_list(topic_id, jp.limit.unwrap_or(20))
+            .await
+            .map_err(from_study)?;
+        ok_json(serde_json::json!({ "journal": rows, "count": rows.len() }))
     }
 }
 

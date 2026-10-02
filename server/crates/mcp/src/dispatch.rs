@@ -223,7 +223,11 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "topic_delete", false, "删 topic（级联全部节点，不可恢复）" => crate::study::StudyTopicDeleteParams;
             "item_add", false, "加知识点（position 缺省排尾部）" => crate::study::StudyItemAddParams;
             "unit_set", false, "知识点状态机 not_started|learning|learned（learned 记时间戳；允许回退）" => crate::study::StudyUnitSetParams;
-            "item_link", false, "知识点挂资料（wiki_slugs/doc_ids 覆盖式更新）" => crate::study::StudyItemLinkParams
+            "item_link", false, "知识点挂资料（wiki_slugs/doc_ids 覆盖式更新）" => crate::study::StudyItemLinkParams;
+            "item_set_review", false, "SRS 复习标记：needs_review 开关+review_due_at 到期时间（缺省立即到期）" => crate::study::StudyItemSetReviewParams;
+            "reviews_due", true, "复习队列：已标记且到期的知识点（review_due_at 升序）" => crate::study::StudyReviewsDueParams;
+            "journal_add", false, "进度时间线记一笔（学了什么/卡在哪/下一步）" => crate::study::StudyJournalAddParams;
+            "journal_list", true, "查 topic 最近进度时间线（新→旧）" => crate::study::StudyJournalListParams
         ],
         _ => return None,
     })
@@ -449,6 +453,8 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                     | "item_add"
                     | "unit_set"
                     | "item_link"
+                    | "item_set_review"
+                    | "journal_add"
             )
             | (
                 "wiki",
@@ -554,7 +560,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
             | ("tickets", "list" | "links" | "get" | "events")
             | ("codegraph", "list" | "query")
             | ("jobs", "list" | "get" | "events")
-            | ("study", "get" | "list")
+            | ("study", "get" | "list" | "reviews_due" | "journal_list")
     )
 }
 

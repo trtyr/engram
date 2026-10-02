@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 65 份迁移：0065 = study 学习路线图跟踪器——tracks/items 状态机）
+    // 版本可查（当前 66 份迁移：0066 = study SRS 复习字段+journal 时间线表）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(65), "0001-0065 迁移应已应用");
+    assert_eq!(version, Some(66), "0001-0066 迁移应已应用");
 
     // 0056（代码图谱入口收敛）：dest_mode 列形态——NOT NULL + 落库默认 default + 二值 CHECK。
     // 历史行回填 custom 是迁移的语义保证（生产库实测见《代码图谱入口收敛 · roadmap》）；
@@ -215,6 +215,7 @@ async fn all_domain_tables_exist_with_columns() {
         "asset_revisions",
         "ticket_events",
             "study_tracks",
+        "study_track_journal",
         "study_track_items",
     ];
     for table in expected_tables {

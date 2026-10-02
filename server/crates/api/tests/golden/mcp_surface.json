@@ -196,7 +196,7 @@
         "readOnlyHint": false,
         "title": "Study 域"
       },
-      "description": "Study 域（单一入口）：学习路线图跟踪——领域 track → 知识单元状态机（待学/进行中/已学）→ 挂 wiki 页。\n只管「学没学/学到哪/下一步学啥」的过程状态；知识内容归 wiki，原文归 documents。\n核心用法：study get{id} 一次拿全【进度+下一步队列+资料清单】——跨会话恢复学习上下文。\n\n【本域操作 8 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- add：开题（新学习领域）——name+goal（学到什么程度算完，归档锚）\n- get：【破坏性】topic 全量一次拿全【进度+下一步队列+资料清单】——跨会话恢复学习上下文的核心查询\n- list：【破坏性】全部学习领域简报\n- topic_update：【破坏性】补丁更新 topic（name/goal/status active|paused|done——done=归档，数据保留）\n- topic_delete：删 topic（级联全部节点，不可恢复）\n- item_add：加知识点（position 缺省排尾部）\n- unit_set：知识点状态机 not_started|learning|learned（learned 记时间戳；允许回退）\n- item_link：知识点挂资料（wiki_slugs/doc_ids 覆盖式更新）",
+      "description": "Study 域（单一入口）：学习路线图跟踪——领域 track → 知识单元状态机（待学/进行中/已学）→ 挂 wiki 页。\n只管「学没学/学到哪/下一步学啥」的过程状态；知识内容归 wiki，原文归 documents。\n核心用法：study get{id} 一次拿全【进度+下一步队列+资料清单】——跨会话恢复学习上下文。\n\n【本域操作 12 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- add：开题（新学习领域）——name+goal（学到什么程度算完，归档锚）\n- get：【破坏性】topic 全量一次拿全【进度+下一步队列+资料清单】——跨会话恢复学习上下文的核心查询\n- list：【破坏性】全部学习领域简报\n- topic_update：【破坏性】补丁更新 topic（name/goal/status active|paused|done——done=归档，数据保留）\n- topic_delete：删 topic（级联全部节点，不可恢复）\n- item_add：加知识点（position 缺省排尾部）\n- unit_set：知识点状态机 not_started|learning|learned（learned 记时间戳；允许回退）\n- item_link：知识点挂资料（wiki_slugs/doc_ids 覆盖式更新）\n- item_set_review：SRS 复习标记：needs_review 开关+review_due_at 到期时间（缺省立即到期）\n- reviews_due：【破坏性】复习队列：已标记且到期的知识点（review_due_at 升序）\n- journal_add：进度时间线记一笔（学了什么/卡在哪/下一步）\n- journal_list：【破坏性】查 topic 最近进度时间线（新→旧）",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
