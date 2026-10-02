@@ -11,7 +11,6 @@ use support::{app, connect_with_retry, connection_url, start_pgvector};
 use tower::util::ServiceExt;
 use tracing_subscriber::prelude::*;
 
-#[tokio::test]
 async fn pg_layer_events_land_in_logs_table() {
     let container = start_pgvector().await.expect("测试库");
     let url = connection_url(&container).await.unwrap();
@@ -47,7 +46,6 @@ async fn pg_layer_events_land_in_logs_table() {
     writer.abort();
 }
 
-#[tokio::test]
 async fn retention_deletes_old_keeps_recent() {
     let container = start_pgvector().await.expect("测试库");
     let url = connection_url(&container).await.unwrap();
@@ -82,7 +80,6 @@ async fn retention_deletes_old_keeps_recent() {
 }
 
 /// 无入站头 → 生成 uuid7 回带；有入站头 → 原值透传。
-#[tokio::test]
 async fn request_id_generated_and_echoed() {
     let (app, _pg) = app().await;
 
@@ -120,8 +117,6 @@ async fn request_id_generated_and_echoed() {
 }
 
 /// 请求日志落 logs 表：request_id + 方法/路由模板/状态/耗时齐全。
-/// （set_default 独占全局 subscriber——本文件仅此一测用 layer 全局注册。）
-#[tokio::test]
 async fn request_log_lands_with_request_id() {
     let container = start_pgvector().await.expect("测试库");
     let url = connection_url(&container).await.unwrap();
@@ -150,13 +145,21 @@ async fn request_log_lands_with_request_id() {
     tokio::time::sleep(std::time::Duration::from_millis(900)).await;
     writer.abort();
 
-    let row: Option<(String, String, i64)> = sqlx::query_as(
-        "SELECT fields->>'http_method', fields->>'http_path', (fields->>'latency_ms')::bigint \
-         FROM logs WHERE message = 'http 请求' AND request_id = 'trace-abc-999' LIMIT 1",
-    )
-    .fetch_optional(&pool)
-    .await
-    .unwrap();
+    // writer 批量 flush（64 条/500ms）+ 并行调度抖动——轮询等待落表
+    let mut row: Option<(String, String, i64)> = None;
+    for _ in 0..50 {
+        row = sqlx::query_as(
+            "SELECT fields->>'http_method', fields->>'http_path', (fields->>'latency_ms')::bigint \
+             FROM logs WHERE message = 'http 请求' AND request_id = 'trace-abc-999' LIMIT 1",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        if row.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     let (method, path, latency) = row.expect("请求日志应落表且带 request_id");
     assert_eq!(method, "GET");
     assert!(!path.is_empty(), "路由模板/路径应在");
@@ -165,7 +168,6 @@ async fn request_log_lands_with_request_id() {
 
 /// P005-T004：业务审计动作——登录/凭据/API key 的写删操作打点
 /// （audit=true, action/target/actor 齐全，经 PgLogLayer 落 logs 表）。
-#[tokio::test]
 async fn audit_actions_land_in_logs() {
     let container = start_pgvector().await.expect("测试库");
     let url = connection_url(&container).await.unwrap();
@@ -256,8 +258,20 @@ async fn audit_actions_land_in_logs() {
         "key 撤销"
     );
 
-    // 等 writer flush
-    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    // 等 writer flush：固定 sleep 在并行负载下会漏——轮询直到 5 个审计动作到齐
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let actions_now: Vec<String> = sqlx::query_scalar(
+            "SELECT fields->>'action' FROM logs WHERE fields->>'audit' = 'true'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        let need = ["auth.login", "credentials.put", "credentials.delete", "apikey.create", "apikey.revoke"];
+        if need.iter().all(|n| actions_now.iter().any(|a| a == n)) {
+            break;
+        }
+    }
     writer.abort();
 
     // 断言：6 条审计（login/credentials.put/credentials.delete/apikey.create/apikey.revoke）+ request_id 关联
@@ -296,7 +310,6 @@ async fn audit_actions_land_in_logs() {
 }
 
 /// P005-T005：GET /logs 查询面——level/q/request_id 过滤 + 分页（admin 专属）。
-#[tokio::test]
 async fn logs_query_endpoint_filters_and_paginates() {
     let (app, pg2) = app().await;
     let url = connection_url(&pg2).await.unwrap();
@@ -410,7 +423,6 @@ async fn logs_query_endpoint_filters_and_paginates() {
 
 /// P006-T003：error 级事件自动落 logs——source 链/category/request_id 三要素齐全，
 /// internal_bug 类带 alert 告警标记（ErrorCategory::InternalBug 归因驱动）。
-#[tokio::test]
 async fn error_events_land_with_full_context() {
     let container = start_pgvector().await.expect("测试库");
     let url = connection_url(&container).await.unwrap();
@@ -453,7 +465,6 @@ async fn error_events_land_with_full_context() {
 }
 
 /// P006-T004：边界错误信封四要素——code/category/message/request_id 齐全 + 密钥痕迹零出现。
-#[tokio::test]
 async fn error_envelope_carries_code_category_rid_no_secrets() {
     let (app, _pg) = app().await;
     let token = support::login_token(&app).await;
@@ -533,4 +544,18 @@ async fn error_envelope_carries_code_category_rid_no_secrets() {
         !body_text.contains(secret),
         "错误响应不得回显凭据值: {body_text}"
     );
+}
+
+/// 顺序执行壳：set_default 是 per-thread subscriber，tokio::test 并行时跨测试
+/// 丢事件（全量门禁实测 flaky）——全文件测试单 runtime 顺序执行，结构性消除。
+#[tokio::test]
+async fn logging_capture_integration() {
+    pg_layer_events_land_in_logs_table().await;
+    retention_deletes_old_keeps_recent().await;
+    request_id_generated_and_echoed().await;
+    logs_query_endpoint_filters_and_paginates().await;
+    error_envelope_carries_code_category_rid_no_secrets().await;
+    request_log_lands_with_request_id().await;
+    audit_actions_land_in_logs().await;
+    error_events_land_with_full_context().await;
 }
