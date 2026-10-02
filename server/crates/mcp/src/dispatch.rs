@@ -156,13 +156,13 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
                   "version_content", false, "读某版本快照的正文（回滚前预览）" => crate::wiki::WikiVersionContentParams;
                   "restore_version", false, "回滚到历史版本（已删除页面从快照重建）" => crate::wiki::WikiRestoreVersionParams;
                   "sources", false, "列出来源记录（wiki_sources 及其状态；delete_source 级联清理的入口）" => crate::wiki::WikiSourcesParams;
-                  "delete_source", true, "删除一条织入原料及其全部产出（级联，不可逆）" => crate::wiki::WikiDeleteSourceParams;
+                  "delete_source", true, "删除一条来源记录及其全部产出（级联，不可逆）" => crate::wiki::WikiDeleteSourceParams;
                   "graph", false, "Wiki 链接图全貌（节点/边/社区划分；按库）" => crate::wiki::WikiLibParams;
                   "lint", false, "Wiki 体检（死链/孤页/缺源；只报告不修改；按库）" => crate::wiki::WikiLibParams;
                   "lint_deep", false, "语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步任务，结果随 job report 查看；slugs 可限定范围控成本）" => crate::wiki::WikiLintDeepParams;
                   "merge", false, "合并页面：duplicate 并入 primary（冗余丢弃或内容并入 + 全库链接改指 + 快照兜底删除）——处置重复页用" => crate::wiki::WikiMergeParams;
                   "ingest", false, "喂原料给 wiki 维护 Agent Harness（url 或 text 二选一）——harness 自主抓取/检索/建页/互链（异步 job，返回 job_id）" => crate::wiki::WikiIngestParams;
-        "document_add", false, "入库文档（text 或 url）——分块+嵌入进原文 RAG 并触发织入；幂等去重" => crate::wiki::WikiDocumentAddParams;
+        "document_add", false, "入库文档（text 或 url）——分块+嵌入进原文 RAG（完成后维护 Agent 自动接力）；幂等去重" => crate::wiki::WikiDocumentAddParams;
                   "document_delete", true, "删除一条入库文档及其分块/嵌入（document_add 返回的 id；documents 体系，非 delete_source）" => crate::wiki::WikiDocumentDeleteParams;
                   "document_get", false, "文档状态（status/error 即处理进度）" => crate::wiki::WikiDocumentGetParams;
                   "documents_search", false, "原文检索（chunk 级 FTS+向量混合——与页面级 search 互补）" => crate::wiki::WikiDocumentsSearchParams;
@@ -651,8 +651,8 @@ pub fn render_manual(domain: &str, disabled: &[String]) -> Value {
     root
 }
 
-/// EN-236：wiki 任务组导航（找/读/写/织入/体检/版本/整理/晋升）——全部动作入组不重不漏（人审组随人审移除退役）
-///（含工单后增动作：list_pages 归读、document_delete 归织入——验收③数量不减，按组可导航到每个动作）。
+/// EN-236：wiki 任务组导航（找/读/写/原料/体检/版本/整理/晋升）——全部动作入组不重不漏（人审组随人审移除退役）
+///（含工单后增动作：list_pages 归读、document_delete 归原料——验收③数量不减，按组可导航到每个动作）。
 fn wiki_groups_hint() -> Value {
     let groups: &[(&str, &str, &[&str])] = &[
         (
@@ -697,7 +697,7 @@ fn wiki_groups_hint() -> Value {
         .map(|(name, why, actions)| json!({ "group": name, "why": why, "actions": actions }))
         .collect();
     json!({
-        "hint": "动作多，按任务找组——先看组名定位意图，再看组内 action；全部 action 在下方 actions 平铺列表（参数以该处为准）。28 动作已全部入组（list_pages 归读、document_delete 归织入为工单后增补组）",
+        "hint": "动作多，按任务找组——先看组名定位意图，再看组内 action；全部 action 在下方 actions 平铺列表（参数以该处为准）。26 动作已全部入组",
         "groups": items,
     })
 }

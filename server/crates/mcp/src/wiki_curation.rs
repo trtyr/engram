@@ -214,7 +214,7 @@ impl EngramMcpServer {
         ok_json(v)
     }
 
-    /// 列出织入原料（wiki_sources：ingest 的源文本及其状态）。
+    /// 列出来源记录（wiki_sources：ingest 的源文本及其状态）。
     ///
     /// 何时用：lint 报 stale_source 后找要清理的 source_id；或查某次 ingest 的状态。
     pub(crate) async fn wiki_sources(
@@ -238,9 +238,9 @@ impl EngramMcpServer {
         ok_json(serde_json::to_value(&items).unwrap_or(serde_json::json!([])))
     }
 
-    /// 删除一条织入原料及其全部产出（级联：源、任务、由它产出的页面；不可逆）。
+    /// 删除一条来源记录及其全部产出（级联：源、任务、由它产出的页面；不可逆）。
     ///
-    /// 何时用：lint 报 stale_source（页面已删但原料残留）或想整体撤销一次织入。
+    /// 何时用：lint 报 stale_source（页面已删但原料残留）或想整体撤销一次原料处理。
     pub(crate) async fn wiki_delete_source(
         &self,
         ctx: RequestContext<RoleServer>,

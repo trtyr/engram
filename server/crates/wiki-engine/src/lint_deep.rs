@@ -70,7 +70,7 @@ pub async fn enqueue(
     Ok(queued.id)
 }
 
-/// 语义 lint 任务主体：取范围内页面 → 分批送 LLM → 发现写 review_items。
+/// 语义 lint 任务主体：取范围内页面 → 分批送 LLM → 结果随 job report 返回。
 pub async fn lint_deep_job(
     ctx: &engram_jobs::JobContext,
     llm: &crate::service::LlmRef,

@@ -66,7 +66,7 @@ skills 域已裁撤（2026-09-26，EN-252）：技能触发回归调用方本地
 wiki 域用法：单库知识库（Markdown 页面 + [[wikilink]] + 混合检索）。单库终局——无 library 参数，一切读写恒定在 main 主库。
 1. 查证事实性知识 → {\"action\":\"search\"}（命中带片段，全文 get_page）；浏览结构 → {\"action\":\"list_pages\"} / {\"action\":\"graph\"}；
 2. 沉淀：单条结论 {\"action\":\"archive_query\"}，整篇文档 {\"action\":\"ingest\"}（异步，产物落同库），明确要页面 {\"action\":\"write_page\"}（覆盖前先 get_page，旧文自动留版本）；
-3. 版本与原料：{\"action\":\"versions\"}/{\"action\":\"restore_version\"} 查历史与回滚（误删页可重建）；{\"action\":\"sources\"}/{\"action\":\"delete_source\"} 清理织入原料（lint 报 stale_source 时用）。
+3. 版本与原料：{\"action\":\"versions\"}/{\"action\":\"restore_version\"} 查历史与回滚（误删页可重建）；{\"action\":\"sources\"}/{\"action\":\"delete_source\"} 清理来源记录（lint 报 stale_source 时用）。
 
 todos 域用法：不绑定项目的快速待办（灵感/学习计划/系统操作——做完勾掉）。
 {\"action\":\"add\",\"title\":\"…\"} 秒记；{\"action\":\"list\"} 看进行中；{\"action\":\"done\",\"id\":\"…\"} 完成。

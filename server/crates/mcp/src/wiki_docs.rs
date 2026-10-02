@@ -33,7 +33,7 @@ impl EngramMcpServer {
 
     // ---------- 文档 RAG（wiki_documents）——MCP 对齐 HTTP 能力（工单「工具面不对齐」） ----------
 
-    /// 入库文档（document_add）：text 或 url → 分块+嵌入进原文 RAG，并触发 LLM 织入。
+    /// 入库文档（document_add）：text 或 url → 分块+嵌入进原文 RAG；完成后维护 Agent 自动接力。
     pub(crate) async fn wiki_document_add(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -74,7 +74,7 @@ impl EngramMcpServer {
             "title": doc.title,
             "status": doc.status,
             "deduped": deduped,
-            "hint": "入库成功（异步分块/嵌入/织入）——用 document_get 看 status 进度；原文检索用 documents_search",
+            "hint": "入库成功（异步分块/嵌入）——用 document_get 看 status 进度；原文检索用 documents_search",
         }))
     }
 

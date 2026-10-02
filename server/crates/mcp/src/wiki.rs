@@ -185,11 +185,11 @@ pub struct WikiIngestParams {
 pub struct WikiDocumentAddParams {
     /// 二选一：要入库的文本（name 作标题）
     #[schemars(
-        description = "二选一：要入库的文本全文（分块+嵌入进原文 RAG，并触发 LLM 织入）。与 url 二选一。"
+        description = "二选一：要入库的文本全文（分块+嵌入进原文 RAG；入库完成后维护 Agent 自动接力整理）。与 url 二选一。"
     )]
     pub text: Option<String>,
     /// 二选一：要抓取的 URL（SSRF 校验）
-    #[schemars(description = "二选一：要抓取的 URL（自动抓取→分块→嵌入→织入）。与 text 二选一。")]
+    #[schemars(description = "二选一：要抓取的 URL（自动抓取→分块→嵌入；维护 Agent 自动接力）。与 text 二选一。")]
     pub url: Option<String>,
     /// 可选：文档名/标题（text 模式作标题；url 模式忽略）。兼容 `title` 字段名。
     #[schemars(description = "可选：文档标题（text 模式）。字段名 `name` 或 `title` 均可。")]
@@ -311,7 +311,7 @@ pub struct WikiRestoreVersionParams {
 #[derive(Serialize, Deserialize, JsonSchema, Default)]
 pub struct WikiSourcesParams {}
 
-/// 删除织入原料参数（E7：删除页面后原料成 stale_source 残留——级联清理通道）。
+/// 删除来源记录参数（E7：删除页面后原料成 stale_source 残留——级联清理通道）。
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiDeleteSourceParams {
     /// 原料 id（sources 列表返回；级联删除该源产出的页面与任务）

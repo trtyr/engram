@@ -305,7 +305,7 @@ impl EngramMcpServer {
         }))
     }
 
-    /// 查询缺口清单（零命中/低分查询=内容缺口）——织入方向与 Deep Research 的输入。
+    /// 查询缺口清单（零命中/低分查询=内容缺口）——喂原料方向与 Deep Research 的输入。
     pub(crate) async fn wiki_query_gaps(
         &self,
         ctx: RequestContext<RoleServer>,

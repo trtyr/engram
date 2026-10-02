@@ -315,8 +315,8 @@ fn wiki_routes() -> Router<AppState> {
             "/wiki/documents/{id}/re-embed",
             post(wiki_docs_api::reembed),
         )
-        // P004-T009：/wiki/ingest 端点已随织入流水线退役（Q005 拍板 C+）——
-        // ingest 入口语义由 Agent Harness（T010）以新实现接管。
+        // P008-T003：/wiki/ingest 承载维护 Agent 下发入口（P004-T009 曾随旧织入流水线退役，
+        // 现以 Agent Harness 语义重建——见 wiki_docs_api::ingest）。
         .route("/wiki/webreader/status", get(wiki_docs_api::webreader_status))
         .route(
             "/wiki/webreader/test",
