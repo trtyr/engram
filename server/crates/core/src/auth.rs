@@ -5,8 +5,8 @@
 
 use uuid::Uuid;
 
-/// 全部合法 scope（12 个；skills 已随域裁撤移除——EN-252 全清 2026-09-26）。
-pub const SCOPES: [&str; 12] = [
+/// 全部合法 scope（13 个；study 学习路线图 P007 新增 2026-10-02）。
+pub const SCOPES: [&str; 13] = [
     "memory",
     "wiki",
     "codegraph",
@@ -19,6 +19,7 @@ pub const SCOPES: [&str; 12] = [
     "cron",
     "migrate",
     "original",
+    "study",
 ];
 
 /// 常见误写 → 合法 scope（签发/更新入口规范化；存量 key 值不受影响）。

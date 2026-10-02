@@ -107,7 +107,7 @@ async fn mcp_initialize_and_list_tools() {
     // circles 共享 memory scope（registry.rs circles→memory），一并可见
     assert_eq!(
         names,
-        vec!["circles", "jobs", "memory", "search_all"],
+        vec!["circles", "jobs", "memory", "search_all", "study"],
         "memory-only key 应见 memory 域工具 + circles（共享 memory scope）与 search_all（jobs 无域 scope——任何合法凭证可见）"
     );
     let memory = tools
@@ -442,8 +442,8 @@ async fn mcp_admin_info_endpoint() {
     let tools = info["tools"].as_array().expect("工具清单");
     assert_eq!(
         tools.len(),
-        11,
-        "应为十个域工具（含 jobs/tickets/assets/circles）+ search_all：{}",
+        12,
+        "应为十一个域工具（含 jobs/tickets/assets/circles/study）+ search_all：{}",
         tools.len()
     );
     let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();
@@ -556,7 +556,7 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     sorted.sort();
     assert_eq!(
         sorted,
-        vec!["circles", "jobs", "memory", "search_all"],
+        vec!["circles", "jobs", "memory", "search_all", "study"],
         "域工具应保留（+跨域 search_all；jobs 无域 scope 恒可见；circles 共享 memory scope）：{names:?}"
     );
     // 描述目录里 write_session 应隐身
@@ -1234,4 +1234,118 @@ async fn todos_model_refinement_mcp_end_to_end() {
     // 拆域后 tickets.add 参数层面无 priority 字段（传入被 serde 忽略）——分级走 severity
     let added4 = parse_text(&v);
     assert_eq!(added4["severity"], "P1", "工单分级应用 severity：{added4}");
+}
+
+// ---------- Study 域（P007-T004） ----------
+
+#[tokio::test]
+async fn study_mcp_lifecycle() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let key = create_key(&app, &admin, &["study"]).await;
+
+    // ① add 开题
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(1, "study", "add", json!({"name": "RAG 入门", "goal": "能设计切分管线"})),
+    )
+    .await;
+    let out = expect_result(&v, "study add");
+    let out: Value =
+        serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    let topic_id = out["id"].as_str().expect("返回 id").to_string();
+
+    // ② item_add ×3（含缺省排尾）
+    for (i, name) in ["基础流程", "切分策略", "嵌入与向量检索"].iter().enumerate() {
+        let args = if i < 2 {
+            json!({"topic_id": topic_id, "name": name, "position": (i as i64 + 1) * 10})
+        } else {
+            json!({"topic_id": topic_id, "name": name})
+        };
+        let (_, v) = mcp_rpc(&app, &key, call(2 + i as i64, "study", "item_add", args)).await;
+        expect_result(&v, "study item_add");
+    }
+
+    // ③ unit_set：第 1 个 learned
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(10, "study", "get", json!({"id": topic_id})),
+    )
+    .await;
+    let full: Value = serde_json::from_str(
+        expect_result(&v, "study get")["content"][0]["text"].as_str().unwrap(),
+    )
+    .unwrap();
+    let first_item = full["items"][0]["id"].as_str().unwrap().to_string();
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(11, "study", "unit_set", json!({"item_id": first_item, "status": "learned"})),
+    )
+    .await;
+    expect_result(&v, "study unit_set");
+
+    // ④ get 核心契约：一次拿全【进度+下一步+进行中】
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(12, "study", "get", json!({"id": topic_id})),
+    )
+    .await;
+    let full: Value = serde_json::from_str(
+        expect_result(&v, "study get 全量")["content"][0]["text"].as_str().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(full["progress"]["total"], json!(3));
+    assert_eq!(full["progress"]["learned"], json!(1));
+    assert_eq!(full["next_up"].as_array().unwrap().len(), 2);
+    assert_eq!(full["in_progress"].as_array().unwrap().len(), 0);
+    assert_eq!(full["items"].as_array().unwrap().len(), 3);
+
+    // ⑤ item_link 挂 wiki
+    let second = full["items"][1]["id"].as_str().unwrap().to_string();
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(13, "study", "item_link", json!({"item_id": second, "wiki_slugs": ["recursive-chunking"]})),
+    )
+    .await;
+    expect_result(&v, "study item_link");
+
+    // ⑥ topic_update 归档 + list
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(14, "study", "topic_update", json!({"id": topic_id, "status": "paused"})),
+    )
+    .await;
+    expect_result(&v, "study topic_update");
+    let (_, v) = mcp_rpc(&app, &key, call(15, "study", "list", json!({}))).await;
+    let out: Value = serde_json::from_str(
+        expect_result(&v, "study list")["content"][0]["text"].as_str().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(out["count"], json!(1));
+
+    // ⑦ 非法 action 指路
+    let (_, v) = mcp_rpc(&app, &key, call(16, "study", "bogus", json!({}))).await;
+    let err = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(err.contains("study"), "应提示 study 域可用操作: {err}");
+}
+
+#[tokio::test]
+async fn study_readonly_key_write_rejected() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let ro = create_key(&app, &admin, &["study:ro"]).await;
+    let (_, v) = mcp_rpc(
+        &app,
+        &ro,
+        call(1, "study", "add", json!({"name": "x"})),
+    )
+    .await;
+    let msg = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(msg.contains("只读") || msg.contains("study scope"), ":ro 写应拒: {msg}");
 }

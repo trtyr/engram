@@ -215,6 +215,16 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "events", false, "任务事件时间线（增量轮询）" => crate::jobs::JobsEventsParams;
             "revive", true, "复活 dead/failed 任务重跑（仅管理员——amk_ key 会收到明确拒绝）" => crate::jobs::JobsReviveParams
         ],
+        "study" => action_docs![
+            "add", false, "开题（新学习领域）——name+goal（学到什么程度算完，归档锚）" => crate::study::StudyAddParams;
+            "get", true, "topic 全量一次拿全【进度+下一步队列+资料清单】——跨会话恢复学习上下文的核心查询" => crate::study::StudyGetParams;
+            "list", true, "全部学习领域简报" => crate::study::StudyListParams;
+            "topic_update", true, "补丁更新 topic（name/goal/status active|paused|done——done=归档，数据保留）" => crate::study::StudyTopicUpdateParams;
+            "topic_delete", false, "删 topic（级联全部节点，不可恢复）" => crate::study::StudyTopicDeleteParams;
+            "item_add", false, "加知识点（position 缺省排尾部）" => crate::study::StudyItemAddParams;
+            "unit_set", false, "知识点状态机 not_started|learning|learned（learned 记时间戳；允许回退）" => crate::study::StudyUnitSetParams;
+            "item_link", false, "知识点挂资料（wiki_slugs/doc_ids 覆盖式更新）" => crate::study::StudyItemLinkParams
+        ],
         _ => return None,
     })
 }
@@ -231,6 +241,7 @@ pub const DOMAIN_TOOLS: &[&str] = &[
     "tickets",
     "codegraph",
     "jobs",
+    "study",
 ];
 
 pub fn is_domain_tool(name: &str) -> bool {
@@ -431,6 +442,15 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
             | ("credentials", "put" | "delete")
             | ("circles", "create" | "update" | "relate" | "unrelate")
             | (
+                "study",
+                "add"
+                    | "topic_update"
+                    | "topic_delete"
+                    | "item_add"
+                    | "unit_set"
+                    | "item_link"
+            )
+            | (
                 "wiki",
                 "write_page"
                     | "archive_query"
@@ -534,6 +554,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
             | ("tickets", "list" | "links" | "get" | "events")
             | ("codegraph", "list" | "query")
             | ("jobs", "list" | "get" | "events")
+            | ("study", "get" | "list")
     )
 }
 

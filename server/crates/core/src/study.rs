@@ -108,10 +108,10 @@ impl StudyService {
         goal: Option<&str>,
         status: Option<&str>,
     ) -> Result<(), StudyError> {
-        if let Some(s) = status {
-            if !matches!(s, "active" | "paused" | "done") {
-                return Err(StudyError::BadRequest(format!("非法 topic status: {s}")));
-            }
+        if let Some(s) = status
+            && !matches!(s, "active" | "paused" | "done")
+        {
+            return Err(StudyError::BadRequest(format!("非法 topic status: {s}")));
         }
         let n = self.exists_track(id).await?;
         if !n {

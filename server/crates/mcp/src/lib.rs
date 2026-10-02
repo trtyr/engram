@@ -34,6 +34,7 @@ mod projects;
 mod registry;
 mod search_all;
 mod server;
+mod study;
 mod tickets;
 mod todos;
 mod todos_links;
@@ -101,6 +102,7 @@ impl EngramMcpServer {
         tool_router.merge(crate::assets::routes_assets());
         tool_router.merge(crate::codegraph::routes_codegraph());
         tool_router.merge(crate::todos::routes_todos());
+        tool_router.merge(crate::study::routes_study());
         tool_router.merge(crate::memory::routes_memory());
         tool_router.merge(crate::memory_write::routes_memory_write());
         tool_router.merge(crate::search_all::routes_search_all());
