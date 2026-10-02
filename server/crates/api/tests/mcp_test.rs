@@ -1298,6 +1298,8 @@ async fn study_mcp_lifecycle() {
         expect_result(&v, "study get 全量")["content"][0]["text"].as_str().unwrap(),
     )
     .unwrap();
+    // P007 demo 留档：topic_get 一次拿全【进度+下一步+进行中+资料清单】
+    eprintln!("DEMO study topic_get 全量 = {}", serde_json::to_string_pretty(&full).unwrap_or_default());
     assert_eq!(full["progress"]["total"], json!(3));
     assert_eq!(full["progress"]["learned"], json!(1));
     assert_eq!(full["next_up"].as_array().unwrap().len(), 2);
