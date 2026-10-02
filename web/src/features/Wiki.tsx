@@ -116,7 +116,7 @@ export default function Wiki() {
       requestedRef.current = null
       return
     }
-    // oxlint-disable-next-line react/set-state-in-effect -- 置 loading 先于异步拉取，非同步级联（同 ProposalsPane 先例）
+    // oxlint-disable-next-line react/set-state-in-effect -- 置 loading 先于异步拉取，非同步级联
     setOpening(true)
     let stale = false
     api
