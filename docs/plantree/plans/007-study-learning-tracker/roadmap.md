@@ -14,11 +14,16 @@
 
 ## In Progress
 
-（空——2026-10-02 六任务+demo 全落地）
+**二期（做全，2026-10-02 立项）**——一期 MCP-only 的缺口补全：HTTP 面+前端+联动+复习+时间线。
 
 ## Next
 
-（空）
+- [ ] **T007 · HTTP 端点**：study_routes（8 端点：GET/POST /study/topics、GET/PATCH/DELETE /study/topics/{id}、POST /study/topics/{id}/items、PATCH/DELETE /study/items/{id}）；utoipa paths 注册+openapi 快照同步；读端点 :ro 放行（对齐 MCP 语义）。
+- [ ] **T008 · HTTP 集成测试**：CRUD 全流程+`:ro` 拒写+非 study scope 403；测试绿是 T007 完成条件之一。
+- [ ] **T009 · 前端学习页**：web/src/features/Study.tsx（track 列表卡片+goal/进度条+节点三态勾选+wiki slug 链接+新建表单）+App.tsx 注册（nav+route）；web build+tsc+lint 净。
+- [ ] **T010 · harness 联动**：harness system prompt 加学习协同指引（建页时若命中 study track 知识点，提示/执行 unit_set+item_link——工具面 MCP 同源已可调）；集成测试。
+- [ ] **T011 · SRS 复习机制（最小）**：0066 迁移（items 加 needs_review 布尔+review_due_at）；MCP unit_set 扩展 needs_review 参数；复习队列查询（review_due_at 升序）；前端复习入口随 T009。
+- [ ] **T012 · journal 进度时间线**：0066 同迁移加 study_track_journal（track_id/ts/note）；MCP journal_add/journal_list；topic_get 带最近时间线。
 
 ## Deferred
 
