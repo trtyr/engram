@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::error::StoreResult;
 
 /// 学习领域 track。
-#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct StudyTrackRow {
     pub id: Uuid,
     pub name: String,
@@ -18,7 +18,7 @@ pub struct StudyTrackRow {
 }
 
 /// 知识单元 item。
-#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct StudyItemRow {
     pub id: Uuid,
     pub track_id: Uuid,
