@@ -5,8 +5,9 @@ import { appConfirm } from '@/components/confirm'
 import { Check, ChevronDown, Trash2 } from 'lucide-react'
 import Pager from '@/components/Pager'
 import { api, type Todo } from '@/lib/api'
-import { Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
-import { inputCls, selectCls } from '@/lib/ui'
+import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
+import { fmtTime, inputCls, selectCls } from '@/lib/ui'
+import WikiMarkdown from '@/components/WikiMarkdown'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { PRIO_DOT, PRIO_LABEL } from '@/lib/todos-ui'
@@ -22,6 +23,7 @@ export default function Todos() {
   const [tag, setTag] = useState('')
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
+  const [selected, setSelected] = useState<Todo | null>(null)
   const [busy, setBusy] = useState(false)
   const [doneRows, setDoneRows] = useState<Todo[] | null>(null)
   const [showDone, setShowDone] = useState(false) // 「已完成」折叠组，默认收起（微软 To Do 心智）
@@ -261,7 +263,9 @@ export default function Todos() {
 
       {err && <ErrorBox msg={err} />}
 
-      {/* 清单 */}
+      {/* 清单（主从：点击行进详情） */}
+      <div className={cn('grid grid-cols-1 gap-4', selected ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]' : 'grid-cols-1')}>
+      <div className={cn(selected && 'lg:h-full lg:overflow-y-auto lg:pr-1')}>
       {rows.length === 0 ? (
         <Empty
           text={
@@ -284,6 +288,8 @@ export default function Todos() {
                 onArchive={doArchive}
                 onDelete={doDelete}
                 onClearDue={clearDue}
+                onSelect={setSelected}
+                selected={selected?.id === t.id}
               />
             ))}
           </div>
@@ -299,6 +305,18 @@ export default function Todos() {
           />
         </>
       )}
+      </div>
+      {selected && (
+        <TodoDetail
+          t={rows.find((r) => r.id === selected.id) ?? selected}
+          busy={busy}
+          onToggle={toggleDone}
+          onArchive={doArchive}
+          onDelete={doDelete}
+          onClose={() => setSelected(null)}
+        />
+      )}
+      </div>
 
       {/* 「已完成」折叠组：仅进行中视图，默认收起（微软 To Do 心智） */}
       {view === 'active' && (
@@ -312,6 +330,7 @@ export default function Todos() {
           onArchive={doArchive}
           onDelete={doDelete}
           onClearDue={clearDue}
+          onSelect={setSelected}
         />
       )}
     </div>
@@ -331,6 +350,7 @@ function DoneGroup({
   onArchive,
   onDelete,
   onClearDue,
+  onSelect,
 }: {
   count: number
   open: boolean
@@ -341,6 +361,7 @@ function DoneGroup({
   onArchive: (t: Todo) => void
   onDelete: (t: Todo) => void
   onClearDue: (t: Todo) => void
+  onSelect: (t: Todo) => void
 }) {
   return (
     <div className="pt-3">
@@ -370,6 +391,8 @@ function DoneGroup({
                 onArchive={onArchive}
                 onDelete={onDelete}
                 onClearDue={onClearDue}
+                onSelect={onSelect}
+                selected={false}
               />
             ))
           )}
@@ -387,6 +410,8 @@ function TodoRow({
   onArchive,
   onDelete,
   onClearDue,
+  onSelect,
+  selected,
 }: {
   t: Todo
   busy: boolean
@@ -394,6 +419,8 @@ function TodoRow({
   onArchive: (t: Todo) => void
   onDelete: (t: Todo) => void
   onClearDue: (t: Todo) => void
+  onSelect: (t: Todo) => void
+  selected: boolean
 }) {
   const overdue = t.due_at && t.status === 'open' && new Date(t.due_at) < new Date()
   const done = t.status === 'done'
@@ -419,7 +446,15 @@ function TodoRow({
       >
         {done && <Check className="size-3.5" aria-hidden="true" />}
       </button>
-      <div className="min-w-0 flex-1">
+      <div
+        className={cn('min-w-0 flex-1 cursor-pointer rounded px-1 py-0.5', selected && 'bg-muted/50')}
+        onClick={() => onSelect(t)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onSelect(t)
+        }}
+      >
         <div className="flex items-center gap-2">
           {/* 优先级色点（微软 To Do 的星标位——轻量、不打断清单流） */}
           <span
@@ -476,5 +511,67 @@ function TodoRow({
         </Button>
       </div>
     </div>
+  )
+}
+
+
+/** 待办详情：markdown 渲染正文 + 行内操作。 */
+function TodoDetail({
+  t,
+  busy,
+  onToggle,
+  onArchive,
+  onDelete,
+  onClose,
+}: {
+  t: Todo
+  busy: boolean
+  onToggle: (t: Todo) => void
+  onArchive: (t: Todo) => void
+  onDelete: (t: Todo) => void
+  onClose: () => void
+}) {
+  const done = t.status === 'done'
+  return (
+    <Card className="flex flex-col gap-3 p-4 lg:h-full lg:overflow-y-auto">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className={cn('text-sm font-semibold leading-6', done && 'text-muted-foreground line-through')}>
+          {t.title}
+        </h3>
+        <Button size="sm" variant="ghost" onClick={onClose} aria-label="关闭详情">
+          ✕
+        </Button>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="font-mono">EN-{t.short_no}</span>
+        <span>{PRIO_LABEL[t.priority] ?? t.priority}</span>
+        <span>·</span>
+        <span>{t.status}</span>
+        {t.due_at && (
+          <>
+            <span>·</span>
+            <span>到期 {fmtTime(t.due_at)}</span>
+          </>
+        )}
+      </div>
+      <div className="min-h-0 border-t pt-3">
+        {t.body ? (
+          <WikiMarkdown content={t.body} />
+        ) : (
+          <p className="text-sm text-muted-foreground">（无正文——记的时候没展开写）</p>
+        )}
+      </div>
+      <div className="mt-auto flex flex-wrap gap-2 border-t pt-3">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => onToggle(t)}>
+          {done ? '重开' : '完成'}
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => onArchive(t)}>
+          归档
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => onDelete(t)}>
+          删除
+        </Button>
+      </div>
+    </Card>
   )
 }
