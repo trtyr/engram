@@ -22,4 +22,5 @@
 - [module-map.md](module-map.md) — 模块键
 - [risk-hotspots.md](risk-hotspots.md) — 风险热点速览
 - [test-and-release-gates.md](test-and-release-gates.md) — 门禁与红线
+- [feature-removal-checklist.md](feature-removal-checklist.md) — 功能移除完整性清单（五层扫描：调用面/派生面/行为面/语义面/文档面）
 - runtime-flows / storage-and-state：不建本地副本（档案运行时视图 + 数据层篇已是权威，图表 diagram-03/05 可视化）
