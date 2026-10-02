@@ -20,3 +20,7 @@
 **背景更新（相对 EN-33 原始表述）**：harness（P004-T010）落地后「知识沉淀自动化」环节已解决——本需求的独特价值聚焦在「学习过程的路线图跟踪」。
 
 **晋升触发**：用户能回答「模型对不对味 + 承载 A/B + 要不要掌握度」三问时，晋升为 plan（候选 P007）。
+
+## wiki 前端 agent-first 重设计（2026-10-02 侦察）
+
+背景：P004 织入流水线退役后 wiki 维护已 agent-first（harness 12 工具+MCP 28 actions），但前端 Wiki.tsx 还是人肉维护形态（1016 行：tree+编辑器+graph+inbox/ops 五 tab）。30+ HTTP 端点里版本管理/repair/query-gaps/duplicates/promotions 记录均无 UI；harness 干活（ingest 下发→job→report）在 wiki UI 完全不可见，要去 Jobs 页翻。人的核心职责（人审 reviews/proposals）面板较弱。设计方向：三层心智（知识层/检索层/Agent 层）+人审中心强化+ingest 语义改「喂给维护 Agent」+补版本/体检缺面板。已给用户完整设计提案，等拍板立 plan。
