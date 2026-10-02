@@ -28,7 +28,7 @@
 | P004 | [wiki-document-ingest](plans/004-wiki-document-ingest/README.md) | server/core/wiki_docs, server/mcp, web, server/parsing | done | 夜间长任务收官（2026-10-02）：T001-T010 全落地（harness 主体+织入退役+三篇救活+EN-31/32 关闭）；真实 demo 已跑通（LangChain 链接→抓取→建 3 页互链 6 条，118s） | ae069d0/2cd036a/aaae960/2c22833/ca49dc6/15ae465 | 手册=projects《wiki 维护工作流手册》 |
 | P005 | [logging](plans/005-logging/README.md) | server/api, server/core, server/llm, server/storage, server/jobs, web | done | 六任务全落地（2026-10-02）：logs 表+PgLogLayer+request-id 贯穿+LLM 调用日志+6 审计点+GET /logs+前端日志页+覆盖面 sweep | 9b99c55/cd51c9f/a6f1719/2755a0d/e1c5da4/0c64198 | 保留期 info30d/debug7d |
 | P006 | [error-handling](plans/006-error-handling/README.md) | server/core, server/storage, server/llm, server/jobs, server/mcp, server/api, server/distill, web | done | 五任务全落地（2026-10-02）：EngramError+17 码注册表+wiki_docs 桥+internal_bug 告警升级+边界 category/request_id+错误码全表；传播链剩余域 Deferred | d5d7d12/619662c/91daebc/b387089 | 渐进下沉（Q001） |
-| P007 | [study-learning-tracker](plans/007-study-learning-tracker/README.md) | server/storage, server/core, server/mcp, server/distill, web | planning | 模型定稿（track/unit 状态机，独立域拍板 2026-10-02）；T001-T006 待开工 | EN-33+学习助手现场痛点+ideas 晋升 | T001 迁移 0065 |
+| P007 | [study-learning-tracker](plans/007-study-learning-tracker/README.md) | server/storage, server/core, server/mcp, server/distill, web | done | 六任务+demo 全落地（2026-10-02）：0065 两表/repo/StudyService/MCP study 域 8 action/蒸馏判据同步/分工手册；前端页等二期 Deferred | 446f627/efd098e/ec3761b/3bae446/e08c593 | 手册=projects《学习工作流分工手册》01a0fba1 |
 
 ## Ideas
 
