@@ -17,7 +17,6 @@
 ## Deferred
 
 - **harness 深水区·自主递归追链接**（原 Q004 残余）：webReader 返回链接列表后 agent 可手动追；自动化（预算控制/深度限制/循环防护）在 T010 落地实测后再立项。
-- **T010 真实 demo 补验**：harness 全链路已验证（mock 集成 4/4 绿 + job 队列/审计/预算实跑），唯 newapi 真实 LLM 响应被【用户侧 Clash TUN 进程级分流】环境阻塞（curl/python 同 body 200，reqwest 全配置变体 500，fake-ip 全劫持 DNS 无法绕过）——用户修 Clash 分流后一键补验：`ENGRAM_DEMO_LLM_KEY/ENGRAM_DEMO_READER_KEY` 就绪后 `cargo test -p engram-core --test wiki_agent_test demo_real_url -- --ignored`（模型 MiniMax-M3）。
 
 ## Done
 
@@ -26,7 +25,7 @@
 - [x] **T007 · MCP 工具面全量对齐**（2cd036a）：13 新 action，24→41 工具总数；curation 测试读写双路径绿。
 - [x] **T005 · web-reader 接入**（aaae960）：core::wiki_docs::web_reader（MCP streamable HTTP + SSE + 双重 JSON 适配）；未配回落/故障降级事件/真网三测试绿。
 - [x] **T009 · 织入流水线退役**（2c22833）：四触发点拆除（MCP ingest action/HTTP 端点/document_add 尾部/write_page auto_ingest）；golden+openapi+mcp_test 同步；service.ingest 与 job 链代码保留（T010 换芯）。
-- [~] **T010 · Agent Harness【主体落地，真实 demo blocked 移交】**（ca49dc6 主体 + 6e483c1 加固）：core::wiki_agent（10 工具循环/预算 20 轮 60 调用 10 分钟/全工具 audit 留痕/Purpose::WikiAgent 档位/document_add ready 自动接力）；ingest 同名换芯（喂原料给 harness）；mock 集成 4 场景绿；真实网关往返达 LLM 层。**真实链接 demo 未跑通**（blocked 移交，见 Deferred）——非本批代码问题：网关链路对 hyper 客户端稳定坏帧（curl/python 同 body 200），TUN 关闭后仍复现。
+- [x] **T010 · Agent Harness【全部完成，真实 demo 跑通】**（ca49dc6 主体 + 6e483c1 加固 + 1f3d958 原件缓存架构）：core::wiki_agent（11 工具循环/预算 20 轮 60 调用 10 分钟/全工具 audit 留痕/Purpose::WikiAgent 档位/document_add ready 自动接力）；ingest 同名换芯（喂原料给 harness）；mock 集成 4 场景绿。**真实链接 demo 跑通**（2026-10-02）：LangChain 链接→web-reader 抓取→缓存原件→LLM read_cache 分段读→建 3 页互链 6 条（118s，job 01a0fad8 succeeded）。架构要点：web_reader 结果落地原件、上下文只带 cache_id+摘要、read_cache 自主分段读；工具回填用文本协议（累积 user 消息——tool 角色回填会触发网关渠道转发 bug，v4 对照实证）。
 - [x] **T006 · 设置页网页读取配置**（15ae465）：GET /wiki/webreader/status + POST test（admin 门）+ Settings「网页读取」tab。
 - [x] **T002 · 滞留恢复机制**：reembed MCP action（随 T007）+ K1 姿势入 T008 手册。
 - [x] **T003 · 三篇滞留救活验证**：三篇 documents_search 全命中且 embed_failed 全 false（01a0f7e0-a87d-7f22 / 01a0f7e6-03e5-76e3 / 01a0f7e6-03ab-76c1）——生产已自行恢复，无需恢复动作。
