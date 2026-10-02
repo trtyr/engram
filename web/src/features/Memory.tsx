@@ -1116,7 +1116,7 @@ function SearchPane({
                     question: q,
                     answer: r.l1.map((h) => h.snippet).join('\n\n'),
                   })
-                  setArchiveMsg('已存档到 wiki 并触发再摄取')
+                  setArchiveMsg('已存档到 wiki')
                 } catch (ex) {
                   setArchiveMsg(ex instanceof Error ? ex.message : '存档失败')
                 }

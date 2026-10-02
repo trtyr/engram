@@ -1,4 +1,4 @@
-/** Wiki 文档面板：左目录右阅读的主从版式 + 摄取/URL + 文档检索。 */
+/** Wiki 文档面板：左目录右阅读的主从版式 + 原料上传/URL + 文档检索。 */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { appConfirm } from '@/components/confirm'
 import { Link2, Search, Upload } from 'lucide-react'
@@ -61,13 +61,13 @@ export function DocumentsPane({ libSlug }: { libSlug: string }) {
 
   const upload = async (f: File) => {
     setIngesting(true)
-    setNotice(`摄取中：${f.name}`)
+    setNotice(`入库中：${f.name}`)
     try {
       await api.upload(withLib('/wiki/upload'), f)
       setNotice(`已入列：${f.name}`)
       load()
     } catch (ex) {
-      setNotice(ex instanceof Error ? `摄取失败：${ex.message}` : '摄取失败')
+      setNotice(ex instanceof Error ? `入库失败：${ex.message}` : '入库失败')
     } finally {
       setIngesting(false)
     }
@@ -117,7 +117,7 @@ export function DocumentsPane({ libSlug }: { libSlug: string }) {
             }}
           />
           <Button size="sm" disabled={ingesting} onClick={() => fileRef.current?.click()}>
-            {ingesting ? '摄取中…' : '上传文件'}
+            {ingesting ? '入库中…' : '上传文件'}
           </Button>
           <form
             className="flex flex-1 gap-2"
@@ -125,7 +125,7 @@ export function DocumentsPane({ libSlug }: { libSlug: string }) {
               e.preventDefault()
               if (!url || ingesting) return
               setIngesting(true)
-              setNotice(`摄取中：${url}`)
+              setNotice(`入库中：${url}`)
               try {
                 await api.post(withLib('/wiki/documents'), { url })
                 setNotice(`已提交：${url}`)
@@ -140,19 +140,19 @@ export function DocumentsPane({ libSlug }: { libSlug: string }) {
           >
             <input
               className={`${inputCls} flex-1`}
-              placeholder="https://… 粘贴 URL 摄取网页"
+              placeholder="https://… 粘贴 URL 入库原文（维护 Agent 自动整理）"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
             <Button size="sm" variant="outline" type="submit" disabled={ingesting}>
-              摄取 URL
+              入库 URL
             </Button>
           </form>
         </div>
         {/* 单行状态：无动作时显示格式提示，有反馈时覆盖（省一行常驻空位） */}
         <p className="mt-2 min-h-4 text-xs">
           {notice ? (
-            <span className={notice.includes('失败') ? 'text-destructive' : notice.includes('摄取中') ? 'text-info' : 'text-success'}>
+            <span className={notice.includes('失败') ? 'text-destructive' : notice.includes('入库中') ? 'text-info' : 'text-success'}>
               {notice}
             </span>
           ) : (
@@ -235,7 +235,7 @@ export function DocumentsPane({ libSlug }: { libSlug: string }) {
             </div>
             {visibleDocs.length === 0 ? (
               <div className="p-4">
-                <Empty text={docs.length === 0 ? '暂无文档——拖拽文件到上方摄取区，或粘贴 URL' : '无匹配标题'} />
+                <Empty text={docs.length === 0 ? '暂无文档——拖拽文件到上方入库区，或粘贴 URL' : '无匹配标题'} />
               </div>
             ) : (
               <ul className="max-h-64 divide-y divide-border/60 overflow-auto lg:max-h-[calc(100vh-16rem)]">
@@ -255,7 +255,7 @@ export function DocumentsPane({ libSlug }: { libSlug: string }) {
                         'mt-0.5 flex items-center gap-1.5 font-mono text-xs',
                         d.id === activeId ? 'text-background/70' : 'text-muted-foreground',
                       )}>
-                        {d.source_uri ? <Link2 className="size-3" aria-label="URL 摄取" /> : <span>{mimeTag(d.mime)}</span>}
+                        {d.source_uri ? <Link2 className="size-3" aria-label="URL 入库" /> : <span>{mimeTag(d.mime)}</span>}
                         <span className="truncate">{relTime(d.created_at)}</span>
                         {['pending', 'parsing', 'chunking', 'embedding'].includes(d.status) && (
                           <span className={cn('size-1.5 rounded-full bg-info', d.id === activeId ? '' : 'engram-pulse')} />
@@ -314,7 +314,7 @@ function DocReader({ doc, libSlug, onDeleted }: { doc: Document; libSlug: string
               <StatusBadge status={doc.status} />
               {doc.source_uri ? (
                 <span className="truncate" title={doc.source_uri}>
-                  <Link2 className="mr-0.5 inline size-3" aria-label="URL 摄取" />
+                  <Link2 className="mr-0.5 inline size-3" aria-label="URL 入库" />
                   {doc.source_uri}
                 </span>
               ) : (

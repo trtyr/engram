@@ -233,7 +233,7 @@ export default function Wiki() {
   return (
     <div className={cn('flex flex-col gap-4 lg:gap-5', bounded && 'lg:h-[calc(100vh-3rem)]')}>
       <div className="shrink-0">
-        <PageHeader title="Wiki" desc="AI 织入的互链知识库——目录树浏览页面，图谱看关系">
+        <PageHeader title="Wiki" desc="Agent 维护的互链知识库——目录树浏览页面，图谱看关系">
           {panel !== 'none' ? (
             <Button size="sm" variant="outline" onClick={() => setPanel('none')}>
               ← 返回 Wiki
@@ -380,7 +380,7 @@ function TreePane({
         <Spinner />
       ) : pages.length === 0 ? (
         <div className="p-3">
-          <Empty text="还没有页面——去收件箱上传文档，织入后这里会长出目录树" />
+          <Empty text="还没有页面——在「原料」tab 上传文档，维护 Agent 会整理出目录树" />
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto p-2 [scrollbar-gutter:stable]">
@@ -543,7 +543,7 @@ function PageReader({
           ) : (
             <p className="text-sm text-muted-foreground">从左侧目录树选一页开始阅读；正文里的 wikilink 可直接跳转</p>
           )}
-          {hasPages && <p className="text-xs text-muted-foreground/80">织入的页面按文件夹层级自动归档</p>}
+          {hasPages && <p className="text-xs text-muted-foreground/80">Agent 整理的页面按文件夹层级自动归档</p>}
         </div>
       </Card>
     )

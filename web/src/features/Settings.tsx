@@ -768,7 +768,7 @@ function WebReaderPane() {
         <div>
           <div className="font-medium">网页读取（web-reader）</div>
           <div className="text-sm text-muted-foreground mt-1">
-            配置智谱 web-reader key 后，URL 摄取与维护 Agent 用其抓取网页正文（SPA/JS
+            配置智谱 web-reader key 后，URL 入库与维护 Agent 用其抓取网页正文（SPA/JS
             渲染页支持）；未配置时回落本地抓取（质量降级）。
           </div>
         </div>
