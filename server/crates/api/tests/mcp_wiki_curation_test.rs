@@ -57,10 +57,6 @@ async fn wiki_curation_read_actions_reachable() {
     let (_, v) = mcp_rpc(&ctx.app, &key, wiki_call("query_gaps", json!({}))).await;
     assert!(v.get("error").is_none(), "query_gaps 应可达: {v}");
 
-    // proposals：无提案 → 空数组
-    let (_, v) = mcp_rpc(&ctx.app, &key, wiki_call("proposals", json!({}))).await;
-    assert!(v.get("error").is_none(), "proposals 应可达: {v}");
-
     // rebuild_links / rebuild_tsv：空库幂等 → 计数字段
     for action in ["rebuild_links", "rebuild_tsv"] {
         let (_, v) = mcp_rpc(&ctx.app, &key, wiki_call(action, json!({}))).await;
@@ -102,31 +98,6 @@ async fn wiki_curation_write_actions_roundtrip() {
         "purpose 读回应带 configured 标记: {text}"
     );
     assert!(text.contains("沉淀 RAG 学习知识"), "写读应一致: {text}");
-
-    // proposal_apply → get_page 落页验证
-    let (_, v) = mcp_rpc(
-        &ctx.app,
-        &key,
-        wiki_call(
-            "proposal_apply",
-            json!({
-                "slug": "t007-proposal-page",
-                "title": "T007 提案页",
-                "content": "# T007 提案页\n\n人审合入的内容。",
-                "via": "ai"
-            }),
-        ),
-    )
-    .await;
-    assert!(v.get("error").is_none(), "proposal_apply 应成功: {v}");
-    let (_, v) = mcp_rpc(
-        &ctx.app,
-        &key,
-        wiki_call("get_page", json!({ "slug": "t007-proposal-page" })),
-    )
-    .await;
-    let text = v["result"]["content"][0]["text"].as_str().unwrap_or("");
-    assert!(text.contains("人审合入的内容"), "提案应已落页: {text}");
 
     // insight_dismiss：任意 key 幂等 ok
     let (_, v) = mcp_rpc(

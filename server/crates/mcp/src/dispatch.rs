@@ -469,7 +469,6 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                     | "delete_page"
                     | "merge"
                     | "purpose_set"
-                    | "proposal_apply"
                     | "repair"
                     | "repair_async"
                     | "insight_dismiss"
@@ -550,7 +549,6 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                     | "duplicates"
                     | "query_gaps"
                     | "folders"
-                    | "proposals"
             )
             | ("todos", "list" | "links" | "get")
             | ("tickets", "list" | "links" | "get" | "events")
