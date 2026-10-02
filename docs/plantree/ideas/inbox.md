@@ -23,4 +23,4 @@
 
 ## wiki 前端 agent-first 重设计（2026-10-02 侦察）
 
-背景：P004 织入流水线退役后 wiki 维护已 agent-first（harness 12 工具+MCP 28 actions），但前端 Wiki.tsx 还是人肉维护形态（1016 行：tree+编辑器+graph+inbox/ops 五 tab）。30+ HTTP 端点里版本管理/repair/query-gaps/duplicates/promotions 记录均无 UI；harness 干活（ingest 下发→job→report）在 wiki UI 完全不可见，要去 Jobs 页翻。人的核心职责（人审 reviews/proposals）面板较弱。设计方向：三层心智（知识层/检索层/Agent 层）+人审中心强化+ingest 语义改「喂给维护 Agent」+补版本/体检缺面板。已拍板（2026-10-02）：**不做人审**；晋升为 P008（plans/008-wiki-frontend-agentfirst）。
+背景：P004 织入流水线退役后 wiki 维护已 agent-first（harness 12 工具+MCP 28 actions），但前端 Wiki.tsx 还是人肉维护形态（1016 行：tree+编辑器+graph+inbox/ops 五 tab）。30+ HTTP 端点里版本管理/repair/query-gaps/duplicates/promotions 记录均无 UI；harness 干活（ingest 下发→job→report）在 wiki UI 完全不可见，要去 Jobs 页翻。人的核心职责（人审 reviews/proposals）面板较弱。设计方向：三层心智（知识层/检索层/Agent 层）+人审中心强化+ingest 语义改「喂给维护 Agent」+补版本/体检缺面板。已拍板（2026-10-02）：人审**整体移除**（非保留不升级——用户明确要求系统里人审相关全删）；晋升为 P008（plans/008-wiki-frontend-agentfirst），侦察结论与删除边界已入 README。

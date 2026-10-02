@@ -5,13 +5,20 @@ web 前端 Wiki.tsx 及相关组件重设计，对齐 P004 后的 agent-first wi
 
 ## 权威
 - 想法源：ideas/inbox.md「wiki 前端 agent-first 重设计」（已晋升）
-- 拍板（2026-10-02）：**不做人审环节**——agent 产出直接生效，人看结果不审批；reviews/proposals 前端保持现状不升级
-- 受影响模块：web（Wiki.tsx/DocumentsPane/新增组件）、server/api（如需 job report 查询端点复用 /jobs）
+- 拍板①（2026-10-02）：wiki 前端对齐 agent-first
+- 拍板②（2026-10-02）：**人审机制整体移除**——不是「前端不升级」保留现状，而是系统里人审相关的东西全删（后端 actions/端点/service+前端面板+测试）；agent 产出直接生效，不存在审批环节
+- 受影响模块：web（Wiki.tsx）、server/wiki-engine（review 模块）、server/mcp、server/api
 
-## 非目标
-- 人审中心/reviews+proposals UI 升级（用户明确否决）
-- wiki 后端功能变更（纯前端消费现有端点；缺数据才补只读端点）
-- 编辑器形态改造（现有 tree+编辑器保留）
+## 侦察结论（2026-10-02，删除边界已确认）
+- **harness/core 零依赖**：wiki_agent.rs 与 wiki_docs/ 无任何 review/proposal 引用——移除不伤 agent 写路径（安全）
+- **写入点 3 处**：review.rs（create_items/create_lint_items）、ingest.rs（织入退役链的 LLM flag 段+purpose_suggestion 段——两段都写 wiki_review_items）、lint_deep.rs:151（lint 深检产出待审项）
+- **读取/处理**：repair_ops.rs reviews/review_resolve 两 fn+service.rs apply_proposal（put_page 包装）
+- **表**：wiki_review_items（0012 建）——迁移只增不改纪律 → **留表停写**，代码全删
+- **前端**：Wiki.tsx InboxPane（inbox 面板）+ReviewAndProposals（ops proposals tab）
+- **测试**：wiki_test 3 用例（human_page_produces_proposal_not_overwrite/review_resolve_miss_returns_not_found/lint_deep_writes_review_items）+mcp_test action 计数 28→26+golden 重生成
+
+## 文件
+- roadmap.md：任务拆分与状态
 
 ## 文件
 - roadmap.md：任务拆分与状态
