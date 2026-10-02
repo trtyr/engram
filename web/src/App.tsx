@@ -24,8 +24,7 @@ import {
   Ticket,
   UserCircle,
   Users,
-  Waypoints,
-} from 'lucide-react'
+  Waypoints, GraduationCap } from 'lucide-react'
 import { clearToken, getToken, logoutSession } from '@/lib/api'
 import { useSystemStatus } from '@/lib/status'
 import { cn } from '@/lib/utils'
@@ -49,6 +48,7 @@ const Todos = lazy(() => import('@/features/Todos'))
 const Tickets = lazy(() => import('@/features/Tickets'))
 const Jobs = lazy(() => import('@/features/Jobs'))
 const Logs = lazy(() => import('@/features/Logs'))
+const Study = lazy(() => import('@/features/Study'))
 const Settings = lazy(() => import('@/features/Settings'))
 const Account = lazy(() => import('@/features/Account'))
 const Mcp = lazy(() => import('@/features/Mcp'))
@@ -87,6 +87,7 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
     items: [
       { to: '/jobs', label: '任务', icon: ListChecks, badge: (s) => s.failed || null },
       { to: '/logs', label: '日志', icon: ScrollText },
+      { to: '/study', label: '学习', icon: GraduationCap },
       { to: '/mcp', label: 'MCP', icon: Plug },
       { to: '/account', label: '账号与安全', icon: UserCircle },
       { to: '/settings', label: '设置', icon: SettingsIcon },
@@ -342,6 +343,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/tickets" element={<Tickets />} />
               <Route path="/jobs" element={<Jobs />} />
               <Route path="/logs" element={<Logs />} />
+              <Route path="/study" element={<Study />} />
               <Route path="/mcp" element={<Mcp />} />
               <Route path="/account" element={<Account />} />
         <Route path="/settings" element={<Settings />} />
