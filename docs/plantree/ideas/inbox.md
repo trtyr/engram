@@ -27,4 +27,4 @@
 
 ## todos 前端：详情查看+markdown 渲染（2026-10-02 侦察）
 
-用户报：①todo 没法像工单一样点击查看详情 ②markdown 渲染没做好。侦察（Todos.tsx 480 行 vs Tickets.tsx 对照）：todos 现状是纯行内操作（勾选/到期清理/归档/删除），无点击进详情、无 markdown 渲染；tickets 已有现成模式——selected 状态+TicketDetail 主从布局+WikiMarkdown 组件渲染详情。且 react-markdown 依赖已在 package.json，WikiMarkdown 组件现成——todos 补齐零新依赖。修法方向：抄 TicketDetail 主从模式（点行进详情）+详情内 content/note 用 WikiMarkdown 渲染。待拍板：立 P009 还是并入其他前端工作。
+用户报：①todo 没法像工单一样点击查看详情 ②markdown 渲染没做好。侦察（Todos.tsx 480 行 vs Tickets.tsx 对照）：todos 现状是纯行内操作（勾选/到期清理/归档/删除），无点击进详情、无 markdown 渲染；tickets 已有现成模式——selected 状态+TicketDetail 主从布局+WikiMarkdown 组件渲染详情。且 react-markdown 依赖已在 package.json，WikiMarkdown 组件现成——todos 补齐零新依赖。修法方向：抄 TicketDetail 主从模式（点行进详情）+详情内 content/note 用 WikiMarkdown 渲染。**已实现**（2026-10-02，并入 P008-T007，063d34b）。
