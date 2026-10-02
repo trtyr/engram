@@ -2,12 +2,15 @@
 
 ## 门禁留档（/tmp，会话级）
 
-| 闸 | 文件 | 结果 |
+| 闸 | 文件 | 结果（HEAD=352bc81） |
 |---|---|---|
-| workspace（终） | `/tmp/gate_o_ws_raw.log` | 见 HEAD b5a60c6 行 + WORKSPACE_EXIT |
-| clippy（终） | `/tmp/gate_o_clippy_raw.log` | 见 CLIPPY_EXIT |
-| web 三连 | `/tmp/gate_n_web.log` | TSC/LINT/BUILD EXIT=0 |
-| demo（dist 产物） | `/tmp/gate_n_demo.log` | 新面板全命中 + 退役词零残留 |
+| workspace | `/tmp/gate_q_ws_raw.log` | WORKSPACE_EXIT=0；79 ok / 0 FAILED（15:23:09→15:51:41Z） |
+| clippy 全仓 | `/tmp/gate_q_clippy_raw.log` | CLIPPY_EXIT=0（15:23:09→15:27:12Z） |
+| web 三连 | `/tmp/gate_q_web.log` | TSC_EXIT=0 / LINT 0 error / BUILD_EXIT=0 |
+| demo（dist 产物） | `/tmp/gate_q_demo.log` | 新面板全命中（维护 Agent 2/知识缺口/重复页/版本历史/喂给维护 Agent）+退役词 0 |
+
+注：gate_l（首轮）被门禁自身抓出 mcp_wiki_curation_test 漏网（EXIT=101）；
+gate_n/o/p 因提交与门禁并行导致 HEAD 错位，作废；**以 gate_q 为准**。
 
 ## 审计历次驳回与修正
 
