@@ -1190,7 +1190,7 @@ function OpsPanel({ lib }: { lib: string }) {
   )
 }
 
-/** Review 队列 + 人工页提案合流 */
+/** 原料管理：列出来源+级联删除 */
 function SourcesPane({ libSlug }: { libSlug: string }) {
   const [rows, setRows] = useState<{ id: string; title: string | null; status: string }[] | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
