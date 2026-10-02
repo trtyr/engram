@@ -835,11 +835,13 @@ function GraphPane({ libSlug }: { libSlug: string }) {
 
 // ---------- 运维二级入口 ----------
 
-type OpsSection = 'agent' | 'insights' | 'lint' | 'sources' | 'purpose'
+type OpsSection = 'agent' | 'insights' | 'gaps' | 'duplicates' | 'lint' | 'sources' | 'purpose'
 
 const OPS_SECTIONS: { value: OpsSection; label: string }[] = [
   { value: 'agent', label: '维护 Agent' },
   { value: 'insights', label: '洞察' },
+  { value: 'gaps', label: '知识缺口' },
+  { value: 'duplicates', label: '重复页' },
   { value: 'lint', label: 'Lint' },
   { value: 'sources', label: '原料' },
   { value: 'purpose', label: '目标' },
@@ -855,6 +857,144 @@ interface AgentJobRow {
 }
 
 /** 维护 Agent 面板：下发原料 + 内联 job 进度 + agent 报告 + 历史 run。 */
+interface QueryGapRow {
+  query: string
+  calls: number
+  zero_calls: number
+  low_calls: number
+  last_top_score: number | null
+  last_queried_at: string
+}
+
+/** 知识缺口：零命中/低分查询——内容缺口的直接信号。 */
+function GapsPanel() {
+  const [rows, setRows] = useState<QueryGapRow[] | null>(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    api
+      .get<{ gaps: QueryGapRow[] }>('/wiki/query-gaps')
+      .then((v) => setRows(v.gaps))
+      .catch((e) => setErr(String(e)))
+  }, [])
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        零命中=内容缺口，低分=召回存疑。复制查询词到「维护 Agent」tab 下发对应原料即可补齐。
+      </p>
+      {err && <ErrorBox msg={err} />}
+      {rows === null ? (
+        <Spinner />
+      ) : rows.length === 0 ? (
+        <Empty text="没有缺口——所有查询都有像样的命中" />
+      ) : (
+        <table className={tableCls.root}>
+          <thead>
+            <tr>
+              <th>查询词</th>
+              <th>零命中</th>
+              <th>低分</th>
+              <th>最后查询</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.query}>
+                <td className="font-medium">{r.query}</td>
+                <td>{r.zero_calls}</td>
+                <td>{r.low_calls}</td>
+                <td className="text-xs text-muted-foreground">{fmtTime(r.last_queried_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+interface DupCandidate {
+  norm_title: string
+  count: number
+  pages: { slug: string; title: string; page_type: string }[]
+}
+
+/** 重复页候选：同标题多页——确认后合并（primary 保留，duplicate 并入删除）。 */
+function DuplicatesPanel() {
+  const [rows, setRows] = useState<DupCandidate[] | null>(null)
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
+  const load = useCallback(() => {
+    api
+      .get<{ candidates: DupCandidate[] }>('/wiki/duplicates')
+      .then((v) => setRows(v.candidates))
+      .catch((e) => setErr(String(e)))
+  }, [])
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const merge = async (primary: string, duplicate: string) => {
+    if (!window.confirm(`把「${duplicate}」并入「${primary}」？duplicate 页会删除（内容拼接保留）。`)) return
+    setBusy(primary + duplicate)
+    setErr('')
+    setMsg('')
+    try {
+      await api.post('/wiki/pages/merge', { primary, duplicate })
+      setMsg(`已合并 ${duplicate} → ${primary}`)
+      load()
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {err && <ErrorBox msg={err} />}
+      {msg && <p className="text-sm text-emerald-600 dark:text-emerald-400">{msg}</p>}
+      {rows === null ? (
+        <Spinner />
+      ) : rows.length === 0 ? (
+        <Empty text="没有同标题重复页" />
+      ) : (
+        rows.map((c) => (
+          <Card key={c.norm_title} className="p-3 space-y-2">
+            <div className="text-sm font-medium">
+              「{c.norm_title}」× {c.count}
+            </div>
+            <div className="space-y-1">
+              {c.pages.map((pg, idx) => (
+                <div key={pg.slug} className="flex items-center gap-2 text-sm">
+                  <span className="text-xs text-muted-foreground">#{idx + 1}</span>
+                  <a
+                    className="hover:underline"
+                    href={`/wiki?slug=${encodeURIComponent(pg.slug)}`}
+                  >
+                    {pg.title || pg.slug}
+                  </a>
+                  <span className="text-xs opacity-50">{pg.slug}</span>
+                  {idx > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy === c.pages[0].slug + pg.slug}
+                      onClick={() => merge(c.pages[0].slug, pg.slug)}
+                    >
+                      并入 #1
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Card>
+        ))
+      )}
+    </div>
+  )
+}
+
 function AgentPanel() {
   const [mode, setMode] = useState<'url' | 'text'>('url')
   const [url, setUrl] = useState('')
@@ -1040,6 +1180,8 @@ function OpsPanel({ lib }: { lib: string }) {
       <h2 className="text-sm font-semibold">运维</h2>
       <Tabs items={OPS_SECTIONS} value={section} onChange={setSection} />
       {section === 'agent' && <AgentPanel />}
+      {section === 'gaps' && <GapsPanel />}
+      {section === 'duplicates' && <DuplicatesPanel />}
       {section === 'insights' && <InsightsPanel onHighlight={() => {}} libSlug={lib} />}
       {section === 'lint' && <LintPane libSlug={lib} />}
       {section === 'sources' && <SourcesPane libSlug={lib} />}
