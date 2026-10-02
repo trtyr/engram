@@ -128,6 +128,10 @@ impl LlmProvider for OpenAiCompatProvider {
             );
         }
 
+        // 诊断开关：ENGRAM_DUMP_REQ_PATH 设置时把请求体落盘（P004 demo 排查）
+        if let Ok(p) = std::env::var("ENGRAM_DUMP_REQ_PATH") {
+            let _ = std::fs::write(&p, body.to_string().as_bytes());
+        }
         let resp = self
             .post_with_retry("/v1/chat/completions", self.chat_timeout, &body)
             .await?;

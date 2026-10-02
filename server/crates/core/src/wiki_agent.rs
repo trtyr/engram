@@ -87,6 +87,8 @@ pub struct AgentDeps {
     pub pool: PgPool,
     pub registry: engram_llm::ProviderRegistry,
     pub data_dir: std::path::PathBuf,
+    /// purpose 序列化文本（run_agent 入口填充；None=未设置）
+    pub purpose_text: Option<String>,
 }
 
 impl AgentDeps {
@@ -116,8 +118,15 @@ fn tool_defs() -> Vec<ToolDef> {
         }
     }
     vec![
-        def("web_reader", "抓取网页正文（markdown，含标题/链接）。SPA/JS 渲染页可用。",
+        def("web_reader", "抓取网页正文（markdown）。SPA/JS 渲染页可用。正文落地为本地缓存原件，返回 cache_id+摘要；全文用 read_cache 分段读。",
             json!({"url": {"type": "string", "description": "完整 URL"}}), &["url"]),
+        def("read_cache", "读 web_reader 缓存的原件全文（分段）。首次调用 offset=0，之后用返回的 next_offset 续读。",
+            json!({
+                "cache_id": {"type": "string", "description": "web_reader 返回的 cache_id"},
+                "offset": {"type": "integer", "description": "起始字符偏移，默认 0"},
+                "limit": {"type": "integer", "description": "本次读取字符数，默认 4000，上限 8000"}
+            }),
+            &["cache_id"]),
         def("wiki_search", "按关键词检索 wiki 页面（FTS+向量混合），返回 slug/标题/摘要。",
             json!({"query": {"type": "string"}, "limit": {"type": "integer", "description": "默认 8"}}),
             &["query"]),
@@ -153,8 +162,9 @@ fn tool_defs() -> Vec<ToolDef> {
     ]
 }
 
-/// 工具结果截断（防上下文爆炸）。
-const TOOL_RESULT_MAX: usize = 16_000;
+/// 工具结果截断（防上下文爆炸；兼防大 body 请求触发网关响应聚合坏帧——
+/// 实测 >15KB 的第二轮请求在新api 链路稳定 500 bad_response_body，P004-T010 demo 实证）
+const TOOL_RESULT_MAX: usize = 4_000;
 
 fn truncate(s: String) -> String {
     if s.chars().count() <= TOOL_RESULT_MAX {
@@ -183,9 +193,62 @@ async fn execute_tool(
                 .read_url(url)
                 .await
                 .map_err(|e| format!("抓取失败: {e}"))?;
+            // 原件落地：抓取正文写本地缓存（data_dir/web_cache），LLM 用 read_cache 分段读——
+            // 大上下文不进对话（P004-T010 架构拍板：缓存原件+read 工具自取）
+            let cache_id = format!("wc-{}", &Uuid::now_v7().simple().to_string()[..16]);
+            let cache_dir = deps.data_dir.join("web_cache");
+            tokio::fs::create_dir_all(&cache_dir)
+                .await
+                .map_err(|e| format!("缓存目录创建失败: {e}"))?;
+            let title = page.title.clone().unwrap_or_else(|| url.to_string());
+            let full = format!(
+                "# {}\n\nSource: {}\n\n{}",
+                title, url, page.content_markdown
+            );
+            let chars = full.chars().count();
+            tokio::fs::write(cache_dir.join(format!("{cache_id}.md")), &full)
+                .await
+                .map_err(|e| format!("缓存写入失败: {e}"))?;
+            let preview: String = page.content_markdown.chars().take(600).collect();
             Ok(truncate(
-                json!({"title": page.title, "url": url, "content": page.content_markdown})
-                    .to_string(),
+                json!({
+                    "cache_id": cache_id,
+                    "title": title,
+                    "url": url,
+                    "chars": chars,
+                    "preview": preview,
+                    "hint": "全文已缓存——用 read_cache{cache_id, offset} 分段读（默认每次 4000 字）"
+                })
+                .to_string(),
+            ))
+        }
+        "read_cache" => {
+            let cache_id = args["cache_id"].as_str().ok_or("缺 cache_id")?;
+            // 防路径穿越：仅允许 wc- 前缀哈希标识
+            if !cache_id.starts_with("wc-") || cache_id.contains("..") || cache_id.contains('/') {
+                return Err("cache_id 非法".into());
+            }
+            let offset = args["offset"].as_u64().unwrap_or(0) as usize;
+            let limit = args["limit"].as_u64().unwrap_or(4_000).min(8_000) as usize;
+            let path = deps.data_dir.join("web_cache").join(format!("{cache_id}.md"));
+            let full = tokio::fs::read_to_string(&path)
+                .await
+                .map_err(|e| format!("缓存读取失败（cache_id 是否有效）: {e}"))?;
+            let total = full.chars().count();
+            let start = offset.min(total);
+            let seg: String = full.chars().skip(start).take(limit).collect();
+            let has_more = start + limit < total;
+            Ok(truncate(
+                json!({
+                    "cache_id": cache_id,
+                    "offset": start,
+                    "returned": seg.chars().count(),
+                    "total_chars": total,
+                    "has_more": has_more,
+                    "next_offset": if has_more { Some(start + limit) } else { None },
+                    "content": seg,
+                })
+                .to_string(),
             ))
         }
         "wiki_search" => {
@@ -296,11 +359,11 @@ async fn execute_tool(
 }
 
 /// system 提示词：身份 + purpose + 工具纪律。
-async fn build_system(deps: &AgentDeps, lib: Uuid) -> String {
-    let purpose_text = match deps.wiki().get_purpose(lib).await {
-        Ok(p) => serde_json::to_string_pretty(&p).unwrap_or_default(),
-        Err(_) => "（未设置）".into(),
-    };
+fn build_system_static(deps: &AgentDeps, _lib: Uuid) -> String {
+    let purpose_text = deps
+        .purpose_text
+        .clone()
+        .unwrap_or_else(|| "（未设置）".into());
     format!(
         "你是 engram wiki 库的维护 Agent。你通过工具读取/检索/写入 wiki 页面，\
 把知识整理成结构化、互链的页面网络（Karpathy LLM Wiki 模式：wiki 即你的记忆）。\n\n\
@@ -342,11 +405,27 @@ pub async fn run_agent<P: LlmProvider + 'static>(
 ) -> Result<AgentReport, AgentError> {
     let started = Instant::now();
     let lib = task.lib;
+    let purpose_text = match deps.wiki().get_purpose(lib).await {
+        Ok(p) => serde_json::to_string_pretty(&p).ok(),
+        Err(_) => None,
+    };
+    let deps = AgentDeps {
+        purpose_text,
+        pool: deps.pool.clone(),
+        registry: deps.registry.clone(),
+        data_dir: deps.data_dir.clone(),
+    };
     let defs = tool_defs();
-    let mut messages = vec![
-        ChatMessage::system(build_system(deps, lib).await),
-        ChatMessage::user(build_user_msg(task)),
-    ];
+    // 工具记录累积进单条 user 消息（不用 assistant tool_calls / tool 角色回填——
+    // 部分网关渠道对 tool 角色回填的上游转发存在坏响应 bug，P004-T010 demo 实证；
+    // 文本协议回填对任何 OpenAI 兼容上游稳定）
+    let mut user_accum = build_user_msg(task);
+    let rebuild = |user_accum: &str| -> Vec<ChatMessage> {
+        vec![
+            ChatMessage::system(build_system_static(&deps, lib)),
+            ChatMessage::user(user_accum.to_string()),
+        ]
+    };
     let mut report = AgentReport {
         rounds: 0,
         llm_calls: 0,
@@ -381,7 +460,7 @@ pub async fn run_agent<P: LlmProvider + 'static>(
 
         let req = ChatRequest {
             model: model.clone(),
-            messages: messages.clone(),
+            messages: rebuild(&user_accum),
             temperature: Some(0.3),
             json_mode: false,
             // 限响应长度：部分网关对长非流式响应的聚合转发不稳（bad_response_body）
@@ -406,14 +485,11 @@ pub async fn run_agent<P: LlmProvider + 'static>(
 
         match resp.tool_calls {
             Some(calls) if !calls.is_empty() => {
-                messages.push(ChatMessage::assistant_with_tool_calls(
-                    resp.content.clone(),
-                    calls.clone(),
-                ));
+                user_accum.push_str(&format!("\n\n## 第 {} 轮工具调用\n", report.rounds));
                 for call in calls {
                     let t1 = Instant::now();
                     let destructive = matches!(call.name.as_str(), "delete_page" | "merge_pages");
-                    let result = execute_tool(deps, lib, &call.name, &parse_args(&call.arguments), &mut report.pages_touched).await;
+                    let result = execute_tool(&deps, lib, &call.name, &parse_args(&call.arguments), &mut report.pages_touched).await;
                     report.tool_calls += 1;
                     let ok = result.is_ok();
                     // 审计（拍板②）：全工具留痕，破坏性标记 destructive
@@ -431,7 +507,10 @@ pub async fn run_agent<P: LlmProvider + 'static>(
                         Ok(s) => s,
                         Err(e) => format!("{{\"error\": {}}}", serde_json::to_string(&e).unwrap_or_default()),
                     };
-                    messages.push(ChatMessage::tool_result(call.id.clone(), content));
+                    user_accum.push_str(&format!(
+                        "\n### {}\n{}\n",
+                        call.name, content
+                    ));
                 }
             }
             _ => {
@@ -513,6 +592,7 @@ pub fn register_agent_handler(
                 .and_then(|v| serde_json::from_value(v).map_err(|e| JobError::Permanent(format!("task 解析失败: {e}"))))?;
             let job_id = ctx.job.id;
             let deps = AgentDeps {
+                purpose_text: None,
                 pool: ctx.pool().clone(),
                 registry,
                 data_dir,

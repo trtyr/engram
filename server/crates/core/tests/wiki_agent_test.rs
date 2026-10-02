@@ -1,4 +1,6 @@
 //! wiki Agent Harness 集成测试（P004-T010）：mock LLM 多轮工具循环 + 破坏性工具审计 + 预算降级。
+//! 真实 demo（demo_real_url）已于 2026-10-02 跑通：LangChain 链接→web-reader 抓取→缓存原件
+//! →LLM 分段读→建 3 页互链 6 条（118s，MiniMax-M3 经 newapi）。
 
 mod support;
 
@@ -87,6 +89,7 @@ async fn setup_deps() -> (AgentDeps, uuid::Uuid, tempfile::TempDir, support::Tes
             .unwrap();
     (
         AgentDeps {
+            purpose_text: None,
             pool,
             registry,
             data_dir: dir.path().to_path_buf(),
@@ -415,3 +418,43 @@ async fn demo_real_url_ingest_builds_pages() {
     assert!(page_count >= 2, "至少建 2 页");
     assert!(link_count >= 1, "至少 1 条互链");
 }
+
+/// 终极对照：同进程 reqwest Client 发「抓包文件字节」到真网关（诊断 reqwest 500 元凶）。
+#[tokio::test]
+#[ignore = "诊断探针：ENGRAM_DEMO_LLM_KEY + /tmp/req_dump.json 存在时运行"]
+async fn probe_reqwest_raw_dump_body() {
+    let key = std::env::var("ENGRAM_DEMO_LLM_KEY").unwrap();
+    let body = std::fs::read("/tmp/req_dump.json").unwrap();
+    let client = reqwest::Client::builder()
+        .http1_only()
+        .user_agent(concat!("engram-llm/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .unwrap();
+    // 1. 纯 reqwest + dump body
+    let r1 = client
+        .post("https://newapi.trtyr.top/v1/chat/completions")
+        .bearer_auth(&key)
+        .header("content-type", "application/json")
+        .body(body.clone())
+        .send()
+        .await
+        .unwrap();
+    eprintln!("PROBE reqwest+dump-body: HTTP {} len={}", r1.status(), body.len());
+    if r1.status().as_u16() != 200 {
+        eprintln!("PROBE body-snippet: {}", r1.text().await.unwrap_or_default().chars().take(200).collect::<String>());
+    }
+    // 2. reqwest 手动 json! 构造（模拟 chat.rs 的 json! 宏路径）
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let r2 = client
+        .post("https://newapi.trtyr.top/v1/chat/completions")
+        .bearer_auth(&key)
+        .json(&val)
+        .send()
+        .await
+        .unwrap();
+    eprintln!("PROBE reqwest+.json(Value): HTTP {}", r2.status());
+    if r2.status().as_u16() != 200 {
+        eprintln!("PROBE body-snippet: {}", r2.text().await.unwrap_or_default().chars().take(200).collect::<String>());
+    }
+}
+
