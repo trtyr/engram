@@ -12,18 +12,24 @@
 - [x] **T006 · 工作流手册**：《study×wiki×harness×memory 学习工作流分工手册》落档 engram projects（01a0fba1-506b，doc_search 18 行命中）。
 - [x] **Demo · 真实 track 留档**：study_mcp_lifecycle 以「RAG 入门」语义全链跑通（add→3 items→unit_set learned→get 全量留档输出：进度 1/3+next_up 2+资料清单）。
 
-## In Progress
+## Done
 
-**二期（做全，2026-10-02 立项）**——一期 MCP-only 的缺口补全：HTTP 面+前端+联动+复习+时间线。
+**二期（做全）六任务全落地（2026-10-02）：**
+
+- [x] **T007 · HTTP 端点** ✓ 433b589——study_routes 8 端点+utoipa paths 注册+openapi 快照同步+:ro 读放行
+- [x] **T008 · HTTP 集成测试** ✓ 87c3280——CRUD 全流程+:ro 拒写+错 scope 403（study_api_test 4 用例）
+- [x] **T009 · 前端学习页** ✓ a7718c0——Study.tsx（track 卡片+进度条+三态勾选+[[wiki]] 互链+表单）+App 注册；build/tsc/lint 净
+- [x] **T010 · harness 联动** ✓ eb51025——工具 10→12（study_list/study_update_item）+prompt 学习协同纪律+集成测试（DB learned 断言）
+- [x] **T011 · SRS 复习机制** ✓ 169d7ad——0066 加 needs_review/review_due_at+item_set_review/reviews_due（NULL=立即到期）+MCP/HTTP 双面+前端到期徽标
+- [x] **T012 · journal 时间线** ✓ 169d7ad——0066 加 study_track_journal+MCP journal_add/list+HTTP /journal+topic_get 带 recent_journal+前端时间线
+
+二期合计 6 commit（433b589/87c3280/a7718c0/eb51025/169d7ad+plan）；
+study actions 8→12（item_set_review/reviews_due/journal_add/journal_list）；
+HTTP 面 8→11 端点（+reviews+journal 两路径）；golden 已重生成。
 
 ## Next
 
-- [ ] **T007 · HTTP 端点**：study_routes（8 端点：GET/POST /study/topics、GET/PATCH/DELETE /study/topics/{id}、POST /study/topics/{id}/items、PATCH/DELETE /study/items/{id}）；utoipa paths 注册+openapi 快照同步；读端点 :ro 放行（对齐 MCP 语义）。
-- [ ] **T008 · HTTP 集成测试**：CRUD 全流程+`:ro` 拒写+非 study scope 403；测试绿是 T007 完成条件之一。
-- [ ] **T009 · 前端学习页**：web/src/features/Study.tsx（track 列表卡片+goal/进度条+节点三态勾选+wiki slug 链接+新建表单）+App.tsx 注册（nav+route）；web build+tsc+lint 净。
-- [ ] **T010 · harness 联动**：harness system prompt 加学习协同指引（建页时若命中 study track 知识点，提示/执行 unit_set+item_link——工具面 MCP 同源已可调）；集成测试。
-- [ ] **T011 · SRS 复习机制（最小）**：0066 迁移（items 加 needs_review 布尔+review_due_at）；MCP unit_set 扩展 needs_review 参数；复习队列查询（review_due_at 升序）；前端复习入口随 T009。
-- [ ] **T012 · journal 进度时间线**：0066 同迁移加 study_track_journal（track_id/ts/note）；MCP journal_add/journal_list；topic_get 带最近时间线。
+（空——二期收官）
 
 ## Deferred
 
