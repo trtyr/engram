@@ -137,6 +137,20 @@ impl MemoryService {
             self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
             self.fire_hit_feedback("scenarios", l2.iter().map(|h| h.id).collect());
         }
+        // T020：读取生命周期——只记元数据（层命中数/体量），查询正文不落日志
+        self.emit_mem_log(
+            "search",
+            serde_json::json!({
+                "query_chars": query.chars().count(),
+                "hits": {
+                    "entities": entities.len(),
+                    "l1_atoms": l1.len(),
+                    "l2_scenarios": l2.len(),
+                },
+                "no_feedback": no_feedback,
+            }),
+        )
+        .await;
         Ok(SearchResponse {
             entities,
             l1,

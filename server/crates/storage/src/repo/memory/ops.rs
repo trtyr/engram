@@ -84,17 +84,19 @@ pub async fn embedding_missing_counts(pool: &PgPool) -> StoreResult<(i64, i64)> 
     Ok((atoms_missing, scenarios_missing))
 }
 
-/// 编辑/清空类审计：写一条已完成的 job 行（谁、何时、干了什么）——不可抵赖凭证。
+/// 编辑/清空类审计（T001/Q001 拍板 2026-10-03「系统里没有 job，只有日志」）：
+/// 改写 logs 时间线（target=audit.<kind>，fields.audit=true，domain=memory），
+/// jobs 表不再收伪造 succeeded 行；历史审计行原地留存不回填。
 pub async fn audit(pool: &PgPool, kind: &str, payload: Value) {
-    sqlx::query(
-        "INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, \
-         progress, started_at, finished_at) \
-         VALUES ($1, $2, $3, 'succeeded', 1, 1, $3, now(), now())",
+    let fields = serde_json::json!({ "audit": true, "actor": "user", "payload": payload });
+    crate::repo::logs::emit_log(
+        pool,
+        "info",
+        &format!("audit.{kind}"),
+        &format!("审计：{kind}"),
+        Some(fields),
+        "memory",
     )
-    .bind(Uuid::now_v7())
-    .bind(kind)
-    .bind(payload)
-    .execute(pool)
     .await
     .ok();
 }

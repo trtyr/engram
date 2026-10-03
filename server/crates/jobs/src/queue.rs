@@ -194,17 +194,29 @@ impl JobQueue {
         message: &str,
         data: Option<serde_json::Value>,
     ) -> Result<(), JobError> {
-        sqlx::query(
-            "INSERT INTO logs (level, target, message, fields)
-             SELECT upper($2), 'job.' || COALESCE(kind, 'unknown'), $3,
-                    jsonb_build_object('job_id', $1::text) || COALESCE($4, '{}'::jsonb)
-             FROM (SELECT kind FROM jobs WHERE id = $1) k",
+        // T019 域化：kind → domain 表驱动（写入层单点 emit_log）
+        let kind: Option<String> =
+            sqlx::query_scalar("SELECT kind FROM jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
+        let kind = kind.unwrap_or_else(|| "unknown".into());
+        let mut fields = serde_json::Map::new();
+        fields.insert("job_id".into(), serde_json::Value::String(job_id.to_string()));
+        if let Some(obj) = data.as_ref().and_then(|d| d.as_object()) {
+            for (k, v) in obj {
+                fields.insert(k.clone(), v.clone());
+            }
+        }
+        engram_storage::repo::logs::emit_log(
+            &self.pool,
+            level,
+            &format!("job.{kind}"),
+            message,
+            Some(serde_json::Value::Object(fields)),
+            crate::domain_for_kind(&kind),
         )
-        .bind(job_id)
-        .bind(level)
-        .bind(message)
-        .bind(data.map(sqlx::types::Json))
-        .execute(&self.pool)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
         Ok(())

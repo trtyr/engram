@@ -160,6 +160,12 @@ impl MemoryService {
             src,
         )
         .await?;
+        // T020：写入生命周期（元数据零语义——记 key 与长度，不打 value 正文）
+        self.emit_mem_log(
+            "kv_put",
+            serde_json::json!({ "key": k, "value_chars": v.chars().count() }),
+        )
+        .await;
         Ok(row)
     }
 
@@ -232,6 +238,27 @@ impl MemoryService {
     /// 编辑/清空类审计：写一条已完成的 job 行（谁、何时、干了什么）——不可抵赖凭证。
     pub async fn audit(&self, kind: &str, payload: serde_json::Value) {
         repo::audit(&self.pool, kind, payload).await;
+    }
+
+    /// T020：记忆域生命周期日志——元数据零语义（不打正文），domain=memory。
+    pub async fn emit_mem_log(&self, action: &str, fields: serde_json::Value) {
+        let mut f = serde_json::Map::new();
+        f.insert("action".into(), serde_json::Value::String(action.into()));
+        if let Some(obj) = fields.as_object() {
+            for (k, v) in obj {
+                f.insert(k.clone(), v.clone());
+            }
+        }
+        engram_storage::repo::logs::emit_log(
+            &self.pool,
+            "info",
+            "memory.lifecycle",
+            action,
+            Some(serde_json::Value::Object(f)),
+            "memory",
+        )
+        .await
+        .ok();
     }
 
     /// P4 全量导出（数据主权）：记忆域五表完整快照，JSON 随身带走。

@@ -84,6 +84,13 @@ impl MemoryService {
             }
             _ => {}
         }
+        // T020：写入生命周期（agent + 轮数 + 体量，不打正文）
+        let turn_count = turns.as_array().map(|a| a.len()).unwrap_or(0);
+        self.emit_mem_log(
+            "write_session",
+            serde_json::json!({ "agent": agent, "turns": turn_count }),
+        )
+        .await;
         Ok(row)
     }
 
@@ -164,6 +171,12 @@ impl MemoryService {
                 .await
                 .ok();
         }
+        // T020：追加生命周期
+        self.emit_mem_log(
+            "session_append",
+            serde_json::json!({ "session": id.to_string(), "turns": arr.len() }),
+        )
+        .await;
         Ok(row)
     }
 

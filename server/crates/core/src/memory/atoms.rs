@@ -162,6 +162,14 @@ impl MemoryService {
             source_kind.unwrap_or("user_stated"),
         )
         .await?;
+        // T020：直写生命周期（kind + 体量 + 待审标记，不打正文）
+        self.emit_mem_log(
+            "atom_create",
+            serde_json::json!({
+                "kind": kind, "chars": content.chars().count(), "needs_review": needs_review,
+            }),
+        )
+        .await;
         Ok(row)
     }
 

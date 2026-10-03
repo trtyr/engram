@@ -83,6 +83,10 @@ export default function Logs() {
   const [scope, setScope] = useState<'all' | 'job' | 'system'>(
     () => (new URLSearchParams(window.location.search).get('scope') as 'job') || 'all',
   )
+  // T019 域化：memory / wiki / codegraph / system（'' = 全部）
+  const [domain, setDomain] = useState(
+    () => new URLSearchParams(window.location.search).get('domain') || '',
+  )
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [openJob, setOpenJob] = useState<string | null>(null)
@@ -99,6 +103,7 @@ export default function Logs() {
     if (since) p.set('since', since)
     // 范围与任务筛选都交给服务端——总数才会是真的
     if (scope !== 'all') p.set('scope', scope)
+    if (domain) p.set('domain', domain)
     if (scope === 'job' && openJob) p.set('job_id', openJob)
     api
       .get<{ logs: LogRow[]; total: number }>(`/logs?${p}`)
@@ -113,7 +118,7 @@ export default function Logs() {
     setRows(null)
     loadLogs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, q, audit, days, scope, openJob, page, pageSize])
+  }, [level, q, audit, days, scope, domain, openJob, page, pageSize])
 
   // 10s 自动刷新（保持当前页）
   useEffect(() => {
@@ -147,6 +152,13 @@ export default function Logs() {
             <option value="all">全部</option>
             <option value="job">仅后台</option>
             <option value="system">仅系统</option>
+          </select>
+          <select className={selectCls} value={domain} onChange={(e) => setDomain(e.target.value)}>
+            <option value="">全部域</option>
+            <option value="memory">记忆</option>
+            <option value="wiki">Wiki</option>
+            <option value="codegraph">代码图谱</option>
+            <option value="system">系统</option>
           </select>
           <select className={selectCls} value={level} onChange={(e) => setLevel(e.target.value)}>
             <option value="">全部级别</option>

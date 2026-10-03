@@ -116,7 +116,7 @@ async fn workflow_jobs_execute_serially_and_budget_gate_works() {
         );
     }
 
-    handle.shutdown_and_wait(Duration::from_secs(5));
+    handle.shutdown_and_wait(Duration::from_secs(5)).await;
 }
 
 #[tokio::test]
@@ -169,7 +169,7 @@ async fn llm_budget_exceeded_fails_job_with_clear_error() {
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
 
-    handle.shutdown_and_wait(Duration::from_secs(5));
+    handle.shutdown_and_wait(Duration::from_secs(5)).await;
 }
 
 /// 非 Admin 的 JEV 设置读取鉴权烟测（本文件顺带覆盖——settings 面与 runner 无关但同批）。

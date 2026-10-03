@@ -673,3 +673,219 @@ async fn logging_capture_integration() {
     audit_actions_land_in_logs().await;
     error_events_land_with_full_context().await;
 }
+
+/// P011 T019/T020/T001 域化顺序壳：一次完整记忆生命周期在 domain='memory' 全链可查。
+/// 覆盖三型：写入（write_session → memory.lifecycle）/ 读取（search → 元数据无正文）/
+/// 审计（erase_session → audit.* 走 logs，jobs 表不再收伪造行）。
+#[tokio::test]
+async fn memory_lifecycle_queryable_by_domain() {
+    let (layer, rx) = logging::channel();
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let (app, pg) = app().await;
+    let pool = connect_with_retry(&connection_url(&pg).await.unwrap()).await.unwrap();
+    let writer = logging::spawn_log_writer(pool.clone(), rx);
+    let token = support::login_token(&app).await;
+
+    // ① 写入：write_session（distill=off，不引蒸馏链）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/memory/sessions")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "agent": "pi",
+                        "turns": [{"speaker": "user", "text": "我住在杭州"}],
+                        "distill": "off",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::CREATED, "会话写入");
+    let created: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap(),
+    )
+    .unwrap();
+    let sid = created["id"].as_str().expect("session id").to_string();
+
+    // ② 读取：search（T020 只记元数据——查询正文不落日志）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/memory/search")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"query": "杭州住址", "max_items": 5}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK, "检索");
+
+    // ③ 审计：create_atom → update_atom 改写（edit_atom 审计——必然触发）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/memory/atoms")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "kind": "fact",
+                        "content": "用户住在杭州",
+                        "confidence": 0.9,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::CREATED, "原子直写");
+    let atom: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap(),
+    )
+    .unwrap();
+    let aid = atom["id"].as_str().expect("atom id").to_string();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/memory/atoms/{aid}"))
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"content": "用户住在杭州西湖区"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK, "原子改写");
+
+    // ④ 作废：erase_session（T001：audit 行走 logs，jobs 表不再收伪造 succeeded 行）
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/memory/sessions/{sid}"))
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        axum::http::StatusCode::NO_CONTENT,
+        "会话作废"
+    );
+
+    // 等 flush：轮询直到三型 lifecycle 行到齐（并行负载下固定 sleep 会漏）
+    let mut ready = false;
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM logs WHERE domain = 'memory' AND (\
+             (target = 'memory.lifecycle' AND fields->>'action' IN ('write_session','search')) \
+             OR target IN ('audit.edit_atom', 'audit.session_erase_cascade'))",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(0);
+        if n >= 3 {
+            ready = true;
+            break;
+        }
+    }
+    writer.abort();
+    if !ready {
+        let all: Vec<(String, String, i64)> = sqlx::query_as(
+            "SELECT target, domain, count(*) FROM logs GROUP BY target, domain ORDER BY count(*) DESC LIMIT 30",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+        let total: i64 = sqlx::query_scalar("SELECT count(*) FROM logs").fetch_one(&pool).await.unwrap_or(-1);
+        panic!("memory 域三型生命周期行应到齐——总行 {total}，分布: {all:?}");
+    }
+
+    // 断言 1：三型行都在 domain='memory'，且带域化字段
+    let rows: Vec<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT target, fields->>'action', domain FROM logs \
+         WHERE domain = 'memory' AND (target LIKE 'memory.lifecycle%' OR target LIKE 'audit.%') \
+         ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let actions: Vec<Option<String>> = rows.iter().map(|(_, a, _)| a.clone()).collect();
+    assert!(actions.iter().any(|a| a.as_deref() == Some("write_session")), "写入 lifecycle 行: {rows:?}");
+    assert!(actions.iter().any(|a| a.as_deref() == Some("search")), "读取 lifecycle 行");
+    assert!(
+        rows.iter().any(|(t, _, _)| t == "audit.edit_atom"),
+        "edit_atom 审计行（logs 域化路径）: {rows:?}"
+    );
+
+    // 断言 2：读取 lifecycle 只记元数据——查询正文「杭州住址」不得落日志
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM logs WHERE message LIKE '%杭州住址%' OR fields::text LIKE '%杭州住址%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0, "查询正文不得落日志（T020 元数据纪律）");
+
+    // 断言 3：audit.erase_session 不再进 jobs 表（T001 拍板）
+    let fake_jobs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind LIKE 'erase%' OR kind LIKE 'audit%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(fake_jobs, 0, "jobs 表不应再收审计伪造行");
+
+    // 断言 4：HTTP /logs?domain=system 不含 memory 域行（域过滤真的过滤了）
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/logs?domain=system&limit=500")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap(),
+    )
+    .unwrap();
+    let sys_targets: Vec<String> = body["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|l| l["target"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        !sys_targets.iter().any(|t| t.starts_with("memory.lifecycle") || t.starts_with("audit.")),
+        "system 域不应含 memory 生命周期/审计行: {sys_targets:?}"
+    );
+}

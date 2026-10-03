@@ -22,6 +22,9 @@ pub struct LogsQueryParams {
     /// 可选：按 request_id 贯穿筛
     #[schemars(description = "可选：按 request_id 贯穿筛（一次 HTTP 请求引发的全部日志）。")]
     pub request_id: Option<String>,
+    /// 可选：功能域筛（T019 域化）
+    #[schemars(description = "可选：功能域筛（memory=用户记忆蒸馏/审计 / wiki / codegraph / system=请求与错误）。")]
+    pub domain: Option<String>,
     /// 可选：起始时间（RFC3339）
     #[schemars(description = "可选：起始时间（RFC3339，如 2026-10-03T00:00:00Z）。")]
     pub since: Option<String>,
@@ -72,6 +75,7 @@ impl EngramMcpServer {
             request_id: p.request_id.as_deref(),
             job_id: p.job_id.as_deref(),
             job_scope: None,
+            domain: p.domain.as_deref(),
             since,
             until,
             audit_only: false,
@@ -119,7 +123,7 @@ impl EngramMcpServer {
     }
 
     /// 日志域（P010）：系统里发生的一切都在这里——请求/错误/后台执行。
-    /// 支持 level/q/job_id/request_id/时间窗过滤，另有 stats 聚合。
+    /// 支持 level/q/domain/job_id/request_id/时间窗过滤，另有 stats 聚合。
     /// 操作全景：action="help"。
     #[tool(
         name = "logs",

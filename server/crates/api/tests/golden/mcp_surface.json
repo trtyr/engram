@@ -111,7 +111,7 @@
         "readOnlyHint": true,
         "title": "日志域"
       },
-      "description": "日志域（P010）：系统里发生的一切都在这里——请求/错误/后台执行。\n支持 level/q/job_id/request_id/时间窗过滤，另有 stats 聚合。\n操作全景：action=\"help\"。\n\n【本域操作 2 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- query：查系统日志（系统里发生的一切：请求/错误/后台执行都在同一条时间线；可按 level/q/job_id/request_id/时间窗过滤）\n- stats：日志聚合（按 level 或 target 分组计数，一眼看系统态势）",
+      "description": "日志域（P010）：系统里发生的一切都在这里——请求/错误/后台执行。\n支持 level/q/domain/job_id/request_id/时间窗过滤，另有 stats 聚合。\n操作全景：action=\"help\"。\n\n【本域操作 2 个】调用形态 {\"action\":\"…\",…}；参数细节用 action=\"help\" 取\n- query：查系统日志（系统里发生的一切：请求/错误/后台执行都在同一条时间线；可按 level/q/domain/job_id/request_id/时间窗过滤；domain=memory 看记忆蒸馏与审计）\n- stats：日志聚合（按 level 或 target 分组计数，一眼看系统态势）",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,

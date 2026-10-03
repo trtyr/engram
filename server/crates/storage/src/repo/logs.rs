@@ -15,6 +15,8 @@ pub struct LogRow {
     pub message: String,
     pub fields: serde_json::Value,
     pub request_id: Option<String>,
+    /// 功能域（T019 域化）：memory / wiki / codegraph / system。
+    pub domain: String,
 }
 
 /// 日志过滤条件（全部可选；全部命中才返回）。
@@ -30,6 +32,8 @@ pub struct LogFilter<'a> {
     pub job_scope: Option<bool>,
     pub since: Option<chrono::DateTime<chrono::Utc>>,
     pub until: Option<chrono::DateTime<chrono::Utc>>,
+    /// 功能域过滤（T019 域化）：memory / wiki / codegraph / system；None=全部
+    pub domain: Option<&'a str>,
     /// 仅审计行（fields->>'audit' = 'true'）
     pub audit_only: bool,
     pub limit: i64,
@@ -73,6 +77,9 @@ fn push_filters<'args>(
     if let Some(until) = f.until {
         qb.push(" AND ts <= ").push_bind(until);
     }
+    if let Some(d) = f.domain {
+        qb.push(" AND domain = ").push_bind(d);
+    }
     if f.audit_only {
         qb.push(" AND fields->>'audit' = 'true'");
     }
@@ -81,7 +88,7 @@ fn push_filters<'args>(
 /// 查询（ts DESC + id DESC 稳定排序）。
 pub async fn query_logs(pool: &PgPool, f: &LogFilter<'_>) -> StoreResult<Vec<LogRow>> {
     let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
-        "SELECT id, ts, level, target, message, fields, request_id FROM logs WHERE 1=1",
+        "SELECT id, ts, level, target, message, fields, request_id, domain FROM logs WHERE 1=1",
     );
     push_filters(&mut qb, f);
     qb.push(" ORDER BY ts DESC, id DESC LIMIT ")
@@ -98,6 +105,30 @@ pub async fn count_logs_filtered(pool: &PgPool, f: &LogFilter<'_>) -> StoreResul
     push_filters(&mut qb, f);
     let n: i64 = qb.build_query_scalar().fetch_one(pool).await?;
     Ok(n)
+}
+
+/// 单点写入（T019 域化）：queue.emit 与 repo::audit 都走这里——
+/// INSERT INTO logs 的语句全仓只此一处，domain 在写入时显式落定。
+pub async fn emit_log(
+    pool: &PgPool,
+    level: &str,
+    target: &str,
+    message: &str,
+    fields: Option<serde_json::Value>,
+    domain: &str,
+) -> StoreResult<()> {
+    sqlx::query(
+        "INSERT INTO logs (level, target, message, fields, domain) \
+         VALUES (upper($1), $2, $3, $4, $5)",
+    )
+    .bind(level)
+    .bind(target)
+    .bind(message)
+    .bind(fields.map(sqlx::types::Json))
+    .bind(domain)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// 单桶计数（group_by 维度值 + 行数）。

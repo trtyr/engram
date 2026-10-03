@@ -214,7 +214,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "revive", true, "复活 dead/failed 的后台执行重跑（仅管理员——amk_ key 会收到明确拒绝）" => crate::jobs::JobsReviveParams
         ],
         "logs" => action_docs![
-            "query", false, "查系统日志（系统里发生的一切：请求/错误/后台执行都在同一条时间线；可按 level/q/job_id/request_id/时间窗过滤）" => crate::logs::LogsQueryParams;
+            "query", false, "查系统日志（系统里发生的一切：请求/错误/后台执行都在同一条时间线；可按 level/q/domain/job_id/request_id/时间窗过滤；domain=memory 看记忆蒸馏与审计）" => crate::logs::LogsQueryParams;
             "stats", false, "日志聚合（按 level 或 target 分组计数，一眼看系统态势）" => crate::logs::LogsStatsParams
         ],
         "study" => action_docs![

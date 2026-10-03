@@ -27,6 +27,8 @@ pub struct LogsQuery {
     pub job_id: Option<String>,
     /// 范围（P010）：all=全部（默认）/ job=仅后台（带 job_id）/ system=仅系统（不带 job_id）
     pub scope: Option<String>,
+    /// 功能域（T019 域化）：memory / wiki / codegraph / system；缺省=全部
+    pub domain: Option<String>,
     /// RFC3339
     pub since: Option<String>,
     pub until: Option<String>,
@@ -57,6 +59,7 @@ pub async fn list_logs(
             Some("system") => Some(false),
             _ => None,
         },
+        domain: p.domain.as_deref(),
         since,
         until,
         audit_only: p.audit.as_deref() == Some("true"),
