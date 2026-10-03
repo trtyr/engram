@@ -65,6 +65,29 @@
 - [ ] **T010 · mcp_test.rs:446 文案滞后**
   报错文案「应为十二个域工具」vs 断言 `tools.len()==13`（P010 加 logs 域后没跟）。
 
+### 能力候选（2026-10-03 L0→L1 机制讨论产生，待拍板排序）
+
+- [ ] **T011 · 蒸馏归因回执（段级判定可观测）**
+  extract 每段产出结构化回执：抽出 N 条候选 / 显式拒绝 + 理由短语——落任务事件流，
+  抽取率（拒收段占比）可统计。动机：误杀（相关被判无关）是沉默丢失，现在只有一句
+  「无持久洞察」日志；后续调 prompt v9+、评估保险级联全靠这个数据。背景：extract
+  prompt 规则 8 已要求「不值得记输出空数组.宁缺毋滥」（prompts.rs:40），但拒绝原因
+  不落盘。
+- [ ] **T012 · JEV 决策模型适配评估（openrouter typesafe/jev-1.13）**
+  System One 决策模型（choice/noul/score 三原语，typed 输出+概率，输出 token 免费，
+  $0.042/M 输入）。三落点：
+  ① **L0→L1 前置保险级联**（Jev-Verified Cascade 模式）：noul「此段含值得长期记住的
+  用户事实吗？」P<0.3 跳过 chat 抽取——便宜哨兵挡在贵模型前，比 chat 模型当保险
+  便宜一个量级且有概率阈值；
+  ② **arbitrate choice 化**：每候选 choice{new,duplicate,contradicts}，替换
+  prompt-and-parse；低置信进待审（顺治 T002 相关的漏判兜底问题）；
+  ③ **consolidate noul 化**：近重复「语义等价吗」判定。
+  凭证：`openrouter/engram`（credentials 域，2026-10-03 入库）。
+  **前置条件**：中文效果评测先行（官方案例全英文，engram 全中文记忆，p(yes) 校准度
+  未验证）；**风险**：/api/alpha/decisions 为 alpha 面、32k 上下文、arbitrate 的
+  target_id 指认是开放集合（choice 只判类型 + top1 相似当 target，或动态构造 criteria
+  编号选项——设计期定）。不适配：extract 开放抽取 / persona 生成（保持 chat 模型）。
+
 ## Deferred / 交叉引用
 
 - prompt_version 归因列（atoms/scenarios）→ **P001 Deferred 已挂**，不重复开
