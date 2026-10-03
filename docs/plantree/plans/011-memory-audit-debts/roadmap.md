@@ -89,6 +89,15 @@
   arbitrate：每候选 choice{new,duplicate,contradicts} 替换 prompt-and-parse，低置信
   进待审（顺治漏判兜底问题）；target 指认取 top1 相似（最简方案，设计期可复审）。
   consolidate：近重复「语义等价吗」noul 化。评测支撑：三判 7/7（T012 评测记录）。
+- [ ] **T016 · 蒸馏链 single-flight + LLM 熔断核查（T007 扩围）**
+  生产实锤（2026-10-03）：近 7 天 extract_atoms 12 dead / 17 succeeded（「网络错误或
+  超时」「熔断器打开」），且生产未配 per-kind 并发——蒸馏链走全局并发 4，organize
+  双跑会抢占同一批未归组原子（重复场景风险）、persona 双跑撞 UNIQUE(aspect,version)。
+  ① 立即：部署 env 配 `AGENT_MEMORY_JOB_CONCURRENCY=extract_atoms:1,organize_scenarios:1,
+  distill_persona:1,consolidate:1`（零代码，蒸馏链单飞）；② 代码级：蒸馏 kind 出厂默认
+  single-flight（不依赖 env）；③ 核查：蒸馏链篇坑 4「无熔断」部分过时——llm 层已有
+  熔断器（error 文案实证），budget 总闸仍缺，随 P012 T002 一并落地。
+  用户期望口径（2026-10-03）：「同一时刻只有一条路在跑——一旦并发了就会出问题。」
 
 ## Deferred / 交叉引用
 
