@@ -107,8 +107,8 @@ async fn mcp_initialize_and_list_tools() {
     // circles 共享 memory scope（registry.rs circles→memory），一并可见
     assert_eq!(
         names,
-        vec!["circles", "jobs", "memory", "search_all", "study"],
-        "memory-only key 应见 memory 域工具 + circles（共享 memory scope）与 search_all（jobs 无域 scope——任何合法凭证可见）"
+        vec!["circles", "jobs", "logs", "memory", "search_all", "study"],
+        "memory-only key 应见 memory 域工具 + circles（共享 memory scope）、search_all 与 jobs/logs（均无域 scope——任何合法凭证可见）"
     );
     let memory = tools
         .iter()
@@ -442,8 +442,8 @@ async fn mcp_admin_info_endpoint() {
     let tools = info["tools"].as_array().expect("工具清单");
     assert_eq!(
         tools.len(),
-        12,
-        "应为十一个域工具（含 jobs/tickets/assets/circles/study）+ search_all：{}",
+        13,
+        "应为十二个域工具（含 jobs/logs/tickets/assets/circles/study）+ search_all：{}",
         tools.len()
     );
     let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();
@@ -556,8 +556,8 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     sorted.sort();
     assert_eq!(
         sorted,
-        vec!["circles", "jobs", "memory", "search_all", "study"],
-        "域工具应保留（+跨域 search_all；jobs 无域 scope 恒可见；circles 共享 memory scope）：{names:?}"
+        vec!["circles", "jobs", "logs", "memory", "search_all", "study"],
+        "域工具应保留（+跨域 search_all；jobs/logs 无域 scope 恒可见；circles 共享 memory scope）：{names:?}"
     );
     // 描述目录里 write_session 应隐身
     let domain = result["tools"]
