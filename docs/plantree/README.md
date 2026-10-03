@@ -32,6 +32,7 @@
 | P008 | [wiki-frontend-agentfirst](plans/008-wiki-frontend-agentfirst/README.md) | web, server/wiki-engine, server/mcp, server/api | done | 人审机制整体移除（T001-T002）+Agent 维护流面板/版本 UI/体检补全/语义修正（T003-T006）+todos 详情/markdown（ideas 晋升 T007） | 8b97b26/f118992/7522406/b27d235/5ad386b/063d34b | 表 wiki_review_items 留停写；wiki actions 28→26 |
 | P009 | [frontend-ia-observability](plans/009-frontend-ia-observability/README.md) | web, deploy, server/api | done | 任务并入日志并移除任务入口/学习归资产域/日志 7 天窗口+长内容收起/已完成计数/账号拆三标签/网页读取归 AI 功能/生产 codegraph 数据根修复 | 2c5423a/72003f6/dbef672/cb7bf7d | — |
 | P010 | [logs-unify](plans/010-logs-unify/README.md) | server/logs, mcp, web, db | done | 日志统一为系统唯一时间线（job_events 并入 logs，迁移 67）；MCP logs 域；前端日志页重建为单线；任务概念退役 | 31ad8a4/2ad412d/891dbff/e2cb949 | — |
+| P011 | [memory-audit-debts](plans/011-memory-audit-debts/README.md) | server/distill, server/core/memory, server/storage, server/mcp | planning | 2026-10-03 memory 全链实读行为债登记：审计不进 logs 流/双 active/场景双轨漂移/update 清不掉字段/子串归并/claim 全表扫/LLM 无熔断/stale 注释×3——全待拍板（Q001-Q004） | — | 拍板 Q001-Q004 |
 
 ## Ideas
 
