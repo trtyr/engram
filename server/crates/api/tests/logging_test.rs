@@ -421,6 +421,90 @@ async fn logs_query_endpoint_filters_and_paginates() {
     );
 }
 
+/// P010：按 job_id 筛出某任务的完整生命周期日志（入队→开始→终态同一条时间线）。
+async fn logs_filter_by_job_id_returns_lifecycle() {
+    let (app, pg2) = app().await;
+    let url = connection_url(&pg2).await.unwrap();
+    let pool = connect_with_retry(&url).await.expect("连接");
+
+    let job = uuid::Uuid::now_v7();
+    let other = uuid::Uuid::now_v7();
+    // 造数：同一任务的三条生命周期日志（不同 level/时间）+ 另一任务的日志 + 无关日志
+    sqlx::query(
+        "INSERT INTO logs (ts, level, target, message, fields) VALUES
+         (now() - interval '3 min', 'INFO',  'job.cg_index', '任务入队',   jsonb_build_object('job_id', $1::text)),
+         (now() - interval '2 min', 'INFO',  'job.cg_index', '开始执行',   jsonb_build_object('job_id', $1::text)),
+         (now() - interval '1 min', 'ERROR', 'job.cg_index', '任务失败（可重试）: boom', jsonb_build_object('job_id', $1::text, 'retryable', true)),
+         (now(),                    'INFO',  'job.other',    '别的任务',   jsonb_build_object('job_id', $2::text)),
+         (now(),                    'INFO',  'api',          '无关日志',   '{}')",
+    )
+    .bind(job)
+    .bind(other)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let token = support::login_token(&app).await;
+    let resp = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .uri(format!("/logs?job_id={job}"))
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let logs = v["logs"].as_array().unwrap();
+    assert_eq!(logs.len(), 3, "该任务的 3 条生命周期日志应全返回: {v}");
+    let msgs: Vec<&str> = logs
+        .iter()
+        .map(|l| l["message"].as_str().unwrap())
+        .collect();
+    assert!(msgs.contains(&"任务入队"), "含入队: {msgs:?}");
+    assert!(msgs.contains(&"开始执行"), "含开始: {msgs:?}");
+    assert!(
+        msgs.iter().any(|m| m.contains("任务失败")),
+        "含终态: {msgs:?}"
+    );
+    assert!(
+        !msgs.contains(&"别的任务") && !msgs.contains(&"无关日志"),
+        "不得混入其它任务/无关日志: {msgs:?}"
+    );
+
+    // 既有参数不回归：level 过滤 + job_id 组合
+    let resp = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri(format!("/logs?job_id={job}&level=ERROR"))
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        v["logs"].as_array().unwrap().len(),
+        1,
+        "job_id + level 组合应只剩失败那条"
+    );
+    assert_eq!(v["logs"][0]["level"], "ERROR");
+}
+
 /// P006-T003：error 级事件自动落 logs——source 链/category/request_id 三要素齐全，
 /// internal_bug 类带 alert 告警标记（ErrorCategory::InternalBug 归因驱动）。
 async fn error_events_land_with_full_context() {
@@ -554,6 +638,7 @@ async fn logging_capture_integration() {
     retention_deletes_old_keeps_recent().await;
     request_id_generated_and_echoed().await;
     logs_query_endpoint_filters_and_paginates().await;
+    logs_filter_by_job_id_returns_lifecycle().await;
     error_envelope_carries_code_category_rid_no_secrets().await;
     request_log_lands_with_request_id().await;
     audit_actions_land_in_logs().await;

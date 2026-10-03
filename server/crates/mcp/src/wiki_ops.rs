@@ -354,7 +354,7 @@ impl EngramMcpServer {
         ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
     }
 
-    /// 修复异步入队（大库友好）——任务页可查进度与历史。
+    /// 修复异步入队（大库友好）——日志页可按 job_id 查进度与历史。
     pub(crate) async fn wiki_repair_async(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -368,7 +368,7 @@ impl EngramMcpServer {
             .map_err(|e| mcp_err(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string()))?;
         ok_json(serde_json::json!({
             "job_id": job_id,
-            "note": "修复已入队——GET /jobs/{job_id} 或任务页查进度",
+            "note": "修复已入队——日志页按 job_id 筛可看进度，或 GET /jobs/{job_id}",
         }))
     }
 

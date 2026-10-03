@@ -37,7 +37,7 @@ pub(crate) fn flat_tool_scope(other: &str) -> &'static str {
 /// MCP instructions：initialize 时返回给调用方 AI 的顶层使用说明。
 pub(crate) const SERVER_INSTRUCTIONS: &str = "\
 Engram —— 单用户 AI 长期记忆平台。MCP 工具面采用渐进式发现：十个领域各一个入口工具\
-（memory 用户记忆 / projects 工作线 / assets 资产台账 / credentials 机密凭据 / circles 圈子实体图 / wiki 知识库 / todos 待办 / tickets 工单 / codegraph 代码图谱 / jobs 任务），\
+（memory 用户记忆 / projects 工作线 / assets 资产台账 / credentials 机密凭据 / circles 圈子实体图 / wiki 知识库 / todos 待办 / tickets 工单 / codegraph 代码图谱 / jobs 后台执行），\
 外加跨域全局检索 search_all（一次查询并发四域，各回 top-k 摘要；机密域 credentials 不进全局检索）。\
 域工具调用形态 {\"action\":\"<操作名>\", ...参数}；每个工具的描述里带操作目录（常驻可见），\
 参数细节用 {\"action\":\"help\"} 一轮取回全域操作手册。

@@ -139,7 +139,7 @@ impl ServerHandler for EngramMcpServer {
                     "search_all" => ["memory", "wiki", "todos", "project"]
                         .iter()
                         .any(|s| p.domain_access(s) != DomainAccess::None),
-                    // jobs 无域 scope（对齐 HTTP：任何合法凭证可读任务——AI 轮询自己触发的任务）
+                    // jobs 无域 scope（对齐 HTTP：任何合法凭证可读后台执行——AI 轮询自己触发的）
                     "jobs" => true,
                     name => {
                         p.domain_access(tool_scope(name)) != DomainAccess::None

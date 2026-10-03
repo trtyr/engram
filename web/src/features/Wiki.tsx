@@ -1143,9 +1143,9 @@ function AgentPanel() {
 
       {/* 历史 run */}
       <Card className="p-4">
-        <div className="text-sm font-medium mb-2">最近维护任务</div>
+        <div className="text-sm font-medium mb-2">最近维护执行</div>
         {history.length === 0 ? (
-          <Empty text="还没有维护任务——上面喂一份原料试试" />
+          <Empty text="还没有维护执行——上面喂一份原料试试" />
         ) : (
           <table className={tableCls.root}>
             <thead>

@@ -274,6 +274,17 @@ async fn execute_job(queue: &JobQueue, handlers: Arc<HashMap<String, HandlerFn>>
         return;
     };
 
+    // 执行起点标记（P010：任务生命周期进统一日志流，与入队/终态构成完整时间线）
+    queue
+        .emit(
+            job.id,
+            "info",
+            "开始执行",
+            Some(serde_json::json!({ "kind": job.kind, "attempt": job.attempts })),
+        )
+        .await
+        .ok();
+
     let ctx = JobContext {
         job: job.clone(),
         queue: queue.clone(),

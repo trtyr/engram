@@ -1,14 +1,15 @@
-//! jobs 域参数（EN-61）：AI 轮询异步任务的状态/错误/救活——闭环 codegraph index/sync 链路。
+//! jobs 域参数（EN-61）：**内部调度面**——轮询后台执行的状态/错误/救活。
+//! 用户可见的概念只有「日志」：执行的生命周期在 logs 时间线上（logs.query 带 job_id）。
 //!
-//! 权限对齐 HTTP 侧：list/get/events 任何合法凭证可读（AI 轮询自己触发的任务）；
+//! 权限对齐 HTTP 侧：list/get/events 任何合法凭证可读（AI 轮询自己触发的执行）；
 //! revive 仅管理员（与 POST /jobs/{id}/revive 同语义）。
 
 use rmcp::schemars::JsonSchema;
 
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 pub struct JobsListParams {
-    /// 可选：任务种类过滤（逗号分隔，如 cg_index,cg_sync）
-    #[schemars(description = "可选：任务种类过滤（逗号分隔，如 cg_index,cg_sync）。")]
+    /// 可选：执行种类过滤（逗号分隔，如 cg_index,cg_sync）
+    #[schemars(description = "可选：执行种类过滤（逗号分隔，如 cg_index,cg_sync）。")]
     pub kind: Option<String>,
     /// 可选：状态过滤（逗号分隔：pending,running,succeeded,failed,dead）
     #[schemars(
@@ -25,15 +26,15 @@ pub struct JobsListParams {
 
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 pub struct JobsGetParams {
-    /// 任务 id（codegraph index/sync 与 gc 自愈返回的 job_id）
-    #[schemars(description = "任务 id（codegraph index/sync 与 gc 自愈返回的 job_id）。")]
+    /// 执行 id（codegraph index/sync 与 gc 自愈返回的 job_id）
+    #[schemars(description = "执行 id（codegraph index/sync 与 gc 自愈返回的 job_id）。")]
     pub id: String,
 }
 
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 pub struct JobsEventsParams {
-    /// 任务 id
-    #[schemars(description = "任务 id。")]
+    /// 执行 id
+    #[schemars(description = "执行 id。")]
     pub id: String,
     /// 可选：增量游标（上一批最后事件 id）
     #[schemars(description = "可选：增量游标（上一批最后事件 id）。")]
@@ -45,8 +46,8 @@ pub struct JobsEventsParams {
 
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 pub struct JobsReviveParams {
-    /// 任务 id（dead/failed 的任务）
-    #[schemars(description = "任务 id（dead/failed 的任务）。")]
+    /// 执行 id（dead/failed 的后台执行）
+    #[schemars(description = "执行 id（dead/failed 的后台执行）。")]
     pub id: String,
 }
 
@@ -56,7 +57,7 @@ use super::*;
 
 #[tool_router(router = jobs_router)]
 impl EngramMcpServer {
-    // ---------- 异步任务域（EN-61）：job 状态/错误/事件/救活——闭环 AI 侧异步链路 ----------
+    // ---------- 后台执行域（EN-61）：job 状态/错误/过程/救活——内部调度面 ----------
 
     /// 解析 jobs.list 的状态过滤字面量（唯一收口 `JobStatus::parse_filter`，与 HTTP 同口径；非法值报错，RJ-02）。
     pub(crate) fn parse_job_statuses(
@@ -78,7 +79,7 @@ impl EngramMcpServer {
         }
     }
 
-    /// 任务列表（EN-61）：codegraph index/sync 与 gc 自愈的 job 都在这。
+    /// 后台执行列表（EN-61，内部调度面）：codegraph index/sync 与 gc 自愈的 job 都在这。
     pub(crate) async fn jobs_list(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -130,7 +131,7 @@ impl EngramMcpServer {
         })))
     }
 
-    /// 任务详情（EN-61）：状态/错误/attempts——job_id 从 codegraph index/sync 返回拿。
+    /// 后台执行详情（EN-61）：状态/错误/attempts——job_id 从 codegraph index/sync 返回拿。
     pub(crate) async fn jobs_get(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -140,7 +141,7 @@ impl EngramMcpServer {
         let id = Uuid::parse_str(&params.0.id).map_err(|_| {
             mcp_err(
                 ErrorCode::INVALID_PARAMS,
-                format!("任务 id 不是合法 UUID：{}", params.0.id),
+                format!("执行 id 不是合法 UUID：{}", params.0.id),
             )
         })?;
         let job = engram_jobs::JobQueue::new(self.state.pool.clone())
@@ -150,20 +151,20 @@ impl EngramMcpServer {
             .ok_or_else(|| {
                 mcp_err(
                     ErrorCode::INVALID_PARAMS,
-                    format!("任务 {id} 不存在——codegraph index/sync 的返回里有 job_id"),
+                    format!("执行 {id} 不存在——codegraph index/sync 的返回里有 job_id"),
                 )
             })?;
-        // EN-238①：succeeded 但 error 非空 = 部分成功（子任务警告）——显式派生标记消歧义
+        // EN-238①：succeeded 但 error 非空 = 部分成功（子步骤警告）——显式派生标记消歧义
         let partial = matches!(job.status, engram_jobs::types::JobStatus::Succeeded)
             && job.error.as_deref().is_some_and(|e| !e.trim().is_empty());
         Ok(CallToolResult::structured(serde_json::json!({
             "job": job,
             "partial": partial,
-            "hint": "failed/dead 时看 error 字段定因；succeeded 但 partial=true 表示部分子任务失败（error 是警告，最终态成功）；dead 可让管理员 revive（Web 控制台或 admin token）",
+            "hint": "failed/dead 时看 error 字段定因；succeeded 但 partial=true 表示部分子步骤失败（error 是警告，最终态成功）；dead 可让管理员 revive（Web 控制台或 admin token）",
         })))
     }
 
-    /// 任务事件时间线（EN-61）：增量轮询（after=上一批最后事件 id）。
+    /// 后台执行的过程行（EN-61）：增量轮询（after=上一批最后事件 id）；与 logs 域同源。
     pub(crate) async fn jobs_events(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -173,7 +174,7 @@ impl EngramMcpServer {
         let id = Uuid::parse_str(&params.0.id).map_err(|_| {
             mcp_err(
                 ErrorCode::INVALID_PARAMS,
-                format!("任务 id 不是合法 UUID：{}", params.0.id),
+                format!("执行 id 不是合法 UUID：{}", params.0.id),
             )
         })?;
         let rows = engram_jobs::JobQueue::new(self.state.pool.clone())
@@ -187,7 +188,7 @@ impl EngramMcpServer {
         })))
     }
 
-    /// 复活 dead/failed 任务（EN-61）：仅管理员（与 HTTP POST /jobs/{id}/revive 同语义）。
+    /// 复活 dead/failed 的后台执行（EN-61）：仅管理员（与 HTTP POST /jobs/{id}/revive 同语义）。
     pub(crate) async fn jobs_revive(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -198,24 +199,24 @@ impl EngramMcpServer {
             Principal::ApiKey { .. } => {
                 return Err(mcp_err(
                     ErrorCode::INVALID_REQUEST,
-                    "任务复活仅管理员——用 Web 控制台操作，或让管理员处理（HTTP POST /jobs/{id}/revive 同语义）",
+                    "后台执行复活仅管理员——用 Web 控制台操作，或让管理员处理（HTTP POST /jobs/{id}/revive 同语义）",
                 ));
             }
         }
         let id = Uuid::parse_str(&params.0.id).map_err(|_| {
             mcp_err(
                 ErrorCode::INVALID_PARAMS,
-                format!("任务 id 不是合法 UUID：{}", params.0.id),
+                format!("执行 id 不是合法 UUID：{}", params.0.id),
             )
         })?;
         let queue = engram_jobs::JobQueue::new(self.state.pool.clone());
         queue.revive(id).await.map_err(Self::from_job)?;
-        // 复活后回读确认——非 dead/failed 的任务 UPDATE 影响 0 行，如实告知而非假成功
+        // 复活后回读确认——非 dead/failed 的执行 UPDATE 影响 0 行，如实告知而非假成功
         let job = queue
             .get(id)
             .await
             .map_err(Self::from_job)?
-            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("任务 {id} 不存在")))?;
+            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("执行 {id} 不存在")))?;
         if matches!(
             job.status,
             engram_jobs::types::JobStatus::Failed | engram_jobs::types::JobStatus::Dead
@@ -224,24 +225,24 @@ impl EngramMcpServer {
                 "revived": false,
                 "id": id,
                 "status": job.status.to_string(),
-                "hint": "只有 dead/failed 任务能复活——当前状态不符合",
+                "hint": "只有 dead/failed 的后台执行能复活——当前状态不符合",
             })));
         }
         Ok(CallToolResult::structured(serde_json::json!({
             "revived": true,
             "id": id,
             "status": job.status.to_string(),
-            "hint": "任务已回 pending 重新调度——用 jobs get 跟进进展",
+            "hint": "已回 pending 重新调度——用 jobs get 跟进进展，或在日志页按 job_id 跟踪",
         })))
     }
 
-    /// 异步任务域（EN-61）：轮询 job 状态/错误/事件，闭环 codegraph index/sync
+    /// 后台执行域（EN-61，**内部调度面**）：轮询 job 状态/错误/过程。
     /// 的异步链路（拿到 job_id 不再干看着）。list/get/events 任何合法凭证可读；
-    /// revive 复活 dead/failed 任务仅管理员（与 HTTP 同语义）。操作全景：action="help"。
+    /// revive 复活 dead/failed 仅管理员（与 HTTP 同语义）。用户概念只有「日志」。操作全景：action="help"。
     #[tool(
         name = "jobs",
         annotations(
-            title = "异步任务域",
+            title = "后台执行域（内部调度面）",
             read_only_hint = false,
             destructive_hint = true,
             idempotent_hint = false,

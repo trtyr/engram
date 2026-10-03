@@ -162,9 +162,9 @@ pub struct WikiWritePageParams {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiIngestParams {
-    /// 任务指令（可选：不给则默认「阅读原料沉淀为 wiki 知识页」）
+    /// 维护指令（可选：不给则默认「阅读原料沉淀为 wiki 知识页」）
     #[schemars(
-        description = "可选：给维护 Agent 的任务指令（如「整理成对比页」）。缺省为「阅读原料，沉淀为 wiki 知识页（建页/更新/互链）」。"
+        description = "可选：给维护 Agent 的指令（如「整理成对比页」）。缺省为「阅读原料，沉淀为 wiki 知识页（建页/更新/互链）」。"
     )]
     pub instruction: Option<String>,
     /// 二选一：原料 URL（harness 自主抓取）
@@ -314,9 +314,9 @@ pub struct WikiSourcesParams {}
 /// 删除来源记录参数（E7：删除页面后原料成 stale_source 残留——级联清理通道）。
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiDeleteSourceParams {
-    /// 原料 id（sources 列表返回；级联删除该源产出的页面与任务）
+    /// 原料 id（sources 列表返回；级联删除该源产出的页面与其执行记录）
     #[schemars(
-        description = "原料 id（sources 列表返回）。级联删除：该源、其任务与由它产出的页面一并删除，不可逆。"
+        description = "原料 id（sources 列表返回）。级联删除：该源、其执行记录与由它产出的页面一并删除，不可逆。"
     )]
     pub source_id: String,
 }

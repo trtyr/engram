@@ -159,7 +159,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
                   "delete_source", true, "删除一条来源记录及其全部产出（级联，不可逆）" => crate::wiki::WikiDeleteSourceParams;
                   "graph", false, "Wiki 链接图全貌（节点/边/社区划分；按库）" => crate::wiki::WikiLibParams;
                   "lint", false, "Wiki 体检（死链/孤页/缺源；只报告不修改；按库）" => crate::wiki::WikiLibParams;
-                  "lint_deep", false, "语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步任务，结果随 job report 查看；slugs 可限定范围控成本）" => crate::wiki::WikiLintDeepParams;
+                  "lint_deep", false, "语义 lint（LLM 深度检查页面间矛盾/过时声明/缺页概念；异步入队，结果随 job report 查看，日志页可按 job_id 跟踪；slugs 可限定范围控成本）" => crate::wiki::WikiLintDeepParams;
                   "merge", false, "合并页面：duplicate 并入 primary（冗余丢弃或内容并入 + 全库链接改指 + 快照兜底删除）——处置重复页用" => crate::wiki::WikiMergeParams;
                   "ingest", false, "喂原料给 wiki 维护 Agent Harness（url 或 text 二选一）——harness 自主抓取/检索/建页/互链（异步 job，返回 job_id）" => crate::wiki::WikiIngestParams;
         "document_add", false, "入库文档（text 或 url）——分块+嵌入进原文 RAG（完成后维护 Agent 自动接力）；幂等去重" => crate::wiki::WikiDocumentAddParams;
@@ -208,10 +208,14 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "delete", true, "注销代码图谱项目（删注册与产物；默认落盘的服务端自建目录连目录清，自定义落盘目录保留、需手动清理）" => crate::CgNameParams
         ],
         "jobs" => action_docs![
-            "list", false, "列出异步任务（可按 kind/status 过滤——codegraph index/sync 与 gc 自愈的 job 都在这）" => crate::jobs::JobsListParams;
-            "get", false, "查任务详情（状态/错误/进度/attempts——job_id 从 codegraph index/sync 返回拿）" => crate::jobs::JobsGetParams;
-            "events", false, "任务事件时间线（增量轮询）" => crate::jobs::JobsEventsParams;
-            "revive", true, "复活 dead/failed 任务重跑（仅管理员——amk_ key 会收到明确拒绝）" => crate::jobs::JobsReviveParams
+            "list", false, "列出后台执行（内部调度面；可按 kind/status 过滤——codegraph index/sync 与 gc 自愈的 job 都在这。面向人的查询请用 logs 域）" => crate::jobs::JobsListParams;
+            "get", false, "查后台执行详情（状态/错误/进度/attempts——job_id 从 codegraph index/sync 返回拿）" => crate::jobs::JobsGetParams;
+            "events", false, "后台执行的过程行（增量轮询；与 logs 域同源——logs.query 带 job_id 是同一条时间线）" => crate::jobs::JobsEventsParams;
+            "revive", true, "复活 dead/failed 的后台执行重跑（仅管理员——amk_ key 会收到明确拒绝）" => crate::jobs::JobsReviveParams
+        ],
+        "logs" => action_docs![
+            "query", false, "查系统日志（系统里发生的一切：请求/错误/后台执行都在同一条时间线；可按 level/q/job_id/request_id/时间窗过滤）" => crate::logs::LogsQueryParams;
+            "stats", false, "日志聚合（按 level 或 target 分组计数，一眼看系统态势）" => crate::logs::LogsStatsParams
         ],
         "study" => action_docs![
             "add", false, "开题（新学习领域）——name+goal（学到什么程度算完，归档锚）" => crate::study::StudyAddParams;
@@ -243,6 +247,7 @@ pub const DOMAIN_TOOLS: &[&str] = &[
     "tickets",
     "codegraph",
     "jobs",
+    "logs",
     "study",
 ];
 
@@ -554,6 +559,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
             | ("tickets", "list" | "links" | "get" | "events")
             | ("codegraph", "list" | "query")
             | ("jobs", "list" | "get" | "events")
+            | ("logs", "query" | "stats")
             | ("study", "get" | "list" | "reviews_due" | "journal_list")
     )
 }
@@ -643,7 +649,7 @@ pub fn render_manual(domain: &str, disabled: &[String]) -> Value {
         "cross_domain_hint": "另有独立工具 search_all（非本域操作）：一次查询并发 memory/wiki/todos/projects 各回 top-k 摘要——不确定信息在哪域时用",
         "actions": actions,
     });
-    // EN-236：wiki 域动作最多（28 个），help 平铺可发现性差——按九任务组分组的导航层（纯增量：
+    // EN-236：wiki 域动作最多（28 个），help 平铺可发现性差——按九大用途分组的导航层（纯增量：
     // actions 平铺原样保留，旧客户端不受影响；每组列 action 名单，数量不减语义不变）
     if domain == "wiki" {
         root["groups"] = wiki_groups_hint();
@@ -651,7 +657,7 @@ pub fn render_manual(domain: &str, disabled: &[String]) -> Value {
     root
 }
 
-/// EN-236：wiki 任务组导航（找/读/写/原料/体检/版本/整理/晋升）——全部动作入组不重不漏（人审组随人审移除退役）
+/// EN-236：wiki 用途组导航（找/读/写/原料/体检/版本/整理/晋升）——全部动作入组不重不漏（人审组随人审移除退役）
 ///（含工单后增动作：list_pages 归读、document_delete 归原料——验收③数量不减，按组可导航到每个动作）。
 fn wiki_groups_hint() -> Value {
     let groups: &[(&str, &str, &[&str])] = &[
@@ -697,7 +703,7 @@ fn wiki_groups_hint() -> Value {
         .map(|(name, why, actions)| json!({ "group": name, "why": why, "actions": actions }))
         .collect();
     json!({
-        "hint": "动作多，按任务找组——先看组名定位意图，再看组内 action；全部 action 在下方 actions 平铺列表（参数以该处为准）。26 动作已全部入组",
+        "hint": "动作多，按用途找组——先看组名定位意图，再看组内 action；全部 action 在下方 actions 平铺列表（参数以该处为准）。26 动作已全部入组",
         "groups": items,
     })
 }

@@ -969,8 +969,8 @@ function DeepPurgePane() {
   )
 }
 
-// ---------- 节律（内置节律线 roadmap v3：jobs 基建自续任务） ----------
-// 蒸馏节律住在 server 内部：任务「先续期再干活」——跑完自动排下一期（周期桶幂等键防重），
+// ---------- 节律（内置节律线 roadmap v3：后台执行自续） ----------
+// 蒸馏节律住在 server 内部：执行「先续期再干活」——跑完自动排下一期（周期桶幂等键防重），
 // 启动自检补建；设置页只管配置（GET/PUT /settings/rhythm）与观察（读 jobs 表）。
 
 type RhythmConfig = {
@@ -1034,7 +1034,7 @@ function RhythmPane() {
       <Card className="p-5 space-y-4">
         <h2 className="text-sm font-semibold">节律配置</h2>
         <p className="text-xs text-muted-foreground">
-          蒸馏节律住在 server 内部：任务跑完自动排下一期，重启自恢复——无需外部 crontab。
+          蒸馏节律住在 server 内部：执行跑完自动排下一期，重启自恢复——无需外部 crontab。
         </p>
         <label className="flex items-center gap-2 text-sm">
           <input

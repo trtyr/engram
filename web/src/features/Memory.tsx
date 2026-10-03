@@ -415,7 +415,7 @@ function DistillBar() {
           try {
             // 202 返回入队的 Job[]——空数组 = 没有待蒸馏会话
             const jobs = await api.post<Job[]>('/memory/distill', { full: false })
-            setMsg(jobs.length > 0 ? `已入队 ${jobs.length} 个蒸馏任务` : '没有待蒸馏的会话')
+            setMsg(jobs.length > 0 ? `已入队 ${jobs.length} 个蒸馏（可在日志页看进度）` : '没有待蒸馏的会话')
             count()
           } catch (e) {
             setMsg(e instanceof Error ? `触发失败：${e.message}` : '触发失败')
@@ -493,7 +493,7 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
               setReembedMsg('')
               try {
                 await api.post('/memory/reembed')
-                setReembedMsg('重嵌任务已入队，完成后向量通道自动恢复')
+                setReembedMsg('重嵌已入队，完成后向量通道自动恢复（日志页可见）')
               } catch (ex) {
                 setReembedMsg(ex instanceof Error ? ex.message : '入队失败')
               }

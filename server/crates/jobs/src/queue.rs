@@ -184,7 +184,8 @@ impl JobQueue {
         Ok(())
     }
 
-    /// 追加事件。
+    /// 追加事件——写入统一日志流 logs（P010：job_events 已并入，不再单独存）。
+    /// target 记 `job.<kind>`；fields 恒带 job_id，便于按任务筛日志。
     pub async fn emit(
         &self,
         job_id: Uuid,
@@ -193,7 +194,10 @@ impl JobQueue {
         data: Option<serde_json::Value>,
     ) -> Result<(), JobError> {
         sqlx::query(
-            "INSERT INTO job_events (job_id, level, message, data) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO logs (level, target, message, fields)
+             SELECT upper($2), 'job.' || COALESCE(kind, 'unknown'), $3,
+                    jsonb_build_object('job_id', $1::text) || COALESCE($4, '{}'::jsonb)
+             FROM (SELECT kind FROM jobs WHERE id = $1) k",
         )
         .bind(job_id)
         .bind(level)
@@ -240,7 +244,7 @@ impl JobQueue {
         .map_err(|e| JobError::Retryable(e.to_string()))
     }
 
-    /// 事件时间线。
+    /// 任务事件时间线——读统一日志流 logs 中该任务的行（P010：job_events 已并入）。
     pub async fn events(
         &self,
         job_id: Uuid,
@@ -248,7 +252,11 @@ impl JobQueue {
         limit: i64,
     ) -> Result<Vec<JobEvent>, JobError> {
         sqlx::query_as::<_, JobEvent>(
-            "SELECT * FROM job_events WHERE job_id = $1 AND ($2::bigint IS NULL OR id > $2) ORDER BY id LIMIT $3",
+            "SELECT id, (fields->>'job_id')::uuid AS job_id, ts, lower(level) AS level, message,
+                    fields - 'job_id' AS data
+             FROM logs
+             WHERE fields->>'job_id' = $1::text AND ($2::bigint IS NULL OR id > $2)
+             ORDER BY id LIMIT $3",
         )
         .bind(job_id)
         .bind(after_id)

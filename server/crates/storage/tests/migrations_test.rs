@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 66 份迁移：0066 = study SRS 复习字段+journal 时间线表）
+    // 版本可查（当前 67 份迁移：0067 = logs 统一——job_events 并入 logs 时间线）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(66), "0001-0066 迁移应已应用");
+    assert_eq!(version, Some(67), "0001-0067 迁移应已应用");
 
     // 0056（代码图谱入口收敛）：dest_mode 列形态——NOT NULL + 落库默认 default + 二值 CHECK。
     // 历史行回填 custom 是迁移的语义保证（生产库实测见《代码图谱入口收敛 · roadmap》）；

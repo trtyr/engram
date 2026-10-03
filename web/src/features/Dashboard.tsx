@@ -130,7 +130,7 @@ function ActivityFeed({ jobs }: { jobs: Job[] }) {
     <ul className="divide-y divide-border/60">
       {jobs.map((j) => (
         <li key={j.id} title={j.error ?? undefined}>
-          <Link to="/logs#jobs" className="flex items-center gap-2.5 px-4 py-2.5 transition-colors hover:bg-muted/40">
+          <Link to="/logs?scope=job" className="flex items-center gap-2.5 px-4 py-2.5 transition-colors hover:bg-muted/40">
             <StatusBadge status={j.status} />
             <span className="truncate font-mono text-xs text-muted-foreground">{j.kind}</span>
             <span className="ml-auto shrink-0 text-xs text-muted-foreground">{relTime(j.created_at)}</span>
@@ -311,18 +311,18 @@ export default function Dashboard() {
             <h2 className="text-sm font-medium">近期活动</h2>
             {failed > 0 ? (
               <Link
-                to="/logs#jobs"
+                to="/logs?scope=job"
                 className="rounded border border-destructive/30 px-1.5 py-px font-mono text-xs text-destructive transition-colors hover:bg-destructive/10"
               >
                 失败 {failed}
               </Link>
             ) : (
-              <span className="font-mono text-xs text-muted-foreground">任务</span>
+              <span className="font-mono text-xs text-muted-foreground">后台</span>
             )}
           </div>
           {jobs === null || jobs.length === 0 ? (
             <div className="p-4">
-              <Empty text="暂无任务" />
+              <Empty text="暂无后台执行" />
             </div>
           ) : (
             <ActivityFeed jobs={jobs} />

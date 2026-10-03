@@ -47,7 +47,7 @@ impl EngramMcpServer {
     /// 语义 lint（LLM 深度检查：页面间矛盾 / 过时声明 / 重要概念缺页）。
     ///
     /// 何时用：结构 lint（lint action）干净后的进阶健康检查——语义维度只有 LLM 能做。
-    /// 异步任务：入队返回 job_id，结果随 job report 查看（人审队列已退役），
+    /// 异步入队：返回 job_id，结果随 job report 查看，日志页可按 job_id 跟踪，
     /// 不自动改写页面。slugs 可限定范围控制 LLM 成本。
     pub(crate) async fn wiki_lint_deep(
         &self,
@@ -238,7 +238,7 @@ impl EngramMcpServer {
         ok_json(serde_json::to_value(&items).unwrap_or(serde_json::json!([])))
     }
 
-    /// 删除一条来源记录及其全部产出（级联：源、任务、由它产出的页面；不可逆）。
+    /// 删除一条来源记录及其全部产出（级联：源、其执行记录、由它产出的页面；不可逆）。
     ///
     /// 何时用：lint 报 stale_source（页面已删但原料残留）或想整体撤销一次原料处理。
     pub(crate) async fn wiki_delete_source(

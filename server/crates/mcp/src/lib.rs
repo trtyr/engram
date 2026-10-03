@@ -21,6 +21,7 @@ mod credentials;
 pub mod dispatch;
 mod guard;
 pub mod jobs;
+mod logs;
 mod memory;
 mod memory_kv;
 mod memory_manage;
@@ -109,6 +110,7 @@ impl EngramMcpServer {
         tool_router.merge(crate::project_docs::routes_project_docs());
         tool_router.merge(crate::wiki_curation::routes_wiki_curation());
         tool_router.merge(crate::jobs::routes_jobs());
+        tool_router.merge(crate::logs::routes_logs());
         tool_router.merge(crate::tickets::routes_tickets());
         tool_router.merge(crate::memory_sessions::routes_memory_sessions());
         tool_router.merge(crate::project_files::routes_project_files());

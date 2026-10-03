@@ -241,7 +241,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   projects: '项目',
   todos: '待办',
   tickets: '工单',
-  jobs: '异步任务',
+  jobs: '后台执行',
   search: '跨域检索', // 后端把 search_all 的 domain 字段写作 "search"（settings/mcp tools[].domain）
 }
 

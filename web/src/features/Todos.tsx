@@ -1,4 +1,4 @@
-/** 待办页（待办形态）：不绑定项目的临时任务/灵感速记——微软 To Do 式清单流。
+/** 待办页（待办形态）：不绑定项目的临时事项/灵感速记——微软 To Do 式清单流。
  *  与工单页（Tickets.tsx）同表不同心智：这里没有 severity、没有状态流转，只有「做完勾掉」。 */
 import { useEffect, useMemo, useState } from 'react'
 import { appConfirm } from '@/components/confirm'
@@ -170,7 +170,7 @@ export default function Todos() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="待办" desc="不绑定项目的临时任务/灵感速记——速记、做完勾掉">
+      <PageHeader title="待办" desc="不绑定项目的临时事项/灵感速记——速记、做完勾掉">
         <input
           className={`${inputCls} w-40`}
           placeholder="搜索待办…"

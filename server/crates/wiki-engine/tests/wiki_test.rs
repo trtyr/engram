@@ -648,7 +648,7 @@ async fn w3_embed_failure_keeps_fts_searchable() {
 
     // 失败事件留痕（可观测）
     let events: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM job_events WHERE message LIKE '%嵌入失败%'")
+        sqlx::query_scalar("SELECT count(*) FROM logs WHERE message LIKE '%嵌入失败%'")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -958,7 +958,7 @@ async fn generate_page_cap_truncates_and_warns() {
 
     // 告警事件落 job_events
     let warned: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM job_events WHERE message LIKE '%建页量超软上限%'")
+        sqlx::query_scalar("SELECT count(*) FROM logs WHERE message LIKE '%建页量超软上限%'")
             .fetch_one(&pool)
             .await
             .unwrap();

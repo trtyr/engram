@@ -1,9 +1,14 @@
 /**
- * 日志域：结构化运行日志 + 后台任务区块（原「任务」页并入，不再单独入口）。
- * 时间窗默认近 7 天；长内容（消息/字段）默认收起，点击展开——避免整页被撑爆。
+ * 日志页：**系统唯一的时间线**（P010）。
+ *
+ * 系统里发生的一切都在这条线上：HTTP 请求、错误、以及系统后台的执行过程
+ * （入队 → 开始 → 进度 → 终态）。后台执行**不是**另一个概念——它就是
+ * 日志里的一类条目（fields.job_id 非空），可展开看过程、失败可重跑。
+ *
+ * 过滤器：「范围」切全部/后台/系统（后台=带 job_id 的行）；时间窗默认近 7 天；
+ * 长内容默认收起，点击展开。
  */
 import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
 import { api, type Job, type JobEvent } from '@/lib/api'
 import { Card, Empty, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls, tableCls } from '@/lib/ui'
@@ -41,6 +46,12 @@ function sinceIso(days: string): string | undefined {
   return new Date(Date.now() - d * 86_400_000).toISOString()
 }
 
+/** 一条日志是否属于某次后台执行（带 fields.job_id 的行）。 */
+function jobIdOf(r: LogRow): string | null {
+  const v = r.fields?.job_id
+  return typeof v === 'string' && v ? v : null
+}
+
 /** 长文本：超阈值默认截断，点击展开/收起。 */
 const MSG_MAX = 140
 function LongText({ text }: { text: string }) {
@@ -61,19 +72,18 @@ function LongText({ text }: { text: string }) {
 }
 
 export default function Logs() {
-  // ---- 日志面 ----
   const [rows, setRows] = useState<LogRow[] | null>(null)
   const [level, setLevel] = useState('')
   const [q, setQ] = useState('')
   const [audit, setAudit] = useState(false)
   const [days, setDays] = useState('7')
+  /** 范围：all=全部 / job=仅后台 / system=仅系统 */
+  const [scope, setScope] = useState<'all' | 'job' | 'system'>(
+    () => (new URLSearchParams(window.location.search).get('scope') as 'job') || 'all',
+  )
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
-
-  // ---- 任务面（原 Jobs 页并入）----
-  const [jobs, setJobs] = useState<Job[] | null>(null)
-  const [jobStatus, setJobStatus] = useState('')
-  const [openJob, setOpenJob] = useState<Job | null>(null)
+  const [openJob, setOpenJob] = useState<string | null>(null)
 
   const loadLogs = () => {
     const p = new URLSearchParams({ limit: '200' })
@@ -82,13 +92,9 @@ export default function Logs() {
     if (audit) p.set('audit', 'true')
     const since = sinceIso(days)
     if (since) p.set('since', since)
+    // 服务端按 job_id 精确筛；「仅系统」没有反向参数，前端过滤（见下面 filtered）
+    if (scope === 'job' && openJob) p.set('job_id', openJob)
     api.get<{ logs: LogRow[] }>(`/logs?${p}`).then((v) => setRows(v.logs)).catch(() => {})
-  }
-
-  const loadJobs = () => {
-    const p = new URLSearchParams({ limit: '50' })
-    if (jobStatus) p.set('status', jobStatus)
-    api.get<Job[]>(`/jobs?${p}`).then(setJobs).catch(() => {})
   }
 
   useEffect(() => {
@@ -96,40 +102,31 @@ export default function Logs() {
     loadLogs()
     setPage(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, q, audit, days])
-
-  useEffect(() => {
-    setJobs(null)
-    loadJobs()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobStatus])
-
-  // 支持 /logs#jobs 锚点直达（Dashboard 的失败徽章/活动行跳此处）
-  const { hash } = useLocation()
-  useEffect(() => {
-    if (hash === '#jobs') {
-      const el = document.getElementById('jobs')
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-  }, [hash])
+  }, [level, q, audit, days, scope, openJob])
 
   // 10s 自动刷新
   useEffect(() => {
-    const t = setInterval(() => {
-      loadLogs()
-      loadJobs()
-    }, 10000)
+    const t = setInterval(loadLogs, 10000)
     return () => clearInterval(t)
   })
 
-  const maxPage = Math.max(1, Math.ceil((rows?.length ?? 0) / pageSize))
+  // 范围过滤：后台=带 job_id 的行；系统=不带 job_id 的行
+  const filtered = (rows ?? []).filter((r) => {
+    if (scope === 'job') return jobIdOf(r) !== null
+    if (scope === 'system') return jobIdOf(r) === null
+    return true
+  })
+
+  const maxPage = Math.max(1, Math.ceil(filtered.length / pageSize))
   const cur = Math.min(page, maxPage)
   const winLabel = WINDOW_OPTIONS.find((o) => o.value === days)?.label ?? ''
 
   return (
     <div className="space-y-6">
-      {/* ── 运行日志 ── */}
-      <PageHeader title="日志" desc="结构化运行日志（info 保留 30 天 / debug 7 天）">
+      <PageHeader
+        title="日志"
+        desc="系统里发生的一切：请求、错误、后台执行（info 保留 30 天 / debug 7 天）"
+      >
         <div className="flex flex-wrap items-center gap-2">
           <select className={selectCls} value={days} onChange={(e) => setDays(e.target.value)}>
             {WINDOW_OPTIONS.map((o) => (
@@ -137,6 +134,15 @@ export default function Logs() {
                 {o.label}
               </option>
             ))}
+          </select>
+          <select
+            className={selectCls}
+            value={scope}
+            onChange={(e) => setScope(e.target.value as 'all' | 'job' | 'system')}
+          >
+            <option value="all">全部</option>
+            <option value="job">仅后台</option>
+            <option value="system">仅系统</option>
           </select>
           <select className={selectCls} value={level} onChange={(e) => setLevel(e.target.value)}>
             <option value="">全部级别</option>
@@ -158,7 +164,7 @@ export default function Logs() {
       </PageHeader>
       {rows === null ? (
         <Spinner />
-      ) : rows.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <Empty text={`${winLabel}无日志行`} />
       ) : (
         <Card className="overflow-x-auto">
@@ -173,40 +179,56 @@ export default function Logs() {
               </tr>
             </thead>
             <tbody>
-              {rows.slice((cur - 1) * pageSize, cur * pageSize).map((r) => (
-                <tr key={r.id} className={tableCls.row}>
-                  <td className={`${tableCls.td} text-xs tabular-nums text-muted-foreground`}>
-                    {fmtTime(r.ts)}
-                  </td>
-                  <td className={`${tableCls.td} text-xs font-medium ${LEVEL_CLS[r.level] ?? ''}`}>
-                    {r.level}
-                  </td>
-                  <td className={`${tableCls.td} max-w-40 truncate font-mono text-xs`}>{r.target}</td>
-                  <td className={`${tableCls.td} max-w-96`}>
-                    <LongText text={r.message} />
-                    {Object.keys(r.fields ?? {}).length > 0 && (
-                      <details className="mt-0.5">
-                        <summary className="cursor-pointer text-xs text-muted-foreground">
-                          字段（{Object.keys(r.fields).length}）
-                        </summary>
-                        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-2 text-xs">
-                          {JSON.stringify(r.fields, null, 2)}
-                        </pre>
-                      </details>
-                    )}
-                  </td>
-                  <td className={`${tableCls.td} font-mono text-xs text-muted-foreground`}>
-                    {r.request_id ?? ''}
-                  </td>
-                </tr>
-              ))}
+              {filtered.slice((cur - 1) * pageSize, cur * pageSize).map((r) => {
+                const jid = jobIdOf(r)
+                return (
+                  <tr key={r.id} className={tableCls.row}>
+                    <td className={`${tableCls.td} text-xs tabular-nums text-muted-foreground`}>
+                      {fmtTime(r.ts)}
+                    </td>
+                    <td className={`${tableCls.td} text-xs font-medium ${LEVEL_CLS[r.level] ?? ''}`}>
+                      {r.level}
+                    </td>
+                    <td className={`${tableCls.td} max-w-40 truncate font-mono text-xs`}>
+                      {jid ? (
+                        <button
+                          type="button"
+                          className="rounded bg-muted px-1 py-px text-info hover:underline"
+                          title="查看该执行过程"
+                          onClick={() => setOpenJob(jid)}
+                        >
+                          后台
+                        </button>
+                      ) : (
+                        r.target
+                      )}
+                    </td>
+                    <td className={`${tableCls.td} max-w-96`}>
+                      <LongText text={r.message} />
+                      {Object.keys(r.fields ?? {}).length > 0 && (
+                        <details className="mt-0.5">
+                          <summary className="cursor-pointer text-xs text-muted-foreground">
+                            字段（{Object.keys(r.fields).length}）
+                          </summary>
+                          <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-2 text-xs">
+                            {JSON.stringify(r.fields, null, 2)}
+                          </pre>
+                        </details>
+                      )}
+                    </td>
+                    <td className={`${tableCls.td} font-mono text-xs text-muted-foreground`}>
+                      {r.request_id ?? ''}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </Card>
       )}
-      {(rows?.length ?? 0) > 0 && (
+      {filtered.length > 0 && (
         <Pager
-          total={rows?.length ?? 0}
+          total={filtered.length}
           page={cur}
           pageSize={pageSize}
           onPage={setPage}
@@ -214,87 +236,42 @@ export default function Logs() {
             setPageSize(n)
             setPage(1)
           }}
-          hint={(rows?.length ?? 0) >= 200 ? '仅载入 200 条（收窄时间窗看更早）' : undefined}
+          hint={filtered.length >= 200 ? '仅载入 200 条（收窄时间窗看更早）' : undefined}
         />
       )}
-
-      {/* ── 后台任务（原「任务」页并入） ── */}
-      <div
-        id="jobs"
-        className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-5"
-      >
-        <h2 className="text-sm font-semibold">后台任务</h2>
-        <select className={selectCls} value={jobStatus} onChange={(e) => setJobStatus(e.target.value)}>
-          <option value="">全部状态</option>
-          {['pending', 'running', 'succeeded', 'failed', 'dead'].map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
-      </div>
-      {jobs === null ? (
-        <Spinner />
-      ) : jobs.length === 0 ? (
-        <Empty text="无任务" />
-      ) : (
-        <Card className="overflow-x-auto">
-          <table className={tableCls.root}>
-            <thead className={tableCls.thead}>
-              <tr>
-                <th className={tableCls.th}>类型</th>
-                <th className={tableCls.th}>状态</th>
-                <th className={tableCls.th}>尝试</th>
-                <th className={tableCls.th}>时间</th>
-                <th className={tableCls.th}>错误</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((j) => (
-                <tr
-                  key={j.id}
-                  className={`${tableCls.row} cursor-pointer`}
-                  onClick={() => setOpenJob(j)}
-                >
-                  <td className={`${tableCls.td} font-medium`}>{j.kind}</td>
-                  <td className={tableCls.td}>
-                    <StatusBadge status={j.status} />
-                  </td>
-                  <td className={`${tableCls.td} tabular-nums`}>{j.attempts}</td>
-                  <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(j.created_at)}</td>
-                  <td className={`${tableCls.td} max-w-64 text-destructive`}>
-                    {j.error ? <LongText text={j.error} /> : ''}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-      {openJob && <EventTimeline job={openJob} onClose={() => setOpenJob(null)} />}
+      {openJob && <JobTrajectory jobId={openJob} onClose={() => setOpenJob(null)} />}
     </div>
   )
 }
 
-function EventTimeline({ job, onClose }: { job: Job; onClose: () => void }) {
+/** 执行过程：该条链在日志中的全部行 + 状态 + 失败可重跑（日志流内展开，非独立区块）。 */
+function JobTrajectory({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+  const [job, setJob] = useState<Job | null>(null)
   const [events, setEvents] = useState<JobEvent[] | null>(null)
+
   useEffect(() => {
+    api.get<Job>(`/jobs/${jobId}`).then(setJob).catch(() => setJob(null))
     api
-      .get<JobEvent[]>(`/jobs/${job.id}/events?limit=200`)
+      .get<JobEvent[]>(`/jobs/${jobId}/events?limit=200`)
       .then(setEvents)
       .catch(() => setEvents([]))
-  }, [job.id])
+  }, [jobId])
+
   return (
     <Card className="p-4">
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm font-medium">
-          {job.kind} <span className="ml-2 font-mono text-xs text-muted-foreground">{job.id}</span>
+          执行过程{' '}
+          {job && <StatusBadge status={job.status} />}
+          <span className="ml-2 font-mono text-xs text-muted-foreground">{jobId}</span>
         </p>
         <div className="flex gap-2">
-          {(job.status === 'dead' || job.status === 'failed') && (
+          {job && (job.status === 'dead' || job.status === 'failed') && (
             <Button
               size="sm"
               variant="outline"
               onClick={async () => {
-                await api.post(`/jobs/${job.id}/revive`)
+                await api.post(`/jobs/${jobId}/revive`)
                 onClose()
               }}
             >
@@ -307,9 +284,9 @@ function EventTimeline({ job, onClose }: { job: Job; onClose: () => void }) {
         </div>
       </div>
       {events === null ? (
-        <Spinner label="事件加载…" />
+        <Spinner label="过程加载…" />
       ) : events.length === 0 ? (
-        <p className="text-sm text-muted-foreground">无事件</p>
+        <p className="text-sm text-muted-foreground">无过程行</p>
       ) : (
         <div className="max-h-96 space-y-1 overflow-auto">
           {events.map((e) => (

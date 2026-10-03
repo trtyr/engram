@@ -364,7 +364,7 @@ function DocReader({ doc, libSlug, onDeleted }: { doc: Document; libSlug: string
                     setMsg('')
                     try {
                       await api.post(`/wiki/documents/${doc.id}/re-embed`)
-                      setMsg('重嵌任务已入队')
+                      setMsg('重嵌已入队（可在日志页看进度）')
                     } catch (ex) {
                       setMsg(ex instanceof Error ? ex.message : '重嵌失败')
                     } finally {

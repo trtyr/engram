@@ -23,6 +23,8 @@ pub struct LogsQuery {
     /// message/target ILIKE 模糊
     pub q: Option<String>,
     pub request_id: Option<String>,
+    /// 按任务筛（P010：查该任务的完整生命周期日志）
+    pub job_id: Option<String>,
     /// RFC3339
     pub since: Option<String>,
     pub until: Option<String>,
@@ -47,6 +49,7 @@ pub async fn list_logs(
         level: p.level.as_deref(),
         q: p.q.as_deref(),
         request_id: p.request_id.as_deref(),
+        job_id: p.job_id.as_deref(),
         since,
         until,
         audit_only: p.audit.as_deref() == Some("true"),

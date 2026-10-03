@@ -789,7 +789,7 @@ async fn url_fetch_without_webreader_key_goes_straight_to_local() {
     assert_eq!(doc.status, "failed", "私网 URL 应被 SSRF 拒绝落 failed");
 
     let wr_events: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM job_events WHERE message LIKE '%web-reader%'")
+        sqlx::query_scalar("SELECT count(*) FROM logs WHERE message LIKE '%web-reader%'")
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -846,7 +846,7 @@ async fn url_fetch_webreader_failure_degrades_with_event() {
 
     // 降级标注：回落事件必须可见
     let degrade: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM job_events WHERE message LIKE '%回落本地抓取%'")
+        sqlx::query_scalar("SELECT count(*) FROM logs WHERE message LIKE '%回落本地抓取%'")
             .fetch_one(&pool)
             .await
             .unwrap();
