@@ -429,7 +429,10 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
             | ("assets", "runbook_save" | "runbook_restore")
             | ("credentials", "put" | "delete")
             | ("circles", "create" | "update" | "relate" | "unrelate")
-            | ("circles", "forget" | "delete" | "merge" | "attach" | "detach")
+            | (
+                "circles",
+                "forget" | "delete" | "merge" | "attach" | "detach"
+            )
             | (
                 "study",
                 "add"

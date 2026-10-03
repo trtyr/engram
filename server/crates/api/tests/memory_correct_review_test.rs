@@ -177,17 +177,23 @@ async fn review_confirm_discard_guards() {
     ctx.mark_review(&c).await;
 
     // confirm A：摘标记
-    let v = ctx.mem("review", json!({ "mode": "confirm",  "atom_id": a })).await;
+    let v = ctx
+        .mem("review", json!({ "mode": "confirm",  "atom_id": a }))
+        .await;
     assert_eq!(v["needs_review"], false);
     let a_row = ctx.atom_by_id(&a).await;
     assert_eq!(a_row["needs_review"], false);
 
     // 治理：confirm 非待审条目 → 报错
-    let err = ctx.mem_err("review", json!({ "mode": "confirm", "atom_id": b })).await;
+    let err = ctx
+        .mem_err("review", json!({ "mode": "confirm", "atom_id": b }))
+        .await;
     assert!(err.contains("needs_review"), "应报非待审：{err}");
 
     // discard C：归档
-    let v = ctx.mem("review", json!({ "mode": "discard",  "atom_id": c })).await;
+    let v = ctx
+        .mem("review", json!({ "mode": "discard",  "atom_id": c }))
+        .await;
     assert_eq!(v["status"], "archived");
     let c_row = ctx.atom_by_id(&c).await;
     assert_eq!(c_row["status"], "archived");
@@ -251,8 +257,10 @@ async fn persona_edit_pins_and_guards() {
 
     // 3. 治理：非法 aspect → 可行动报错
     let err = ctx
-        .mem_err("revise",
-            json!({ "mode": "persona", "aspect": "mood", "content": "x" }))
+        .mem_err(
+            "revise",
+            json!({ "mode": "persona", "aspect": "mood", "content": "x" }),
+        )
         .await;
     assert!(err.contains("aspect"), "应报 aspect 非法：{err}");
 }
@@ -262,13 +270,15 @@ async fn distill_trigger_guard_and_full() {
     let ctx = Ctx::new().await;
 
     // 1. mode=sleep 预留：报未上线
-    let err = ctx.mem_err("review",
-            json!({ "mode": "distill", "step": "sleep" })).await;
+    let err = ctx
+        .mem_err("review", json!({ "mode": "distill", "step": "sleep" }))
+        .await;
     assert!(err.contains("尚未上线"), "应报 sleep 未上线：{err}");
 
     // 2. 无 running：触发成功（full 含 consolidate）
-    let v = ctx.mem("review",
-            json!({ "mode": "distill", "full": true })).await;
+    let v = ctx
+        .mem("review", json!({ "mode": "distill", "full": true }))
+        .await;
     assert_eq!(v["already_running"], false);
     let kinds: Vec<&str> = v["jobs"]
         .as_array()
@@ -295,8 +305,7 @@ async fn distill_trigger_guard_and_full() {
         .await
         .unwrap();
 
-    let v = ctx.mem("review",
-            json!({ "mode": "distill",})).await;
+    let v = ctx.mem("review", json!({ "mode": "distill",})).await;
     assert_eq!(v["already_running"], true);
 
     let after: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'extract_atoms'")

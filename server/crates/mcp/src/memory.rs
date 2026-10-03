@@ -393,8 +393,7 @@ impl EngramMcpServer {
             },
             _ => action.clone(), // help
         };
-        const KV_ACTIONS: [&str; 5] =
-            ["kv_put", "kv_get", "kv_list", "kv_search", "kv_delete"];
+        const KV_ACTIONS: [&str; 5] = ["kv_put", "kv_get", "kv_list", "kv_search", "kv_delete"];
         // scope 按底层动作分（T018 回归修复：六动词入口不能先 require_memory
         // 挡掉 kv 模式的 original-only key）——KV_ACTIONS 含 kv_delete（T017 original 口径）
         if KV_ACTIONS.contains(&resolved.as_str()) {

@@ -162,13 +162,23 @@ async fn memory_void_cascades_superseded_and_restore() {
     assert_eq!(archived, 2, "D2：superseded 原子应一并归档");
 
     // list_atoms 默认 active → 空；status=all → 2 条 archived
-    let (_, v) = mcp_rpc(&app, &key, call(3, "memory", "browse", json!({"mode": "atoms"}))).await;
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(3, "memory", "browse", json!({"mode": "atoms"})),
+    )
+    .await;
     let rows = out_json(&v, "list_atoms default");
     assert_eq!(rows.as_array().unwrap().len(), 0, "默认只查 active（P1-6）");
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(4, "memory", "browse", json!({"mode": "atoms", "status": "all"})),
+        call(
+            4,
+            "memory",
+            "browse",
+            json!({"mode": "atoms", "status": "all"}),
+        ),
     )
     .await;
     assert_eq!(
@@ -203,7 +213,12 @@ async fn memory_void_cascades_superseded_and_restore() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(6, "memory", "browse", json!({"mode": "session", "session_id": sid})),
+        call(
+            6,
+            "memory",
+            "browse",
+            json!({"mode": "session", "session_id": sid}),
+        ),
     )
     .await;
     let s = out_json(&v, "browse session after restore");
@@ -450,7 +465,12 @@ async fn memory_search_strips_l3_evidence_refs_by_default() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(1, "memory", "recall", json!({"mode": "search", "query": "zebra3k"})),
+        call(
+            1,
+            "memory",
+            "recall",
+            json!({"mode": "search", "query": "zebra3k"}),
+        ),
     )
     .await;
     let r = out_json(&v, "search default");
