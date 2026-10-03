@@ -35,8 +35,16 @@
 - 新「执行过程」：≥1 文件
 - 新「仅后台」范围选项：≥1 文件
 
-## 生产验证（部署后填）
+## 生产验证（HEAD=e2cb949，2026-10-03 07:05）
 
-- /ready 与迁移号
-- logs 表中任务生命周期可查（job_id）
-- MCP logs 域返回真实行
+| 项 | 结果 |
+|---|---|
+| /ready | ready，**migration_version 67**（0067 已跑） |
+| 容器 | engram-app-1 重建 healthy（部署前已备份 db.dump + env.bak） |
+| ① job_events → logs 回填 | 回填行 1197 = job_events 总行 1197（**精确对应**） |
+| ② job_id 索引 | `idx_logs_job_id` 存在 |
+| ③ logs 带 job_id 行 | 1,253（含回填 1,197 + 部署后新增 56） |
+| ④ **真实任务生命周期** | 触发 `POST /codegraph/projects/{id}/sync` → job `01a10094`，logs 中查到完整四步同一条时间线：`任务入队 → 开始执行 → 任务抢占 → 任务成功`（07:05:22–07:05:25） |
+| ⑤ **MCP logs.query** | 按 job_id 返回 count=4（该任务全部行）；`logs.stats` 聚合真实计数（DEBUG 413,768 / INFO 86,835 / TRACE 75,095 / ERROR 24 / WARN 21，近 24h） |
+| ⑥ 前端产物（30 分片） | 旧「后台任务」独立区块 = **0**；新「仅后台」范围选项 ≥1；「执行过程」≥1；job_id 关联 ≥1 |
+| ⑦ job_events 表 | 留表停写（1197 行留存，代码不再写入） |

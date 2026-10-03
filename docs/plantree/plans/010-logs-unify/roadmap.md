@@ -9,10 +9,10 @@
 - [x] **T005 前端**：日志页重建为单一时间线（去独立任务区块，任务成为日志流中一类条目，可展开看过程/失败重跑，范围过滤，?scope=job 深链）✓ 31ad8a4
 - [x] **T006 概念退役**：前端/MCP/HTTP 用户可见「任务」清零；修失效锚点与指向已删任务页的提示 ✓ 31ad8a4
 
-## In Progress
+## Done（续）
 
-- [ ] **T007 收官门禁 + 生产部署 + 生产实测**
-- [ ] **T008 文档对齐**（projects 数据层/接口面/前端路由篇 + P010 注册 + AGENTS.md）
+- [x] **T007 收官门禁 + 生产部署 + 生产实测**：四闸全绿（workspace EXIT=0/0 FAILED、clippy EXIT=0、web 四连）；门禁抓出并修正两轮真缺口（golden 快照过期 + mcp_test 硬编码断言）；生产部署至 e2cb949，迁移 66→67，实测 job_events 1197 行精确回填、真实任务生命周期四步同线可查、MCP logs 域返回真实数据 ✓ 2ad412d/891dbff/e2cb949
+- [x] **T008 文档对齐**：engram projects 五篇增量（数据层/接口面/前端路由/mcp crate/api crate）；P010 注册；AGENTS.md 基线对齐
 
 ## Next
 
