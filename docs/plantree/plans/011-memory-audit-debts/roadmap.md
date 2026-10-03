@@ -89,16 +89,35 @@
   arbitrate：每候选 choice{new,duplicate,contradicts} 替换 prompt-and-parse，低置信
   进待审（顺治漏判兜底问题）；target 指认取 top1 相似（最简方案，设计期可复审）。
   consolidate：近重复「语义等价吗」noul 化。评测支撑：三判 7/7（T012 评测记录）。
-- [ ] **T016 · 蒸馏链 single-flight + LLM 熔断核查（T007 扩围）**
-  生产实锤（2026-10-03）：近 7 天 extract_atoms 12 dead / 17 succeeded（「网络错误或
-  超时」「熔断器打开」），且生产未配 per-kind 并发——蒸馏链走全局并发 4，organize
-  双跑会抢占同一批未归组原子（重复场景风险）、persona 双跑撞 UNIQUE(aspect,version)。
-  ① env 配置 `AGENT_MEMORY_JOB_CONCURRENCY=extract_atoms:1,organize_scenarios:1,
-  distill_persona:1,consolidate:1`（零代码）——**用户拍板（2026-10-03）：暂缓执行，
-  不单独动生产 env，随下次部署或后续统一落地**；② 代码级：蒸馏 kind 出厂默认
-  single-flight（不依赖 env）；③ 核查：蒸馏链篇坑 4「无熔断」部分过时——llm 层已有
-  熔断器（error 文案实证），budget 总闸仍缺，随 P012 T002 一并落地。
-  用户期望口径（2026-10-03）：「同一时刻只有一条路在跑——一旦并发了就会出问题。」
+- [ ] **T016 · 蒸馏链串行保证写死（结构不变量，非配置项）**
+  生产实锤（2026-10-03）：近 7 天 extract_atoms 12 dead / 17 succeeded；蒸馏链无串行
+  保证——organize 双跑抢占同一批未归组原子（重复场景风险）、persona 双跑撞
+  UNIQUE(aspect,version)。
+  **设计原则（用户拍板 2026-10-03）**：串行性是蒸馏链的**正确性不变量**，必须写死在
+  代码里作为结构性保证（类似消息队列分区串行语义），**不能是 env 可调项**——env
+  能调的是性能参数，不是「会不会产生重复场景」。现有三层防护（claim 状态机互斥 /
+  防抖幂等键 / 可选 per-kind env）是补丁拼盘，缺结构性保证。
+  落地方向：① runner 层引入**工作流类别**——蒸馏链 kind（extract_atoms/arbitrate_atoms/
+  organize_scenarios/distill_persona/consolidate）标记为 workflow 类，全局同时只允许
+  **一条活跃蒸馏链**（chain-level mutex：链头 extract 抢到 chain 锁，链尾释放），
+  写死无 env；② 其余独立 kind（wiki_*/cg_*/embed 等维持并发池，per-kind cap 仅对
+  非蒸馏 kind 开放）；③ LLM 熔断核查随本任务：坑 4「无熔断」部分过时（llm 层有
+  熔断器，error 文案实证），budget 总闸仍缺，随 P012 T002 一并落地。
+  用户原话：「这个东西应该写死的」「应该有一个类似于消息队列的一套机制，能够保证
+  稳定，并且保证不会冲突」。
+- [ ] **T017 · KV 准入 JEV 闸（写前把关）+ 存量大扫除**
+  KV 写入路径（remember(mode=kv)/kv_put 全部入口）前置 JEV choice 判定，一次请求
+  同时完成判定与归因：`kv_fit`（放行入库）/ `prefer_atoms` / `prefer_credentials` /
+  `prefer_assets`（含 projects）——非 kv_fit 拒绝入库并在错误信息里建议去处，由
+  调用方自行转投。准入判据写进 criteria 四条：**逐字必需**（精确值，LLM 转述会变形）/
+  **非机密**（机密走 credentials）/ **非台账**（基础设施走 assets）/ **跟用户相关**。
+  降级语义：JEV 未配置或调用失败 = **放行**（KV 写入是调用方显式动作，闸门把关不
+  阻塞——与蒸馏侧「失败直通」同哲学）。配置复用 T013 的 JEV 配置面（同 key 同开关）。
+  存量大扫除（2026-10-03 摸底共 9 条）：workrule_no_push_during_review → 转 atoms
+  （偏好/约定）；agent-compose-beijing-hub → 转 assets；fleet-npm-registry-status →
+  核实后删；其余 6 条（contact-*/resume-path/music-*）合规保留。
+  动机：KV 正从「精确值登记簿」退化为「不知道放哪就放这」的杂物抽屉（9 条中 2 条
+  放错）——用 JEV 把准入判据从纪律变成机制。
 
 ## Deferred / 交叉引用
 
