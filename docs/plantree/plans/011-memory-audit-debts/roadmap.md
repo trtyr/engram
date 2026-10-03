@@ -125,10 +125,10 @@
   `recall`（search/context/entities/kv_get/kv_search）·
   `browse`（atoms/sessions/session/kv/**scenarios/persona**——吸收 list_atoms/
   list_sessions/get_session/kv_list/scenarios_list/persona_get）·
-  `revise`（correct/persona/**archive/merge**——吸收 correct/persona_edit/
-  atom_archive/entity_merge）·
+  `revise`（correct/persona/**archive**——吸收 correct/persona_edit/atom_archive；
+  **entity_merge 按域界挪 circles**）·
   `review`（distill/result/confirm/discard/**duplicates**——吸收 distill/distill_result/
-  confirm/discard/atom_duplicates/entity_duplicates，duplicates 带 target 参数）·
+  confirm/discard/atom_duplicates，duplicates 仅原子；**实体重复检测按域界挪 circles**）·
   `forget`（void/erase/restore/**kv**——吸收三个会话动作+kv_delete）。
   mode 改名：session_append→append（去旧名影子）；kv_delete→forget(mode=kv)。
   语义全覆盖 32→6，零丢失；实体 CRUD 本就不在 MCP 面（HTTP/Web），不受影响。
@@ -138,6 +138,20 @@
   未竟终章。变更面：dispatch.rs 动作表与 handler 合并 + golden 快照重生成 +
   mcp_test 三处断言（照 P010 两轮门禁教训预防）+ Web 管理台跟随。验证：门禁 +
   golden + Agent 实测（pi 自身即消费者）。
+- [ ] **T021 · circles 域界补齐——同联断裂修复 + 反向联动执行器**
+  用户架构定义（2026-10-03）：**用户记忆与圈子是同一个东西的两种展示**——记忆是
+  纵向事实流，圈子是横向关系/图谱展示；存储同源（entities 系表在 memory repo 无独立
+  circles 存储），操作面按域界切分：**动原子/会话/KV → memory；动实体/关系/关联边 →
+  circles**。全面审视发现三个同联断裂：
+  ① **实体档案延续断裂**：归档实体被再次提及时新建空档案（extract.rs link_entity 只查
+  活体，复活语义已废除），老档案（summary/revision）永沉——同名重现应**复活延续**。
+  Q002 依此原则改判：**倾向恢复接线**（挂链时查归档档并 revive），不再「删函数」。
+  ② **实体时间线污染**：repo/entity.rs entity_atoms 不过滤 status——superseded 旧原子
+  仍挂在实体详情/时间线里；修为默认仅 active（全量可选参数）。
+  ③ **反向联动执行器缺失**：circles MCP 7 动作能建/改/连，**不能 forget（级联归档
+  原子）/ merge（原子改挂）/ attach|detach（挂摘原子）**——机制全在 core/repo（T005
+  误吞修复的产出依赖 merge 闭环），仅 Web/HTTP 有。补齐三动作 + duplicates（实体
+  重复检测，从 memory 域挪入）。修正后 circles = 实体与关系的唯一管理面。
 - [ ] **T019 · 日志域化——logs 加 domain 列，每个功能一份全量日志**
   用户需求（2026-10-03）：「为每一个功能单独做日志，获取跟这个功能相关的全量日志」
   ——日志按功能域组织，不是任务概念（不破 P010 唯一时间线：仍是单表单流，域是列
