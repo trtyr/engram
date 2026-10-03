@@ -1,12 +1,19 @@
 # P009 证据
 
-## 本地门禁（HEAD=cb7bf7d）
+## 审计首轮驳回与修正
+
+| 驳回点 | 修正 |
+|---|---|
+| 声称「/jobs 路由零残留」不实：Dashboard.tsx:133（近期活动行）与 :314（失败 N 徽章）仍硬编码 `to="/jobs"`，点入白屏 | c0875eb 两处改 `/logs#jobs`；Logs.tsx 任务区块加 `id="jobs"` + hash effect 平滑滚动 |
+| （根治）此类漏网人眼扫不住 | c0875eb 新增 `src/routes-consistency.test.ts`：扫全部源码 `<Link to="/...">` 与 `NAV_GROUPS` 的 `to:'/...'`，断言命中 App.tsx 已声明 Route（支持 `:param`）；突变验证塞坏链接即 FAIL |
+
+## 本地门禁（HEAD=cb7bf7d → 修正后 c0875eb）
 
 | 闸 | 文件 | 结果 |
 |---|---|---|
-| workspace | `/tmp/gate_w1_ws_raw.log` | 见 WORKSPACE_EXIT |
-| clippy 全仓 | `/tmp/gate_w1_clippy_raw.log` | CLIPPY_EXIT=0（04:06:37→04:07:12Z） |
-| web 三连 | `/tmp/gate_w1_web.log` | TSC_EXIT=0 / LINT 0 error / Tests 89 passed / BUILD_EXIT=0 |
+| workspace | `/tmp/gate_w1_ws_raw.log`（w1, HEAD=cb7bf7d）WORKSPACE_EXIT=0, 0 FAILED；`/tmp/gate_w2_ws_raw.log`（w2, HEAD=c0875eb）见其 EXIT |
+| clippy 全仓 | `/tmp/gate_w1_clippy_raw.log` CLIPPY_EXIT=0；c0875eb 后复跑 0 error |
+| web 三连 | `/tmp/gate_w1_web.log`（89 测试）；`/tmp/gate_w2_web.log`（HEAD=c0875eb，**91 测试**含新增路由守护）TSC/LINT/BUILD 全 0 |
 
 ## 生产验证（codegraph 修复）
 
