@@ -435,7 +435,8 @@ impl MemoryService {
     .await;
         Ok(())
     }
-    /// F4 治：归档或标敏感 → 受影响场景快照收敛重算（best-effort 异步，30s 防抖合并批量归档）。
+    /// F4 治：仅归档触发 → 受影响场景快照收敛重算（best-effort 异步，30s 防抖合并批量归档）。
+    /// 标敏感不触发收敛（P003-T001/决策 001：sensitive 是纯标记，不入收敛判据）。
     async fn enqueue_converge_refresh(&self, id: Uuid) {
         let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
         self.queue

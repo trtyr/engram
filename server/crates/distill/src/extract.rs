@@ -353,24 +353,47 @@ pub async fn link_entity(
     let eid: Uuid = match similar {
         Some(eid) => eid,
         None => {
-            sqlx::query(
-                "INSERT INTO entities (id, name, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+            // T008（Q002 改判）：活体无同名 → 查归档档同名——复活延续旧档案
+            // （summary/revision 不沉归档态）；墓碑（merged_into）永不复活。
+            let archived: Option<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM entities WHERE kind = $2 AND archived_at IS NOT NULL AND merged_into IS NULL \
+                 AND (lower(btrim(name)) = lower(btrim($1)) OR position(lower(name) in lower($1)) > 0) \
+                 ORDER BY (lower(btrim(name)) = lower(btrim($1))) DESC, length(name) DESC, created_at ASC \
+                 LIMIT 1",
             )
-            .bind(Uuid::now_v7())
             .bind(name)
             .bind(kind)
-            .execute(pool)
+            .fetch_optional(pool)
             .await
             .map_err(|e| e.to_string())?;
-            sqlx::query_scalar(
-                "SELECT id FROM entities WHERE lower(btrim(name)) = lower(btrim($1)) AND kind = $2 \
-                 AND merged_into IS NULL AND archived_at IS NULL",
-            )
-            .bind(name)
-            .bind(kind)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| e.to_string())?
+            match archived {
+                Some(eid) => {
+                    engram_storage::repo::memory::revive_entity(pool, eid)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    eid
+                }
+                None => {
+                    sqlx::query(
+                        "INSERT INTO entities (id, name, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                    )
+                    .bind(Uuid::now_v7())
+                    .bind(name)
+                    .bind(kind)
+                    .execute(pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    sqlx::query_scalar(
+                        "SELECT id FROM entities WHERE lower(btrim(name)) = lower(btrim($1)) AND kind = $2 \
+                         AND merged_into IS NULL AND archived_at IS NULL",
+                    )
+                    .bind(name)
+                    .bind(kind)
+                    .fetch_one(pool)
+                    .await
+                    .map_err(|e| e.to_string())?
+                }
+            }
         }
     };
     sqlx::query(

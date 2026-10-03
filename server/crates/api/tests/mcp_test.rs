@@ -443,7 +443,7 @@ async fn mcp_admin_info_endpoint() {
     assert_eq!(
         tools.len(),
         13,
-        "应为十二个域工具（含 jobs/logs/tickets/assets/circles/study）+ search_all：{}",
+        "应为十三个域工具（含 jobs/logs/tickets/assets/circles/study）+ search_all：{}",
         tools.len()
     );
     let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();

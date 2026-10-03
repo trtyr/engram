@@ -2611,6 +2611,68 @@ async fn t005_entity_substring_no_longer_swallows() {
     assert_eq!(looked, Some(xiaowang), "lookup 应与挂链口径一致命中小王档");
 }
 
+/// T008 回归：归档实体同名重现 → 复活延续旧档案（Q002 改判：同联原则）——
+/// summary/revision 不沉归档态，不新建实体；墓碑（merged_into）永不复活。
+#[tokio::test]
+async fn t008_archived_entity_revives_with_continuity() {
+    let (pool, _pg) = setup_min().await;
+    let eid = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO entities (id, name, kind, summary) VALUES ($1, '老王', 'person', '老王的旧档案摘要')",
+    )
+    .bind(eid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // 归档（孤儿清扫同款操作）
+    sqlx::query("UPDATE entities SET archived_at = now() WHERE id = $1")
+        .bind(eid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // 同名重现（旧名完整出现在新名里 → 复用归档档）
+    let aid = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
+         VALUES ($1, 'fact', '老王师傅来串门', 'active', 0.9, to_tsvector('simple', '老王师傅来串门'))",
+    )
+    .bind(aid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    engram_distill::extract::link_entity(&pool, aid, "老王师傅", "person")
+        .await
+        .expect("link 老王师傅");
+
+    // 断言：同 id 复活 + 档案延续 + 无新实体
+    let (archived, summary): (Option<chrono::DateTime<chrono::Utc>>, Option<String>) =
+        sqlx::query_as("SELECT archived_at, summary FROM entities WHERE id = $1")
+            .bind(eid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(archived.is_none(), "归档实体应被复活");
+    assert_eq!(summary.as_deref(), Some("老王的旧档案摘要"), "旧档案 summary 应延续");
+    let total: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM entities WHERE name LIKE '老王%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(total, 1, "同名重现不得新建实体");
+    // 原子挂到复活实体上
+    let linked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM atom_entities WHERE entity_id = $1 AND atom_id = $2",
+    )
+    .bind(eid)
+    .bind(aid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(linked, 1, "新原子应挂到复活实体档上");
+}
+
 /// T006 回归：claim 分批——pending 超过 EXTRACT_CLAIM_BATCH 时候批只认领 50，
 /// 满批自续投下一批，最终全部蒸完（不再一次性全量抢占）。
 #[tokio::test]

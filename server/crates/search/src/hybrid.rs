@@ -83,8 +83,8 @@ pub async fn search_atoms(
     if query_vec.is_none() && !has_query_tokens(query) {
         return Ok(vec![]);
     }
-    // P3：sensitive 原子默认排除（医疗/感情/财务），reveal 才进结果。
-    // 布尔编译为 SQL 常量——非用户输入，无注入面。
+    // 敏感口径（决策 001 / 2026-09-12）：主检索全暴露（include_sensitive 恒 true）；
+    // include_sensitive 机制仅导出侧显式开关还在用。布尔编译为 SQL 常量——非用户输入，无注入面。
     let sens_filter = if include_sensitive {
         "true"
     } else {

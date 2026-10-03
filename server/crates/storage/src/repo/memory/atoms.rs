@@ -373,7 +373,7 @@ pub async fn atoms_by_ids(pool: &PgPool, ids: &[Uuid]) -> StoreResult<Vec<AtomDt
     Ok(rows)
 }
 
-/// context_pack 无 query 路径：热度头部（过滤过期与敏感）。
+/// context_pack 无 query 路径：热度头部（仅过滤过期；敏感口径放开不滤，决策 001）。
 pub async fn recent_active_atoms(pool: &PgPool, limit: i64) -> StoreResult<Vec<AtomDto>> {
     let rows = sqlx::query_as(
         "SELECT * FROM atoms WHERE status = 'active' \
