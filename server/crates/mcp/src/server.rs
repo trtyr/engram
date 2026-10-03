@@ -33,7 +33,11 @@ impl EngramMcpServer {
     }
 
     pub(crate) fn svc(&self) -> engram_core::memory::MemoryService {
+        let cipher = self.state.master_key.as_ref().and_then(|m| {
+            engram_llm::crypto::KeyCipher::from_hex_master(&m.0).ok()
+        });
         engram_core::memory::MemoryService::new(self.state.pool.clone(), self.state.registry())
+            .with_cipher(cipher)
     }
 
     pub(crate) fn svc_project(&self) -> engram_core::project::ProjectService {

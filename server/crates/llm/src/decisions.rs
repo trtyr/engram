@@ -79,7 +79,7 @@ pub fn masked(cfg: &JevConfig) -> serde_json::Value {
 }
 
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())
@@ -186,6 +186,181 @@ pub struct DecisionsResult {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub cost: f64,
+}
+
+/// 段级保险判定结果（T014 三档路由）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum GuardOutcome {
+    /// ≥ review 阈值：放行精抽。
+    Pass,
+    /// 双阈之间：照常精抽但产物提级 needs_review。
+    Review,
+    /// < reject 阈值：跳过（不精抽）。
+    Reject,
+}
+
+/// 段级判定：三档结果 + 概率 + 归因（choice segment_type，拒绝时的理由）。
+#[derive(Debug, Clone)]
+pub struct SegmentGuard {
+    pub outcome: GuardOutcome,
+    pub p: f64,
+    /// 归因（choice 分类）：project_internal / transient / learning / chitchat / user_facts。
+    pub reason: Option<String>,
+}
+
+/// 段级保险的两问（guard noul + 归因 choice）。
+/// criteria 含 T012 评测教训：「用户拍板了 X」≠ 用户记忆——看 X 的实质主语。
+pub fn guard_questions() -> BTreeMap<String, Question> {
+    let mut q = BTreeMap::new();
+    q.insert(
+        "guard".to_string(),
+        Question::Noul {
+            instructions: "Does this conversation segment contain facts about the USER worth \
+                remembering long-term — the user's attributes, preferences, decisions, \
+                experiences, personal relationships, or the user's relationship with tools/\
+                projects they use? CRITICAL subject test: phrasing like 'the user decided X' \
+                about project/tool configuration is NOT user memory — if removing the user \
+                makes the fact still true, it is project-internal. Software internals, code \
+                findings, transient system readings, study progress tracking, and small talk \
+                do NOT count."
+                .into(),
+        },
+    );
+    let mut criteria = BTreeMap::new();
+    criteria.insert(
+        "user_facts".into(),
+        "Facts about the user: attributes, preferences, decisions affecting their life/work \
+         habits, experiences, personal network, learning background and motivations."
+            .into(),
+    );
+    criteria.insert(
+        "project_internal".into(),
+        "Only software/code/system internals, project conventions, build details, debugging \
+         findings — still true with the user removed."
+            .into(),
+    );
+    criteria.insert(
+        "transient".into(),
+        "Only transient readings: disk space, IPs, ports, temp paths — expired immediately."
+            .into(),
+    );
+    criteria.insert(
+        "learning".into(),
+        "Only study progress tracking (learning X, finished chapter Y)."
+            .into(),
+    );
+    criteria.insert("chitchat".into(), "Small talk, mood, weather — no persistent facts.".into());
+    q.insert(
+        "segment_type".to_string(),
+        Question::Choice {
+            instructions: "Which single description best fits this conversation segment? \
+                          Apply the subject test first."
+                .into(),
+            criteria,
+        },
+    );
+    q
+}
+
+/// 纯函数：三档路由 + 归因（单测锁定）。
+pub fn evaluate_guard(
+    noul_p: f64,
+    segment_type: Option<&str>,
+    reject_threshold: f64,
+    review_threshold: f64,
+) -> SegmentGuard {
+    let outcome = if noul_p < reject_threshold {
+        GuardOutcome::Reject
+    } else if noul_p < review_threshold {
+        GuardOutcome::Review
+    } else {
+        GuardOutcome::Pass
+    };
+    SegmentGuard {
+        outcome,
+        p: noul_p,
+        reason: segment_type.map(str::to_string),
+    }
+}
+
+/// 对一段会话文本执行保险判定（guard + 归因，一次请求两问）。
+pub async fn guard_segment(
+    client: &JevClient,
+    seg_text: &str,
+) -> Result<SegmentGuard, LlmError> {
+    let result = client
+        .decide(
+            serde_json::json!({ "segment": seg_text }),
+            guard_questions(),
+        )
+        .await?;
+    let p = result
+        .answers
+        .get("guard")
+        .and_then(|a| a.noul())
+        .ok_or_else(|| LlmError::Permanent("JEV guard 缺 noul 答案".into()))?;
+    let reason = result
+        .answers
+        .get("segment_type")
+        .and_then(|a| a.choice())
+        .map(str::to_string);
+    Ok(evaluate_guard(
+        p,
+        reason.as_deref(),
+        client.reject_threshold,
+        client.review_threshold,
+    ))
+}
+
+/// KV 准入闸（T017）：四判一次请求——kv_fit 放行，其余拒绝并建议去处。
+pub fn kv_gate_questions() -> BTreeMap<String, Question> {
+    let mut criteria = BTreeMap::new();
+    criteria.insert(
+        "kv_fit".into(),
+        "Verbatim-exact value that must NOT be paraphrased: serial numbers, UUIDs, IPs, \
+         ports, URLs, file paths, phone numbers, playlist/platform references, config keys. \
+         AND user-related AND non-secret AND not infrastructure ledger material."
+            .into(),
+    );
+    criteria.insert(
+        "prefer_atoms".into(),
+        "A preference/convention/decision in natural language — belongs to atomic memory, \
+         not a verbatim registry."
+            .into(),
+    );
+    criteria.insert(
+        "prefer_credentials".into(),
+        "A secret (password, token, private key) — belongs to the encrypted credentials \
+         domain."
+            .into(),
+    );
+    criteria.insert(
+        "prefer_assets".into(),
+        "Infrastructure/ledger material (host inventory, service topology, project locations) \
+         — belongs to assets/projects domains."
+            .into(),
+    );
+    let mut q = BTreeMap::new();
+    q.insert(
+        "gate".to_string(),
+        Question::Choice {
+            instructions: "Should this key-value pair be stored in the verbatim registry? \
+                           The registry is for exact machine-produced values tied to the user."
+                .into(),
+            criteria,
+        },
+    );
+    q
+}
+
+/// 非 kv_fit 判定的拒绝文案（建议去处，Agent 据此转投）。
+pub fn kv_gate_reject_hint(choice: &str) -> String {
+    match choice {
+        "prefer_atoms" => "该内容是偏好/约定类陈述，建议走 remember(mode=atom) 进原子记忆".into(),
+        "prefer_credentials" => "该内容疑似机密，建议存 credentials 域（加密+审计）".into(),
+        "prefer_assets" => "该内容属基础设施/台账，建议登记 assets/projects 域".into(),
+        other => format!("JEV 判定不适合 KV 登记（{other}）——精确值需逐字必需且非机密非台账"),
+    }
 }
 
 /// JEV 决策客户端（resolve 构造；clone 安全）。
@@ -403,6 +578,36 @@ mod tests {
         let a = parse_answer("noul", &serde_json::json!({"type":"noul","noul":0.71})).unwrap();
         assert!((a.noul().unwrap() - 0.71).abs() < 1e-9);
         assert!(parse_answer("score", &serde_json::json!({"type":"score"})).is_none());
+    }
+
+    #[test]
+    fn evaluate_guard_three_bands() {
+        // < reject → Reject（含归因）
+        let g = evaluate_guard(0.10, Some("project_internal"), 0.3, 0.5);
+        assert_eq!(g.outcome, GuardOutcome::Reject);
+        assert_eq!(g.reason.as_deref(), Some("project_internal"));
+        // 双阈之间 → Review
+        let g = evaluate_guard(0.42, None, 0.3, 0.5);
+        assert_eq!(g.outcome, GuardOutcome::Review);
+        // ≥ review → Pass
+        let g = evaluate_guard(0.88, Some("user_facts"), 0.3, 0.5);
+        assert_eq!(g.outcome, GuardOutcome::Pass);
+        // 边界：恰在阈值上不算 Reject（< 严格小于）
+        assert_eq!(evaluate_guard(0.3, None, 0.3, 0.5).outcome, GuardOutcome::Review);
+        assert_eq!(evaluate_guard(0.5, None, 0.3, 0.5).outcome, GuardOutcome::Pass);
+    }
+
+    #[test]
+    fn kv_gate_questions_has_four_options() {
+        let qs = kv_gate_questions();
+        assert!(qs.contains_key("gate"));
+        // choices 序列化后应含四选项
+        let j = qs["gate"].to_json();
+        let criteria = j["criteria"].as_object().unwrap();
+        for opt in ["kv_fit", "prefer_atoms", "prefer_credentials", "prefer_assets"] {
+            assert!(criteria.contains_key(opt), "缺选项 {opt}");
+        }
+        assert_eq!(kv_gate_reject_hint("prefer_atoms"), "该内容是偏好/约定类陈述，建议走 remember(mode=atom) 进原子记忆");
     }
 
     #[test]

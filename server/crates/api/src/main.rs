@@ -113,19 +113,19 @@ async fn build_runner(
     if let Ok(v) = std::env::var("AGENT_MEMORY_JOB_CONCURRENCY") {
         runner_config.per_kind_concurrency = engram_jobs::runner::parse_per_kind_concurrency(&v);
     }
-    let distill_llm = engram_distill::gateway_llm(pool.clone(), {
-        // 未配置 = 全零占位（纯 chat 场景不碰密钥加密也不出错）；配了坏值则响亮拒绝，
-        // 并告诉 AI/人「怎么生成正确的」——此前 expect("主密钥格式恒合法") 在坏值下
-        // 打出自相矛盾的日志（恒合法 + NotConfigured + 必须是 64 hex 三信息打架）。
+    // T014/T017：JEV 哨兵解密 settings 里的 api_key——runner 需 cipher（None=哨兵降级直通）
+    let jev_cipher = {
         let master_key_hex = cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32));
-        engram_llm::KeyCipher::from_hex_master(&master_key_hex).map_err(|e| {
-                anyhow::anyhow!(
-                    "AGENT_MEMORY_MASTER_KEY 非法（{e}）——必须是 64 个 hex 字符（生成：openssl rand -hex 32）；\
-                     请修正 ~/.engram/.env 后重启。当前值前 8 字符：{}",
-                    &master_key_hex[..master_key_hex.len().min(8)]
-                )
-            })?
-    });
+        Some(engram_llm::KeyCipher::from_hex_master(&master_key_hex).map_err(|e| {
+            anyhow::anyhow!(
+                "AGENT_MEMORY_MASTER_KEY 非法（{e}）——必须是 64 个 hex 字符（生成：openssl rand -hex 32）；\
+                 请修正 ~/.engram/.env 后重启。当前值前 8 字符：{}",
+                &master_key_hex[..master_key_hex.len().min(8)]
+            )
+        })?)
+    };
+    runner_config.cipher = jev_cipher.clone();
+    let distill_llm = engram_distill::gateway_llm(pool.clone(), jev_cipher.expect("上方已校验"));
     let runner = engram_distill::register_handlers(
         engram_jobs::Runner::new(pool.clone(), runner_config),
         distill_llm.clone(),

@@ -17,6 +17,8 @@ pub struct JobContext {
     queue: JobQueue,
     /// LLM 调用计数（本任务内；Arc 跨 clone 共享）——预算闸记账用。
     llm_calls: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// 主密钥 cipher（可选）：JEV 哨兵解密配置用；None = 哨兵降级直通。
+    pub cipher: Option<engram_llm::KeyCipher>,
 }
 
 impl JobContext {
@@ -115,6 +117,9 @@ pub struct RunnerConfig {
     /// （cap = min(per_kind, 全局 concurrency)），未配置走全局——默认空表 = 行为与旧版完全一致。
     /// env 入口：`AGENT_MEMORY_JOB_CONCURRENCY=wiki_generate:1,wiki_analyze:2`（runner::parse_per_kind）。
     pub per_kind_concurrency: HashMap<String, usize>,
+    /// 主密钥 cipher（可选）：JEV 闸解密 settings 里的 api_key_enc 用（T014/T017）。
+    /// None = JEV 哨兵不可用，全部降级直通。
+    pub cipher: Option<engram_llm::KeyCipher>,
 }
 
 impl Default for RunnerConfig {
@@ -126,6 +131,7 @@ impl Default for RunnerConfig {
             batch_size: 2,
             reap_interval: Duration::from_secs(30),
             per_kind_concurrency: HashMap::new(),
+            cipher: None,
         }
     }
 }
@@ -247,6 +253,7 @@ impl Runner {
                                 let semaphore = semaphore.clone();
                                 let queue = queue.clone();
                                 let handlers = handlers.clone();
+                                let cipher = config.cipher.clone();
                                 tokio::spawn(async move {
                                     let _kind_permit = match kind_sem {
                                         Some(sem) => sem.acquire_owned().await.ok(),
@@ -260,7 +267,7 @@ impl Runner {
                                         return;
                                     };
                                     let _permit = permit;
-                                    execute_job(&queue, handlers, job).await;
+                                    execute_job(&queue, handlers, job, cipher).await;
                                 });
                             }
                         }
@@ -317,7 +324,12 @@ impl RunnerHandle {
     }
 }
 
-async fn execute_job(queue: &JobQueue, handlers: Arc<HashMap<String, HandlerFn>>, job: Job) {
+async fn execute_job(
+    queue: &JobQueue,
+    handlers: Arc<HashMap<String, HandlerFn>>,
+    job: Job,
+    cipher: Option<engram_llm::KeyCipher>,
+) {
     let Some(handler) = handlers.get(&job.kind) else {
         // 未注册种类：永久失败（防无限重排）
         if let Err(e) = queue
@@ -347,6 +359,7 @@ async fn execute_job(queue: &JobQueue, handlers: Arc<HashMap<String, HandlerFn>>
         job: job.clone(),
         queue: queue.clone(),
         llm_calls: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        cipher: cipher.clone(),
     };
     match handler(ctx).await {
         Ok(result) => {
@@ -408,7 +421,7 @@ mod per_kind_tests {
         };
         let sem = build_per_kind_semaphores(&config);
         assert!(
-            sem.get("extract_atoms").is_none() && sem.get("organize_scenarios").is_none(),
+            !sem.contains_key("extract_atoms") && !sem.contains_key("organize_scenarios"),
             "workflow kind 不可通过 env 放松串行: {:?}",
             sem.keys().collect::<Vec<_>>()
         );

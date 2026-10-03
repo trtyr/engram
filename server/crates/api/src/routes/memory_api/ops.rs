@@ -34,7 +34,11 @@ pub(crate) fn me(e: MemoryError) -> ApiError {
 }
 
 pub(crate) fn svc(state: &AppState) -> MemoryService {
-    MemoryService::new(state.pool.clone(), state.registry())
+    let cipher = state
+        .master_key
+        .as_ref()
+        .and_then(|m| engram_llm::crypto::KeyCipher::from_hex_master(&m.0).ok());
+    MemoryService::new(state.pool.clone(), state.registry()).with_cipher(cipher)
 }
 
 pub(crate) fn default_conf() -> f32 {
