@@ -1,5 +1,9 @@
 # P011 Roadmap
 
+> **落地基线（2026-10-03 夜间冲刺）**：T001-T010 / T013-T014 / T016-T021 全部落地
+> （goal musad761-gko7jm，逐项 commit 见行尾）；**T015（阶段二 arbitrate choice 化 +
+> consolidate noul 化）按设计后置**——依赖 T013/T014 生产稳定后再启。生产部署单独拍板。
+
 > 任务身份/状态/顺序的唯一权威。全部 Planning——每条需拍板后进 In Progress。
 > 每条带实读证据（文件:行号，2026-10-03 实读）。
 
@@ -23,29 +27,29 @@
 
 ### 正确性
 
-- [ ] **T001 · 审计事件不进 logs 流**【Q001】
+- [x] **T001 · 审计事件不进 logs 流**【Q001】 ——✅ 5f39973
   repo/memory/ops.rs:88 `audit()` 直插 jobs 表伪造 `status='succeeded'` 的 job 行
   （注释自认「写一条已完成的 job 行」）。调用点 11+：session_void_cascade /
   session_erase_cascade / session_unvoid_restore / correct_atom / edit_atom /
   review_confirm / review_discard / atom_archive / kv_delete / entity_merge /
   edit_persona / delete_entity。**与 P010「日志是唯一时间线」原则冲突**——审计只在
   MCP jobs 域可见，logs 流与前端日志页看不到。
-- [ ] **T002 · mark_superseded 双 active**
+- [x] **T002 · mark_superseded 双 active** ——✅ 02f0c30
   distill/arbitrate.rs:296 `WHERE id=$2 AND status='active'`——旧条已 archived 时
   UPDATE 0 行但候选已转正（:235 先 promote 再 supersede），同主题双 active。
   蒸馏链篇坑清单第 5 条实证。
-- [ ] **T003 · 场景成员双轨漂移——已拍板：归属牌单一事实源（方案 A）**
+- [x] **T003 · 场景成员双轨漂移——已拍板：归属牌单一事实源（方案 A）** ——✅ 02f0c30
   用户拍板（2026-10-03）：**Q003 用归属牌**——atoms.scenario_id 为唯一真源，
   scenarios.atom_refs 降级为可重算缓存（organize/converge 写侧按 scenario_id 重算
   对齐）。读侧（entity_scenarios/timeline）已用 scenario_id 正查，改动集中在写侧
   与 converge；T012 的 scenario_write 成员增删是单点同步的落地时机（与 P012 交叉
   引用）。原双轨描述（存档）：写侧 organize.rs:270 atom_refs 并集只进不出 +
   :317 scenario_id 覆盖回填，两段代码分别维护——A 案后归一。
-- [ ] **T004 · update_atom_full 单值字段清不掉**
+- [x] **T004 · update_atom_full 单值字段清不掉** ——✅ 02f0c30
   repo/memory/atoms.rs:271-274 superseded_by/occurred_at/valid_until/sensitive 全
   `COALESCE($X, 保留旧值)`——传 None 永远无法置回 NULL。EN-BUG-1（study learned_at）
   同族盲 CASE，方向相反：那边保不住、这边清不掉。
-- [ ] **T005 · 实体子串归并误吞 + 关系 lookup 口径分裂**
+- [x] **T005 · 实体子串归并误吞 + 关系 lookup 口径分裂** ——✅ 02f0c30
   distill/extract.rs:226 `position(lower($1) in lower(name))>0 OR 反向` 双向包含
   + `LIMIT 1` 无 ORDER BY——「云」可吞「星云」；:298 关系 lookup 用 `name=$1` 精确
   匹配，与挂链的子串归并口径不一致。坑清单第 3 条实证（P001 Deferred 只挂了
@@ -53,30 +57,30 @@
 
 ### 性能
 
-- [ ] **T006 · extract claim 全量抢占无 LIMIT**
+- [x] **T006 · extract claim 全量抢占无 LIMIT** ——✅ 02f0c30
   distill/extract.rs:46 `UPDATE raw_sessions SET distill_status='processing'
   WHERE distill_status='pending' AND ... RETURNING ...`——一次认领全部 pending，
   无 LIMIT。会话量级增长后第一个慢查询（坑清单第 2 条实证）。
-- [ ] **T007 · LLM 无熔断**
+- [x] **T007 · LLM 无熔断** ——✅ 00902d9
   distill/llm_port.rs budget_tokens 声明未用——蒸馏风暴无成本闸门（坑清单第 4 条）。
 
 ### 卫生
 
-- [ ] **T008 · revive_entity 死代码 + 永不复活后果**【Q002】
+- [x] **T008 · revive_entity 死代码 + 永不复活后果**【Q002】 ——✅ f8e2280
   repo/memory/entity.rs:459 全仓零调用；extract.rs:264 注释明示「复活语义已废除」。
   实际后果：孤儿实体归档后即使同名再次出现也**新建实体**（link_entity 只查活体），
   旧档案（summary/revision）永沉归档态。删函数或恢复接线，二选一。
-- [ ] **T009 · stale 注释三处（决策 001 后未跟上）**
+- [x] **T009 · stale 注释三处（决策 001 后未跟上）** ——✅ f8e2280
   ① search/hybrid.rs:86「P3：sensitive 原子默认排除」——主检索路径已全传 true
   （core/search.rs:250/472/332）；② core/memory/search.rs:426 F4 注释「归档或标敏感
   →收敛」——实际仅归档触发（:377，标敏感不触发是 P003-T001 决策）；③
   repo/memory/atoms.rs:368 recent_active_atoms 注释「过滤过期与敏感」——SQL 只滤过期。
-- [ ] **T010 · mcp_test.rs:446 文案滞后**
+- [x] **T010 · mcp_test.rs:446 文案滞后** ——✅ f8e2280
   报错文案「应为十二个域工具」vs 断言 `tools.len()==13`（P010 加 logs 域后没跟）。
 
 ### 已拍板（决策 001 · JEV 上 L0→L1，2026-10-03）
 
-- [ ] **T013 · 决策模型接入面 + JEV 配置**
+- [x] **T013 · 决策模型接入面 + JEV 配置** ——✅ e844d93
   ① DistillLlm trait 增 `decide` 原语（或独立 DecideLlm port）+ OpenRouter Decisions
   API 客户端（POST /api/alpha/decisions，typesafe/jev-1.13）；② 配置面：Web 设置
   「AI 功能」新增 JEV 区块——**接口仅支持 OpenRouter**（无 provider 选择器，默认且唯一），
@@ -84,7 +88,7 @@
   KeyCipher/re-encrypt/测试链；备选 settings 单行 JSON），enabled 开关 + 模型名 +
   阈值参数（reject/review 两线）；③ HTTP GET/PUT /settings/jev（Admin）。验证：配置
   改动即时生效 + 门禁。
-- [ ] **T014 · L0→L1 保险级联落地（含归因回执）**
+- [x] **T014 · L0→L1 保险级联落地（含归因回执）** ——✅ ea55091
   extract claim 后、chat 精抽前逐段 JEV 判定：noul 概率 `<0.3` 跳过（事件流记
   「JEV 拒绝 p=xx」）/`0.3~0.5` 照常精抽但产物提级 needs_review/`≥0.5` 放行；
   归因回执用 choice 五分类（user_facts/project_internal/transient/learning/chitchat）
@@ -94,7 +98,7 @@
   arbitrate：每候选 choice{new,duplicate,contradicts} 替换 prompt-and-parse，低置信
   进待审（顺治漏判兜底问题）；target 指认取 top1 相似（最简方案，设计期可复审）。
   consolidate：近重复「语义等价吗」noul 化。评测支撑：三判 7/7（T012 评测记录）。
-- [ ] **T016 · 蒸馏链串行保证写死（结构不变量，非配置项）**
+- [x] **T016 · 蒸馏链串行保证写死（结构不变量，非配置项）** ——✅ 00902d9
   生产实锤（2026-10-03）：近 7 天 extract_atoms 12 dead / 17 succeeded；蒸馏链无串行
   保证——organize 双跑抢占同一批未归组原子（重复场景风险）、persona 双跑撞
   UNIQUE(aspect,version)。
@@ -110,7 +114,7 @@
   熔断器，error 文案实证），budget 总闸仍缺，随 P012 T002 一并落地。
   用户原话：「这个东西应该写死的」「应该有一个类似于消息队列的一套机制，能够保证
   稳定，并且保证不会冲突」。
-- [ ] **T017 · KV 准入 JEV 闸（写前把关）+ 存量大扫除**
+- [x] **T017 · KV 准入 JEV 闸（写前把关）+ 存量大扫除** ——✅ ea55091
   KV 写入路径（remember(mode=kv)/kv_put 全部入口）前置 JEV choice 判定，一次请求
   同时完成判定与归因：`kv_fit`（放行入库）/ `prefer_atoms` / `prefer_credentials` /
   `prefer_assets`（含 projects）——非 kv_fit 拒绝入库并在错误信息里建议去处，由
@@ -123,7 +127,7 @@
   核实后删；其余 6 条（contact-*/resume-path/music-*）合规保留。
   动机：KV 正从「精确值登记簿」退化为「不知道放哪就放这」的杂物抽屉（9 条中 2 条
   放错）——用 JEV 把准入判据从纪律变成机制。
-- [ ] **T018 · MCP memory 域动作面收敛 32→6（旧名删除，不做兼容）**
+- [x] **T018 · MCP memory 域动作面收敛 32→6（旧名删除，不做兼容）** ——✅ 13b4457
   用户拍板（2026-10-03）：System prompt 由用户自行维护，旧名无需兼容——直接删。
   目标形态（六动词全 mode 归并）：
   `remember`（atom/session/append/kv——吸收 write_session/append_session/kv_put）·
@@ -143,7 +147,7 @@
   未竟终章。变更面：dispatch.rs 动作表与 handler 合并 + golden 快照重生成 +
   mcp_test 三处断言（照 P010 两轮门禁教训预防）+ Web 管理台跟随。验证：门禁 +
   golden + Agent 实测（pi 自身即消费者）。
-- [ ] **T021 · circles 域界补齐——同联断裂修复 + 反向联动执行器**
+- [x] **T021 · circles 域界补齐——同联断裂修复 + 反向联动执行器** ——✅ 13b4457
   用户架构定义（2026-10-03）：**用户记忆与圈子是同一个东西的两种展示**——记忆是
   纵向事实流，圈子是横向关系/图谱展示；存储同源（entities 系表在 memory repo 无独立
   circles 存储），操作面按域界切分：**动原子/会话/KV → memory；动实体/关系/关联边 →
@@ -160,7 +164,7 @@
   **Q004 拍板（2026-10-03）：实体遗忘双行为并存**——`forget`（归档式：实体归档 +
   挂链 active 原子级联归档，可恢复）与 `delete`（物理删：档案蒸发，显式清理路径）
   同时提供，调用方按意图选；MCP 面两个动作齐备，物理删沿用既有 delete_entity。
-- [ ] **T019 · 日志域化——logs 加 domain 列，每个功能一份全量日志**
+- [x] **T019 · 日志域化——logs 加 domain 列，每个功能一份全量日志** ——✅ 5f39973
   用户需求（2026-10-03）：「为每一个功能单独做日志，获取跟这个功能相关的全量日志」
   ——日志按功能域组织，不是任务概念（不破 P010 唯一时间线：仍是单表单流，域是列
   不是新日志概念）。
@@ -172,7 +176,7 @@
   ③ 读取面：MCP logs.query + HTTP /logs 加 domain 参数；前端 Logs 页域切换 tab；
   ④ 连锁简化：T011/T014 落点改为 logs domain='memory' 聚合（抽取率/JEV 命中率
   SQL 一跳出），无需独立蒸馏史表。
-- [ ] **T020 · 记忆域生命周期日志补全（记全，配合 T019 归域）**
+- [x] **T020 · 记忆域生命周期日志补全（记全，配合 T019 归域）** ——✅ 5f39973
   用户拍板（2026-10-03）：「用户记忆没有很好地做到日志记录」——实读确认读写两侧
   全裸：写入侧 write_session/import/create_atom(直写)/kv_put **零语义日志**（kv_delete
   反而有 audit——删有痕写无痕）；读取侧 recall(context)/search **零日志**（AI 何时

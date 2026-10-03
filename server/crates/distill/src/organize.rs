@@ -370,15 +370,17 @@ async fn refresh_embeddings_by_ids(
         return Ok(());
     }
     let texts: Vec<String> = rows.iter().map(|(_, t)| t.clone()).collect();
-    let embeddings = llm.embed(&texts, ctx.job.id).await?;
+    // embed 失败容忍（OpenRouter 等无 embedding 端点的 provider）：降级只写 tsv，
+    // embedding 留空待后续 reembed_memory 补——场景检索走 tsv 腿不受影响。
+    let embeddings = llm.embed(&texts, ctx.job.id).await.unwrap_or_default();
     for (i, (sid, text)) in rows.iter().enumerate() {
+        let emb = embeddings.get(i).cloned().map(pgvector::Vector::from);
         sqlx::query(
-            "UPDATE scenarios SET embedding = $2, tsv = to_tsvector('simple', $3) WHERE id = $1",
+            "UPDATE scenarios SET embedding = COALESCE($2, embedding), \
+             tsv = to_tsvector('simple', $3) WHERE id = $1",
         )
         .bind(sid)
-        .bind(pgvector::Vector::from(
-            embeddings.get(i).cloned().unwrap_or_default(),
-        ))
+        .bind(emb)
         .bind(engram_search::tokenize::tsv_text(text))
         .execute(pool)
         .await
