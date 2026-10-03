@@ -13,7 +13,7 @@
   查询前看 `codegraph list` freshness——`stale=true` 先本机 `codegraph sync` + 服务端 `sync`
 - 位置：主开发机 MacBook Air M1 `/Volumes/trtyr_for_mac/Code/engram`；
   生产 engram.trtyr.top（腾讯云北京 Docker compose，宿主无 clone，无 IaC）
-- 文档基线：**HEAD `a6beb1a`**（2026-10-03 P008 收官+生产重部署；上轮 15ae465/2026-10-02 夜间三线）
+- 文档基线：**HEAD `c0875eb`**（2026-10-03 P009 前端 IA 重构+生产 codegraph 数据根修复；上轮 a6beb1a/P008 收官+重部署）
 
 ## 文档清单（title → category → doc_id 完整 UUID，一跳 doc_get 直达）
 
@@ -54,6 +54,7 @@
 - 风险与债（四维排序 22 项）`01a0e6f6-04d2-7b03-b128-29863af0e008`
 - 开工记录 2026-09-28（基线 HEAD 82fdba7）`01a0e704-a36e-7651-94f9-290bc317b718`
 - 更新记录 2026-10-01→02 · 夜间长任务三线（P004/P005/P006）`01a0f99b-53f1-7d30-9b61-01378442f731`
+- 生产重部署 2026-10-03（a6beb1a→c0875eb · 86 commit · 迁移 63→66）`01a0fdc7-8a43-7603-a961-0e7a2bf29860`
 - study×wiki×harness×memory 学习工作流分工手册 `01a0fba1-506b-79d0-9da0-765ac9fe9129`
 - 生产重部署 2026-10-03（a6beb1a · 78 commit · 迁移 63→66）`01a0fdc7-8a43-7603-a961-0e7a2bf29860`
 
@@ -72,7 +73,7 @@
 
 ## 关键纪律（改代码前必读）
 
-0. **规划工作面**：本地 `docs/plantree/`（P001 风险债整改线进行中，待拍板问题见其 open-questions.md）——分工约定：Mia 整理决策点并执行，trtyr 只拍板
+0. **规划工作面**：本地 `docs/plantree/`（P001 风险债整改线进行中，待拍板问题见其 open-questions.md）——分工约定：Mia 整理决策点并执行，trtyr 只拍板（P009 frontend-ia-observability 已 done：前端 IA 重构 + 生产 codegraph 数据根修复）
 
 1. **门禁**：server `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`；web `pnpm run lint && pnpm exec tsc --noEmit && pnpm test && pnpm run build`
 2. **本地 journey 唯一合法入口 `scripts/e2e-local.sh`**（Playwright 无 `E2E_BASE` 直接 throw——三次误删生产库的教训）
