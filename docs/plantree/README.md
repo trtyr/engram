@@ -30,6 +30,7 @@
 | P006 | [error-handling](plans/006-error-handling/README.md) | server/core, server/storage, server/llm, server/jobs, server/mcp, server/api, server/distill, web | done | 五任务全落地（2026-10-02）：EngramError+17 码注册表+wiki_docs 桥+internal_bug 告警升级+边界 category/request_id+错误码全表；传播链剩余域 Deferred | d5d7d12/619662c/91daebc/b387089 | 渐进下沉（Q001） |
 | P007 | [study-learning-tracker](plans/007-study-learning-tracker/README.md) | server/storage, server/core, server/mcp, server/api, server/distill, web | done | 一期 MCP 域（446f627..e08c593）+二期做全（433b589..169d7ad）：HTTP 11 端点/集成测试/前端学习页/harness 联动（工具 12）/SRS/journal——四层全通 | 433b589/87c3280/a7718c0/eb51025/169d7ad | 0066 迁移；actions 8→12 |
 | P008 | [wiki-frontend-agentfirst](plans/008-wiki-frontend-agentfirst/README.md) | web, server/wiki-engine, server/mcp, server/api | done | 人审机制整体移除（T001-T002）+Agent 维护流面板/版本 UI/体检补全/语义修正（T003-T006）+todos 详情/markdown（ideas 晋升 T007） | 8b97b26/f118992/7522406/b27d235/5ad386b/063d34b | 表 wiki_review_items 留停写；wiki actions 28→26 |
+| P009 | [frontend-ia-observability](plans/009-frontend-ia-observability/README.md) | web, deploy, server/api | done | 任务并入日志并移除任务入口/学习归资产域/日志 7 天窗口+长内容收起/已完成计数/账号拆三标签/网页读取归 AI 功能/生产 codegraph 数据根修复 | 2c5423a/72003f6/dbef672/cb7bf7d | — |
 
 ## Ideas
 
