@@ -271,6 +271,10 @@ fn settings_routes() -> Router<AppState> {
             "/settings/rhythm",
             get(crate::rhythm_admin::get_rhythm_config).put(crate::rhythm_admin::put_rhythm_config),
         )
+        .route(
+            "/settings/jev",
+            get(crate::jev_admin::get_jev_config).put(crate::jev_admin::put_jev_config),
+        )
 }
 
 /// `/llm` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。

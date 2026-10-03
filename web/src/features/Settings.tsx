@@ -684,6 +684,9 @@ function Routing() {
 
       {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
 
+      {/* JEV 决策模型：蒸馏与 KV 的准入哨兵（决策 001，OpenRouter-only） */}
+      <JevPane />
+
       {/* 网页读取：抓取正文能力配置（随 AI 功能同处） */}
       <WebReaderPane />
     </div>
@@ -691,6 +694,156 @@ function Routing() {
 }
 
 /** 危险操作 tab：主密钥重加密 + 清空记忆库（从设置页底部移入独立子 tab）。 */
+/** JEV 决策模型（决策 001）：蒸馏与 KV 的准入哨兵配置（OpenRouter-only，key 加密存）。 */
+function JevPane() {
+  type JevCfg = {
+    enabled: boolean
+    model: string
+    reject_threshold: number
+    review_threshold: number
+    key_configured: boolean
+  }
+  const [cfg, setCfg] = useState<JevCfg | null>(null)
+  const [apiKey, setApiKey] = useState('')
+  const [reject, setReject] = useState('')
+  const [review, setReview] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const load = () =>
+    api
+      .get<JevCfg>('/settings/jev')
+      .then((r) => {
+        setCfg(r)
+        setReject(String(r.reject_threshold))
+        setReview(String(r.review_threshold))
+      })
+      .catch(() => setCfg(null))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load()
+  }, [])
+
+  const save = async (patch: Record<string, unknown>, ok: string) => {
+    setBusy(true)
+    setMsg('')
+    try {
+      const r = await api.put<JevCfg>('/settings/jev', patch)
+      setCfg(r)
+      setApiKey('')
+      setMsg(ok)
+    } catch (e) {
+      setMsg(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-3">
+        <div>
+          <div className="font-medium">JEV 决策模型（哨兵）</div>
+          <div className="text-sm text-muted-foreground mt-1">
+            蒸馏入库与 KV 登记前的廉价判定闸（判断模型，非生成模型）：低概率段直接跳过精抽、
+            KV 垃圾值挡在门外。接口仅支持 OpenRouter；未配置或调用失败时自动直通（不阻塞主链）。
+          </div>
+        </div>
+        <div className="text-sm">
+          状态：
+          {cfg === null ? (
+            <span className="text-muted-foreground">加载中…</span>
+          ) : (
+            <>
+              {cfg.enabled ? (
+                <span className="text-emerald-600">已启用</span>
+              ) : (
+                <span className="text-muted-foreground">未启用</span>
+              )}
+              <span className="text-muted-foreground"> · </span>
+              {cfg.key_configured ? (
+                <span className="text-emerald-600">Key 已配置</span>
+              ) : (
+                <span className="text-amber-600">未配置 Key</span>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            disabled={busy || cfg === null}
+            onClick={() => save({ enabled: !(cfg?.enabled ?? false) }, cfg?.enabled ? '已停用' : '已启用')}
+          >
+            {cfg?.enabled ? '停用' : '启用'}
+          </Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="password"
+            placeholder="OpenRouter API key（sk-or-…）"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            className={inputCls + ' max-w-sm'}
+          />
+          <Button size="sm" disabled={busy || !apiKey.trim()} onClick={() => save({ api_key: apiKey.trim() }, 'Key 已保存')}>
+            保存 Key
+          </Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className={inputCls + ' w-64'}
+            placeholder="模型（typesafe/jev-1.13）"
+            value={cfg?.model ?? ''}
+            disabled
+            readOnly
+          />
+          <label className="text-xs text-muted-foreground">
+            拒绝阈值
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={reject}
+              onChange={(e) => setReject(e.target.value)}
+              className={inputCls + ' w-24 ml-1'}
+            />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            待审阈值
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="1"
+              value={review}
+              onChange={(e) => setReview(e.target.value)}
+              className={inputCls + ' w-24 ml-1'}
+            />
+          </label>
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() =>
+              save(
+                {
+                  model: cfg?.model,
+                  reject_threshold: Number(reject),
+                  review_threshold: Number(review),
+                },
+                '参数已保存',
+              )
+            }
+          >
+            保存参数
+          </Button>
+        </div>
+        {msg && <div className="text-sm text-muted-foreground">{msg}</div>}
+      </Card>
+    </div>
+  )
+}
+
 /** 网页读取（web-reader，admin）：智谱 key 配置 + 连通性测试（P004-T006）。 */
 function WebReaderPane() {
   const [configured, setConfigured] = useState<boolean | null>(null)

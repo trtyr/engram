@@ -6,6 +6,7 @@ pub mod client_ip;
 pub mod config;
 pub mod error;
 pub mod login_throttle;
+pub mod jev_admin;
 pub mod logging;
 pub mod mcp_admin;
 pub mod metrics;

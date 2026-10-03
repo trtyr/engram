@@ -5,11 +5,13 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 pub mod crypto;
+pub mod decisions;
 pub mod provider;
 pub mod router;
 pub mod types;
 
 pub use crypto::KeyCipher;
+pub use decisions::{JevClient, JevConfig};
 pub use provider::{OpenAiCompatProvider, ProviderRegistry};
 pub use router::PurposeRouter;
 pub use types::{
