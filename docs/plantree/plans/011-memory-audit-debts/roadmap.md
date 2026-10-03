@@ -87,6 +87,20 @@
   未验证）；**风险**：/api/alpha/decisions 为 alpha 面、32k 上下文、arbitrate 的
   target_id 指认是开放集合（choice 只判类型 + top1 相似当 target，或动态构造 criteria
   编号选项——设计期定）。不适配：extract 开放抽取 / persona 生成（保持 chat 模型）。
+  **评测记录（2026-10-03 两轮，107 次调用合计 <$0.002）**：
+  - 第一轮构造用例 10/10（noul@0.5 全对，KEEP≥0.58/REJECT≤0.24 分离度佳；choice
+    五分类全对 conf 0.84-1.0，拒绝理由归因白送——T011 可用 choice 一次请求同时出
+    保险判定+拒绝分类）
+  - 第二轮生产回放 25 段：**一致率 84%**（KEEP 18/20、REJECT 3/5）。方差 spread
+    ≤0.06（同段复跑 3 次）——阈值路由可行。注意：标注=历史 extract 判定（有产出=KEEP/
+    空产出=REJECT），84% 是**与 extract 的一致率**非真实准确率；2 条「误放」（空产出
+    但 p=0.71）疑似 extract 历史误杀被 JEV 揪出——若复核坐实，可加「空产出段 JEV
+    补抽哨兵」玩法（高 P 空产出段进二次精抽）
+  - arbitrate 三判 7/7：真实 superseded 对（contradicts 例证）1/1 conf 0.92；独立
+    active 对（new 例证）6/6 conf 0.98-1.0
+  - **评测结论：可落地**。设计期三件事：① DistillLlm trait 增 decide 原语（或独立
+    port）② 阈值分档（建议：<0.3 拒绝跳过 / 0.3-0.5 待审（复用 needs_review 通道）/
+    ≥0.5 放行精抽）③ arbitrate target 指认方案
 
 ## Deferred / 交叉引用
 
