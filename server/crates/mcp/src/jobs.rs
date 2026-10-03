@@ -236,8 +236,9 @@ impl EngramMcpServer {
         })))
     }
 
-    /// 后台执行域（EN-61，**内部调度面**）：轮询 job 状态/错误/过程。
-    /// 的异步链路（拿到 job_id 不再干看着）。list/get/events 任何合法凭证可读；
+    /// 后台执行域（EN-61，**内部调度面**）：轮询 job 状态/错误/过程，
+    /// 闭环 codegraph index/sync 的异步链路（拿到 job_id 不再干看着）。
+    /// list/get/events 任何合法凭证可读；
     /// revive 复活 dead/failed 仅管理员（与 HTTP 同语义）。用户概念只有「日志」。操作全景：action="help"。
     #[tool(
         name = "jobs",
