@@ -162,6 +162,9 @@ pub async fn item_get(pool: &PgPool, id: Uuid) -> StoreResult<Option<StudyItemRo
 }
 
 /// 补丁式更新；status 置 learned 时记 learned_at，离开 learned 清空。
+/// EN-BUG-1（学习助手 2026-10-03 报）：原实现 `learned_at = CASE WHEN $3='learned' THEN now() ELSE NULL END`
+/// 在 status 未传（$3=NULL）时也把 learned_at 清成 NULL——并发的其它字段更新会静默抹掉时间戳。
+/// 修：只有**本次显式传了 status** 才允许改 learned_at；status 缺省时保持原值。
 #[allow(clippy::too_many_arguments)]
 pub async fn item_update(
     pool: &PgPool,
@@ -179,7 +182,10 @@ pub async fn item_update(
          position = COALESCE($4, position), \
          wiki_slugs = COALESCE($5, wiki_slugs), \
          doc_ids = COALESCE($6, doc_ids), \
-         learned_at = CASE WHEN $3 = 'learned' THEN now() ELSE NULL END, \
+         learned_at = CASE \
+           WHEN $3 = 'learned' THEN COALESCE(learned_at, now()) \
+           WHEN $3 IS NOT NULL THEN NULL \
+           ELSE learned_at END, \
          updated_at = now() \
          WHERE id = $1",
     )

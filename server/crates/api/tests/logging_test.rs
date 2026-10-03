@@ -357,6 +357,35 @@ async fn logs_query_endpoint_filters_and_paginates() {
     assert_eq!(v["logs"].as_array().unwrap().len(), 1);
     assert_eq!(v["logs"][0]["level"], "ERROR");
 
+    // P010 修正：total 是**同过滤条件下的真实总数**，与 limit 无关（前端凭此真分页）
+    let resp = get("level=ERROR&limit=1").await;
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["logs"].as_array().unwrap().len(), 1, "limit=1 应只返 1 条");
+    assert_eq!(v["total"], serde_json::json!(1), "total 不受 limit 影响");
+
+    // scope=job / scope=system 的计数口径
+    let resp = get("scope=job&limit=1").await;
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["total"], serde_json::json!(0), "本用例造数无 job 行: {v}");
+    let resp = get("scope=system&limit=1").await;
+    let v: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(v["total"], serde_json::json!(4), "全部 4 行都无 job_id: {v}");
+
     // request_id 过滤
     let resp = get("request_id=rid-1").await;
     let v: serde_json::Value = serde_json::from_slice(

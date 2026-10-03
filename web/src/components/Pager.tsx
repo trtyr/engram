@@ -19,6 +19,13 @@ export default function Pager({
   hint?: string
 }) {
   const pages = Math.max(1, Math.ceil(total / pageSize))
+  // 窗口式页码：页数多时只显示当前页附近的（否则万级页数会渲染上万个按钮）
+  const windowSize = 5
+  let from = Math.max(1, page - Math.floor(windowSize / 2))
+  const to = Math.min(pages, from + windowSize - 1)
+  from = Math.max(1, to - windowSize + 1)
+  const nums: number[] = []
+  for (let p = from; p <= to; p++) nums.push(p)
   return (
     <div className="flex flex-wrap items-center justify-end gap-3 pt-1 text-xs text-muted-foreground">
       <span>共 {total} 条{hint ? `（${hint}）` : ''}</span>
@@ -48,7 +55,8 @@ export default function Pager({
         >
           <ChevronLeft className="size-4" aria-hidden="true" />
         </button>
-        {Array.from({ length: pages }, (_, i) => i + 1).map((p) => (
+        {from > 1 && <span className="px-0.5">…</span>}
+        {nums.map((p) => (
           <button
             key={p}
             type="button"
@@ -62,6 +70,7 @@ export default function Pager({
             {p}
           </button>
         ))}
+        {to < pages && <span className="px-0.5">…</span>}
         <button
           type="button"
           aria-label="下一页"

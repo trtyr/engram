@@ -71,6 +71,7 @@ impl EngramMcpServer {
             q: p.q.as_deref(),
             request_id: p.request_id.as_deref(),
             job_id: p.job_id.as_deref(),
+            job_scope: None,
             since,
             until,
             audit_only: false,

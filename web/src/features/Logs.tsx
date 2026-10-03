@@ -73,6 +73,8 @@ function LongText({ text }: { text: string }) {
 
 export default function Logs() {
   const [rows, setRows] = useState<LogRow[] | null>(null)
+  /** 同过滤条件下的真实总数（服务端返回，非「已拉取条数」）。 */
+  const [total, setTotal] = useState(0)
   const [level, setLevel] = useState('')
   const [q, setQ] = useState('')
   const [audit, setAudit] = useState(false)
@@ -86,38 +88,40 @@ export default function Logs() {
   const [openJob, setOpenJob] = useState<string | null>(null)
 
   const loadLogs = () => {
-    const p = new URLSearchParams({ limit: '200' })
+    const p = new URLSearchParams({
+      limit: String(pageSize),
+      offset: String((page - 1) * pageSize),
+    })
     if (level) p.set('level', level)
     if (q) p.set('q', q)
     if (audit) p.set('audit', 'true')
     const since = sinceIso(days)
     if (since) p.set('since', since)
-    // 服务端按 job_id 精确筛；「仅系统」没有反向参数，前端过滤（见下面 filtered）
+    // 范围与任务筛选都交给服务端——总数才会是真的
+    if (scope !== 'all') p.set('scope', scope)
     if (scope === 'job' && openJob) p.set('job_id', openJob)
-    api.get<{ logs: LogRow[] }>(`/logs?${p}`).then((v) => setRows(v.logs)).catch(() => {})
+    api
+      .get<{ logs: LogRow[]; total: number }>(`/logs?${p}`)
+      .then((v) => {
+        setRows(v.logs)
+        setTotal(v.total)
+      })
+      .catch(() => setRows([]))
   }
 
   useEffect(() => {
     setRows(null)
     loadLogs()
-    setPage(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, q, audit, days, scope, openJob])
+  }, [level, q, audit, days, scope, openJob, page, pageSize])
 
-  // 10s 自动刷新
+  // 10s 自动刷新（保持当前页）
   useEffect(() => {
     const t = setInterval(loadLogs, 10000)
     return () => clearInterval(t)
   })
 
-  // 范围过滤：后台=带 job_id 的行；系统=不带 job_id 的行
-  const filtered = (rows ?? []).filter((r) => {
-    if (scope === 'job') return jobIdOf(r) !== null
-    if (scope === 'system') return jobIdOf(r) === null
-    return true
-  })
-
-  const maxPage = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const maxPage = Math.max(1, Math.ceil(total / pageSize))
   const cur = Math.min(page, maxPage)
   const winLabel = WINDOW_OPTIONS.find((o) => o.value === days)?.label ?? ''
 
@@ -164,7 +168,7 @@ export default function Logs() {
       </PageHeader>
       {rows === null ? (
         <Spinner />
-      ) : filtered.length === 0 ? (
+      ) : rows.length === 0 ? (
         <Empty text={`${winLabel}无日志行`} />
       ) : (
         <Card className="overflow-x-auto">
@@ -179,7 +183,7 @@ export default function Logs() {
               </tr>
             </thead>
             <tbody>
-              {filtered.slice((cur - 1) * pageSize, cur * pageSize).map((r) => {
+              {rows.map((r) => {
                 const jid = jobIdOf(r)
                 return (
                   <tr key={r.id} className={tableCls.row}>
@@ -226,9 +230,9 @@ export default function Logs() {
           </table>
         </Card>
       )}
-      {filtered.length > 0 && (
+      {total > 0 && (
         <Pager
-          total={filtered.length}
+          total={total}
           page={cur}
           pageSize={pageSize}
           onPage={setPage}
@@ -236,7 +240,7 @@ export default function Logs() {
             setPageSize(n)
             setPage(1)
           }}
-          hint={filtered.length >= 200 ? '仅载入 200 条（收窄时间窗看更早）' : undefined}
+          hint={total > pageSize ? `${winLabel}共 ${total} 条，本页第 ${(cur - 1) * pageSize + 1}–${Math.min(cur * pageSize, total)} 条` : undefined}
         />
       )}
       {openJob && <JobTrajectory jobId={openJob} onClose={() => setOpenJob(null)} />}

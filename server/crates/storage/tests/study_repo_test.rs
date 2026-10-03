@@ -195,3 +195,81 @@ async fn journal_add_and_list() {
     let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 10).await.unwrap();
     assert!(rows.is_empty(), "级联删除");
 }
+
+/// EN-BUG-1（学习助手 2026-10-03 报，P007 验收输入）：patch_item 一次调用会顺序跑
+/// item_set_status + item_link 两次 UPDATE；旧实现第二次（status=None）把 learned_at
+/// 清成 NULL——「置 learned 再挂资料」的时间戳静默丢失。修后：status 缺省时 learned_at 保持原值。
+#[tokio::test]
+async fn item_link_after_learned_keeps_learned_at() {
+    let (pool, _pg) = setup().await;
+    let (tid, iid) = (Uuid::now_v7(), Uuid::now_v7());
+    engram_storage::repo::study::track_create(&pool, tid, "T", "").await.unwrap();
+    engram_storage::repo::study::item_create(&pool, iid, tid, "向量检索", 0).await.unwrap();
+
+    // ① 置 learned（时间戳写入）
+    engram_storage::repo::study::item_update(&pool, iid, None, Some("learned"), None, None, None)
+        .await
+        .unwrap();
+    let at1 = engram_storage::repo::study::item_get(&pool, iid)
+        .await
+        .unwrap()
+        .unwrap()
+        .learned_at
+        .expect("置 learned 应有 learned_at");
+
+    // ② 随后挂资料（status=None 的另一路 UPDATE）——旧实现在此处抹掉时间戳
+    engram_storage::repo::study::item_update(
+        &pool, iid, None, None, None,
+        Some(&serde_json::json!(["rag-basics"])), None,
+    )
+    .await
+    .unwrap();
+    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    assert_eq!(row.learned_at, Some(at1), "挂资料不得抹掉 learned_at");
+    assert_eq!(row.status, "learned");
+
+    // ③ 补充：不带 status 的其它更新（重设 review）同样不得动时间戳
+    engram_storage::repo::study::item_set_review(&pool, iid, true, None).await.unwrap();
+    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    assert_eq!(row.learned_at, Some(at1), "SRS 标记不得动 learned_at");
+
+    // ④ 显式离开 learned → 清空（原有语义不回归）
+    engram_storage::repo::study::item_update(&pool, iid, None, Some("learning"), None, None, None)
+        .await
+        .unwrap();
+    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    assert_eq!(row.learned_at, None, "离开 learned 应清时间戳");
+    // 再置回 learned → 重新记时
+    engram_storage::repo::study::item_update(&pool, iid, None, Some("learned"), None, None, None)
+        .await
+        .unwrap();
+    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    assert!(row.learned_at.is_some(), "重新置 learned 应重新记时");
+}
+
+/// 并发场景：同 item 并发「置 learned + 挂资料」——无论哪个顺序，时间戳不丢。
+#[tokio::test]
+async fn concurrent_learned_and_link_keep_learned_at() {
+    let (pool, _pg) = setup().await;
+    let (tid, iid) = (Uuid::now_v7(), Uuid::now_v7());
+    engram_storage::repo::study::track_create(&pool, tid, "T", "").await.unwrap();
+    engram_storage::repo::study::item_create(&pool, iid, tid, "N", 0).await.unwrap();
+
+    let p = pool.clone();
+    let h1 = tokio::spawn(async move {
+        engram_storage::repo::study::item_update(&p, iid, None, Some("learned"), None, None, None).await
+    });
+    let p = pool.clone();
+    let h2 = tokio::spawn(async move {
+        engram_storage::repo::study::item_update(
+            &p, iid, None, None, None,
+            Some(&serde_json::json!(["s"])), None,
+        ).await
+    });
+    h1.await.unwrap().unwrap();
+    h2.await.unwrap().unwrap();
+
+    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    assert_eq!(row.status, "learned");
+    assert!(row.learned_at.is_some(), "并发下 learned_at 不应被抹掉: {row:?}");
+}
