@@ -259,18 +259,22 @@ pub async fn update_atom_full(
     confidence: f32,
     status: &str,
     needs_review: Option<bool>,
-    superseded_by: Option<Uuid>,
-    occurred_at: Option<DateTime<Utc>>,
-    valid_until: Option<DateTime<Utc>>,
-    sensitive: Option<bool>,
+    // T004 三态：None=不动 / Some(None)=清空（NULL；sensitive 因 NOT NULL 落 false）/
+    // Some(Some(v))=设置——显式 null 语义，修复「单值字段传 None 永远清不掉」。
+    superseded_by: Option<Option<Uuid>>,
+    occurred_at: Option<Option<DateTime<Utc>>>,
+    valid_until: Option<Option<DateTime<Utc>>>,
+    sensitive: Option<Option<bool>>,
     embedding: Option<Vec<f32>>,
     tsv: &str,
     kind: &str,
 ) -> StoreResult<AtomDto> {
     let row = sqlx::query_as::<_, AtomDto>(
         "UPDATE atoms SET content = $2, confidence = $3, status = $4, kind = $12, needs_review = COALESCE($5, needs_review), \
-             superseded_by = COALESCE($6, superseded_by), occurred_at = COALESCE($7, occurred_at), \
-             valid_until = COALESCE($8, valid_until), sensitive = COALESCE($9, sensitive), \
+             superseded_by = CASE WHEN $13 THEN $6 ELSE superseded_by END, \
+             occurred_at = CASE WHEN $14 THEN $7 ELSE occurred_at END, \
+             valid_until = CASE WHEN $15 THEN $8 ELSE valid_until END, \
+             sensitive = CASE WHEN $16 THEN $9 ELSE sensitive END, \
              embedding = COALESCE($10, embedding), tsv = to_tsvector('simple', $11), updated_at = now() \
          WHERE id = $1 RETURNING *",
     )
@@ -279,13 +283,17 @@ pub async fn update_atom_full(
     .bind(confidence)
     .bind(status)
     .bind(needs_review)
-    .bind(superseded_by)
-    .bind(occurred_at)
-    .bind(valid_until)
-    .bind(sensitive)
+    .bind(superseded_by.flatten())
+    .bind(occurred_at.flatten())
+    .bind(valid_until.flatten())
+    .bind(sensitive.flatten().unwrap_or(false))
     .bind(embedding.map(pgvector::Vector::from))
     .bind(tsv)
     .bind(kind)
+    .bind(superseded_by.is_some())
+    .bind(occurred_at.is_some())
+    .bind(valid_until.is_some())
+    .bind(sensitive.is_some())
     .fetch_one(pool)
     .await?;
     Ok(row)

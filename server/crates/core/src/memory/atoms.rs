@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// T004 可清空单值：None=不动 / Some(None)=清空 / Some(Some(v))=设置。
+pub type Clearable<T> = Option<Option<T>>;
+
 impl MemoryService {
     /// 解析导入文本 → turns（[{speaker, text}]）。jsonl：每行 {role, content}；text：空行分段交替。
     pub(super) fn parse_import(
@@ -323,10 +326,11 @@ impl MemoryService {
         confidence: Option<f32>,
         status: Option<&str>,
         needs_review: Option<bool>,
-        superseded_by: Option<Uuid>,
-        occurred_at: Option<DateTime<Utc>>,
-        valid_until: Option<DateTime<Utc>>,
-        sensitive: Option<bool>,
+        // T004 三态：None=不动 / Some(None)=清空 / Some(Some(v))=设置（显式 null 语义）
+        superseded_by: Clearable<Uuid>,
+        occurred_at: Clearable<DateTime<Utc>>,
+        valid_until: Clearable<DateTime<Utc>>,
+        sensitive: Clearable<bool>,
         // 编辑来源（"admin" / "key:名"）——改写语义时落 atom_revisions + 审计
         actor: &str,
     ) -> Result<AtomDto, MemoryError> {

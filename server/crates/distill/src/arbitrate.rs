@@ -52,7 +52,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     // 有相似的交 LLM 仲裁；全无相似则跳过 LLM 调用
     if candidates.len() > no_similar.len() {
         let verdicts = arbitrate_with_llm(&ctx, llm.as_ref(), &user, &candidates).await?;
-        apply_verdicts(pool, &verdicts, &mut outcome).await?;
+        apply_verdicts(&ctx, pool, &verdicts, &mut outcome).await?;
         let leftover = promote_leftovers(pool, &candidates).await?;
         outcome.promoted.extend(leftover);
     }
@@ -222,6 +222,7 @@ fn parse_verdicts(out: &Value, valid_ids: &HashSet<Uuid>) -> Vec<Verdict> {
 
 /// 4. 落库应用：按裁决逐条落库（duplicate 归档 / contradicts 取代 / 其他转正）。
 async fn apply_verdicts(
+    ctx: &JobContext,
     pool: &sqlx::PgPool,
     verdicts: &[Verdict],
     outcome: &mut Outcome,
@@ -231,11 +232,26 @@ async fn apply_verdicts(
             "duplicate" => apply_duplicate(pool, v, outcome).await?,
             "contradicts" => {
                 if let Some(t) = v.target_id {
-                    // 候选转正 + 旧条 superseded
-                    promote_atoms(pool, std::slice::from_ref(&v.candidate_id)).await?;
-                    mark_superseded(pool, v.candidate_id, t).await?;
-                    outcome.superseded.push((v.candidate_id, t));
-                    outcome.promoted.push(v.candidate_id);
+                    // T002：先 supersede 后 promote——旧条必须真的被降位（rows>0）才转正候选；
+                    // 旧条已 archived/superseded（0 行）时候选降级 needs_review 转正（提级待审，
+                    // 不直接生效），杜绝「同主题双 active」。
+                    let superseded = mark_superseded(pool, v.candidate_id, t).await?;
+                    if superseded {
+                        promote_atoms(pool, std::slice::from_ref(&v.candidate_id)).await?;
+                        outcome.superseded.push((v.candidate_id, t));
+                        outcome.promoted.push(v.candidate_id);
+                    } else {
+                        promote_with_review(pool, &v.candidate_id).await?;
+                        outcome.promoted.push(v.candidate_id);
+                        ctx.emit(
+                            "取代目标已非 active（T002 防双 active）——候选提级待审",
+                            Some(serde_json::json!({
+                                "candidate": v.candidate_id.to_string(), "target": t.to_string(),
+                            })),
+                        )
+                        .await
+                        .ok();
+                    }
                 } else {
                     // 无 target 的 contradicts 视为 new
                     promote_atoms(pool, std::slice::from_ref(&v.candidate_id)).await?;
@@ -291,12 +307,26 @@ async fn archive_candidate(pool: &sqlx::PgPool, id: Uuid) -> Result<(), JobError
     Ok(())
 }
 
-async fn mark_superseded(pool: &sqlx::PgPool, new_id: Uuid, old_id: Uuid) -> Result<(), JobError> {
-    sqlx::query(
+/// T002：旧条降位。返回是否真的降了位（旧条非 active = false——调用方据此走待审路径）。
+async fn mark_superseded(pool: &sqlx::PgPool, new_id: Uuid, old_id: Uuid) -> Result<bool, JobError> {
+    let r = sqlx::query(
         "UPDATE atoms SET status = 'superseded', superseded_by = $1, updated_at = now() WHERE id = $2 AND status = 'active'",
     )
     .bind(new_id)
     .bind(old_id)
+    .execute(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
+    Ok(r.rows_affected() > 0)
+}
+
+/// T002 伴生：转正但保留待审标记（取代落空时候选不直接生效）。
+async fn promote_with_review(pool: &sqlx::PgPool, id: &Uuid) -> Result<(), JobError> {
+    // 无 status 条件：no_similar 前置转正后仍要补提级（取代落空 = 必须待审）
+    sqlx::query(
+        "UPDATE atoms SET status = 'active', needs_review = TRUE, updated_at = now() WHERE id = $1",
+    )
+    .bind(id)
     .execute(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;

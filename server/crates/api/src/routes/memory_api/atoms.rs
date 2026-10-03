@@ -79,6 +79,7 @@ pub struct CreateAtomRequest {
     #[serde(default, deserialize_with = "opt_flex_dt")]
     pub occurred_at: Option<chrono::DateTime<chrono::Utc>>,
     /// 有效期（ISO8601；到期事件可过滤/降权）
+    #[serde(default, deserialize_with = "opt_flex_dt")]
     pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
     /// P3 隐私标记：默认不进检索与 context_pack（reveal 才可见）
     #[serde(default)]
@@ -134,13 +135,17 @@ pub struct UpdateAtomRequest {
     /// 人审结论：true=转待审，false=通过（清标记）
     pub needs_review: Option<bool>,
     /// correction 取代链：本原子被哪条新原子取代（arbitrate 自动维护，手动 correction 补链）
-    pub superseded_by: Option<Uuid>,
-    #[serde(default, deserialize_with = "opt_flex_dt")]
-    pub occurred_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(default, deserialize_with = "opt_flex_dt")]
-    pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// 三态：缺省=不动 / null=清空 / 值=设置（T004）
+    pub superseded_by: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "opt_flex_dt3")]
+    /// 三态：缺省=不动 / null=清空 / 值=设置（T004）
+    pub occurred_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    #[serde(default, deserialize_with = "opt_flex_dt3")]
+    /// 三态：缺省=不动 / null=清空 / 值=设置（T004）
+    pub valid_until: Option<Option<chrono::DateTime<chrono::Utc>>>,
     /// P3 隐私标记切换
-    pub sensitive: Option<bool>,
+    /// 三态：缺省=不动 / null=清标记(false) / 值=设置（T004）
+    pub sensitive: Option<Option<bool>>,
 }
 
 #[utoipa::path(patch, path = "/memory/atoms/{id}",

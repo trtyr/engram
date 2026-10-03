@@ -2285,3 +2285,397 @@ async fn jev_gate_degrades_to_passthrough_with_visible_event() {
         .unwrap();
     assert!(n >= 1, "降级直通后原子应照常产出（count={n}）");
 }
+
+/// T002 回归：contradicts 取代落空（旧条已 archived）时候选不得直接 active——
+/// 先 supersede 后 promote；降位失败 → 候选提级 needs_review，杜绝同主题双 active。
+#[tokio::test]
+async fn t002_contradicts_stale_target_degrades_to_review() {
+    let c_con = Uuid::now_v7();
+    let t_con = Uuid::now_v7(); // 旧条：archived（取代落空）
+    let t_act = Uuid::now_v7(); // 活体相似锚：让候选交到 LLM 而非 no_similar 直通
+    let env = setup(vec![
+        json!({"verdicts": [
+            {"candidate_id": c_con.to_string(), "disposition": "contradicts",
+             "target_id": t_con.to_string()},
+        ]}),
+        json!({"actions": []}),
+    ])
+    .await;
+    // embedding 相似对（同 arbitrate_branches 的 con 组）——不落 no_similar 直通，交 LLM 裁决
+    // t_active：活体相似锚（保证候选进入 LLM 仲裁而非 no_similar 直通）；
+    // t_con：archived 旧条（verdict 指认它 → 取代落空 = T002 场景）
+    for (id, status, needs_review, seed) in [
+        (c_con, "candidate", false, 3),
+        (t_con, "archived", false, 5),
+        (t_act, "active", false, 4),
+    ] {
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, status, confidence, needs_review, embedding, tsv) \
+             VALUES ($1, 'fact', $3, $2, 0.9, $4, $5, to_tsvector('simple', $3))",
+        )
+        .bind(id)
+        .bind(status)
+        .bind(format!("内容-{id}"))
+        .bind(needs_review)
+        .bind(emb(seed))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
+    env.queue
+        .enqueue(
+            JobTemplate::new("arbitrate_atoms")
+                .with_payload(json!({"candidate_ids": [c_con]})),
+        )
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "arbitrate_atoms").await;
+    assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
+
+    // 候选：转正但提级待审（取代落空 → 不直接生效）
+    let (st, nr): (String, bool) = sqlx::query_as(
+        "SELECT status, needs_review FROM atoms WHERE id = $1",
+    )
+    .bind(c_con)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(st, "active", "候选应转正（信息不丢）");
+    assert!(nr, "取代落空的候选必须提级待审（T002）");
+
+    // 旧条：保持 archived——supersede 不落、无双 active
+    let (st, sb): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT status, superseded_by FROM atoms WHERE id = $1",
+    )
+    .bind(t_con)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(st, "archived", "旧条不应被改成 superseded");
+    assert!(sb.is_none());
+
+    // 全库断言：除测试自建的相似锚 t_act 外，不得有未审 active（取代落空候选必须提级）
+    let unreviewed: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM atoms WHERE status = 'active' AND needs_review = FALSE AND id <> $1",
+    )
+    .bind(t_act)
+    .fetch_all(&env.pool)
+    .await
+    .unwrap();
+    assert!(
+        unreviewed.is_empty(),
+        "取代落空时不允许无审双 active（意外 active: {unreviewed:?}）"
+    );
+}
+
+/// T003 回归：场景成员归属牌（atoms.scenario_id）为唯一真源，atom_refs 按真源重算——
+/// 被挪去其他场景的成员自动从原场景缓存消失（不再「并集只进不出」）。
+#[tokio::test]
+async fn t003_scenario_member_reassignment_recomputes_refs() {
+    let a = Uuid::now_v7();
+    let b = Uuid::now_v7();
+    let x = Uuid::now_v7();
+    let z = Uuid::now_v7();
+    let env = setup(vec![json!({"actions": [
+        // 先把 X 明确归 A，再把 X 归 B——最终 X 应只属于 B
+        {"action": "update", "scenario_id": a.to_string(), "topic": "场景A",
+         "summary": "A", "body": "A", "atom_ids": [x.to_string()]},
+        {"action": "update", "scenario_id": b.to_string(), "topic": "场景B",
+         "summary": "B", "body": "B", "atom_ids": [x.to_string()]},
+    ]})])
+    .await;
+    for (id, sid) in [(a, None::<Uuid>), (b, None)] {
+        let _ = sid;
+        sqlx::query(
+            "INSERT INTO scenarios (id, topic, summary, body, atom_refs) \
+             VALUES ($1, $2, 's', 'b', '[]'::jsonb)",
+        )
+        .bind(id)
+        .bind(format!("t-{id}"))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
+    // X 挂 A（初始真源）、Z 挂 A（留在 A 的成员）
+    for aid in [x, z] {
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, status, confidence, scenario_id, tsv) \
+             VALUES ($1, 'fact', $3, 'active', 0.9, $2, to_tsvector('simple', $3))",
+        )
+        .bind(aid)
+        .bind(a)
+        .bind(format!("内容-{aid}"))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
+    // refs 先对齐真源（x/z 挂 A → A.refs=[x,z]）——否则 converge 的双轨漂移兜底
+    // 会抢先触发重写快照消耗 mock chat（T003 测的是 organize 写侧归一，不是兜底）
+    sqlx::query(
+        "UPDATE scenarios SET atom_refs = ( \
+            SELECT COALESCE(jsonb_agg(id::text ORDER BY created_at), '[]'::jsonb) \
+            FROM atoms WHERE scenario_id = scenarios.id )",
+    )
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    env.queue
+        .enqueue(
+            JobTemplate::new("organize_scenarios")
+                .with_payload(json!({"atom_ids": [x, z]})),
+        )
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "organize_scenarios").await;
+    if j.status != JobStatus::Succeeded {
+        let jobs: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT kind, status::text, error FROM jobs ORDER BY created_at",
+        )
+        .fetch_all(&env.pool)
+        .await
+        .unwrap_or_default();
+        let sent: Vec<String> = env
+            .llm
+            .sent_user
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|u| { let c: Vec<char> = u.chars().collect(); let n = c.len(); if n > 150 { c[n-150..].iter().collect::<String>() } else { c.iter().collect::<String>() } })
+            .collect();
+        let stale_probe: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT s.id FROM scenarios s WHERE EXISTS ( \
+             SELECT 1 FROM jsonb_array_elements_text(s.atom_refs) r \
+             LEFT JOIN atoms a ON a.id = r::uuid \
+             WHERE a.id IS NULL OR a.status != 'active')",
+        )
+        .fetch_all(&env.pool)
+        .await
+        .unwrap_or_default();
+        let refs_probe: Vec<(Uuid, String)> =
+            sqlx::query_as("SELECT id, atom_refs::text FROM scenarios")
+                .fetch_all(&env.pool)
+                .await
+                .unwrap_or_default();
+        let remaining: Vec<String> = env
+            .llm
+            .chats
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|c| c.chars().take(60).collect())
+            .collect();
+        panic!(
+            "organize 应成功: {:?}——全任务: {jobs:?}，stale探针: {stale_probe:?}，refs: {refs_probe:?}，LLM 输入序: {sent:?}，剩余队列: {remaining:?}",
+            j.error
+        );
+    }
+
+    // 诊断：organize 的 emit 摘要与日志行
+    let org_logs: Vec<String> = sqlx::query_scalar(
+        "SELECT message FROM logs WHERE target = 'job.organize_scenarios' ORDER BY id",
+    )
+    .fetch_all(&env.pool)
+    .await
+    .unwrap_or_default();
+    let _ = org_logs;
+    // 真源：X 归 B（后写的赢）
+    let xsid: Option<Uuid> =
+        sqlx::query_scalar("SELECT scenario_id FROM atoms WHERE id = $1")
+            .bind(x)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(xsid, Some(b), "X 的归属牌应迁到 B——organize 日志: {org_logs:?}");
+
+    // 缓存：A 的 atom_refs 不再含 X，但保留 Z；B 的 atom_refs = [X]
+    let refs_of = |sid: Uuid| {
+        let pool = env.pool.clone();
+        async move {
+            let v: serde_json::Value =
+                sqlx::query_scalar("SELECT atom_refs FROM scenarios WHERE id = $1")
+                    .bind(sid)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            v.as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|s| s.as_str().and_then(|t| t.parse::<Uuid>().ok()))
+                .collect::<Vec<_>>()
+        }
+    };
+    let refs_a = refs_of(a).await;
+    let refs_b = refs_of(b).await;
+    assert!(!refs_a.contains(&x), "A 缓存应随真源移出 X: {refs_a:?}");
+    assert!(refs_a.contains(&z), "A 缓存应保留 Z: {refs_a:?}");
+    assert_eq!(refs_b, vec![x], "B 缓存应恰为 [X]: {refs_b:?}");
+}
+
+/// 轻量环境（无 runner/mock——纯 repo 层测试用）。
+async fn setup_min() -> (sqlx::PgPool, support::TestPg) {
+    let container = support::start_pgvector().await.expect("容器");
+    let url = support::connection_url(&container).await.unwrap();
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
+    (pool, container)
+}
+
+/// T005 回归：实体子串归并误吞修复——「云」不再吞进「星云」（新名在旧名内的方向已删）；
+/// 「小王同志」复用「小王」档（旧名完整出现在新名里才归并，精确优先）；
+/// 关系 lookup 与挂链口径统一（lookup_entity 命中同一档）。
+#[tokio::test]
+async fn t005_entity_substring_no_longer_swallows() {
+    let (pool, _pg) = setup_min().await;
+    for (name, kind) in [("星云", "topic"), ("小王", "person")] {
+        sqlx::query("INSERT INTO entities (id, name, kind) VALUES ($1, $2, $3)")
+            .bind(Uuid::now_v7())
+            .bind(name)
+            .bind(kind)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let aid = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
+         VALUES ($1, 'fact', '用户研究云', 'active', 0.9, to_tsvector('simple', '用户研究云'))",
+    )
+    .bind(aid)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // ① 「云」：精确不命中；旧名（星云）不在新名（云）内 → 不归并 → 新建实体
+    engram_distill::extract::link_entity(&pool, aid, "云", "topic")
+        .await
+        .expect("link 云");
+    let names: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM entities WHERE archived_at IS NULL ORDER BY name")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(
+        names.contains(&"星云".to_string()) && names.contains(&"云".to_string()),
+        "「云」不得吞进「星云」——应为两个实体: {names:?}"
+    );
+
+    // ② 「小王同志」：旧名（小王）完整出现在新名里 → 复用小王档（不新建）
+    //   （注意「王小明」不含连续子串「小王」——王-小-明，字符串层面本就不归并）
+    let aid2 = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
+         VALUES ($1, 'fact', '小王同志来拜访', 'active', 0.9, to_tsvector('simple', '小王同志来拜访'))",
+    )
+    .bind(aid2)
+    .execute(&pool)
+    .await
+    .unwrap();
+    engram_distill::extract::link_entity(&pool, aid2, "小王同志", "person")
+        .await
+        .expect("link 小王同志");
+    let names2: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM entities WHERE archived_at IS NULL ORDER BY name")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let probe: Vec<(String, String, bool, bool, i32, i32)> = sqlx::query_as(
+        "SELECT name, kind, merged_into IS NULL, archived_at IS NULL, \
+         position(lower(name) in lower('王小明')), length(name) \
+         FROM entities WHERE archived_at IS NULL ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        !names2.contains(&"王小明".to_string()) && names2.contains(&"小王".to_string()),
+        "「小王同志」应复用「小王」档: {names2:?}，探针: {probe:?}"
+    );
+    // 挂链验证：小王同志的原子挂在小王档上
+    let linked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM atom_entities ae JOIN entities e ON e.id = ae.entity_id \
+         WHERE e.name = '小王' AND ae.atom_id = $1",
+    )
+    .bind(aid2)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(linked, 1, "小王同志的原子应挂到小王档");
+
+    // ③ 关系 lookup 口径统一：lookup_entity("小王同志") 命中小王档（与挂链同款归并）
+    let looked = engram_distill::extract::lookup_entity(&pool, "小王同志").await;
+    let xiaowang: Uuid =
+        sqlx::query_scalar("SELECT id FROM entities WHERE name = '小王'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(looked, Some(xiaowang), "lookup 应与挂链口径一致命中小王档");
+}
+
+/// T006 回归：claim 分批——pending 超过 EXTRACT_CLAIM_BATCH 时候批只认领 50，
+/// 满批自续投下一批，最终全部蒸完（不再一次性全量抢占）。
+#[tokio::test]
+async fn t006_extract_claim_is_batched_with_continuation() {
+    // 60 个 pending 会话，内容为空话（extract 每段返回空 atoms）
+    let mut chats = vec![];
+    for _ in 0..60 {
+        chats.push(json!({"atoms": []}));
+    }
+    // 两个 extract 批各自链一个 organize（空动作）
+    chats.push(json!({"actions": []}));
+    chats.push(json!({"actions": []}));
+    let env = setup(chats).await;
+    for i in 0..60 {
+        let sid = Uuid::now_v7();
+        sqlx::query("INSERT INTO raw_sessions (id, agent, content, created_at) \
+             VALUES ($1, 'pi', $2, now() - make_interval(secs => $3))")
+            .bind(sid)
+            .bind(session(&[("user", &format!("闲聊第 {i} 句"))]))
+            .bind(60.0 - i as f64) // 递减间隔保证 created_at 严格有序
+            .execute(&env.pool)
+            .await
+            .unwrap();
+    }
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    // 第一批（50 个）+ 自续批（10 个）都应成功
+    let j1 = wait_done(&env.queue, "extract_atoms").await;
+    assert_eq!(j1.status, JobStatus::Succeeded, "第一批: {:?}", j1.error);
+    // 自续批可能稍后入队——轮询直到全部 done
+    let mut done = 0i64;
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        done = sqlx::query_scalar(
+            "SELECT count(*) FROM raw_sessions WHERE distill_status = 'done'",
+        )
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+        if done >= 60 {
+            break;
+        }
+    }
+    if done != 60 {
+        let dist: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT distill_status, count(*) FROM raw_sessions GROUP BY distill_status",
+        )
+        .fetch_all(&env.pool)
+        .await
+        .unwrap_or_default();
+        let jobs: Vec<(String, String)> =
+            sqlx::query_as("SELECT kind, status FROM jobs ORDER BY created_at")
+                .fetch_all(&env.pool)
+                .await
+                .unwrap_or_default();
+        panic!("满批自续后应全部蒸完（done={done}）——状态分布 {dist:?}，任务 {jobs:?}");
+    }
+    assert_eq!(done, 60, "满批自续后 60 个会话应全部蒸完");
+    // 任务链形状：extract 至少两批
+    let extract_jobs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'extract_atoms'")
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert!(extract_jobs >= 2, "应存在自续批任务（count={extract_jobs}）");
+}

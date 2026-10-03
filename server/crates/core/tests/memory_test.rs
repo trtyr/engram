@@ -483,7 +483,7 @@ async fn atom_time_and_supersede_chain() {
             None,
             Some("archived"),
             None,
-            Some(new.id),
+            Some(Some(new.id)),
             None,
             None,
             None,
@@ -670,7 +670,7 @@ async fn sensitive_atoms_visible_with_flag() {
             None,
             None,
             None,
-            Some(false),
+            Some(Some(false)),
             "test",
         )
         .await
@@ -1074,13 +1074,20 @@ async fn void_done_session_cascades_atom_archive() {
         "done 会话 void 应级联归档其原子（P0-3 回归）"
     );
 
-    // 审计链有记录
-    let audit: i64 =
+    // 审计链有记录（T001：审计走 logs 时间线，jobs 表不再收伪造行）
+    let audit: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM logs WHERE target = 'audit.session_void_cascade'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit, 1, "void 级联应落审计行");
+    let fake_jobs: i64 =
         sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'session_void_cascade'")
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(audit, 1, "void 级联应落审计行");
+    assert_eq!(fake_jobs, 0, "jobs 表不应再收审计伪造行");
 }
 
 /// v2 修复（N3）：budget_items 是各层条数上限——persona 分面不再把 atoms 挤成 0。

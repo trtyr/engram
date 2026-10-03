@@ -41,12 +41,23 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
 ///
 /// v2 修复（H-A2）：`metadata.distill=off` 的会话**永久豁免**——off 是会话级语义，
 /// 不再被后续任何 extract 任务的 pending 全量扫描顺带蒸掉。
+/// 认领上限（T006）：一次最多认领 N 个 pending 会话，剩余留给下一批（满批自续）。
+/// 性能参数（非正确性不变量），写死避免误配成全量抢占。
+const EXTRACT_CLAIM_BATCH: i64 = 50;
+
 async fn claim_pending_sessions(ctx: &JobContext) -> Result<Vec<SessionRow>, JobError> {
+    // T006：LIMIT 分批 + FOR UPDATE SKIP LOCKED（多 worker 并发安全，不再全量抢占）
     let rows = sqlx::query_as::<_, (Uuid, String, serde_json::Value, bool, serde_json::Value)>(
         "UPDATE raw_sessions SET distill_status = 'processing' \
-         WHERE distill_status = 'pending' AND COALESCE(metadata->>'distill','') <> 'off' \
+         WHERE id IN ( \
+             SELECT id FROM raw_sessions \
+             WHERE distill_status = 'pending' AND COALESCE(metadata->>'distill','') <> 'off' \
+             ORDER BY created_at ASC LIMIT $1 \
+             FOR UPDATE SKIP LOCKED \
+         ) \
          RETURNING id, agent, content, sensitive, metadata",
     )
+    .bind(EXTRACT_CLAIM_BATCH)
     .fetch_all(ctx.pool())
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
@@ -172,6 +183,12 @@ async fn run_claimed(
     let candidate_ids = persist_atoms(&ctx, llm.as_ref(), pending).await?;
     persist_relations(&ctx, &all_relations).await;
     mark_sessions_done(&ctx, &session_ids).await?;
+
+    // T006：满批自续——认领满额说明可能仍有积压，链式投下一批（批间独立，无幂等键）
+    if sessions.len() as i64 >= EXTRACT_CLAIM_BATCH {
+        ctx.enqueue_next(JobTemplate::new("extract_atoms").with_payload(json!({"reason": "batch-continue"})))
+            .await?;
+    }
 
     ctx.emit(
         &format!(
@@ -314,15 +331,19 @@ async fn persist_atoms(
 /// v2 修复（N5）：新建前先做**名字包含**近似归并——LLM 对同一实体常给出措辞
 /// 繁简不同的称呼（「星云」/「星云项目」），互为子串且同 kind 即视为同一实体，
 /// 挂到既有实体上，不再各建一个空档案。
-async fn link_entity(
+pub async fn link_entity(
     pool: &sqlx::PgPool,
     atom_id: Uuid,
     name: &str,
     kind: &str,
 ) -> Result<(), String> {
+    // T005：误吞修复——只认「旧名完整出现在新名里」（如「王小明」复用「小王」档），
+    // 去掉「新名在旧名内」方向（「云」不再吞进「星云」）；精确命中优先，其次最长旧名。
     let similar: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM entities WHERE kind = $2 AND merged_into IS NULL AND archived_at IS NULL \
-         AND (position(lower($1) in lower(name)) > 0 OR position(lower(name) in lower($1)) > 0) LIMIT 1",
+         AND (lower(btrim(name)) = lower(btrim($1)) OR position(lower(name) in lower($1)) > 0) \
+         ORDER BY (lower(btrim(name)) = lower(btrim($1))) DESC, length(name) DESC, created_at ASC \
+         LIMIT 1",
     )
     .bind(name)
     .bind(kind)
@@ -392,9 +413,14 @@ async fn persist_relations(ctx: &JobContext, relations: &[(String, String, Strin
     }
 }
 
-async fn lookup_entity(pool: &sqlx::PgPool, name: &str) -> Option<Uuid> {
+/// T005：关系 lookup 与挂链口径统一（trim/lower + 子串归并同款）。
+pub async fn lookup_entity(pool: &sqlx::PgPool, name: &str) -> Option<Uuid> {
     sqlx::query_scalar(
-        "SELECT id FROM entities WHERE name = $1 AND merged_into IS NULL ORDER BY created_at DESC LIMIT 1",
+        "SELECT id FROM entities \
+         WHERE merged_into IS NULL AND archived_at IS NULL \
+           AND (lower(btrim(name)) = lower(btrim($1)) OR position(lower(name) in lower($1)) > 0) \
+         ORDER BY (lower(btrim(name)) = lower(btrim($1))) DESC, length(name) DESC, created_at ASC \
+         LIMIT 1",
     )
     .bind(name)
     .fetch_optional(pool)

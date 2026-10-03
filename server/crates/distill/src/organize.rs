@@ -28,7 +28,6 @@ struct Action {
 /// 落库后的动作回执（场景 id ↔ 其原子集，供向量回填与反向引用）。
 struct Applied {
     scenario_id: Uuid,
-    atom_ids: Vec<Uuid>,
 }
 
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {
@@ -234,10 +233,16 @@ async fn apply_actions(
                 .execute(pool)
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;
+                // T003：create 同样直写真源（scenario_id），缓存初值仅作展示回退
+                sqlx::query("UPDATE atoms SET scenario_id = $2, updated_at = now() WHERE id = ANY($1)")
+                    .bind(&a.atom_ids)
+                    .bind(id)
+                    .execute(pool)
+                    .await
+                    .map_err(|e| JobError::Retryable(e.to_string()))?;
                 texts.push(format!("{}\n{}\n{}", a.topic, a.summary, a.body));
                 applied.push(Applied {
                     scenario_id: id,
-                    atom_ids: a.atom_ids.clone(),
                 });
                 touched.push(id);
             }
@@ -252,7 +257,6 @@ async fn apply_actions(
                 texts.push(format!("{cur}\n{}\n{}", a.summary, a.body));
                 applied.push(Applied {
                     scenario_id: sid,
-                    atom_ids: a.atom_ids.clone(),
                 });
                 if !touched.contains(&sid) {
                     touched.push(sid);
@@ -266,25 +270,52 @@ async fn apply_actions(
 
 /// A6：新旧两侧都 jsonb_array_elements 展开成标量再 agg——否则新侧整个数组当单个元素
 /// 并进，产出 [["id"]] 嵌套混型（2026-08-31 测试方实测）。
+///
+/// T003（Q003 拍板方案 A）：atoms.scenario_id 为唯一真源，scenarios.atom_refs 降级为
+/// 可重算缓存——先按 LLM 给的成员挂 scenario_id（真源写入），再按真源重算 atom_refs
+/// （被挪去其他场景的成员自动从缓存消失，不再「并集只进不出」）。
 async fn update_scenario(pool: &sqlx::PgPool, sid: Uuid, a: &Action) -> Result<(), JobError> {
+    // ⓪ 记录被挪成员的旧归属（这些场景的缓存也要重算）
+    let old_scenarios: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT scenario_id FROM atoms \
+         WHERE id = ANY($1) AND scenario_id IS NOT NULL AND scenario_id <> $2",
+    )
+    .bind(&a.atom_ids)
+    .bind(sid)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
+    // ① 真源写入：成员挂链（幂等——已在别的场景的会被本次覆盖为本场景）
+    sqlx::query("UPDATE atoms SET scenario_id = $2, updated_at = now() WHERE id = ANY($1)")
+        .bind(&a.atom_ids)
+        .bind(sid)
+        .execute(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+    // ② 缓存重算：本场景 ∪ 失去成员的旧场景——atom_refs := 各自 scenario_id 真源（稳定序）
+    let mut affected = old_scenarios;
+    affected.push(sid);
     sqlx::query(
         "UPDATE scenarios SET \
-            summary = $2, body = $3, \
             atom_refs = ( \
-                SELECT COALESCE(jsonb_agg(DISTINCT x), '[]'::jsonb) FROM ( \
-                    SELECT jsonb_array_elements(atom_refs) AS x FROM scenarios WHERE id = $1 \
-                    UNION ALL SELECT jsonb_array_elements($4::jsonb) \
-                ) sub ), \
+                SELECT COALESCE(jsonb_agg(a.id::text ORDER BY a.created_at), '[]'::jsonb) \
+                FROM atoms a WHERE a.scenario_id = scenarios.id \
+            ), \
             version = version + 1, updated_at = now() \
-         WHERE id = $1",
+         WHERE id = ANY($1)",
     )
-    .bind(sid)
-    .bind(&a.summary)
-    .bind(&a.body)
-    .bind(sqlx::types::Json(&a.atom_ids))
+    .bind(&affected)
     .execute(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;
+    // 正文/摘要仅本场景更新
+    sqlx::query("UPDATE scenarios SET summary = $2, body = $3 WHERE id = $1")
+        .bind(sid)
+        .bind(&a.summary)
+        .bind(&a.body)
+        .execute(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
     Ok(())
 }
 
@@ -313,14 +344,8 @@ async fn refresh_embeddings(
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
     }
-    for item in applied {
-        sqlx::query("UPDATE atoms SET scenario_id = $2 WHERE id = ANY($1)")
-            .bind(&item.atom_ids)
-            .bind(item.scenario_id)
-            .execute(pool)
-            .await
-            .map_err(|e| JobError::Retryable(e.to_string()))?;
-    }
+    // T003：scenario_id 真源挂链已收敛到 apply_actions（create/update 单点），
+    // 此处不再回填——避免迟到的批量回填覆盖后续迁移（挪场景）的正确归属。
     Ok(())
 }
 

@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 
 mod atoms;
+pub use atoms::Clearable;
 mod entity;
 mod ops;
 mod search;
