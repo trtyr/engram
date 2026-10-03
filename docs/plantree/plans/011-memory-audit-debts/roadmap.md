@@ -34,12 +34,13 @@
   distill/arbitrate.rs:296 `WHERE id=$2 AND status='active'`——旧条已 archived 时
   UPDATE 0 行但候选已转正（:235 先 promote 再 supersede），同主题双 active。
   蒸馏链篇坑清单第 5 条实证。
-- [ ] **T003 · 场景成员双轨漂移**
-  写侧：distill/organize.rs:270 `update_scenario` 的 atom_refs 是**并集**（旧∪新，
-  只进不出）；:317 `refresh_embeddings` 的 atoms.scenario_id 是**覆盖回填**。
-  原子被场景 B update 拉走时：A.atom_refs 残留 + scenario_id 改指 B。
-  读侧分裂：entity_scenarios（repo/entity.rs:67）/timeline 用 scenario_id 正查，
-  converge（scenario_converge.rs:75）用 atom_refs 反查——两轴一致性仅靠 converge 兜底。
+- [ ] **T003 · 场景成员双轨漂移——已拍板：归属牌单一事实源（方案 A）**
+  用户拍板（2026-10-03）：**Q003 用归属牌**——atoms.scenario_id 为唯一真源，
+  scenarios.atom_refs 降级为可重算缓存（organize/converge 写侧按 scenario_id 重算
+  对齐）。读侧（entity_scenarios/timeline）已用 scenario_id 正查，改动集中在写侧
+  与 converge；T012 的 scenario_write 成员增删是单点同步的落地时机（与 P012 交叉
+  引用）。原双轨描述（存档）：写侧 organize.rs:270 atom_refs 并集只进不出 +
+  :317 scenario_id 覆盖回填，两段代码分别维护——A 案后归一。
 - [ ] **T004 · update_atom_full 单值字段清不掉**
   repo/memory/atoms.rs:271-274 superseded_by/occurred_at/valid_until/sensitive 全
   `COALESCE($X, 保留旧值)`——传 None 永远无法置回 NULL。EN-BUG-1（study learned_at）
@@ -154,8 +155,11 @@
   仍挂在实体详情/时间线里；修为默认仅 active（全量可选参数）。
   ③ **反向联动执行器缺失**：circles MCP 7 动作能建/改/连，**不能 forget（级联归档
   原子）/ merge（原子改挂）/ attach|detach（挂摘原子）**——机制全在 core/repo（T005
-  误吞修复的产出依赖 merge 闭环），仅 Web/HTTP 有。补齐三动作 + duplicates（实体
+  误吞修复的产出依赖 merge 闭环），仅 Web/HTTP 有。补齐动作 + duplicates（实体
   重复检测，从 memory 域挪入）。修正后 circles = 实体与关系的唯一管理面。
+  **Q004 拍板（2026-10-03）：实体遗忘双行为并存**——`forget`（归档式：实体归档 +
+  挂链 active 原子级联归档，可恢复）与 `delete`（物理删：档案蒸发，显式清理路径）
+  同时提供，调用方按意图选；MCP 面两个动作齐备，物理删沿用既有 delete_entity。
 - [ ] **T019 · 日志域化——logs 加 domain 列，每个功能一份全量日志**
   用户需求（2026-10-03）：「为每一个功能单独做日志，获取跟这个功能相关的全量日志」
   ——日志按功能域组织，不是任务概念（不破 P010 唯一时间线：仍是单表单流，域是列
