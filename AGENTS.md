@@ -13,7 +13,7 @@
   查询前看 `codegraph list` freshness——`stale=true` 先本机 `codegraph sync` + 服务端 `sync`
 - 位置：主开发机 MacBook Air M1 `/Volumes/trtyr_for_mac/Code/engram`；
   生产 engram.trtyr.top（腾讯云北京 Docker compose，宿主无 clone，无 IaC）
-- 文档基线：**HEAD `e2cb949`**（2026-10-03 P010 日志统一——logs 唯一时间线/job_events 并入/MCP logs 域，生产迁移 67；上轮 c0875eb/P009 前端 IA+codegraph 数据根修复）
+- 文档基线：**HEAD `1920f0c`**（2026-10-03 午后 P010b 日志真分页 `{logs,total}`+scope 筛 / EN-BUG-1 study learned_at 修复——四篇文档已对齐；上轮 e2cb949/P010 日志统一，迁移 67）
 
 ## 文档清单（title → category → doc_id 完整 UUID，一跳 doc_get 直达）
 
@@ -38,7 +38,7 @@
 - 接口面 · 错误码全表（P006 注册表导出）`01a0f947-05d2-7a03-bb40-45ed7af65e9c`
 
 **数据层**
-- storage 与 SQL 迁移 63（HNSW/事务边界/KV/credentials AES-GCM）`01a0e6f3-d2cb-7032-b092-5bbeb0d9665c`
+- storage 与 SQL 迁移 67（HNSW/事务边界/KV/credentials AES-GCM/study 域落点/日志真分页）`01a0e6f3-d2cb-7032-b092-5bbeb0d9665c`
 
 **前端**
 - 架构与数据流（api.ts/认证/轮询/构建链）`01a0e6e7-5ac4-7c02-a5cd-24f4b5dd7bff`
@@ -54,10 +54,10 @@
 - 风险与债（四维排序 22 项）`01a0e6f6-04d2-7b03-b128-29863af0e008`
 - 开工记录 2026-09-28（基线 HEAD 82fdba7）`01a0e704-a36e-7651-94f9-290bc317b718`
 - 更新记录 2026-10-01→02 · 夜间长任务三线（P004/P005/P006）`01a0f99b-53f1-7d30-9b61-01378442f731`
+- 更新记录 2026-10-03 午后 · P010b 日志真分页 + EN-BUG-1 对齐（文档基线 1920f0c）`01a100f2-2cb8-7e81-adb0-15bff09523c2`
 - 生产重部署 2026-10-03（a6beb1a→c0875eb · 86 commit · 迁移 63→66）`01a0fdc7-8a43-7603-a961-0e7a2bf29860`
 - （P010 增量已并入既有篇目：数据层 63→67 / 接口面 / 前端路由 / mcp crate 12 工具位 / api crate 日志面）
 - study×wiki×harness×memory 学习工作流分工手册 `01a0fba1-506b-79d0-9da0-765ac9fe9129`
-- 生产重部署 2026-10-03（a6beb1a · 78 commit · 迁移 63→66）`01a0fdc7-8a43-7603-a961-0e7a2bf29860`
 
 ## 图清单（projects 文件区，file_get 直取）
 
