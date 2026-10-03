@@ -6,13 +6,12 @@ import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@
 import { fmtTime, inputCls, selectCls, relTime } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-type Tab = 'providers' | 'routing' | 'rhythm' | 'webreader' | 'danger' | 'migrate'
+type Tab = 'providers' | 'routing' | 'rhythm' | 'danger' | 'migrate'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'routing', label: 'AI 功能' },
   { value: 'providers', label: '供应商' },
   { value: 'rhythm', label: '节律' },
-  { value: 'webreader', label: '网页读取' },
   { value: 'danger', label: '危险操作' },
   { value: 'migrate', label: '数据迁移' },
 ]
@@ -37,7 +36,6 @@ export default function Settings() {
       {tab === 'routing' && <Routing />}
       {tab === 'providers' && <Providers />}
       {tab === 'rhythm' && <RhythmPane />}
-      {tab === 'webreader' && <WebReaderPane />}
       {tab === 'danger' && <DangerZone />}
       {tab === 'migrate' && <MigratePane />}
     </div>
@@ -685,6 +683,9 @@ function Routing() {
       </Card>
 
       {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+
+      {/* 网页读取：抓取正文能力配置（随 AI 功能同处） */}
+      <WebReaderPane />
     </div>
   )
 }

@@ -10,7 +10,6 @@ import {
   FolderKanban,
   HardDrive,
   LayoutDashboard,
-  ListChecks,
   ScrollText,
   ListTodo,
   LogOut,
@@ -46,7 +45,6 @@ const Assets = lazy(() => import('@/features/Assets'))
 const Credentials = lazy(() => import('@/features/Credentials'))
 const Todos = lazy(() => import('@/features/Todos'))
 const Tickets = lazy(() => import('@/features/Tickets'))
-const Jobs = lazy(() => import('@/features/Jobs'))
 const Logs = lazy(() => import('@/features/Logs'))
 const Study = lazy(() => import('@/features/Study'))
 const Settings = lazy(() => import('@/features/Settings'))
@@ -80,14 +78,13 @@ const NAV_GROUPS: { label: string | null; items: NavItem[] }[] = [
       { to: '/credentials', label: '凭据', icon: KeyRound },
       { to: '/todos', label: '待办', icon: ListTodo },
       { to: '/tickets', label: '工单', icon: Ticket },
+      { to: '/study', label: '学习', icon: GraduationCap },
     ],
   },
   {
     label: '系统',
     items: [
-      { to: '/jobs', label: '任务', icon: ListChecks, badge: (s) => s.failed || null },
       { to: '/logs', label: '日志', icon: ScrollText },
-      { to: '/study', label: '学习', icon: GraduationCap },
       { to: '/mcp', label: 'MCP', icon: Plug },
       { to: '/account', label: '账号与安全', icon: UserCircle },
       { to: '/settings', label: '设置', icon: SettingsIcon },
@@ -341,7 +338,6 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/credentials" element={<Credentials />} />
               <Route path="/todos" element={<Todos />} />
               <Route path="/tickets" element={<Tickets />} />
-              <Route path="/jobs" element={<Jobs />} />
               <Route path="/logs" element={<Logs />} />
               <Route path="/study" element={<Study />} />
               <Route path="/mcp" element={<Mcp />} />

@@ -26,6 +26,7 @@ export default function Todos() {
   const [selected, setSelected] = useState<Todo | null>(null)
   const [busy, setBusy] = useState(false)
   const [doneRows, setDoneRows] = useState<Todo[] | null>(null)
+  const [doneCount, setDoneCount] = useState(0)
   const [showDone, setShowDone] = useState(false) // 「已完成」折叠组，默认收起（微软 To Do 心智）
 
   // 翻页（前端切页：单用户数据量小，一次拉全 + slice，支持页码直跳）
@@ -63,14 +64,18 @@ export default function Todos() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
-  // 「已完成」折叠组：active 视图内展开时才拉取（默认收起不白拉）；列表变化后同步刷新
+  // 「已完成」计数：始终拉（折叠组标题要显示真实数量，不能等展开才有数字）；
+  // 展开时同时拿全量行用于列表渲染——一次请求兼得两者。
   useEffect(() => {
-    if (view !== 'active' || !showDone) return
+    if (view !== 'active') return
     api
       .get<Todo[]>('/todos?kind=todo&status=done')
-      .then(setDoneRows)
+      .then((r) => {
+        setDoneRows(r)
+        setDoneCount(r.length)
+      })
       .catch(() => undefined)
-  }, [view, showDone, rows])
+  }, [view, rows])
 
   async function quickAdd() {
     if (!title.trim()) return
@@ -321,7 +326,7 @@ export default function Todos() {
       {/* 「已完成」折叠组：仅进行中视图，默认收起（微软 To Do 心智） */}
       {view === 'active' && (
         <DoneGroup
-          count={doneRows?.length ?? 0}
+          count={doneCount}
           open={showDone}
           rows={doneRows}
           busy={busy}

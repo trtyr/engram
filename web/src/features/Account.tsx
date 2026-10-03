@@ -6,46 +6,47 @@
 import { useEffect, useState } from 'react'
 import { appConfirm } from '@/components/confirm'
 import { api, type AdminSessionDto, type ApiKey } from '@/lib/api'
-import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
+import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
+type AcctTab = 'account' | 'sessions' | 'keys'
+
+const ACCT_TABS: { value: AcctTab; label: string }[] = [
+  { value: 'account', label: '账号管理' },
+  { value: 'sessions', label: '活跃会话' },
+  { value: 'keys', label: 'MCP 密钥' },
+]
+
 export default function Account() {
+  const [tab, setTab] = useState<AcctTab>('account')
   return (
     <div className="space-y-6">
-      <PageHeader title="账号与安全" desc="账号/会话管理 + API 密钥——面向公网部署的安全操作台" />
-      <AccountPane />
-      <Keys />
+      <PageHeader title="账号与安全" desc="账号管理 / 活跃会话 / MCP 密钥——面向公网部署的安全操作台" />
+      <Tabs items={ACCT_TABS} value={tab} onChange={setTab} />
+      {tab === 'account' && <AccountPane />}
+      {tab === 'sessions' && <SessionsPane />}
+      {tab === 'keys' && <Keys />}
     </div>
   )
 }
 
-/** 账号与会话（单用户管理）：改用户名/密码 + 活跃会话列表（吊销/吊销其他）。 */
+/** 账号管理：当前账号信息 + 改用户名/密码。 */
 function AccountPane() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [okMsg, setOkMsg] = useState('')
   const [username, setUsername] = useState<string | null>(null)
-  const [sessions, setSessions] = useState<AdminSessionDto[] | null>(null)
-
   const [curPw, setCurPw] = useState('')
   const [newUsername, setNewUsername] = useState('')
   const [newPw, setNewPw] = useState('')
   const [newPw2, setNewPw2] = useState('')
-
-  const loadSessions = () =>
-    api
-      .get<AdminSessionDto[]>('/auth/sessions')
-      .then(setSessions)
-      .catch((e) => setErr(e.message))
 
   useEffect(() => {
     api
       .get<{ username: string }>('/auth/username')
       .then((r) => setUsername(r.username))
       .catch(() => {})
-    loadSessions()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function doChange() {
@@ -82,54 +83,8 @@ function AccountPane() {
       setNewPw('')
       setNewPw2('')
       setErr('')
-      loadSessions()
     } catch (e) {
       setErr(e instanceof Error ? e.message : '修改失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function doRevoke(id: string) {
-    if (
-      !(await appConfirm({
-        title: '吊销该会话？',
-        description: `会话 ${id} 的设备下次请求需重新登录。`,
-        destructive: true,
-        confirmLabel: '吊销',
-      }))
-    )
-      return
-    setBusy(true)
-    try {
-      await api.del(`/auth/sessions/${id}`)
-      setErr('')
-      loadSessions()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '吊销失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function doRevokeOthers() {
-    if (
-      !(await appConfirm({
-        title: '吊销其他全部会话？',
-        description: '除当前设备外的所有登录都将失效。',
-        destructive: true,
-        confirmLabel: '吊销',
-      }))
-    )
-      return
-    setBusy(true)
-    try {
-      const r = await api.post<{ revoked: number }>('/auth/sessions/revoke-others')
-      setOkMsg(`已吊销其他会话 ${r.revoked} 个`)
-      setErr('')
-      loadSessions()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '吊销失败')
     } finally {
       setBusy(false)
     }
@@ -141,7 +96,6 @@ function AccountPane() {
       {okMsg && (
         <Card className="border-success/30 bg-success/10 p-3 text-sm text-success">{okMsg}</Card>
       )}
-
       <Card className="p-4">
         <h3 className="text-sm font-semibold">修改账号</h3>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -199,7 +153,79 @@ function AccountPane() {
           </Button>
         </div>
       </Card>
+    </div>
+  )
+}
 
+/** 活跃会话：查看/吊销各设备登录。 */
+function SessionsPane() {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [okMsg, setOkMsg] = useState('')
+  const [sessions, setSessions] = useState<AdminSessionDto[] | null>(null)
+
+  const loadSessions = () =>
+    api
+      .get<AdminSessionDto[]>('/auth/sessions')
+      .then(setSessions)
+      .catch((e) => setErr(e.message))
+
+  useEffect(() => {
+    loadSessions()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function doRevoke(id: string) {
+    if (
+      !(await appConfirm({
+        title: '吊销该会话？',
+        description: `会话 ${id} 的设备下次请求需重新登录。`,
+        destructive: true,
+        confirmLabel: '吊销',
+      }))
+    )
+      return
+    setBusy(true)
+    try {
+      await api.del(`/auth/sessions/${id}`)
+      setErr('')
+      loadSessions()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '吊销失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doRevokeOthers() {
+    if (
+      !(await appConfirm({
+        title: '吊销其他全部会话？',
+        description: '除当前设备外的所有登录都将失效。',
+        destructive: true,
+        confirmLabel: '吊销',
+      }))
+    )
+      return
+    setBusy(true)
+    try {
+      const r = await api.post<{ revoked: number }>('/auth/sessions/revoke-others')
+      setOkMsg(`已吊销其他会话 ${r.revoked} 个`)
+      setErr('')
+      loadSessions()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '吊销失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {err && <ErrorBox msg={err} />}
+      {okMsg && (
+        <Card className="border-success/30 bg-success/10 p-3 text-sm text-success">{okMsg}</Card>
+      )}
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
