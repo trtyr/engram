@@ -138,6 +138,18 @@
   未竟终章。变更面：dispatch.rs 动作表与 handler 合并 + golden 快照重生成 +
   mcp_test 三处断言（照 P010 两轮门禁教训预防）+ Web 管理台跟随。验证：门禁 +
   golden + Agent 实测（pi 自身即消费者）。
+- [ ] **T019 · 日志域化——logs 加 domain 列，每个功能一份全量日志**
+  用户需求（2026-10-03）：「为每一个功能单独做日志，获取跟这个功能相关的全量日志」
+  ——日志按功能域组织，不是任务概念（不破 P010 唯一时间线：仍是单表单流，域是列
+  不是新日志概念）。
+  ① 迁移 0068：logs 加 `domain` 列 + 索引 + 历史回填（按 target/kind 映射）；
+  ② 写入层单点归域：job.* 按 kind 前缀（extract/arbitrate/organize/persona/
+  consolidate/reembed→memory；wiki_*/chunk/embed/parse_document→wiki；cg_*→
+  codegraph）；HTTP 按 path 首段；审计按 kind 归域（顺带缓解 T001——域日志可见域审计）；
+  队列/runner→system；
+  ③ 读取面：MCP logs.query + HTTP /logs 加 domain 参数；前端 Logs 页域切换 tab；
+  ④ 连锁简化：T011/T014 落点改为 logs domain='memory' 聚合（抽取率/JEV 命中率
+  SQL 一跳出），无需独立蒸馏史表。
 
 ## Deferred / 交叉引用
 
