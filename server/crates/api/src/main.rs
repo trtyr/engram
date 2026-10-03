@@ -25,6 +25,14 @@ async fn main() -> anyhow::Result<()> {
     // 2. 配置
     let cfg = Config::from_env()?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "engram 启动");
+    // 数据根可见化（2026-10-03 codegraph 全量失效事故）：AGENT_MEMORY_DATA_DIR 未设时
+    // 进程按 HOME fallback，容器形态下产物落进可写层、容器重建即丢——把解析结果打进启动日志，
+    // 让「数据到底写哪儿」在运维视角可见（配 deploy 的显式注入构成双保险）。
+    tracing::info!(
+        data_dir = %cfg.data_dir.display(),
+        explicit = std::env::var("AGENT_MEMORY_DATA_DIR").is_ok(),
+        "数据根就绪"
+    );
 
     // 3. 数据库连接 + 迁移 + 管理员播种 + 崩溃自愈（启动即跑，失败快速退出）
     let pool = init_db(&cfg).await?;
