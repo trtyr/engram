@@ -5,7 +5,11 @@
 
 ## Done
 
-（空）
+- [x] **T012 · JEV 决策模型适配评估**（2026-10-03）——两轮中文评测，结论可落地并经
+  用户拍板（决策 001）：构造用例 10/10；生产回放 25 段一致率 84%（方差≤0.06）；
+  arbitrate 三判 7/7；107 次调用 <$0.002。评测依据与阈值分档见
+  [decisions/001-jev-l01-guard.md](decisions/001-jev-l01-guard.md)；完整评测数据在
+  本文件 git 历史（42cc110..bf30073）。
 
 ## In Progress
 
@@ -65,45 +69,31 @@
 - [ ] **T010 · mcp_test.rs:446 文案滞后**
   报错文案「应为十二个域工具」vs 断言 `tools.len()==13`（P010 加 logs 域后没跟）。
 
-### 能力候选（2026-10-03 L0→L1 机制讨论产生，待拍板排序）
+### 已拍板（决策 001 · JEV 上 L0→L1，2026-10-03）
 
-- [ ] **T011 · 蒸馏归因回执（段级判定可观测）**
-  extract 每段产出结构化回执：抽出 N 条候选 / 显式拒绝 + 理由短语——落任务事件流，
-  抽取率（拒收段占比）可统计。动机：误杀（相关被判无关）是沉默丢失，现在只有一句
-  「无持久洞察」日志；后续调 prompt v9+、评估保险级联全靠这个数据。背景：extract
-  prompt 规则 8 已要求「不值得记输出空数组.宁缺毋滥」（prompts.rs:40），但拒绝原因
-  不落盘。
-- [ ] **T012 · JEV 决策模型适配评估（openrouter typesafe/jev-1.13）**
-  System One 决策模型（choice/noul/score 三原语，typed 输出+概率，输出 token 免费，
-  $0.042/M 输入）。三落点：
-  ① **L0→L1 前置保险级联**（Jev-Verified Cascade 模式）：noul「此段含值得长期记住的
-  用户事实吗？」P<0.3 跳过 chat 抽取——便宜哨兵挡在贵模型前，比 chat 模型当保险
-  便宜一个量级且有概率阈值；
-  ② **arbitrate choice 化**：每候选 choice{new,duplicate,contradicts}，替换
-  prompt-and-parse；低置信进待审（顺治 T002 相关的漏判兜底问题）；
-  ③ **consolidate noul 化**：近重复「语义等价吗」判定。
-  凭证：`openrouter/engram`（credentials 域，2026-10-03 入库）。
-  **前置条件**：中文效果评测先行（官方案例全英文，engram 全中文记忆，p(yes) 校准度
-  未验证）；**风险**：/api/alpha/decisions 为 alpha 面、32k 上下文、arbitrate 的
-  target_id 指认是开放集合（choice 只判类型 + top1 相似当 target，或动态构造 criteria
-  编号选项——设计期定）。不适配：extract 开放抽取 / persona 生成（保持 chat 模型）。
-  **评测记录（2026-10-03 两轮，107 次调用合计 <$0.002）**：
-  - 第一轮构造用例 10/10（noul@0.5 全对，KEEP≥0.58/REJECT≤0.24 分离度佳；choice
-    五分类全对 conf 0.84-1.0，拒绝理由归因白送——T011 可用 choice 一次请求同时出
-    保险判定+拒绝分类）
-  - 第二轮生产回放 25 段：**一致率 84%**（KEEP 18/20、REJECT 3/5）。方差 spread
-    ≤0.06（同段复跑 3 次）——阈值路由可行。注意：标注=历史 extract 判定（有产出=KEEP/
-    空产出=REJECT），84% 是**与 extract 的一致率**非真实准确率；2 条「误放」（空产出
-    但 p=0.71）疑似 extract 历史误杀被 JEV 揪出——若复核坐实，可加「空产出段 JEV
-    补抽哨兵」玩法（高 P 空产出段进二次精抽）
-  - arbitrate 三判 7/7：真实 superseded 对（contradicts 例证）1/1 conf 0.92；独立
-    active 对（new 例证）6/6 conf 0.98-1.0
-  - **评测结论：可落地**。设计期三件事：① DistillLlm trait 增 decide 原语（或独立
-    port）② 阈值分档（建议：<0.3 拒绝跳过 / 0.3-0.5 待审（复用 needs_review 通道）/
-    ≥0.5 放行精抽）③ arbitrate target 指认方案
+- [ ] **T013 · 决策模型接入面 + JEV 配置**
+  ① DistillLlm trait 增 `decide` 原语（或独立 DecideLlm port）+ OpenRouter Decisions
+  API 客户端（POST /api/alpha/decisions，typesafe/jev-1.13）；② 配置面：Web 设置
+  「AI 功能」新增 JEV 区块——**接口仅支持 OpenRouter**（无 provider 选择器，默认且唯一），
+  用户填 API key（加密存储，倾向复用 llm_providers 体系加 decide capability 以白嫖
+  KeyCipher/re-encrypt/测试链；备选 settings 单行 JSON），enabled 开关 + 模型名 +
+  阈值参数（reject/review 两线）；③ HTTP GET/PUT /settings/jev（Admin）。验证：配置
+  改动即时生效 + 门禁。
+- [ ] **T014 · L0→L1 保险级联落地（含归因回执）**
+  extract claim 后、chat 精抽前逐段 JEV 判定：noul 概率 `<0.3` 跳过（事件流记
+  「JEV 拒绝 p=xx」）/`0.3~0.5` 照常精抽但产物提级 needs_review/`≥0.5` 放行；
+  归因回执用 choice 五分类（user_facts/project_internal/transient/learning/chitchat）
+  同请求产出拒绝理由（原 T011 方案并入此处，抽取率可统计）。JEV 失败/未配置 = 降级
+  直通精抽（不阻塞蒸馏主链）。验证：logging_test 顺序壳加回放用例 + 抽取率事件可查。
+- [ ] **T015 · 阶段二：arbitrate choice 化 + consolidate noul 化**（依赖 T013/T014 落地）
+  arbitrate：每候选 choice{new,duplicate,contradicts} 替换 prompt-and-parse，低置信
+  进待审（顺治漏判兜底问题）；target 指认取 top1 相似（最简方案，设计期可复审）。
+  consolidate：近重复「语义等价吗」noul 化。评测支撑：三判 7/7（T012 评测记录）。
 
 ## Deferred / 交叉引用
 
+- **空产出段 JEV 补抽哨兵**：T014 落地后的可选玩法——对 0 原子段跑 JEV，高 P（疑似
+  历史误杀）进二次精抽。前置：复核 2 条疑似误杀坐实后再立项
 - prompt_version 归因列（atoms/scenarios）→ **P001 Deferred 已挂**，不重复开
 - 实体归并 LIMIT 1 加 ORDER BY → P001 Deferred「杂项」已挂（本线 T005 补全另两半）
 - 结构观察（非缺陷，登记备查）：敏感标记在 L2 丢失——scenarios 表无 sensitive 列，
