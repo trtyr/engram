@@ -33,6 +33,7 @@
 | P009 | [frontend-ia-observability](plans/009-frontend-ia-observability/README.md) | web, deploy, server/api | done | 任务并入日志并移除任务入口/学习归资产域/日志 7 天窗口+长内容收起/已完成计数/账号拆三标签/网页读取归 AI 功能/生产 codegraph 数据根修复 | 2c5423a/72003f6/dbef672/cb7bf7d | — |
 | P010 | [logs-unify](plans/010-logs-unify/README.md) | server/logs, mcp, web, db | done | 日志统一为系统唯一时间线（job_events 并入 logs，迁移 67）；MCP logs 域；前端日志页重建为单线；任务概念退役 | 31ad8a4/2ad412d/891dbff/e2cb949 | — |
 | P011 | [memory-audit-debts](plans/011-memory-audit-debts/README.md) | server/distill, server/core/memory, server/storage, server/mcp, web, server/api | planning | 实读行为债 T001-T010 待拍板（Q001-Q004）+ **JEV 已拍板（决策 001）**：L0→L1 保险级联上 JEV，T013 接入面+配置（OpenRouter-only）/T014 级联落地/T015 阶段二 arbitrate+consolidate | T012 评测两轮（bf30073） | T013 接入面+JEV 配置区块 |
+| P012 | [organize-agentic](plans/012-organize-agentic/README.md) | server/distill, server/storage, server/llm | planning | L1→L2 组织者 Agent 化：六工具（查原子/搜场景/读写/合并/软删）+ agentic loop，替代 top100 全塞；删除一律软删、converge 保持确定性；成本闸与 P011 T007 合并落地 | — | T001 工具集 |
 
 ## Ideas
 
