@@ -72,6 +72,10 @@ impl EngramMcpServer {
         use engram_jobs::types::JobError;
         match e {
             JobError::Permanent(m) => mcp_err(ErrorCode::INVALID_PARAMS, m),
+            JobError::BudgetExceeded(n) => mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("LLM 调用预算耗尽（{n} 次）——任务过大，可 revive 重跑"),
+            ),
             JobError::Retryable(m) => mcp_err(
                 ErrorCode::INTERNAL_ERROR,
                 format!("临时故障（可重试）：{m}"),

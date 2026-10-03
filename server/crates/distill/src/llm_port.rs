@@ -142,6 +142,8 @@ pub async fn chat_json_retrying(
         })
     };
 
+    // T007/T016：每次模型调用记账——超任务预算 → BudgetExceeded（failed 可 revive）
+    ctx.record_llm_call()?;
     match llm.chat_json(purpose, system, user, job_id).await {
         Ok(v) => {
             ctx.emit(
@@ -161,6 +163,7 @@ pub async fn chat_json_retrying(
         Err(first) => {
             tracing::warn!(%first, %job_id, "LLM 输出解析失败，追加错误详情重试");
             let strict = retry_user_prompt(user, &first.to_string());
+            ctx.record_llm_call()?;
             match llm.chat_json(purpose, system, &strict, job_id).await {
                 Ok(v) => {
                     ctx.emit(

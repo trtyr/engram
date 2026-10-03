@@ -10,5 +10,8 @@ pub mod runner;
 pub mod types;
 
 pub use queue::JobQueue;
-pub use runner::{HandlerFn, JobContext, Runner, RunnerConfig, RunnerHandle};
+pub use runner::{
+    HandlerFn, JobContext, Runner, RunnerConfig, RunnerHandle, WORKFLOW_KINDS,
+    is_workflow_kind, JOB_LLM_CALL_BUDGET,
+};
 pub use types::{FailOutcome, Job, JobError, JobEvent, JobStatus, JobTemplate};

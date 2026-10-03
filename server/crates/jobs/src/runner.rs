@@ -15,9 +15,29 @@ use crate::types::{Job, JobError};
 pub struct JobContext {
     pub job: Job,
     queue: JobQueue,
+    /// LLM 调用计数（本任务内；Arc 跨 clone 共享）——预算闸记账用。
+    llm_calls: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl JobContext {
+    /// 每次模型调用（chat_json / decide）记账；超过 [`JOB_LLM_CALL_BUDGET`] 返回
+    /// `JobError::BudgetExceeded`（任务 failed 可 revive——防蒸馏风暴的成本闸）。
+    pub fn record_llm_call(&self) -> Result<(), JobError> {
+        let n = self
+            .llm_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        if n > JOB_LLM_CALL_BUDGET {
+            return Err(JobError::BudgetExceeded(n));
+        }
+        Ok(())
+    }
+
+    /// 本任务已发生的 LLM 调用次数（事件流/审计用）。
+    pub fn llm_calls_made(&self) -> u64 {
+        self.llm_calls.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// 域表连接池（与队列同池）。
     pub fn pool(&self) -> &sqlx::PgPool {
         self.queue.pool()
@@ -49,6 +69,29 @@ pub type HandlerFn = Arc<
         + Send
         + Sync,
 >;
+
+/// 蒸馏链工作流类别（T016，决策：串行性是正确性不变量，写死非配置项）。
+/// 这些 kind 共享全局单飞信号量——同一时刻整个系统只有一条活跃蒸馏链
+/// （organize 双跑会抢同一批未归组原子，重复场景风险）。
+/// env per-kind 配置对本类无效（不可放松；`build_per_kind_semaphores` 过滤）。
+pub const WORKFLOW_KINDS: &[&str] = &[
+    "extract_atoms",
+    "arbitrate_atoms",
+    "organize_scenarios",
+    "distill_persona",
+    "consolidate",
+    "reembed_memory",
+    "deep_purge",
+];
+
+/// 是否工作流类别（单飞）。
+pub fn is_workflow_kind(kind: &str) -> bool {
+    WORKFLOW_KINDS.contains(&kind)
+}
+
+/// 单任务 LLM 调用预算（T007：防蒸馏风暴；chat/decide 每次调用记账，超限任务
+/// failed 可 revive）。embed 全量重嵌不受此限（reembed 是合法大批量）。
+pub const JOB_LLM_CALL_BUDGET: u64 = 1000;
 
 /// 便于构造 HandlerFn 的小模块（避免直接依赖 futures crate 的路径书写）。
 pub mod futures_handler {
@@ -159,6 +202,9 @@ impl Runner {
             tokio::spawn(async move {
                 // per-kind 分池（R12）：cap 不超过全局并发；启动日志打印生效配置
                 let per_kind_sem = build_per_kind_semaphores(&config);
+                // T016 蒸馏链单飞：workflow 类共享全局 Semaphore(1)——写死非配置，
+                // 同一时刻只有一条活跃蒸馏链（串行性是正确性不变量）。
+                let workflow_sem = Arc::new(tokio::sync::Semaphore::new(1));
                 let semaphore = semaphore.clone();
                 let mut last_reap = tokio::time::Instant::now();
 
@@ -190,11 +236,23 @@ impl Runner {
                                 // 专属等待必须发生在 spawn 内——分派循环若顺序 await 专属信号量，
                                 // 满载的慢 kind 会阻塞同批后面未配置 kind 的派发（饥饿，auditor 抓出）。
                                 let kind_sem = per_kind_sem.get(&job.kind).cloned();
+                                // T016 蒸馏链单飞（写死非配置）：workflow 类共享同一个
+                                // Semaphore(1)——排队发生在全局槽之前（spawn 内 await，
+                                // 不占并发额度），同一时刻只有一条活跃蒸馏链。
+                                let workflow_sem = if is_workflow_kind(&job.kind) {
+                                    Some(workflow_sem.clone())
+                                } else {
+                                    None
+                                };
                                 let semaphore = semaphore.clone();
                                 let queue = queue.clone();
                                 let handlers = handlers.clone();
                                 tokio::spawn(async move {
                                     let _kind_permit = match kind_sem {
+                                        Some(sem) => sem.acquire_owned().await.ok(),
+                                        None => None,
+                                    };
+                                    let _wf_permit = match workflow_sem {
                                         Some(sem) => sem.acquire_owned().await.ok(),
                                         None => None,
                                     };
@@ -288,6 +346,7 @@ async fn execute_job(queue: &JobQueue, handlers: Arc<HashMap<String, HandlerFn>>
     let ctx = JobContext {
         job: job.clone(),
         queue: queue.clone(),
+        llm_calls: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };
     match handler(ctx).await {
         Ok(result) => {
@@ -304,11 +363,19 @@ async fn execute_job(queue: &JobQueue, handlers: Arc<HashMap<String, HandlerFn>>
 }
 
 /// per-kind 分池（R12）：cap 不超过全局并发；空表 = 与旧行为一致。
+/// T016：workflow 类 kind **不进本表**（env 不可放松串行）——它们走共享单飞信号量。
 fn build_per_kind_semaphores(
     config: &RunnerConfig,
 ) -> HashMap<String, Arc<tokio::sync::Semaphore>> {
     let mut per_kind_sem: HashMap<String, Arc<tokio::sync::Semaphore>> = HashMap::new();
     for (kind, cap) in &config.per_kind_concurrency {
+        if is_workflow_kind(kind) {
+            tracing::warn!(
+                kind = %kind,
+                "per-kind 并发配置对蒸馏链 kind 无效（串行性写死）——已忽略"
+            );
+            continue;
+        }
         let cap = (*cap).min(config.concurrency);
         per_kind_sem.insert(kind.clone(), Arc::new(tokio::sync::Semaphore::new(cap)));
     }
@@ -318,9 +385,9 @@ fn build_per_kind_semaphores(
             .map(|(k, s)| format!("{k}:{}", s.available_permits()))
             .collect();
         parts.sort();
-        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, per_kind = %parts.join(","), "job runner 启动（per-kind 并发生效）");
+        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, per_kind = %parts.join(","), workflow = "单飞(写死)", "job runner 启动（per-kind 并发生效）");
     } else {
-        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, "job runner 启动");
+        tracing::info!(worker = %config.worker_id, concurrency = config.concurrency, workflow = "单飞(写死)", "job runner 启动");
     }
     per_kind_sem
 }
@@ -328,6 +395,25 @@ fn build_per_kind_semaphores(
 #[cfg(test)]
 mod per_kind_tests {
     use super::*;
+
+    #[test]
+    fn workflow_kinds_cannot_be_loosened_via_env() {
+        // T016：串行性写死——workflow kind 的 per-kind env 配置必须被忽略
+        // （过滤发生在 build_per_kind_semaphores；parse 只管解析语法）
+        let config = RunnerConfig {
+            per_kind_concurrency: parse_per_kind_concurrency(
+                "extract_atoms:4,wiki_generate:2,organize_scenarios:8",
+            ),
+            ..Default::default()
+        };
+        let sem = build_per_kind_semaphores(&config);
+        assert!(
+            sem.get("extract_atoms").is_none() && sem.get("organize_scenarios").is_none(),
+            "workflow kind 不可通过 env 放松串行: {:?}",
+            sem.keys().collect::<Vec<_>>()
+        );
+        assert_eq!(sem.get("wiki_generate").map(|s| s.available_permits()), Some(2));
+    }
 
     #[test]
     fn parse_per_kind_handles_valid_and_skips_garbage() {

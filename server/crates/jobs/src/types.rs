@@ -133,6 +133,9 @@ pub enum JobError {
     /// 永久错误（参数/校验/逻辑）：不重试，直接 failed。
     #[error("永久失败: {0}")]
     Permanent(String),
+    /// LLM 调用预算耗尽（T016/T007：防蒸馏风暴的成本闸）：不重试，failed 可 revive。
+    #[error("LLM 调用预算耗尽（{0} 次）——任务过大或模型异常，可 revive 重跑")]
+    BudgetExceeded(u64),
 }
 
 /// fail() 的结果去向。

@@ -149,6 +149,7 @@ impl JobQueue {
         let (message, retryable) = match error {
             JobError::Retryable(m) => (m.clone(), true),
             JobError::Permanent(m) => (m.clone(), false),
+            JobError::BudgetExceeded(n) => (format!("LLM 调用预算耗尽（{n} 次）"), false),
         };
 
         let outcome = self
