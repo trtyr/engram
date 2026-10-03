@@ -140,7 +140,8 @@ impl LlmProvider for OpenAiCompatProvider {
         // P004-T010：tool-calling（OpenAI function 格式）
         if let Some(tools) = &req.tools {
             body["tools"] = serde_json::json!(
-                tools.iter()
+                tools
+                    .iter()
                     .map(|t| serde_json::json!({
                         "type": "function",
                         "function": {
@@ -184,17 +185,23 @@ impl LlmProvider for OpenAiCompatProvider {
             .unwrap_or("")
             .to_string();
         // OpenAI tool_calls：[{"id","type":"function","function":{"name","arguments"}}]
-        let tool_calls: Option<Vec<ToolCall>> = first.and_then(|m| m.get("tool_calls")).and_then(|tc| tc.as_array()).map(|arr| {
-            arr.iter()
-                .filter_map(|c| {
-                    Some(ToolCall {
-                        id: c["id"].as_str()?.to_string(),
-                        name: c["function"]["name"].as_str()?.to_string(),
-                        arguments: c["function"]["arguments"].as_str().unwrap_or("{}").to_string(),
+        let tool_calls: Option<Vec<ToolCall>> = first
+            .and_then(|m| m.get("tool_calls"))
+            .and_then(|tc| tc.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| {
+                        Some(ToolCall {
+                            id: c["id"].as_str()?.to_string(),
+                            name: c["function"]["name"].as_str()?.to_string(),
+                            arguments: c["function"]["arguments"]
+                                .as_str()
+                                .unwrap_or("{}")
+                                .to_string(),
+                        })
                     })
-                })
-                .collect()
-        });
+                    .collect()
+            });
         let usage = api.usage.unwrap_or(ApiUsage {
             prompt_tokens: 0,
             completion_tokens: 0,

@@ -82,8 +82,7 @@ pub async fn put_jev_config(
     if let Some(t) = req.review_threshold {
         cfg.review_threshold = t;
     }
-    if !(0.0..cfg.review_threshold).contains(&cfg.reject_threshold) || cfg.review_threshold >= 1.0
-    {
+    if !(0.0..cfg.review_threshold).contains(&cfg.reject_threshold) || cfg.review_threshold >= 1.0 {
         return Err(ApiError::BadRequest(format!(
             "阈值需满足 0 < reject({}) < review({}) < 1",
             cfg.reject_threshold, cfg.review_threshold
@@ -97,9 +96,7 @@ pub async fn put_jev_config(
         }
     }
     if cfg.enabled && !cfg.key_configured() {
-        return Err(ApiError::BadRequest(
-            "启用前需先配置 API key".into(),
-        ));
+        return Err(ApiError::BadRequest("启用前需先配置 API key".into()));
     }
 
     engram_storage::repo::settings::put_json(

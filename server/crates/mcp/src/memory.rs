@@ -300,12 +300,6 @@ impl EngramMcpServer {
         args: serde_json::Map<String, serde_json::Value>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
-        const KV_ACTIONS: [&str; 4] = ["kv_put", "kv_get", "kv_list", "kv_search"];
-        if KV_ACTIONS.contains(&action.as_str()) {
-            require_original(&p)?;
-        } else {
-            require_memory(&p)?;
-        }
         // T018（用户拍板 2026-10-03）：入口白名单——只接受六动词，旧名删除不做兼容。
         if action != "help" && !MEMORY_VERBS.contains(&action.as_str()) {
             return Err(mcp_err(
@@ -399,8 +393,14 @@ impl EngramMcpServer {
             },
             _ => action.clone(), // help
         };
-        if resolved != action && KV_ACTIONS.contains(&resolved.as_str()) {
-            require_original(&p)?; // 六动词走 kv_* 底层动作同样要 original scope
+        const KV_ACTIONS: [&str; 5] =
+            ["kv_put", "kv_get", "kv_list", "kv_search", "kv_delete"];
+        // scope 按底层动作分（T018 回归修复：六动词入口不能先 require_memory
+        // 挡掉 kv 模式的 original-only key）——KV_ACTIONS 含 kv_delete（T017 original 口径）
+        if KV_ACTIONS.contains(&resolved.as_str()) {
+            require_original(&p)?;
+        } else if resolved != "help" {
+            require_memory(&p)?;
         }
         if resolved == "help" {
             let cfg = load_config(&self.state.pool).await;

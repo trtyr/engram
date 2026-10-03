@@ -16,7 +16,6 @@ impl WikiService {
         Ok(crate::lint_deep::enqueue(&self.pool, lib, slugs).await?)
     }
 
-
     /// Repair：lint 修而不只报（wiki 收录哲学线工单③）。
     /// 边界三级（roadmap v6）：自动做（变体死链改写 / 去链接化 / ≥3 页引用建 stub / 孤页沿出链回挂）、
     /// 留痕做（同标题重复合并——冗余丢弃或内容并入；delete_page 快照兜底 + 全库链接改指）、

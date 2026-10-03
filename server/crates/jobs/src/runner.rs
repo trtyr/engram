@@ -436,7 +436,10 @@ mod per_kind_tests {
             "workflow kind 不可通过 env 放松串行: {:?}",
             sem.keys().collect::<Vec<_>>()
         );
-        assert_eq!(sem.get("wiki_generate").map(|s| s.available_permits()), Some(2));
+        assert_eq!(
+            sem.get("wiki_generate").map(|s| s.available_permits()),
+            Some(2)
+        );
     }
 
     #[test]

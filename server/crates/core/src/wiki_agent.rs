@@ -5,21 +5,21 @@
 //! 工具面与外部 Agent 的 MCP wiki 工具能力等价（同一 service 层）；
 //! 跨任务状态不存循环记忆，存 wiki 本身（Karpathy 模式）。
 
-use std::time::{Duration, Instant};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 use engram_jobs::{JobContext, JobError, JobTemplate};
-use engram_llm::types::{ChatMessage, ChatRequest, ToolDef};
 use engram_llm::provider::LlmProvider;
+use engram_llm::types::{ChatMessage, ChatRequest, ToolDef};
 use engram_llm::types::{LlmError, Purpose};
 use engram_storage::PgPool;
 use engram_wiki_engine::service::WikiService;
 
-use crate::wiki_docs::pipeline::IngestSource;
 use crate::wiki_docs::WikiDocumentService;
+use crate::wiki_docs::pipeline::IngestSource;
 
 /// 预算（首版默认：20 轮 / 60 次 LLM 调用 / 总超时 10 分钟）。
 #[derive(Debug, Clone)]
@@ -118,56 +118,101 @@ fn tool_defs() -> Vec<ToolDef> {
         }
     }
     vec![
-        def("web_reader", "抓取网页正文（markdown）。SPA/JS 渲染页可用。正文落地为本地缓存原件，返回 cache_id+摘要；全文用 read_cache 分段读。",
-            json!({"url": {"type": "string", "description": "完整 URL"}}), &["url"]),
-        def("read_cache", "读 web_reader 缓存的原件全文（分段）。首次调用 offset=0，之后用返回的 next_offset 续读。",
+        def(
+            "web_reader",
+            "抓取网页正文（markdown）。SPA/JS 渲染页可用。正文落地为本地缓存原件，返回 cache_id+摘要；全文用 read_cache 分段读。",
+            json!({"url": {"type": "string", "description": "完整 URL"}}),
+            &["url"],
+        ),
+        def(
+            "read_cache",
+            "读 web_reader 缓存的原件全文（分段）。首次调用 offset=0，之后用返回的 next_offset 续读。",
             json!({
                 "cache_id": {"type": "string", "description": "web_reader 返回的 cache_id"},
                 "offset": {"type": "integer", "description": "起始字符偏移，默认 0"},
                 "limit": {"type": "integer", "description": "本次读取字符数，默认 4000，上限 8000"}
             }),
-            &["cache_id"]),
-        def("wiki_search", "按关键词检索 wiki 页面（FTS+向量混合），返回 slug/标题/摘要。",
+            &["cache_id"],
+        ),
+        def(
+            "wiki_search",
+            "按关键词检索 wiki 页面（FTS+向量混合），返回 slug/标题/摘要。",
             json!({"query": {"type": "string"}, "limit": {"type": "integer", "description": "默认 8"}}),
-            &["query"]),
-        def("get_page", "读一个 wiki 页的完整内容。",
-            json!({"slug": {"type": "string"}}), &["slug"]),
-        def("write_page", "创建或覆盖一个 wiki 页（markdown，互链用 [[slug]]）。覆盖前可先 get_page 保留有价值内容。",
+            &["query"],
+        ),
+        def(
+            "get_page",
+            "读一个 wiki 页的完整内容。",
+            json!({"slug": {"type": "string"}}),
+            &["slug"],
+        ),
+        def(
+            "write_page",
+            "创建或覆盖一个 wiki 页（markdown，互链用 [[slug]]）。覆盖前可先 get_page 保留有价值内容。",
             json!({
                 "slug": {"type": "string", "description": "字母/数字/-/_/·，≤80 字符"},
                 "title": {"type": "string"},
                 "content": {"type": "string"},
                 "folder": {"type": "string", "description": "可选目录"}
             }),
-            &["slug", "title", "content"]),
-        def("wiki_graph", "全库页面互链图（节点=页面+边=链接），用于了解现有结构、避免重复建页。",
-            json!({}), &[]),
-        def("wiki_lint", "质量体检报告（孤儿页/缺互链/矛盾提示）。",
-            json!({}), &[]),
-        def("document_add", "把原文资料（URL 或文本）入库为文档（后台分块嵌入，供 documents_search 检索）。",
+            &["slug", "title", "content"],
+        ),
+        def(
+            "wiki_graph",
+            "全库页面互链图（节点=页面+边=链接），用于了解现有结构、避免重复建页。",
+            json!({}),
+            &[],
+        ),
+        def(
+            "wiki_lint",
+            "质量体检报告（孤儿页/缺互链/矛盾提示）。",
+            json!({}),
+            &[],
+        ),
+        def(
+            "document_add",
+            "把原文资料（URL 或文本）入库为文档（后台分块嵌入，供 documents_search 检索）。",
             json!({
                 "name": {"type": "string"},
                 "url": {"type": "string", "description": "与 text 二选一"},
                 "text": {"type": "string", "description": "与 url 二选一"}
             }),
-            &["name"]),
-        def("documents_search", "检索已入库文档的原文分块（FTS+向量），带文档出处。",
+            &["name"],
+        ),
+        def(
+            "documents_search",
+            "检索已入库文档的原文分块（FTS+向量），带文档出处。",
             json!({"query": {"type": "string"}, "limit": {"type": "integer", "description": "默认 6"}}),
-            &["query"]),
-        def("delete_page", "【破坏性】删除一个 wiki 页。仅在确凿重复/错误时使用。",
-            json!({"slug": {"type": "string"}}), &["slug"]),
-        def("merge_pages", "【破坏性】把 duplicate 页并入 primary 页（内容拼接+重定向），删除 duplicate。",
+            &["query"],
+        ),
+        def(
+            "delete_page",
+            "【破坏性】删除一个 wiki 页。仅在确凿重复/错误时使用。",
+            json!({"slug": {"type": "string"}}),
+            &["slug"],
+        ),
+        def(
+            "merge_pages",
+            "【破坏性】把 duplicate 页并入 primary 页（内容拼接+重定向），删除 duplicate。",
             json!({"primary": {"type": "string"}, "duplicate": {"type": "string"}}),
-            &["primary", "duplicate"]),
-        def("study_list", "列出学习路线图全部领域与知识点（id/name/status）。维护指令涉及学习进度时先查这里拿 item_id。",
-            json!({}), &[]),
-        def("study_update_item", "更新学习路线图知识点：设置状态（not_started/learning/learned）或挂 wiki 页互链。",
+            &["primary", "duplicate"],
+        ),
+        def(
+            "study_list",
+            "列出学习路线图全部领域与知识点（id/name/status）。维护指令涉及学习进度时先查这里拿 item_id。",
+            json!({}),
+            &[],
+        ),
+        def(
+            "study_update_item",
+            "更新学习路线图知识点：设置状态（not_started/learning/learned）或挂 wiki 页互链。",
             json!({
                 "item_id": {"type": "string", "description": "study_list 返回的知识点 id"},
                 "status": {"type": "string", "description": "not_started|learning|learned（可选）"},
                 "wiki_slugs": {"type": "array", "items": {"type": "string"}, "description": "挂链 wiki 页 slug 列表（可选，整体替换）"}
             }),
-            &["item_id"]),
+            &["item_id"],
+        ),
     ]
 }
 
@@ -238,7 +283,10 @@ async fn execute_tool(
             }
             let offset = args["offset"].as_u64().unwrap_or(0) as usize;
             let limit = args["limit"].as_u64().unwrap_or(4_000).min(8_000) as usize;
-            let path = deps.data_dir.join("web_cache").join(format!("{cache_id}.md"));
+            let path = deps
+                .data_dir
+                .join("web_cache")
+                .join(format!("{cache_id}.md"));
             let full = tokio::fs::read_to_string(&path)
                 .await
                 .map_err(|e| format!("缓存读取失败（cache_id 是否有效）: {e}"))?;
@@ -282,7 +330,10 @@ async fn execute_tool(
                 .get_page(lib, slug)
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(truncate(json!({"slug": page.slug, "title": page.title, "content": page.content}).to_string()))
+            Ok(truncate(
+                json!({"slug": page.slug, "title": page.title, "content": page.content})
+                    .to_string(),
+            ))
         }
         "write_page" => {
             let slug = args["slug"].as_str().ok_or("缺 slug")?;
@@ -429,7 +480,9 @@ fn build_system_static(deps: &AgentDeps, _lib: Uuid) -> String {
 fn build_user_msg(task: &AgentTask) -> String {
     let mut msg = format!("## 任务\n{}\n", task.instruction);
     if let Some(url) = &task.source_url {
-        msg.push_str(&format!("\n## 原料（URL）\n请先用 web_reader 抓取：<{url}>\n"));
+        msg.push_str(&format!(
+            "\n## 原料（URL）\n请先用 web_reader 抓取：<{url}>\n"
+        ));
     }
     if let Some(text) = &task.source_text {
         let name = task.source_name.as_deref().unwrap_or("未命名");
@@ -514,15 +567,15 @@ pub async fn run_agent<P: LlmProvider + 'static>(
         // 记账（与 P005 LLM 调用日志口径一致；绕过 registry.resolve 的直接调用在此补账）
         deps.registry
             .record_usage(&engram_llm::types::UsageMeta {
-            provider: provider.name().to_string(),
-            model: model.clone(),
-            purpose: Purpose::WikiAgent.as_str().to_string(),
-            input_tokens: resp.input_tokens,
-            output_tokens: resp.output_tokens,
-            latency_ms: t0.elapsed().as_millis() as i64,
-            job_id,
-        })
-        .await;
+                provider: provider.name().to_string(),
+                model: model.clone(),
+                purpose: Purpose::WikiAgent.as_str().to_string(),
+                input_tokens: resp.input_tokens,
+                output_tokens: resp.output_tokens,
+                latency_ms: t0.elapsed().as_millis() as i64,
+                job_id,
+            })
+            .await;
 
         match resp.tool_calls {
             Some(calls) if !calls.is_empty() => {
@@ -533,7 +586,14 @@ pub async fn run_agent<P: LlmProvider + 'static>(
                 for call in calls {
                     let t1 = Instant::now();
                     let destructive = matches!(call.name.as_str(), "delete_page" | "merge_pages");
-                    let result = execute_tool(&deps, lib, &call.name, &parse_args(&call.arguments), &mut report.pages_touched).await;
+                    let result = execute_tool(
+                        &deps,
+                        lib,
+                        &call.name,
+                        &parse_args(&call.arguments),
+                        &mut report.pages_touched,
+                    )
+                    .await;
                     report.tool_calls += 1;
                     let ok = result.is_ok();
                     // 审计（拍板②）：全工具留痕，破坏性标记 destructive
@@ -549,7 +609,10 @@ pub async fn run_agent<P: LlmProvider + 'static>(
                     );
                     let content = match result {
                         Ok(s) => s,
-                        Err(e) => format!("{{\"error\": {}}}", serde_json::to_string(&e).unwrap_or_default()),
+                        Err(e) => format!(
+                            "{{\"error\": {}}}",
+                            serde_json::to_string(&e).unwrap_or_default()
+                        ),
                     };
                     messages.push(ChatMessage::tool_result(call.id.clone(), content));
                 }
@@ -630,7 +693,10 @@ pub fn register_agent_handler(
                 .get("task")
                 .cloned()
                 .ok_or_else(|| JobError::Permanent("payload 缺 task".into()))
-                .and_then(|v| serde_json::from_value(v).map_err(|e| JobError::Permanent(format!("task 解析失败: {e}"))))?;
+                .and_then(|v| {
+                    serde_json::from_value(v)
+                        .map_err(|e| JobError::Permanent(format!("task 解析失败: {e}")))
+                })?;
             let job_id = ctx.job.id;
             let deps = AgentDeps {
                 purpose_text: None,
@@ -645,7 +711,16 @@ pub fn register_agent_handler(
                 .await
                 .map_err(|e| to_job_err(AgentError::Llm(e)))?;
 
-            match run_agent(provider, model, &deps, &task, AgentBudget::default(), Some(job_id)).await {
+            match run_agent(
+                provider,
+                model,
+                &deps,
+                &task,
+                AgentBudget::default(),
+                Some(job_id),
+            )
+            .await
+            {
                 Ok(report) => {
                     let _ = ctx
                         .emit(

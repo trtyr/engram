@@ -74,6 +74,25 @@ where
     }
 }
 
+/// T004 三态版宽松时间：JSON null → Some(None)（清空）；字符串 → Some(Some(v))；缺字段走 default（None）。
+pub(crate) fn opt_flex_dt3<'de, D>(
+    d: D,
+) -> Result<Option<Option<chrono::DateTime<chrono::Utc>>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: Option<String> = Option::deserialize(d)?;
+    match raw {
+        None => Ok(Some(None)), // 显式 null = 清空
+        Some(s) => match parse_flex_datetime(&s) {
+            Some(dt) => Ok(Some(Some(dt))),
+            None => Err(serde::de::Error::custom(format!(
+                "无法解析时间 {s:?}：期望 ISO8601（2026-09-02 或 2026-09-02T00:00:00Z）"
+            ))),
+        },
+    }
+}
+
 /// P11 按 agent 清场（测试隔离）：会话置 void + 产出 active 原子归档（可恢复）。
 /// 破坏半径大——与 erase 同级，需 erase scope。
 #[derive(Deserialize, utoipa::ToSchema)]

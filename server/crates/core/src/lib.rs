@@ -8,18 +8,18 @@
 
 pub mod assets;
 pub mod auth;
-pub mod errors;
 pub mod codegraph;
 pub mod credentials;
+pub mod errors;
 pub mod memory;
 pub mod project;
 pub mod promote;
 pub mod state;
+pub mod study;
 pub mod todos;
 pub mod transfer;
 pub mod unified;
 pub mod wiki;
-pub mod study;
 pub mod wiki_agent;
 pub mod wiki_docs;
 

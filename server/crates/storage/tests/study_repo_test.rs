@@ -33,24 +33,38 @@ async fn track_crud_roundtrip() {
     engram_storage::repo::study::track_update(&pool, id, None, None, Some("paused"))
         .await
         .unwrap();
-    let t = engram_storage::repo::study::track_get(&pool, id).await.unwrap().unwrap();
+    let t = engram_storage::repo::study::track_get(&pool, id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(t.status, "paused");
     assert_eq!(t.goal, "掌握到能设计切分管线", "未更新字段不动");
 
     // list
-    let all = engram_storage::repo::study::track_list(&pool).await.unwrap();
+    let all = engram_storage::repo::study::track_list(&pool)
+        .await
+        .unwrap();
     assert!(all.iter().any(|t| t.id == id));
 
     // delete（级联 items）
-    engram_storage::repo::study::track_delete(&pool, id).await.unwrap();
-    assert!(engram_storage::repo::study::track_get(&pool, id).await.unwrap().is_none());
+    engram_storage::repo::study::track_delete(&pool, id)
+        .await
+        .unwrap();
+    assert!(
+        engram_storage::repo::study::track_get(&pool, id)
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
 async fn item_status_machine_learned_at_semantics() {
     let (pool, _pg) = setup().await;
     let track = Uuid::now_v7();
-    engram_storage::repo::study::track_create(&pool, track, "T", "").await.unwrap();
+    engram_storage::repo::study::track_create(&pool, track, "T", "")
+        .await
+        .unwrap();
 
     let item = Uuid::now_v7();
     engram_storage::repo::study::item_create(&pool, item, track, "切分策略", 1)
@@ -58,7 +72,10 @@ async fn item_status_machine_learned_at_semantics() {
         .unwrap();
 
     // 初始 not_started，learned_at NULL
-    let it = engram_storage::repo::study::item_get(&pool, item).await.unwrap().unwrap();
+    let it = engram_storage::repo::study::item_get(&pool, item)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(it.status, "not_started");
     assert!(it.learned_at.is_none());
 
@@ -66,7 +83,10 @@ async fn item_status_machine_learned_at_semantics() {
     engram_storage::repo::study::item_update(&pool, item, None, Some("learning"), None, None, None)
         .await
         .unwrap();
-    let it = engram_storage::repo::study::item_get(&pool, item).await.unwrap().unwrap();
+    let it = engram_storage::repo::study::item_get(&pool, item)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(it.status, "learning");
     assert!(it.learned_at.is_none(), "learning 不记 learned_at");
 
@@ -74,7 +94,10 @@ async fn item_status_machine_learned_at_semantics() {
     engram_storage::repo::study::item_update(&pool, item, None, Some("learned"), None, None, None)
         .await
         .unwrap();
-    let it = engram_storage::repo::study::item_get(&pool, item).await.unwrap().unwrap();
+    let it = engram_storage::repo::study::item_get(&pool, item)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(it.status, "learned");
     assert!(it.learned_at.is_some(), "learned 应记时间");
 
@@ -82,7 +105,10 @@ async fn item_status_machine_learned_at_semantics() {
     engram_storage::repo::study::item_update(&pool, item, None, Some("learning"), None, None, None)
         .await
         .unwrap();
-    let it = engram_storage::repo::study::item_get(&pool, item).await.unwrap().unwrap();
+    let it = engram_storage::repo::study::item_get(&pool, item)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(it.learned_at.is_none(), "离开 learned 应清空");
 
     // links 字段
@@ -97,7 +123,10 @@ async fn item_status_machine_learned_at_semantics() {
     )
     .await
     .unwrap();
-    let it = engram_storage::repo::study::item_get(&pool, item).await.unwrap().unwrap();
+    let it = engram_storage::repo::study::item_get(&pool, item)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(it.wiki_slugs.as_array().unwrap().len(), 2);
     assert_eq!(it.doc_ids.as_array().unwrap().len(), 1);
 }
@@ -106,7 +135,9 @@ async fn item_status_machine_learned_at_semantics() {
 async fn items_order_and_progress() {
     let (pool, _pg) = setup().await;
     let track = Uuid::now_v7();
-    engram_storage::repo::study::track_create(&pool, track, "T", "").await.unwrap();
+    engram_storage::repo::study::track_create(&pool, track, "T", "")
+        .await
+        .unwrap();
 
     // 乱序 position 创建
     for (name, pos) in [("c", 3), ("a", 1), ("b", 2)] {
@@ -114,22 +145,38 @@ async fn items_order_and_progress() {
             .await
             .unwrap();
     }
-    let items = engram_storage::repo::study::items_by_track(&pool, track).await.unwrap();
+    let items = engram_storage::repo::study::items_by_track(&pool, track)
+        .await
+        .unwrap();
     let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, vec!["a", "b", "c"], "按 position ASC");
 
     // 进度：2 个 learned
     for it in items.iter().take(2) {
-        engram_storage::repo::study::item_update(&pool, it.id, None, Some("learned"), None, None, None)
-            .await
-            .unwrap();
+        engram_storage::repo::study::item_update(
+            &pool,
+            it.id,
+            None,
+            Some("learned"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     }
-    let (total, learned) = engram_storage::repo::study::track_progress(&pool, track).await.unwrap();
+    let (total, learned) = engram_storage::repo::study::track_progress(&pool, track)
+        .await
+        .unwrap();
     assert_eq!((total, learned), (3, 2));
 
     // 级联删除
-    engram_storage::repo::study::track_delete(&pool, track).await.unwrap();
-    let left = engram_storage::repo::study::items_by_track(&pool, track).await.unwrap();
+    engram_storage::repo::study::track_delete(&pool, track)
+        .await
+        .unwrap();
+    let left = engram_storage::repo::study::items_by_track(&pool, track)
+        .await
+        .unwrap();
     assert!(left.is_empty(), "track 删除应级联 items");
 }
 
@@ -139,15 +186,21 @@ async fn srs_review_queue_semantics() {
     let (pool, _pg) = setup().await;
     let tid = Uuid::now_v7();
     let iid = Uuid::now_v7();
-    engram_storage::repo::study::track_create(&pool, tid, "RAG 入门", "").await.unwrap();
-    engram_storage::repo::study::item_create(&pool, iid, tid, "基础流程", 10).await.unwrap();
+    engram_storage::repo::study::track_create(&pool, tid, "RAG 入门", "")
+        .await
+        .unwrap();
+    engram_storage::repo::study::item_create(&pool, iid, tid, "基础流程", 10)
+        .await
+        .unwrap();
 
     // 标记复习、到期时间过去 → 队列命中
     let past = chrono::Utc::now() - chrono::Duration::hours(1);
     engram_storage::repo::study::item_set_review(&pool, iid, true, Some(past))
         .await
         .unwrap();
-    let due = engram_storage::repo::study::reviews_due(&pool).await.unwrap();
+    let due = engram_storage::repo::study::reviews_due(&pool)
+        .await
+        .unwrap();
     assert_eq!(due.len(), 1, "过期复习应命中");
     assert_eq!(due[0].id, iid);
 
@@ -156,17 +209,27 @@ async fn srs_review_queue_semantics() {
     engram_storage::repo::study::item_set_review(&pool, iid, true, Some(future))
         .await
         .unwrap();
-    let due = engram_storage::repo::study::reviews_due(&pool).await.unwrap();
+    let due = engram_storage::repo::study::reviews_due(&pool)
+        .await
+        .unwrap();
     assert!(due.is_empty(), "未到期不应命中");
 
     // 关掉复习 → 不命中
-    engram_storage::repo::study::item_set_review(&pool, iid, false, None).await.unwrap();
-    let due = engram_storage::repo::study::reviews_due(&pool).await.unwrap();
+    engram_storage::repo::study::item_set_review(&pool, iid, false, None)
+        .await
+        .unwrap();
+    let due = engram_storage::repo::study::reviews_due(&pool)
+        .await
+        .unwrap();
     assert!(due.is_empty(), "关闭后不应命中");
 
     // 重新开+无到期时间 → NULL=立即到期，命中
-    engram_storage::repo::study::item_set_review(&pool, iid, true, None).await.unwrap();
-    let due = engram_storage::repo::study::reviews_due(&pool).await.unwrap();
+    engram_storage::repo::study::item_set_review(&pool, iid, true, None)
+        .await
+        .unwrap();
+    let due = engram_storage::repo::study::reviews_due(&pool)
+        .await
+        .unwrap();
     assert_eq!(due.len(), 1, "NULL 到期=立即到期");
 }
 
@@ -175,24 +238,34 @@ async fn journal_add_and_list() {
     // P007 二期 T012：journal 记录+时间线（新→旧）+级联删
     let (pool, _pg) = setup().await;
     let tid = Uuid::now_v7();
-    engram_storage::repo::study::track_create(&pool, tid, "RAG 入门", "").await.unwrap();
+    engram_storage::repo::study::track_create(&pool, tid, "RAG 入门", "")
+        .await
+        .unwrap();
 
     for note in ["第一课学完", "卡在向量检索", "继续切分策略"] {
         engram_storage::repo::study::journal_add(&pool, Uuid::now_v7(), tid, note)
             .await
             .unwrap();
     }
-    let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 10).await.unwrap();
+    let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 10)
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0].note, "继续切分策略", "新→旧排序");
 
     // limit 生效
-    let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 2).await.unwrap();
+    let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 2)
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 2);
 
     // track 级联删 journal
-    engram_storage::repo::study::track_delete(&pool, tid).await.unwrap();
-    let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 10).await.unwrap();
+    engram_storage::repo::study::track_delete(&pool, tid)
+        .await
+        .unwrap();
+    let rows = engram_storage::repo::study::journal_by_track(&pool, tid, 10)
+        .await
+        .unwrap();
     assert!(rows.is_empty(), "级联删除");
 }
 
@@ -203,8 +276,12 @@ async fn journal_add_and_list() {
 async fn item_link_after_learned_keeps_learned_at() {
     let (pool, _pg) = setup().await;
     let (tid, iid) = (Uuid::now_v7(), Uuid::now_v7());
-    engram_storage::repo::study::track_create(&pool, tid, "T", "").await.unwrap();
-    engram_storage::repo::study::item_create(&pool, iid, tid, "向量检索", 0).await.unwrap();
+    engram_storage::repo::study::track_create(&pool, tid, "T", "")
+        .await
+        .unwrap();
+    engram_storage::repo::study::item_create(&pool, iid, tid, "向量检索", 0)
+        .await
+        .unwrap();
 
     // ① 置 learned（时间戳写入）
     engram_storage::repo::study::item_update(&pool, iid, None, Some("learned"), None, None, None)
@@ -219,31 +296,50 @@ async fn item_link_after_learned_keeps_learned_at() {
 
     // ② 随后挂资料（status=None 的另一路 UPDATE）——旧实现在此处抹掉时间戳
     engram_storage::repo::study::item_update(
-        &pool, iid, None, None, None,
-        Some(&serde_json::json!(["rag-basics"])), None,
+        &pool,
+        iid,
+        None,
+        None,
+        None,
+        Some(&serde_json::json!(["rag-basics"])),
+        None,
     )
     .await
     .unwrap();
-    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    let row = engram_storage::repo::study::item_get(&pool, iid)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(row.learned_at, Some(at1), "挂资料不得抹掉 learned_at");
     assert_eq!(row.status, "learned");
 
     // ③ 补充：不带 status 的其它更新（重设 review）同样不得动时间戳
-    engram_storage::repo::study::item_set_review(&pool, iid, true, None).await.unwrap();
-    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    engram_storage::repo::study::item_set_review(&pool, iid, true, None)
+        .await
+        .unwrap();
+    let row = engram_storage::repo::study::item_get(&pool, iid)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(row.learned_at, Some(at1), "SRS 标记不得动 learned_at");
 
     // ④ 显式离开 learned → 清空（原有语义不回归）
     engram_storage::repo::study::item_update(&pool, iid, None, Some("learning"), None, None, None)
         .await
         .unwrap();
-    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    let row = engram_storage::repo::study::item_get(&pool, iid)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(row.learned_at, None, "离开 learned 应清时间戳");
     // 再置回 learned → 重新记时
     engram_storage::repo::study::item_update(&pool, iid, None, Some("learned"), None, None, None)
         .await
         .unwrap();
-    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    let row = engram_storage::repo::study::item_get(&pool, iid)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(row.learned_at.is_some(), "重新置 learned 应重新记时");
 }
 
@@ -252,24 +348,41 @@ async fn item_link_after_learned_keeps_learned_at() {
 async fn concurrent_learned_and_link_keep_learned_at() {
     let (pool, _pg) = setup().await;
     let (tid, iid) = (Uuid::now_v7(), Uuid::now_v7());
-    engram_storage::repo::study::track_create(&pool, tid, "T", "").await.unwrap();
-    engram_storage::repo::study::item_create(&pool, iid, tid, "N", 0).await.unwrap();
+    engram_storage::repo::study::track_create(&pool, tid, "T", "")
+        .await
+        .unwrap();
+    engram_storage::repo::study::item_create(&pool, iid, tid, "N", 0)
+        .await
+        .unwrap();
 
     let p = pool.clone();
     let h1 = tokio::spawn(async move {
-        engram_storage::repo::study::item_update(&p, iid, None, Some("learned"), None, None, None).await
+        engram_storage::repo::study::item_update(&p, iid, None, Some("learned"), None, None, None)
+            .await
     });
     let p = pool.clone();
     let h2 = tokio::spawn(async move {
         engram_storage::repo::study::item_update(
-            &p, iid, None, None, None,
-            Some(&serde_json::json!(["s"])), None,
-        ).await
+            &p,
+            iid,
+            None,
+            None,
+            None,
+            Some(&serde_json::json!(["s"])),
+            None,
+        )
+        .await
     });
     h1.await.unwrap().unwrap();
     h2.await.unwrap().unwrap();
 
-    let row = engram_storage::repo::study::item_get(&pool, iid).await.unwrap().unwrap();
+    let row = engram_storage::repo::study::item_get(&pool, iid)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(row.status, "learned");
-    assert!(row.learned_at.is_some(), "并发下 learned_at 不应被抹掉: {row:?}");
+    assert!(
+        row.learned_at.is_some(),
+        "并发下 learned_at 不应被抹掉: {row:?}"
+    );
 }

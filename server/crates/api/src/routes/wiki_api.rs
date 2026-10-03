@@ -48,7 +48,6 @@ fn require_wiki_read(p: &Principal) -> Result<(), ApiError> {
 
 // ---------- 知识晋升（EN-59）：项目文档 → wiki 的结构化动作；只读列表对齐 MCP ----------
 
-
 /// 页面版本列表（时间线；含已删除页的最后快照）。
 #[utoipa::path(get, path = "/wiki/pages/{slug}/versions",
     responses((status = 200, body = serde_json::Value)))]
@@ -65,7 +64,9 @@ pub async fn list_versions(
         .page_versions(lib, &slug)
         .await
         .map_err(|e| ApiError::Unavailable(e.to_string()))?;
-    Ok(Json(serde_json::json!({ "versions": items, "count": items.len() })))
+    Ok(Json(
+        serde_json::json!({ "versions": items, "count": items.len() }),
+    ))
 }
 
 /// 某版本快照正文（回滚前预览/对比）。
@@ -84,7 +85,9 @@ pub async fn version_content(
         .page_version_content(lib, &slug, version)
         .await
         .map_err(|e| ApiError::Unavailable(e.to_string()))?;
-    Ok(Json(serde_json::to_value(&item).unwrap_or(serde_json::json!({}))))
+    Ok(Json(
+        serde_json::to_value(&item).unwrap_or(serde_json::json!({})),
+    ))
 }
 
 /// 回滚到历史版本（破坏性：当前内容生成新快照后覆盖）。

@@ -164,14 +164,15 @@ impl StudyService {
     /// 知识点状态机（not_started→learning→learned；允许回退——学习本就反复）。
     pub async fn item_set_status(&self, item_id: Uuid, status: &str) -> Result<(), StudyError> {
         if !matches!(status, "not_started" | "learning" | "learned") {
-            return Err(StudyError::BadRequest(format!("非法 unit status: {status}")));
+            return Err(StudyError::BadRequest(format!(
+                "非法 unit status: {status}"
+            )));
         }
         let exists = repo::study::item_get(&self.pool, item_id).await?.is_some();
         if !exists {
             return Err(StudyError::NotFound(format!("item {item_id}")));
         }
-        repo::study::item_update(&self.pool, item_id, None, Some(status), None, None, None)
-            .await?;
+        repo::study::item_update(&self.pool, item_id, None, Some(status), None, None, None).await?;
         Ok(())
     }
 
@@ -223,7 +224,9 @@ impl StudyService {
     }
 
     /// 复习队列：已标记且到期的知识点。
-    pub async fn reviews_due(&self) -> Result<Vec<engram_storage::repo::study::StudyItemRow>, StudyError> {
+    pub async fn reviews_due(
+        &self,
+    ) -> Result<Vec<engram_storage::repo::study::StudyItemRow>, StudyError> {
         engram_storage::repo::study::reviews_due(&self.pool)
             .await
             .map_err(StudyError::from)

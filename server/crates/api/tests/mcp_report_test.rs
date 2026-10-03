@@ -78,12 +78,12 @@ async fn memory_remember_and_slim_write_responses() {
         call(
             3,
             "memory",
-            "write_session",
-            json!({"distill": "off", "turns": [{"speaker": "user", "text": "瘦身校验"}]}),
+            "remember",
+            json!({"mode": "session", "distill": "off", "turns": [{"speaker": "user", "text": "瘦身校验"}]}),
         ),
     )
     .await;
-    let s = out_json(&v, "write_session slim");
+    let s = out_json(&v, "remember session slim");
     assert_eq!(s["turns"], 1);
     assert!(s.get("content").is_none(), "不应回显 turns 全文：{s}");
 }
@@ -101,12 +101,12 @@ async fn memory_void_cascades_superseded_and_restore() {
         call(
             1,
             "memory",
-            "write_session",
-            json!({"distill": "off", "turns": [{"speaker": "user", "text": "级联测试源会话"}]}),
+            "remember",
+            json!({"mode": "session", "distill": "off", "turns": [{"speaker": "user", "text": "级联测试源会话"}]}),
         ),
     )
     .await;
-    let sid = out_json(&v, "write_session")["id"]
+    let sid = out_json(&v, "remember session")["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -162,13 +162,13 @@ async fn memory_void_cascades_superseded_and_restore() {
     assert_eq!(archived, 2, "D2：superseded 原子应一并归档");
 
     // list_atoms 默认 active → 空；status=all → 2 条 archived
-    let (_, v) = mcp_rpc(&app, &key, call(3, "memory", "list_atoms", json!({}))).await;
+    let (_, v) = mcp_rpc(&app, &key, call(3, "memory", "browse", json!({"mode": "atoms"}))).await;
     let rows = out_json(&v, "list_atoms default");
     assert_eq!(rows.as_array().unwrap().len(), 0, "默认只查 active（P1-6）");
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(4, "memory", "list_atoms", json!({"status": "all"})),
+        call(4, "memory", "browse", json!({"mode": "atoms", "status": "all"})),
     )
     .await;
     assert_eq!(
@@ -203,10 +203,10 @@ async fn memory_void_cascades_superseded_and_restore() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(6, "memory", "get_session", json!({"session_id": sid})),
+        call(6, "memory", "browse", json!({"mode": "session", "session_id": sid})),
     )
     .await;
-    let s = out_json(&v, "get_session after restore");
+    let s = out_json(&v, "browse session after restore");
     assert_eq!(s["distill_status"], "done", "恢复到作废前状态：{s}");
 }
 
@@ -450,7 +450,7 @@ async fn memory_search_strips_l3_evidence_refs_by_default() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(1, "memory", "search", json!({"query": "zebra3k"})),
+        call(1, "memory", "recall", json!({"mode": "search", "query": "zebra3k"})),
     )
     .await;
     let r = out_json(&v, "search default");
@@ -469,12 +469,12 @@ async fn memory_search_strips_l3_evidence_refs_by_default() {
         call(
             2,
             "memory",
-            "search",
-            json!({"query": "zebra3k", "include_evidence": true}),
+            "recall",
+            json!({"mode": "search", "query": "zebra3k", "include_evidence": true}),
         ),
     )
     .await;
-    let r = out_json(&v, "search include_evidence");
+    let r = out_json(&v, "recall search include_evidence");
     let l3 = r["l3"].as_array().expect("l3 数组");
     assert!(
         l3[0].get("evidence_refs").is_some(),

@@ -128,7 +128,7 @@ async fn correct_supersede_chain_and_guards() {
     // 2. correct：单事务取代链——新原子 active
     let v = ctx
         .mem(
-            "correct",
+            "revise",
             json!({ "target_id": old_id, "text": "用户现居杭州" }),
         )
         .await;
@@ -145,7 +145,7 @@ async fn correct_supersede_chain_and_guards() {
     // 4. 治理：对已取代原子再 correct → 报错（non-active）
     let err = ctx
         .mem_err(
-            "correct",
+            "revise",
             json!({ "target_id": old_id, "text": "用户搬去苏州" }),
         )
         .await;
@@ -154,7 +154,7 @@ async fn correct_supersede_chain_and_guards() {
     // 5. 治理：不存在的 target → 报错
     let err = ctx
         .mem_err(
-            "correct",
+            "revise",
             json!({
                 "target_id": "00000000-0000-4000-8000-000000000099",
                 "text": "任意"
@@ -177,17 +177,17 @@ async fn review_confirm_discard_guards() {
     ctx.mark_review(&c).await;
 
     // confirm A：摘标记
-    let v = ctx.mem("confirm", json!({ "atom_id": a })).await;
+    let v = ctx.mem("review", json!({ "mode": "confirm",  "atom_id": a })).await;
     assert_eq!(v["needs_review"], false);
     let a_row = ctx.atom_by_id(&a).await;
     assert_eq!(a_row["needs_review"], false);
 
     // 治理：confirm 非待审条目 → 报错
-    let err = ctx.mem_err("confirm", json!({ "atom_id": b })).await;
+    let err = ctx.mem_err("review", json!({ "mode": "confirm", "atom_id": b })).await;
     assert!(err.contains("needs_review"), "应报非待审：{err}");
 
     // discard C：归档
-    let v = ctx.mem("discard", json!({ "atom_id": c })).await;
+    let v = ctx.mem("review", json!({ "mode": "discard",  "atom_id": c })).await;
     assert_eq!(v["status"], "archived");
     let c_row = ctx.atom_by_id(&c).await;
     assert_eq!(c_row["status"], "archived");
@@ -195,8 +195,8 @@ async fn review_confirm_discard_guards() {
     // 治理：discard 不存在 id → 报错（找不到或非待审）
     let err = ctx
         .mem_err(
-            "discard",
-            json!({ "atom_id": "00000000-0000-4000-8000-000000000099" }),
+            "review",
+            json!({ "mode": "discard", "atom_id": "00000000-0000-4000-8000-000000000099" }),
         )
         .await;
     assert!(err.contains("needs_review"), "应报非待审/不存在：{err}");
@@ -219,7 +219,7 @@ async fn correct_sensitive_guard() {
     assert_eq!(status, StatusCode::OK, "标记敏感失败：{v}");
 
     let err = ctx
-        .mem_err("correct", json!({ "target_id": d, "text": "用户无过敏史" }))
+        .mem_err("revise", json!({ "target_id": d, "text": "用户无过敏史" }))
         .await;
     assert!(err.contains("敏感"), "应报敏感禁碰：{err}");
 }
@@ -231,8 +231,8 @@ async fn persona_edit_pins_and_guards() {
     // 1. persona_edit 落库：version+1 + manually_edited=true（钉住）
     let v = ctx
         .mem(
-            "persona_edit",
-            json!({ "aspect": "skills", "content": "用户在学 Rust，偏好实战项目驱动" }),
+            "revise",
+            json!({ "mode": "persona", "aspect": "skills", "content": "用户在学 Rust，偏好实战项目驱动" }),
         )
         .await;
     assert_eq!(v["aspect"], "skills");
@@ -242,8 +242,8 @@ async fn persona_edit_pins_and_guards() {
     // 2. 再编辑一次：version 递增
     let v = ctx
         .mem(
-            "persona_edit",
-            json!({ "aspect": "skills", "content": "用户在学 Rust 与 Elixir，偏好实战项目驱动" }),
+            "revise",
+            json!({ "mode": "persona", "aspect": "skills", "content": "用户在学 Rust 与 Elixir，偏好实战项目驱动" }),
         )
         .await;
     assert_eq!(v["version"].as_i64().unwrap(), v1 + 1);
@@ -251,7 +251,8 @@ async fn persona_edit_pins_and_guards() {
 
     // 3. 治理：非法 aspect → 可行动报错
     let err = ctx
-        .mem_err("persona_edit", json!({ "aspect": "mood", "content": "x" }))
+        .mem_err("revise",
+            json!({ "mode": "persona", "aspect": "mood", "content": "x" }))
         .await;
     assert!(err.contains("aspect"), "应报 aspect 非法：{err}");
 }
@@ -261,11 +262,13 @@ async fn distill_trigger_guard_and_full() {
     let ctx = Ctx::new().await;
 
     // 1. mode=sleep 预留：报未上线
-    let err = ctx.mem_err("distill", json!({ "mode": "sleep" })).await;
+    let err = ctx.mem_err("review",
+            json!({ "mode": "distill", "step": "sleep" })).await;
     assert!(err.contains("尚未上线"), "应报 sleep 未上线：{err}");
 
     // 2. 无 running：触发成功（full 含 consolidate）
-    let v = ctx.mem("distill", json!({ "full": true })).await;
+    let v = ctx.mem("review",
+            json!({ "mode": "distill", "full": true })).await;
     assert_eq!(v["already_running"], false);
     let kinds: Vec<&str> = v["jobs"]
         .as_array()
@@ -292,7 +295,8 @@ async fn distill_trigger_guard_and_full() {
         .await
         .unwrap();
 
-    let v = ctx.mem("distill", json!({})).await;
+    let v = ctx.mem("review",
+            json!({ "mode": "distill",})).await;
     assert_eq!(v["already_running"], true);
 
     let after: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'extract_atoms'")
@@ -318,7 +322,7 @@ async fn original_scope_guards_kv_access() {
         &orig_key,
         "memory",
         json!({
-            "action": "kv_put",
+            "action": "remember", "mode": "kv",
             "key": "test/original-scope",
             "value": "secret-value-123",
             "context": "收录哲学线集成测试",
@@ -331,7 +335,7 @@ async fn original_scope_guards_kv_access() {
         &ctx.app,
         &orig_key,
         "memory",
-        json!({ "action": "kv_get", "key": "test/original-scope" }),
+        json!({ "action": "recall", "mode": "kv_get", "key": "test/original-scope" }),
     )
     .await;
     assert_eq!(get["value"], "secret-value-123");
@@ -345,7 +349,7 @@ async fn original_scope_guards_kv_access() {
             "tools/call",
             json!({
                 "name": "memory",
-                "arguments": { "action": "kv_get", "key": "test/original-scope" }
+                "arguments": { "action": "recall", "mode": "kv_get", "key": "test/original-scope" }
             }),
         ),
     )
@@ -360,7 +364,7 @@ async fn original_scope_guards_kv_access() {
         &ctx.app,
         &orig_ro,
         "memory",
-        json!({ "action": "kv_get", "key": "test/original-scope" }),
+        json!({ "action": "recall", "mode": "kv_get", "key": "test/original-scope" }),
     )
     .await;
     assert_eq!(get["value"], "secret-value-123");
@@ -373,7 +377,7 @@ async fn original_scope_guards_kv_access() {
             "tools/call",
             json!({
                 "name": "memory",
-                "arguments": { "action": "kv_put", "key": "test/ro-write", "value": "x" }
+                "arguments": { "action": "remember", "mode": "kv", "key": "test/ro-write", "value": "x" }
             }),
         ),
     )

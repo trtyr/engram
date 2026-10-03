@@ -11,11 +11,11 @@
 
 use std::collections::HashSet;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::llm_port::{chat_json_retrying, DistillLlm};
+use crate::llm_port::{DistillLlm, chat_json_retrying};
 use engram_jobs::{JobContext, JobError};
 
 /// 循环步数硬顶（结构不变量，写死不设 env）。
@@ -194,7 +194,10 @@ async fn tool_scenario_write(
             .bind(summary)
             .bind(body)
             .bind(sqlx::types::Json(
-                member_atom_ids.iter().map(|u| u.to_string()).collect::<Vec<_>>(),
+                member_atom_ids
+                    .iter()
+                    .map(|u| u.to_string())
+                    .collect::<Vec<_>>(),
             ))
             .execute(pool)
             .await
@@ -212,11 +215,7 @@ async fn tool_scenario_write(
 }
 
 /// scenario_merge：from 成员迁入 into，from 软删（retired）。
-async fn tool_scenario_merge(
-    pool: &PgPool,
-    from: Uuid,
-    into: Uuid,
-) -> Result<Value, JobError> {
+async fn tool_scenario_merge(pool: &PgPool, from: Uuid, into: Uuid) -> Result<Value, JobError> {
     if from == into {
         return Ok(json!({"error": "from 与 into 不得相同"}));
     }
@@ -255,13 +254,11 @@ async fn tool_scenario_retire(
     sid: Uuid,
     removed_texts: &mut Vec<String>,
 ) -> Result<Value, JobError> {
-    let texts: Vec<(String,)> = sqlx::query_as(
-        "SELECT content FROM atoms WHERE scenario_id = $1",
-    )
-    .bind(sid)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let texts: Vec<(String,)> = sqlx::query_as("SELECT content FROM atoms WHERE scenario_id = $1")
+        .bind(sid)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
     for (c,) in &texts {
         removed_texts.push(c.clone());
     }
@@ -338,8 +335,8 @@ pub async fn run_agentic(
         if history.is_empty() {
             user["task"]["hint"] = json!("先 atoms_pending 看散落原子，再逐场景组织。");
         }
-        let user_text = serde_json::to_string(&user)
-            .map_err(|e| JobError::Retryable(e.to_string()))?;
+        let user_text =
+            serde_json::to_string(&user).map_err(|e| JobError::Retryable(e.to_string()))?;
         // 成本闸在 chat_json_retrying 内（record_llm_call——T016 预算）
         let resp = chat_json_retrying(
             ctx,
@@ -391,7 +388,11 @@ pub async fn run_agentic(
                     if let Some(id) = sid {
                         touched.insert(id);
                     }
-                    if let Some(new_id) = r.get("scenario_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok()) {
+                    if let Some(new_id) = r
+                        .get("scenario_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| Uuid::parse_str(s).ok())
+                    {
                         touched.insert(new_id);
                     }
                     r
@@ -433,7 +434,9 @@ pub async fn run_agentic(
                     steps,
                 });
             }
-            other => json!({"error": format!("未知工具 \"{other}\"——可用 atoms_pending/scenarios_search/scenario_get/scenario_write/scenario_merge/scenario_retire/finish")}),
+            other => {
+                json!({"error": format!("未知工具 \"{other}\"——可用 atoms_pending/scenarios_search/scenario_get/scenario_write/scenario_merge/scenario_retire/finish")})
+            }
         };
 
         ctx.emit(
@@ -463,10 +466,11 @@ pub async fn run_agentic(
 fn parse_uuid(args: &Value, key: &str) -> Result<Option<Option<Uuid>>, JobError> {
     match args.get(key) {
         None | Some(Value::Null) => Ok(Some(None)),
-        Some(Value::String(s)) => Ok(Some(Some(
-            Uuid::parse_str(s)
-                .map_err(|_| JobError::Permanent(format!("{key} 不是合法 UUID")))?,
-        ))),
+        Some(Value::String(s)) => {
+            Ok(Some(Some(Uuid::parse_str(s).map_err(|_| {
+                JobError::Permanent(format!("{key} 不是合法 UUID"))
+            })?)))
+        }
         Some(_) => Err(JobError::Permanent(format!("{key} 必须是字符串"))),
     }
 }

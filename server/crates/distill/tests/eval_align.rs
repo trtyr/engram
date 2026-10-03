@@ -57,11 +57,8 @@ async fn run_one(agentic: bool, key: &str) -> (sqlx::PgPool, RunOutcome, support
     // LLM provider：OpenRouter chat（key 走 env → cipher 加密落库）
     // 0022 单行制：model_id + capability；OpenRouter 无 embedding——不插 embedding 行，
     // embed resolve 失败由 refresh/scenarios_search 的降级容忍兜底（检索走 tsv 腿）。
-    let cipher =
-        engram_llm::crypto::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
-    let enc = cipher
-        .encrypt(key)
-        .expect("encrypt key");
+    let cipher = engram_llm::crypto::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
+    let enc = cipher.encrypt(key).expect("encrypt key");
     let enc_hex: String = enc.iter().map(|b| format!("{b:02x}")).collect();
     sqlx::query(
         "INSERT INTO llm_providers (id, name, base_url, api_key_encrypted, model_id, capability, is_default) \
@@ -136,7 +133,9 @@ async fn run_one(agentic: bool, key: &str) -> (sqlx::PgPool, RunOutcome, support
         println!("任务错误（诊断）: {e}");
     }
     let elapsed = started.elapsed();
-    handle.shutdown_and_wait(std::time::Duration::from_secs(5)).await;
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
 
     // 采集指标
     let scenario_count: i64 =

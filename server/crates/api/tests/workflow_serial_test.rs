@@ -8,15 +8,18 @@ use axum::body::Body;
 use axum::http::Request;
 use engram_jobs::types::JobStatus;
 use engram_jobs::{JobContext, JobQueue, JobTemplate, Runner, RunnerConfig};
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 use tower::util::ServiceExt;
 
 mod support;
 
 type HandlerFuture = std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<serde_json::Value, engram_jobs::types::JobError>> + Send>,
+    Box<
+        dyn std::future::Future<Output = Result<serde_json::Value, engram_jobs::types::JobError>>
+            + Send,
+    >,
 >;
 
 #[tokio::test]
@@ -72,7 +75,12 @@ async fn workflow_jobs_execute_serially_and_budget_gate_works() {
 
     // 投 3 个 workflow（不同 kind，跨 kind 也互斥）+ 1 个普通任务
     let mut ids = Vec::new();
-    for kind in ["extract_atoms", "organize_scenarios", "distill_persona", "plain_test_kind"] {
+    for kind in [
+        "extract_atoms",
+        "organize_scenarios",
+        "distill_persona",
+        "plain_test_kind",
+    ] {
         ids.push(queue.enqueue(JobTemplate::new(kind)).await.unwrap().id);
     }
 
@@ -101,7 +109,11 @@ async fn workflow_jobs_execute_serially_and_budget_gate_works() {
     }
 
     // 断言①：workflow 全部成功且串行（跨 kind 并发峰值 ≤ 1）
-    assert!(max.load(Ordering::SeqCst) <= 1, "workflow 任务出现并发：max_concurrent={}——串行保证被破坏", max.load(Ordering::SeqCst));
+    assert!(
+        max.load(Ordering::SeqCst) <= 1,
+        "workflow 任务出现并发：max_concurrent={}——串行保证被破坏",
+        max.load(Ordering::SeqCst)
+    );
     // 断言②：普通任务完成（不受排队阻塞）
     assert_eq!(plain_done.load(Ordering::SeqCst), 1);
     // 断言③：全部 succeeded
@@ -155,10 +167,7 @@ async fn llm_budget_exceeded_fails_job_with_clear_error() {
         let j = queue.get(job.id).await.unwrap().expect("任务应存在");
         if matches!(j.status, JobStatus::Failed) {
             let err = j.error.unwrap_or_default();
-            assert!(
-                err.contains("预算耗尽"),
-                "failed 原因应是预算耗尽：{err}"
-            );
+            assert!(err.contains("预算耗尽"), "failed 原因应是预算耗尽：{err}");
             break;
         }
         assert!(

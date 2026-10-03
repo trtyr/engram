@@ -9,9 +9,11 @@ use tracing_subscriber::prelude::*;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use engram_core::wiki_agent::{run_agent, AgentBudget, AgentDeps, AgentTask};
+use engram_core::wiki_agent::{AgentBudget, AgentDeps, AgentTask, run_agent};
 use engram_llm::provider::LlmProvider;
-use engram_llm::types::{ChatMessage, ChatRequest, ChatResponse, EmbedRequest, EmbedResponse, LlmError, ToolCall};
+use engram_llm::types::{
+    ChatMessage, ChatRequest, ChatResponse, EmbedRequest, EmbedResponse, LlmError, ToolCall,
+};
 
 // ---------- mock provider（预置响应序列，耗尽后回 final） ----------
 
@@ -82,11 +84,10 @@ async fn setup_deps() -> (AgentDeps, uuid::Uuid, tempfile::TempDir, support::Tes
         pool.clone(),
         engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
-    let lib: uuid::Uuid =
-        sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let lib: uuid::Uuid = sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     (
         AgentDeps {
             purpose_text: None,
@@ -136,18 +137,19 @@ async fn harness_two_round_tool_loop_writes_page() {
     .await
     .expect("harness 应成功");
 
-
     assert_eq!(report.rounds, 2, "第一轮工具+第二轮 final");
     assert_eq!(report.tool_calls, 1);
     assert_eq!(report.pages_touched, vec!["agent-test-page"]);
     assert!(!report.degraded);
     assert!(report.summary.contains("final"));
     // 页面真的存在
-    let exists: i64 = sqlx::query_scalar("SELECT count(*) FROM wiki_pages WHERE slug = 'agent-test-page' AND library_id = $1")
-        .bind(lib)
-        .fetch_one(&deps.pool)
-        .await
-        .unwrap();
+    let exists: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_pages WHERE slug = 'agent-test-page' AND library_id = $1",
+    )
+    .bind(lib)
+    .fetch_one(&deps.pool)
+    .await
+    .unwrap();
     assert_eq!(exists, 1, "write_page 工具应真的建页");
 }
 
@@ -166,10 +168,7 @@ where
         let mut map = serde_json::Map::new();
         let mut visitor = Collector(&mut map);
         event.record(&mut visitor);
-        map.insert(
-            "level".into(),
-            event.metadata().level().to_string().into(),
-        );
+        map.insert("level".into(), event.metadata().level().to_string().into());
         self.0.lock().unwrap().push(serde_json::Value::Object(map));
     }
 }
@@ -210,7 +209,11 @@ async fn harness_destructive_tool_is_audited() {
 
     let provider = Arc::new(MockProvider::new(vec![resp(
         "删它",
-        vec![tc("c1", "delete_page", serde_json::json!({"slug": "doomed"}))],
+        vec![tc(
+            "c1",
+            "delete_page",
+            serde_json::json!({"slug": "doomed"}),
+        )],
     )]));
     let task = AgentTask {
         lib,
@@ -219,9 +222,16 @@ async fn harness_destructive_tool_is_audited() {
         source_text: None,
         source_name: None,
     };
-    let report = run_agent(provider, "mock".into(), &deps, &task, AgentBudget::default(), None)
-        .await
-        .expect("harness 应成功");
+    let report = run_agent(
+        provider,
+        "mock".into(),
+        &deps,
+        &task,
+        AgentBudget::default(),
+        None,
+    )
+    .await
+    .expect("harness 应成功");
     assert_eq!(report.pages_touched, Vec::<String>::new(), "删除后触页清空");
 
     let evs = events.lock().unwrap();
@@ -229,10 +239,9 @@ async fn harness_destructive_tool_is_audited() {
         .iter()
         .filter(|e| e.get("audit").and_then(|v| v.as_bool()) == Some(true))
         .collect();
-    let a = audit
-        .iter()
-        .find(|e| e["tool"] == "delete_page")
-        .expect("delete_page 审计事件应存在（进程级订阅下混入他测事件只影响计数不影响存在性）: {evs:?}");
+    let a = audit.iter().find(|e| e["tool"] == "delete_page").expect(
+        "delete_page 审计事件应存在（进程级订阅下混入他测事件只影响计数不影响存在性）: {evs:?}",
+    );
     assert_eq!(a["destructive"], serde_json::json!(true));
     assert_eq!(a["ok"], serde_json::json!(true));
 }
@@ -275,8 +284,18 @@ async fn harness_tool_error_feeds_back_not_aborts() {
     let (deps, lib, _dir, _pg) = setup_deps().await;
     // 第一轮调不存在的工具（报错回填），第二轮改调 get_page 读不存在的页（报错回填），第三轮 final
     let provider = Arc::new(MockProvider::new(vec![
-        resp("试错1", vec![tc("c1", "no_such_tool", serde_json::json!({}))]),
-        resp("试错2", vec![tc("c2", "get_page", serde_json::json!({"slug": "missing-page"}))]),
+        resp(
+            "试错1",
+            vec![tc("c1", "no_such_tool", serde_json::json!({}))],
+        ),
+        resp(
+            "试错2",
+            vec![tc(
+                "c2",
+                "get_page",
+                serde_json::json!({"slug": "missing-page"}),
+            )],
+        ),
     ]));
     let task = AgentTask {
         lib,
@@ -285,9 +304,16 @@ async fn harness_tool_error_feeds_back_not_aborts() {
         source_text: None,
         source_name: None,
     };
-    let report = run_agent(provider, "mock".into(), &deps, &task, AgentBudget::default(), None)
-        .await
-        .expect("工具失败不应终止循环");
+    let report = run_agent(
+        provider,
+        "mock".into(),
+        &deps,
+        &task,
+        AgentBudget::default(),
+        None,
+    )
+    .await
+    .expect("工具失败不应终止循环");
     assert_eq!(report.rounds, 3);
     assert_eq!(report.tool_calls, 2);
     assert!(!report.degraded);
@@ -334,7 +360,14 @@ async fn demo_real_url_ingest_builds_pages() {
         engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap(),
     );
     creds
-        .put("zhipu/web_reader_key", &reader_key, None, "manual", &[], None)
+        .put(
+            "zhipu/web_reader_key",
+            &reader_key,
+            None,
+            "manual",
+            &[],
+            None,
+        )
         .await
         .expect("凭据写入");
 
@@ -384,13 +417,12 @@ async fn demo_real_url_ingest_builds_pages() {
     let mut report = serde_json::Value::Null;
     while std::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
-        let (status, err): (String, Option<String>) = sqlx::query_as(
-            "SELECT status, error FROM jobs WHERE id = $1",
-        )
-        .bind(job_id)
-        .fetch_one(&deps.pool)
-        .await
-        .unwrap();
+        let (status, err): (String, Option<String>) =
+            sqlx::query_as("SELECT status, error FROM jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(&deps.pool)
+                .await
+                .unwrap();
         if matches!(status.as_str(), "succeeded" | "failed" | "dead") {
             final_status = status;
             report = serde_json::json!({"error": err});
@@ -440,9 +472,21 @@ async fn probe_reqwest_raw_dump_body() {
         .send()
         .await
         .unwrap();
-    eprintln!("PROBE reqwest+dump-body: HTTP {} len={}", r1.status(), body.len());
+    eprintln!(
+        "PROBE reqwest+dump-body: HTTP {} len={}",
+        r1.status(),
+        body.len()
+    );
     if r1.status().as_u16() != 200 {
-        eprintln!("PROBE body-snippet: {}", r1.text().await.unwrap_or_default().chars().take(200).collect::<String>());
+        eprintln!(
+            "PROBE body-snippet: {}",
+            r1.text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect::<String>()
+        );
     }
     // 2. reqwest 手动 json! 构造（模拟 chat.rs 的 json! 宏路径）
     let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -455,7 +499,15 @@ async fn probe_reqwest_raw_dump_body() {
         .unwrap();
     eprintln!("PROBE reqwest+.json(Value): HTTP {}", r2.status());
     if r2.status().as_u16() != 200 {
-        eprintln!("PROBE body-snippet: {}", r2.text().await.unwrap_or_default().chars().take(200).collect::<String>());
+        eprintln!(
+            "PROBE body-snippet: {}",
+            r2.text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect::<String>()
+        );
     }
 }
 
@@ -466,17 +518,26 @@ async fn harness_study_coordination_updates_item() {
 
     // 先建「RAG 入门」track + 一个知识点
     let svc = engram_core::study::StudyService::new(deps.pool.clone());
-    let topic = svc.topic_create("RAG 入门", "能设计切分管线").await.unwrap();
+    let topic = svc
+        .topic_create("RAG 入门", "能设计切分管线")
+        .await
+        .unwrap();
     let item = svc.item_add(topic, "基础流程", Some(10)).await.unwrap();
 
     // 两轮：① study_list 定位 ② study_update_item 标 learned
     let mock = Arc::new(MockProvider::new(vec![
-        resp("查学习路线图", vec![tc("c1", "study_list", serde_json::json!({}))]),
-        resp("标记已学", vec![tc(
-            "c2",
-            "study_update_item",
-            serde_json::json!({"item_id": item.to_string(), "status": "learned"}),
-        )]),
+        resp(
+            "查学习路线图",
+            vec![tc("c1", "study_list", serde_json::json!({}))],
+        ),
+        resp(
+            "标记已学",
+            vec![tc(
+                "c2",
+                "study_update_item",
+                serde_json::json!({"item_id": item.to_string(), "status": "learned"}),
+            )],
+        ),
     ]));
     let report = run_agent(
         mock.clone(),

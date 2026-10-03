@@ -27,7 +27,9 @@ pub struct CirclesEntityParams {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CirclesTargetParams {
     /// 实体 id（操作目标）
-    #[schemars(description = "实体 id（UUID）。forget=归档目标；delete=物理删目标；merge=被并方（from）；attach/detach=挂摘目标实体。")]
+    #[schemars(
+        description = "实体 id（UUID）。forget=归档目标；delete=物理删目标；merge=被并方（from）；attach/detach=挂摘目标实体。"
+    )]
     pub entity_id: String,
 }
 
@@ -230,8 +232,7 @@ impl EngramMcpServer {
             }
             "attach" => {
                 // T021：挂原子到实体（跨域操作按发起视角归 circles——动的是 atom_entities 边）
-                let p: CirclesAtomLinkParams =
-                    dispatch::from_args("circles", "attach", call.args)?;
+                let p: CirclesAtomLinkParams = dispatch::from_args("circles", "attach", call.args)?;
                 let eid = uuid::Uuid::parse_str(&p.entity_id)
                     .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "entity_id 不是合法 UUID"))?;
                 let aid = uuid::Uuid::parse_str(&p.atom_id)
@@ -240,8 +241,7 @@ impl EngramMcpServer {
                 ok_json(json!({ "entity_id": eid, "atom_id": aid, "attached": true }))
             }
             "detach" => {
-                let p: CirclesAtomLinkParams =
-                    dispatch::from_args("circles", "detach", call.args)?;
+                let p: CirclesAtomLinkParams = dispatch::from_args("circles", "detach", call.args)?;
                 let eid = uuid::Uuid::parse_str(&p.entity_id)
                     .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "entity_id 不是合法 UUID"))?;
                 let aid = uuid::Uuid::parse_str(&p.atom_id)
@@ -251,7 +251,8 @@ impl EngramMcpServer {
             }
             "duplicates" => {
                 // T021：实体重复检测（从 memory 域按域界挪入）
-                let _: CirclesGraphParams = dispatch::from_args("circles", "duplicates", call.args)?;
+                let _: CirclesGraphParams =
+                    dispatch::from_args("circles", "duplicates", call.args)?;
                 let dups = svc.entity_duplicates().await.map_err(memory_err)?;
                 ok_json(json!({
                     "duplicates": dups,

@@ -48,8 +48,8 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
     // T004 对齐评测后由用户拍板切换）。converge_only 快速通道在上方分支，语义不变。
     let use_agentic: bool = organize_agentic_flag(ctx.pool()).await;
     let mut all_touched = if use_agentic {
-        let out = crate::organize_agentic::run_agentic(&ctx, llm.as_ref(), atoms.len() as i64)
-            .await?;
+        let out =
+            crate::organize_agentic::run_agentic(&ctx, llm.as_ref(), atoms.len() as i64).await?;
         // agentic 写过的场景补 embedding/tsv（内容从库读——工具层不携带全文）
         refresh_embeddings_by_ids(&ctx, llm.as_ref(), &out.touched).await?;
         // retire 释放的表述随 persona 链明确剔除（F4 治——与 converge 同通道）
@@ -121,9 +121,9 @@ async fn fetch_scenarios(ctx: &JobContext) -> Result<Vec<(Uuid, String, String)>
         "SELECT id, topic, summary FROM scenarios WHERE retired_at IS NULL \
          ORDER BY updated_at DESC LIMIT 100",
     )
-        .fetch_all(ctx.pool())
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))
+    .fetch_all(ctx.pool())
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))
 }
 
 fn payload_uuids(ctx: &JobContext, key: &str) -> Vec<Uuid> {
@@ -250,16 +250,16 @@ async fn apply_actions(
                 .await
                 .map_err(|e| JobError::Retryable(e.to_string()))?;
                 // T003：create 同样直写真源（scenario_id），缓存初值仅作展示回退
-                sqlx::query("UPDATE atoms SET scenario_id = $2, updated_at = now() WHERE id = ANY($1)")
-                    .bind(&a.atom_ids)
-                    .bind(id)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| JobError::Retryable(e.to_string()))?;
+                sqlx::query(
+                    "UPDATE atoms SET scenario_id = $2, updated_at = now() WHERE id = ANY($1)",
+                )
+                .bind(&a.atom_ids)
+                .bind(id)
+                .execute(pool)
+                .await
+                .map_err(|e| JobError::Retryable(e.to_string()))?;
                 texts.push(format!("{}\n{}\n{}", a.topic, a.summary, a.body));
-                applied.push(Applied {
-                    scenario_id: id,
-                });
+                applied.push(Applied { scenario_id: id });
                 touched.push(id);
             }
             "update" => {
@@ -271,9 +271,7 @@ async fn apply_actions(
                     .await
                     .map_err(|e| JobError::Retryable(e.to_string()))?;
                 texts.push(format!("{cur}\n{}\n{}", a.summary, a.body));
-                applied.push(Applied {
-                    scenario_id: sid,
-                });
+                applied.push(Applied { scenario_id: sid });
                 if !touched.contains(&sid) {
                     touched.push(sid);
                 }

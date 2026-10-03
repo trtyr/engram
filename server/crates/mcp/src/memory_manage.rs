@@ -19,7 +19,6 @@ pub struct PersonaGetParams {}
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AtomDuplicatesParams {}
 
-
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AtomArchiveParams {
     /// 要归档的原子 id（list_atoms 或 atom_duplicates 拿到的 UUID）
@@ -102,6 +101,4 @@ impl EngramMcpServer {
             "hint": "已归档（archived），未删除。恢复渠道：list_atoms status=archived 可见；治理红线不变。",
         }))
     }
-
 }
-

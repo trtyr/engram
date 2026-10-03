@@ -241,15 +241,16 @@ pub fn guard_questions() -> BTreeMap<String, Question> {
     );
     criteria.insert(
         "transient".into(),
-        "Only transient readings: disk space, IPs, ports, temp paths — expired immediately."
-            .into(),
+        "Only transient readings: disk space, IPs, ports, temp paths — expired immediately.".into(),
     );
     criteria.insert(
         "learning".into(),
-        "Only study progress tracking (learning X, finished chapter Y)."
-            .into(),
+        "Only study progress tracking (learning X, finished chapter Y).".into(),
     );
-    criteria.insert("chitchat".into(), "Small talk, mood, weather — no persistent facts.".into());
+    criteria.insert(
+        "chitchat".into(),
+        "Small talk, mood, weather — no persistent facts.".into(),
+    );
     q.insert(
         "segment_type".to_string(),
         Question::Choice {
@@ -284,10 +285,7 @@ pub fn evaluate_guard(
 }
 
 /// 对一段会话文本执行保险判定（guard + 归因，一次请求两问）。
-pub async fn guard_segment(
-    client: &JevClient,
-    seg_text: &str,
-) -> Result<SegmentGuard, LlmError> {
+pub async fn guard_segment(client: &JevClient, seg_text: &str) -> Result<SegmentGuard, LlmError> {
     let result = client
         .decide(
             serde_json::json!({ "segment": seg_text }),
@@ -593,8 +591,14 @@ mod tests {
         let g = evaluate_guard(0.88, Some("user_facts"), 0.3, 0.5);
         assert_eq!(g.outcome, GuardOutcome::Pass);
         // 边界：恰在阈值上不算 Reject（< 严格小于）
-        assert_eq!(evaluate_guard(0.3, None, 0.3, 0.5).outcome, GuardOutcome::Review);
-        assert_eq!(evaluate_guard(0.5, None, 0.3, 0.5).outcome, GuardOutcome::Pass);
+        assert_eq!(
+            evaluate_guard(0.3, None, 0.3, 0.5).outcome,
+            GuardOutcome::Review
+        );
+        assert_eq!(
+            evaluate_guard(0.5, None, 0.3, 0.5).outcome,
+            GuardOutcome::Pass
+        );
     }
 
     #[test]
@@ -604,10 +608,18 @@ mod tests {
         // choices 序列化后应含四选项
         let j = qs["gate"].to_json();
         let criteria = j["criteria"].as_object().unwrap();
-        for opt in ["kv_fit", "prefer_atoms", "prefer_credentials", "prefer_assets"] {
+        for opt in [
+            "kv_fit",
+            "prefer_atoms",
+            "prefer_credentials",
+            "prefer_assets",
+        ] {
             assert!(criteria.contains_key(opt), "缺选项 {opt}");
         }
-        assert_eq!(kv_gate_reject_hint("prefer_atoms"), "该内容是偏好/约定类陈述，建议走 remember(mode=atom) 进原子记忆");
+        assert_eq!(
+            kv_gate_reject_hint("prefer_atoms"),
+            "该内容是偏好/约定类陈述，建议走 remember(mode=atom) 进原子记忆"
+        );
     }
 
     #[test]

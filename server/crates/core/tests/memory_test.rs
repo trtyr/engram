@@ -986,7 +986,10 @@ async fn archive_debounces_into_single_snapshot_refresh() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(n <= 1, "3 连归档应合并为 ≤1 个快照刷新 job（30s 防抖），实际 {n}");
+    assert!(
+        n <= 1,
+        "3 连归档应合并为 ≤1 个快照刷新 job（30s 防抖），实际 {n}"
+    );
 }
 
 #[tokio::test]
@@ -1075,12 +1078,11 @@ async fn void_done_session_cascades_atom_archive() {
     );
 
     // 审计链有记录（T001：审计走 logs 时间线，jobs 表不再收伪造行）
-    let audit: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM logs WHERE target = 'audit.session_void_cascade'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let audit: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM logs WHERE target = 'audit.session_void_cascade'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(audit, 1, "void 级联应落审计行");
     let fake_jobs: i64 =
         sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'session_void_cascade'")

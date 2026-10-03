@@ -2324,8 +2324,7 @@ async fn t002_contradicts_stale_target_degrades_to_review() {
     }
     env.queue
         .enqueue(
-            JobTemplate::new("arbitrate_atoms")
-                .with_payload(json!({"candidate_ids": [c_con]})),
+            JobTemplate::new("arbitrate_atoms").with_payload(json!({"candidate_ids": [c_con]})),
         )
         .await
         .unwrap();
@@ -2333,24 +2332,22 @@ async fn t002_contradicts_stale_target_degrades_to_review() {
     assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
 
     // 候选：转正但提级待审（取代落空 → 不直接生效）
-    let (st, nr): (String, bool) = sqlx::query_as(
-        "SELECT status, needs_review FROM atoms WHERE id = $1",
-    )
-    .bind(c_con)
-    .fetch_one(&env.pool)
-    .await
-    .unwrap();
+    let (st, nr): (String, bool) =
+        sqlx::query_as("SELECT status, needs_review FROM atoms WHERE id = $1")
+            .bind(c_con)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
     assert_eq!(st, "active", "候选应转正（信息不丢）");
     assert!(nr, "取代落空的候选必须提级待审（T002）");
 
     // 旧条：保持 archived——supersede 不落、无双 active
-    let (st, sb): (String, Option<Uuid>) = sqlx::query_as(
-        "SELECT status, superseded_by FROM atoms WHERE id = $1",
-    )
-    .bind(t_con)
-    .fetch_one(&env.pool)
-    .await
-    .unwrap();
+    let (st, sb): (String, Option<Uuid>) =
+        sqlx::query_as("SELECT status, superseded_by FROM atoms WHERE id = $1")
+            .bind(t_con)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
     assert_eq!(st, "archived", "旧条不应被改成 superseded");
     assert!(sb.is_none());
 
@@ -2420,27 +2417,31 @@ async fn t003_scenario_member_reassignment_recomputes_refs() {
     .await
     .unwrap();
     env.queue
-        .enqueue(
-            JobTemplate::new("organize_scenarios")
-                .with_payload(json!({"atom_ids": [x, z]})),
-        )
+        .enqueue(JobTemplate::new("organize_scenarios").with_payload(json!({"atom_ids": [x, z]})))
         .await
         .unwrap();
     let j = wait_done(&env.queue, "organize_scenarios").await;
     if j.status != JobStatus::Succeeded {
-        let jobs: Vec<(String, String, Option<String>)> = sqlx::query_as(
-            "SELECT kind, status::text, error FROM jobs ORDER BY created_at",
-        )
-        .fetch_all(&env.pool)
-        .await
-        .unwrap_or_default();
+        let jobs: Vec<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT kind, status::text, error FROM jobs ORDER BY created_at")
+                .fetch_all(&env.pool)
+                .await
+                .unwrap_or_default();
         let sent: Vec<String> = env
             .llm
             .sent_user
             .lock()
             .unwrap()
             .iter()
-            .map(|u| { let c: Vec<char> = u.chars().collect(); let n = c.len(); if n > 150 { c[n-150..].iter().collect::<String>() } else { c.iter().collect::<String>() } })
+            .map(|u| {
+                let c: Vec<char> = u.chars().collect();
+                let n = c.len();
+                if n > 150 {
+                    c[n - 150..].iter().collect::<String>()
+                } else {
+                    c.iter().collect::<String>()
+                }
+            })
             .collect();
         let stale_probe: Vec<Uuid> = sqlx::query_scalar(
             "SELECT s.id FROM scenarios s WHERE EXISTS ( \
@@ -2479,13 +2480,16 @@ async fn t003_scenario_member_reassignment_recomputes_refs() {
     .unwrap_or_default();
     let _ = org_logs;
     // 真源：X 归 B（后写的赢）
-    let xsid: Option<Uuid> =
-        sqlx::query_scalar("SELECT scenario_id FROM atoms WHERE id = $1")
-            .bind(x)
-            .fetch_one(&env.pool)
-            .await
-            .unwrap();
-    assert_eq!(xsid, Some(b), "X 的归属牌应迁到 B——organize 日志: {org_logs:?}");
+    let xsid: Option<Uuid> = sqlx::query_scalar("SELECT scenario_id FROM atoms WHERE id = $1")
+        .bind(x)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        xsid,
+        Some(b),
+        "X 的归属牌应迁到 B——organize 日志: {org_logs:?}"
+    );
 
     // 缓存：A 的 atom_refs 不再含 X，但保留 Z；B 的 atom_refs = [X]
     let refs_of = |sid: Uuid| {
@@ -2603,11 +2607,10 @@ async fn t005_entity_substring_no_longer_swallows() {
 
     // ③ 关系 lookup 口径统一：lookup_entity("小王同志") 命中小王档（与挂链同款归并）
     let looked = engram_distill::extract::lookup_entity(&pool, "小王同志").await;
-    let xiaowang: Uuid =
-        sqlx::query_scalar("SELECT id FROM entities WHERE name = '小王'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let xiaowang: Uuid = sqlx::query_scalar("SELECT id FROM entities WHERE name = '小王'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(looked, Some(xiaowang), "lookup 应与挂链口径一致命中小王档");
 }
 
@@ -2653,13 +2656,15 @@ async fn t008_archived_entity_revives_with_continuity() {
             .await
             .unwrap();
     assert!(archived.is_none(), "归档实体应被复活");
-    assert_eq!(summary.as_deref(), Some("老王的旧档案摘要"), "旧档案 summary 应延续");
-    let total: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM entities WHERE name LIKE '老王%'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    assert_eq!(
+        summary.as_deref(),
+        Some("老王的旧档案摘要"),
+        "旧档案 summary 应延续"
+    );
+    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM entities WHERE name LIKE '老王%'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(total, 1, "同名重现不得新建实体");
     // 原子挂到复活实体上
     let linked: i64 = sqlx::query_scalar(
@@ -2688,14 +2693,16 @@ async fn t006_extract_claim_is_batched_with_continuation() {
     let env = setup(chats).await;
     for i in 0..60 {
         let sid = Uuid::now_v7();
-        sqlx::query("INSERT INTO raw_sessions (id, agent, content, created_at) \
-             VALUES ($1, 'pi', $2, now() - make_interval(secs => $3))")
-            .bind(sid)
-            .bind(session(&[("user", &format!("闲聊第 {i} 句"))]))
-            .bind(60.0 - i as f64) // 递减间隔保证 created_at 严格有序
-            .execute(&env.pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO raw_sessions (id, agent, content, created_at) \
+             VALUES ($1, 'pi', $2, now() - make_interval(secs => $3))",
+        )
+        .bind(sid)
+        .bind(session(&[("user", &format!("闲聊第 {i} 句"))]))
+        .bind(60.0 - i as f64) // 递减间隔保证 created_at 严格有序
+        .execute(&env.pool)
+        .await
+        .unwrap();
     }
     env.queue
         .enqueue(JobTemplate::new("extract_atoms"))
@@ -2708,12 +2715,11 @@ async fn t006_extract_claim_is_batched_with_continuation() {
     let mut done = 0i64;
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        done = sqlx::query_scalar(
-            "SELECT count(*) FROM raw_sessions WHERE distill_status = 'done'",
-        )
-        .fetch_one(&env.pool)
-        .await
-        .unwrap();
+        done =
+            sqlx::query_scalar("SELECT count(*) FROM raw_sessions WHERE distill_status = 'done'")
+                .fetch_one(&env.pool)
+                .await
+                .unwrap();
         if done >= 60 {
             break;
         }
@@ -2739,7 +2745,10 @@ async fn t006_extract_claim_is_batched_with_continuation() {
             .fetch_one(&env.pool)
             .await
             .unwrap();
-    assert!(extract_jobs >= 2, "应存在自续批任务（count={extract_jobs}）");
+    assert!(
+        extract_jobs >= 2,
+        "应存在自续批任务（count={extract_jobs}）"
+    );
 }
 
 /// P012-T001/T002/T003：agentic 循环——模型驱动六工具完成组织并 finish 交卷；
@@ -2793,16 +2802,20 @@ async fn p012_agentic_loop_organizes_and_finishes() {
             .unwrap();
     let (sid, _atoms_emb) = row;
     assert!(sid.is_some(), "原子应挂到新场景");
-    let (topic, retired, emb_probe): (String, Option<chrono::DateTime<chrono::Utc>>, Option<String>) =
-        sqlx::query_as(
-            "SELECT topic, retired_at, embedding::text FROM scenarios WHERE id = $1",
-        )
+    let (topic, retired, emb_probe): (
+        String,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<String>,
+    ) = sqlx::query_as("SELECT topic, retired_at, embedding::text FROM scenarios WHERE id = $1")
         .bind(sid.unwrap())
         .fetch_one(&env.pool)
         .await
         .unwrap();
     assert_eq!(topic, "居住地");
-    assert!(emb_probe.is_some(), "agentic 路径应补场景 embedding（refresh_by_ids）");
+    assert!(
+        emb_probe.is_some(),
+        "agentic 路径应补场景 embedding（refresh_by_ids）"
+    );
     assert!(retired.is_none(), "正常 write 不应退役");
 }
 
@@ -2838,7 +2851,12 @@ async fn p012_agentic_loop_steps_capped() {
         .await
         .unwrap();
     let j = wait_done(&env.queue, "organize_scenarios").await;
-    assert_eq!(j.status, JobStatus::Succeeded, "上限收尾应是成功: {:?}", j.error);
+    assert_eq!(
+        j.status,
+        JobStatus::Succeeded,
+        "上限收尾应是成功: {:?}",
+        j.error
+    );
     assert_eq!(
         env.llm.sent_user.lock().unwrap().len(),
         crate_organize_max_steps(),

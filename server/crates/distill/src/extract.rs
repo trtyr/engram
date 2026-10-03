@@ -186,8 +186,10 @@ async fn run_claimed(
 
     // T006：满批自续——认领满额说明可能仍有积压，链式投下一批（批间独立，无幂等键）
     if sessions.len() as i64 >= EXTRACT_CLAIM_BATCH {
-        ctx.enqueue_next(JobTemplate::new("extract_atoms").with_payload(json!({"reason": "batch-continue"})))
-            .await?;
+        ctx.enqueue_next(
+            JobTemplate::new("extract_atoms").with_payload(json!({"reason": "batch-continue"})),
+        )
+        .await?;
     }
 
     ctx.emit(

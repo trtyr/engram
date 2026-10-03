@@ -321,7 +321,12 @@ async fn mcp_tool_call_l0_read_chain() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(6, "memory", "recall", json!({"mode": "entities", "q": "Engram"})),
+        call(
+            6,
+            "memory",
+            "recall",
+            json!({"mode": "entities", "q": "Engram"}),
+        ),
     )
     .await;
     expect_result(&v, "tools/call entities");
@@ -330,7 +335,12 @@ async fn mcp_tool_call_l0_read_chain() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(7, "memory", "recall", json!({"mode": "search", "query": "Engram"})),
+        call(
+            7,
+            "memory",
+            "recall",
+            json!({"mode": "search", "query": "Engram"}),
+        ),
     )
     .await;
     expect_result(&v, "tools/call search");
@@ -351,7 +361,12 @@ async fn mcp_scope_enforcement() {
     let (status, v) = mcp_rpc(
         &app,
         &wiki_key,
-        call(2, "memory", "recall", json!({"mode": "search", "query": "test"})),
+        call(
+            2,
+            "memory",
+            "recall",
+            json!({"mode": "search", "query": "test"}),
+        ),
     )
     .await;
     assert_eq!(
@@ -547,12 +562,8 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     let key = create_key(&app, &admin, &["memory"]).await;
 
     // 停用 memory.remember（action 级开关，T018 六动词粒度）
-    let (status, info) = put_mcp_config(
-        &app,
-        &admin,
-        json!({"disabled_tools": ["memory.remember"]}),
-    )
-    .await;
+    let (status, info) =
+        put_mcp_config(&app, &admin, json!({"disabled_tools": ["memory.remember"]})).await;
     assert_eq!(status, StatusCode::OK, "action 键应通过校验：{info}");
     assert_eq!(info["disabled_tools"], json!(["memory.remember"]));
 
@@ -593,12 +604,7 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(
-            2,
-            "memory",
-            "remember",
-            json!({"text": "x"}),
-        ),
+        call(2, "memory", "remember", json!({"text": "x"})),
     )
     .await;
     assert!(
@@ -1032,7 +1038,12 @@ async fn wiki_mcp_scope_enforcement() {
     let (_, v) = mcp_rpc(
         &app,
         &wiki_key,
-        call(2, "memory", "recall", json!({"mode": "search", "query": "x"})),
+        call(
+            2,
+            "memory",
+            "recall",
+            json!({"mode": "search", "query": "x"}),
+        ),
     )
     .await;
     assert!(
@@ -1265,16 +1276,23 @@ async fn study_mcp_lifecycle() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(1, "study", "add", json!({"name": "RAG 入门", "goal": "能设计切分管线"})),
+        call(
+            1,
+            "study",
+            "add",
+            json!({"name": "RAG 入门", "goal": "能设计切分管线"}),
+        ),
     )
     .await;
     let out = expect_result(&v, "study add");
-    let out: Value =
-        serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
+    let out: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     let topic_id = out["id"].as_str().expect("返回 id").to_string();
 
     // ② item_add ×3（含缺省排尾）
-    for (i, name) in ["基础流程", "切分策略", "嵌入与向量检索"].iter().enumerate() {
+    for (i, name) in ["基础流程", "切分策略", "嵌入与向量检索"]
+        .iter()
+        .enumerate()
+    {
         let args = if i < 2 {
             json!({"topic_id": topic_id, "name": name, "position": (i as i64 + 1) * 10})
         } else {
@@ -1292,14 +1310,21 @@ async fn study_mcp_lifecycle() {
     )
     .await;
     let full: Value = serde_json::from_str(
-        expect_result(&v, "study get")["content"][0]["text"].as_str().unwrap(),
+        expect_result(&v, "study get")["content"][0]["text"]
+            .as_str()
+            .unwrap(),
     )
     .unwrap();
     let first_item = full["items"][0]["id"].as_str().unwrap().to_string();
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(11, "study", "unit_set", json!({"item_id": first_item, "status": "learned"})),
+        call(
+            11,
+            "study",
+            "unit_set",
+            json!({"item_id": first_item, "status": "learned"}),
+        ),
     )
     .await;
     expect_result(&v, "study unit_set");
@@ -1312,11 +1337,16 @@ async fn study_mcp_lifecycle() {
     )
     .await;
     let full: Value = serde_json::from_str(
-        expect_result(&v, "study get 全量")["content"][0]["text"].as_str().unwrap(),
+        expect_result(&v, "study get 全量")["content"][0]["text"]
+            .as_str()
+            .unwrap(),
     )
     .unwrap();
     // P007 demo 留档：topic_get 一次拿全【进度+下一步+进行中+资料清单】
-    eprintln!("DEMO study topic_get 全量 = {}", serde_json::to_string_pretty(&full).unwrap_or_default());
+    eprintln!(
+        "DEMO study topic_get 全量 = {}",
+        serde_json::to_string_pretty(&full).unwrap_or_default()
+    );
     assert_eq!(full["progress"]["total"], json!(3));
     assert_eq!(full["progress"]["learned"], json!(1));
     assert_eq!(full["next_up"].as_array().unwrap().len(), 2);
@@ -1328,7 +1358,12 @@ async fn study_mcp_lifecycle() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(13, "study", "item_link", json!({"item_id": second, "wiki_slugs": ["recursive-chunking"]})),
+        call(
+            13,
+            "study",
+            "item_link",
+            json!({"item_id": second, "wiki_slugs": ["recursive-chunking"]}),
+        ),
     )
     .await;
     expect_result(&v, "study item_link");
@@ -1337,13 +1372,20 @@ async fn study_mcp_lifecycle() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(14, "study", "topic_update", json!({"id": topic_id, "status": "paused"})),
+        call(
+            14,
+            "study",
+            "topic_update",
+            json!({"id": topic_id, "status": "paused"}),
+        ),
     )
     .await;
     expect_result(&v, "study topic_update");
     let (_, v) = mcp_rpc(&app, &key, call(15, "study", "list", json!({}))).await;
     let out: Value = serde_json::from_str(
-        expect_result(&v, "study list")["content"][0]["text"].as_str().unwrap(),
+        expect_result(&v, "study list")["content"][0]["text"]
+            .as_str()
+            .unwrap(),
     )
     .unwrap();
     assert_eq!(out["count"], json!(1));
@@ -1359,14 +1401,12 @@ async fn study_readonly_key_write_rejected() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
     let ro = create_key(&app, &admin, &["study:ro"]).await;
-    let (_, v) = mcp_rpc(
-        &app,
-        &ro,
-        call(1, "study", "add", json!({"name": "x"})),
-    )
-    .await;
+    let (_, v) = mcp_rpc(&app, &ro, call(1, "study", "add", json!({"name": "x"}))).await;
     let msg = v["error"]["message"].as_str().unwrap_or_default();
-    assert!(msg.contains("只读") || msg.contains("study scope"), ":ro 写应拒: {msg}");
+    assert!(
+        msg.contains("只读") || msg.contains("study scope"),
+        ":ro 写应拒: {msg}"
+    );
 }
 
 #[tokio::test]
@@ -1374,7 +1414,11 @@ async fn data_root_is_resolvable_and_reported() {
     // 数据根口径（2026-10-03 codegraph 全量失效事故）：
     // AGENT_MEMORY_DATA_DIR 未设时按 HOME fallback —— 解析结果必须可被上层读到并打进启动日志。
     let root = engram_wiki_engine::data_root();
-    assert!(root.is_absolute(), "数据根必须是绝对路径：{}", root.display());
+    assert!(
+        root.is_absolute(),
+        "数据根必须是绝对路径：{}",
+        root.display()
+    );
     let explicit = std::env::var("AGENT_MEMORY_DATA_DIR").is_ok();
     let expect_home_based = std::env::var("HOME")
         .map(|h| root.starts_with(&h))

@@ -74,11 +74,11 @@ pub struct DistillParams {
         description = "可选：true 时在蒸馏链外附带 consolidate 全量整理（近重复合并）。缺省 false。"
     )]
     pub full: Option<bool>,
-    /// 动作模式：distill（默认）| rebuild（画像全量重建）| sleep（预留——内置节律上线后开放）
+    /// 底层动作步（T018 改名避让六动词 mode 分派键）：distill（默认）| rebuild | sleep（预留）
     #[schemars(
-        description = "可选动作模式：\"distill\"（默认，触发蒸馏链）/ \"rebuild\"（画像全量重建——以全部场景重算所有非钉住分面，记忆清理/修订后用）/ \"sleep\"（记忆巩固——内置节律上线后开放，当前返回未上线提示）。"
+        description = "可选底层动作步：\"distill\"（默认，触发蒸馏链）/ \"rebuild\"（画像全量重建——以全部场景重算所有非钉住分面，记忆清理/修订后用）/ \"sleep\"（记忆巩固——内置节律上线后开放，当前返回未上线提示）。"
     )]
-    pub mode: Option<String>,
+    pub step: Option<String>,
 }
 
 #[tool_router(router = memory_write_router)]
@@ -321,7 +321,7 @@ impl EngramMcpServer {
             .svc()
             .trigger_distill_manual(
                 dp.full.unwrap_or(false),
-                dp.mode.as_deref().unwrap_or("distill"),
+                dp.step.as_deref().unwrap_or("distill"),
                 &actor,
             )
             .await

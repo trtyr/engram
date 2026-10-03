@@ -337,7 +337,6 @@ impl EngramMcpServer {
         ok_json(serde_json::to_value(&folders).unwrap_or(serde_json::json!([])))
     }
 
-
     /// 确定性修复（lint 修而不只报）：死链改写/去链接化/建 stub/孤页回挂/重复合并。
     pub(crate) async fn wiki_repair(
         &self,

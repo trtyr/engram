@@ -23,7 +23,9 @@ pub struct LogsQueryParams {
     #[schemars(description = "可选：按 request_id 贯穿筛（一次 HTTP 请求引发的全部日志）。")]
     pub request_id: Option<String>,
     /// 可选：功能域筛（T019 域化）
-    #[schemars(description = "可选：功能域筛（memory=用户记忆蒸馏/审计 / wiki / codegraph / system=请求与错误）。")]
+    #[schemars(
+        description = "可选：功能域筛（memory=用户记忆蒸馏/审计 / wiki / codegraph / system=请求与错误）。"
+    )]
     pub domain: Option<String>,
     /// 可选：起始时间（RFC3339）
     #[schemars(description = "可选：起始时间（RFC3339，如 2026-10-03T00:00:00Z）。")]
@@ -100,8 +102,7 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         principal_of(&ctx)?;
         let p = params.0;
-        let until = parse_logs_time(p.until.as_deref(), "until")?
-            .unwrap_or_else(chrono::Utc::now);
+        let until = parse_logs_time(p.until.as_deref(), "until")?.unwrap_or_else(chrono::Utc::now);
         let since = parse_logs_time(p.since.as_deref(), "since")?
             .unwrap_or_else(|| until - chrono::Duration::hours(24));
         let group_by = p.group_by.as_deref().unwrap_or("level");
@@ -111,9 +112,10 @@ impl EngramMcpServer {
                 "group_by 只支持 level / target",
             ));
         }
-        let buckets = engram_storage::repo::logs::count_logs(&self.state.pool, since, until, group_by)
-            .await
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, format!("日志聚合失败：{e}")))?;
+        let buckets =
+            engram_storage::repo::logs::count_logs(&self.state.pool, since, until, group_by)
+                .await
+                .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, format!("日志聚合失败：{e}")))?;
         Ok(CallToolResult::structured(serde_json::json!({
             "since": since,
             "until": until,
@@ -147,12 +149,18 @@ impl EngramMcpServer {
         }
         match call.action.as_str() {
             "query" => {
-                self.logs_query(ctx, Parameters(dispatch::from_args("logs", "query", call.args)?))
-                    .await
+                self.logs_query(
+                    ctx,
+                    Parameters(dispatch::from_args("logs", "query", call.args)?),
+                )
+                .await
             }
             "stats" => {
-                self.logs_stats(ctx, Parameters(dispatch::from_args("logs", "stats", call.args)?))
-                    .await
+                self.logs_stats(
+                    ctx,
+                    Parameters(dispatch::from_args("logs", "stats", call.args)?),
+                )
+                .await
             }
             other => Err(dispatch::unknown_action("logs", other)),
         }

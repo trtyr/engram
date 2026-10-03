@@ -47,7 +47,9 @@ fn push_filters<'args>(
     f: &'args LogFilter<'args>,
 ) {
     if let Some(level) = f.level {
-        qb.push(" AND upper(level) = upper(").push_bind(level).push(")");
+        qb.push(" AND upper(level) = upper(")
+            .push_bind(level)
+            .push(")");
     }
     if let Some(q) = f.q {
         qb.push(" AND (message ILIKE ")
@@ -146,7 +148,11 @@ pub async fn count_logs(
     until: chrono::DateTime<chrono::Utc>,
     group_by: &str,
 ) -> StoreResult<Vec<LogBucket>> {
-    let col = if group_by == "target" { "target" } else { "level" };
+    let col = if group_by == "target" {
+        "target"
+    } else {
+        "level"
+    };
     let sql = format!(
         "SELECT {col} AS bucket, count(*) AS count
          FROM logs WHERE ts >= $1 AND ts <= $2

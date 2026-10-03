@@ -91,10 +91,12 @@ impl MemoryService {
     /// JEV 哨兵解析（T017）：settings + cipher → 可用客户端；不可用 → None（放行）。
     async fn jev_client(&self) -> Option<engram_llm::decisions::JevClient> {
         let cipher = self.cipher.as_ref()?;
-        let cfg: engram_llm::decisions::JevConfig =
-            engram_storage::repo::settings::get_json(&self.pool, engram_llm::decisions::SETTINGS_KEY)
-                .await
-                .unwrap_or_default();
+        let cfg: engram_llm::decisions::JevConfig = engram_storage::repo::settings::get_json(
+            &self.pool,
+            engram_llm::decisions::SETTINGS_KEY,
+        )
+        .await
+        .unwrap_or_default();
         engram_llm::decisions::resolve(&cfg, cipher, reqwest::Client::new()).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "JEV 配置解析失败——KV 闸降级放行");
             None
@@ -123,8 +125,12 @@ impl MemoryService {
         }
         // T017 准入闸：哨兵可用才判定；失败/未配置降级放行（显式动作不阻塞）
         if let Some(client) = self.jev_client().await {
-            let state = serde_json::json!({ "key": k, "value": v, "context": context.unwrap_or("") });
-            match client.decide(state, engram_llm::decisions::kv_gate_questions()).await {
+            let state =
+                serde_json::json!({ "key": k, "value": v, "context": context.unwrap_or("") });
+            match client
+                .decide(state, engram_llm::decisions::kv_gate_questions())
+                .await
+            {
                 Ok(result) => {
                     let verdict = result
                         .answers

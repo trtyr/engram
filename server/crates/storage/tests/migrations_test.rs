@@ -214,7 +214,7 @@ async fn all_domain_tables_exist_with_columns() {
         "project_docs",
         "asset_revisions",
         "ticket_events",
-            "study_tracks",
+        "study_tracks",
         "study_track_journal",
         "study_track_items",
     ];

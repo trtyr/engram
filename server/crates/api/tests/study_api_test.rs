@@ -22,12 +22,17 @@ async fn req_json(
         .uri(uri)
         .header("authorization", format!("Bearer {token}"));
     let req = match body {
-        Some(b) => builder.header("content-type", "application/json").body(Body::from(b.to_string())).unwrap(),
+        Some(b) => builder
+            .header("content-type", "application/json")
+            .body(Body::from(b.to_string()))
+            .unwrap(),
         None => builder.body(Body::empty()).unwrap(),
     };
     let resp = app.clone().oneshot(req).await.unwrap();
     let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let v: Value = if bytes.is_empty() {
         Value::Null
     } else {
@@ -226,7 +231,13 @@ async fn study_http_reviews_and_journal() {
         .await;
         assert_eq!(st, StatusCode::CREATED);
     }
-    let (st, v) = req_empty(&app, "GET", &format!("/study/topics/{topic}/journal"), &admin).await;
+    let (st, v) = req_empty(
+        &app,
+        "GET",
+        &format!("/study/topics/{topic}/journal"),
+        &admin,
+    )
+    .await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(v["count"], json!(2));
     assert_eq!(v["journal"][0]["note"], "开始切分策略", "新→旧");

@@ -8,8 +8,8 @@ use engram_api::routes;
 use engram_api::state::AppState;
 use engram_storage::PoolConfig;
 use tower_http::trace::TraceLayer;
-use tracing_subscriber::prelude::*;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::prelude::*;
 
 /// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
 #[allow(clippy::expect_used)]
@@ -59,8 +59,7 @@ async fn main() -> anyhow::Result<()> {
 /// 结构化 JSON 日志初始化（必须最先——配置解析的告警依赖它）。
 /// 叠加 PG 落地层（channel → 批量 writer，层内零 IO 不阻塞请求路径）。
 fn init_tracing(pg_layer: engram_api::logging::PgLogLayer) {
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()

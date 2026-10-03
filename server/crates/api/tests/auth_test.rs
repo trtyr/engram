@@ -1169,8 +1169,10 @@ async fn edit_split_atom_rewrite_user_only() {
             .await
             .unwrap();
     assert_eq!(by, "admin");
+    // 审计链有记录（T001：审计走 logs 时间线，fields.payload.by 落域化审计行）
     let audit: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM jobs WHERE kind = 'edit_atom' AND payload->>'by' = 'admin'",
+        "SELECT count(*) FROM logs WHERE target = 'audit.edit_atom' \
+         AND fields->'payload'->>'by' = 'admin'",
     )
     .fetch_one(&pool)
     .await
@@ -1798,12 +1800,12 @@ async fn openapi_snapshot() {
             "/settings/mcp",
             "/settings/rhythm",
             "/study/items/{id}",
-        "/study/reviews",
-        "/study/topics",
-        "/study/topics/{id}",
-        "/study/topics/{id}/items",
-        "/study/topics/{id}/journal",
-        "/todos",
+            "/study/reviews",
+            "/study/topics",
+            "/study/topics/{id}",
+            "/study/topics/{id}/items",
+            "/study/topics/{id}/journal",
+            "/todos",
             "/todos/export",
             "/todos/{id}",
             "/todos/{id}/links",
@@ -1815,7 +1817,7 @@ async fn openapi_snapshot() {
             "/wiki/duplicates",
             "/wiki/graph",
             "/wiki/ingest",
-        "/wiki/insights",
+            "/wiki/insights",
             "/wiki/insights/dismiss",
             "/wiki/insights/reset",
             "/wiki/links/rebuild",
@@ -1823,9 +1825,9 @@ async fn openapi_snapshot() {
             "/wiki/pages",
             "/wiki/pages/merge",
             "/wiki/pages/{slug}",
-        "/wiki/pages/{slug}/restore",
-        "/wiki/pages/{slug}/versions",
-        "/wiki/pages/{slug}/versions/{version}",
+            "/wiki/pages/{slug}/restore",
+            "/wiki/pages/{slug}/versions",
+            "/wiki/pages/{slug}/versions/{version}",
             "/wiki/promote",
             "/wiki/promotions",
             "/wiki/purpose",
@@ -1838,8 +1840,8 @@ async fn openapi_snapshot() {
             "/wiki/sources/{id}",
             "/wiki/tsv/rebuild",
             "/wiki/upload",
-        "/wiki/webreader/status",
-        "/wiki/webreader/test",
+            "/wiki/webreader/status",
+            "/wiki/webreader/test",
         ],
         "API 端点集合发生变化时必须同步更新快照"
     );

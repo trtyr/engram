@@ -387,8 +387,9 @@ async fn fetch_failure_error(
 ) -> JobError {
     // P006-T002：错误码前缀（归因分类进 error 字段——调试定位与编程判断）
     let code = match &e {
-        super::super::ssrf::FetchError::PrivateAddress
-        | super::super::ssrf::FetchError::Scheme => "WIKI-DOC-SSRF-REJECTED",
+        super::super::ssrf::FetchError::PrivateAddress | super::super::ssrf::FetchError::Scheme => {
+            "WIKI-DOC-SSRF-REJECTED"
+        }
         _ => "WIKI-DOC-URL-FETCH-FAILED",
     };
     let m = format!("[{code}] URL 抓取失败: {e}");

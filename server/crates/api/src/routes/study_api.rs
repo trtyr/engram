@@ -63,7 +63,9 @@ pub async fn list_topics(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_scope_read(&principal, "study")?;
     let rows = svc(&state).topic_list().await.map_err(se)?;
-    Ok(Json(serde_json::json!({ "topics": rows, "count": rows.len() })))
+    Ok(Json(
+        serde_json::json!({ "topics": rows, "count": rows.len() }),
+    ))
 }
 
 /// 开题。
@@ -100,7 +102,9 @@ pub async fn get_topic(
         .await
         .map_err(se)?
         .ok_or_else(|| ApiError::NotFound(format!("topic {id} 不存在")))?;
-    Ok(Json(serde_json::to_value(&full).unwrap_or(serde_json::json!({}))))
+    Ok(Json(
+        serde_json::to_value(&full).unwrap_or(serde_json::json!({})),
+    ))
 }
 
 /// 补丁式更新 topic。
@@ -115,7 +119,12 @@ pub async fn update_topic(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_scope(&principal, "study")?;
     svc(&state)
-        .topic_update(id, req.name.as_deref(), req.goal.as_deref(), req.status.as_deref())
+        .topic_update(
+            id,
+            req.name.as_deref(),
+            req.goal.as_deref(),
+            req.status.as_deref(),
+        )
         .await
         .map_err(se)?;
     Ok(Json(serde_json::json!({ "id": id, "ok": true })))
@@ -213,7 +222,9 @@ pub async fn reviews_due(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_scope_read(&principal, "study")?;
     let rows = svc(&state).reviews_due().await.map_err(se)?;
-    Ok(Json(serde_json::json!({ "reviews": rows, "count": rows.len() })))
+    Ok(Json(
+        serde_json::json!({ "reviews": rows, "count": rows.len() }),
+    ))
 }
 
 /// journal 进度时间线：记一笔。
@@ -245,5 +256,7 @@ pub async fn journal_list(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_scope_read(&principal, "study")?;
     let rows = svc(&state).journal_list(id, 50).await.map_err(se)?;
-    Ok(Json(serde_json::json!({ "journal": rows, "count": rows.len() })))
+    Ok(Json(
+        serde_json::json!({ "journal": rows, "count": rows.len() }),
+    ))
 }

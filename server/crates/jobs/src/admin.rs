@@ -8,7 +8,6 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-
 /// 取消 pending 的 deep_purge job（后悔药）。返回生效行数（0 = 不存在或已执行/已取消）。
 pub async fn cancel_pending_deep_purge(pool: &PgPool, job_id: Uuid) -> Result<u64, sqlx::Error> {
     let res = sqlx::query(

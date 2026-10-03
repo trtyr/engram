@@ -77,7 +77,9 @@ pub struct StudyTopicUpdateParams {
     #[schemars(description = "可选：新目标（学到什么程度算完）。")]
     pub goal: Option<String>,
     /// active | paused | done（done=归档，产出物留 wiki）
-    #[schemars(description = "可选状态：active/paused/done（done=归档，数据保留，wiki 产出物不受影响）。")]
+    #[schemars(
+        description = "可选状态：active/paused/done（done=归档，数据保留，wiki 产出物不受影响）。"
+    )]
     pub status: Option<String>,
 }
 
@@ -100,7 +102,9 @@ pub struct StudyUnitSetParams {
     #[schemars(description = "item id。")]
     pub item_id: String,
     /// not_started | learning | learned（learned 记 learned_at；允许回退）
-    #[schemars(description = "状态：not_started/learning/learned（learned 记时间戳；允许回退——学习本就反复）。")]
+    #[schemars(
+        description = "状态：not_started/learning/learned（learned 记时间戳；允许回退——学习本就反复）。"
+    )]
     pub status: String,
 }
 
@@ -133,7 +137,9 @@ pub struct StudyItemSetReviewParams {
     #[schemars(description = "是否需要复习（learned 后想保持记忆就开；关掉即移出复习队列）。")]
     pub needs_review: bool,
     /// 到期时间（RFC3339；缺省=立即到期）
-    #[schemars(description = "可选：复习到期时间 RFC3339（如 2026-10-09T00:00:00Z）；缺省=立即到期。")]
+    #[schemars(
+        description = "可选：复习到期时间 RFC3339（如 2026-10-09T00:00:00Z）；缺省=立即到期。"
+    )]
     pub review_due_at: Option<String>,
 }
 
@@ -204,8 +210,11 @@ impl EngramMcpServer {
                 .await
             }
             "list" => {
-                self.study_list(ctx, Parameters(dispatch::from_args("study", "list", call.args)?))
-                    .await
+                self.study_list(
+                    ctx,
+                    Parameters(dispatch::from_args("study", "list", call.args)?),
+                )
+                .await
             }
             "topic_update" => {
                 self.study_topic_update(
@@ -324,7 +333,10 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_study_read(&p)?;
-        let rows = study_svc(&self.state).topic_list().await.map_err(from_study)?;
+        let rows = study_svc(&self.state)
+            .topic_list()
+            .await
+            .map_err(from_study)?;
         ok_json(serde_json::json!({ "topics": rows, "count": rows.len() }))
     }
 
@@ -339,7 +351,12 @@ impl EngramMcpServer {
         let id = uuid::Uuid::parse_str(&tp.id)
             .map_err(|_| rmcp::ErrorData::invalid_params(format!("id 非法: {}", tp.id), None))?;
         study_svc(&self.state)
-            .topic_update(id, tp.name.as_deref(), tp.goal.as_deref(), tp.status.as_deref())
+            .topic_update(
+                id,
+                tp.name.as_deref(),
+                tp.goal.as_deref(),
+                tp.status.as_deref(),
+            )
             .await
             .map_err(from_study)?;
         ok_json(serde_json::json!({ "id": tp.id, "ok": true }))
@@ -355,7 +372,10 @@ impl EngramMcpServer {
         require_study(&p)?;
         let id = uuid::Uuid::parse_str(&tp.id)
             .map_err(|_| rmcp::ErrorData::invalid_params(format!("id 非法: {}", tp.id), None))?;
-        study_svc(&self.state).topic_delete(id).await.map_err(from_study)?;
+        study_svc(&self.state)
+            .topic_delete(id)
+            .await
+            .map_err(from_study)?;
         ok_json(serde_json::json!({ "id": tp.id, "deleted": true }))
     }
 
@@ -438,7 +458,9 @@ impl EngramMcpServer {
             .item_set_review(item_id, rp.needs_review, due)
             .await
             .map_err(from_study)?;
-        ok_json(serde_json::json!({ "item_id": rp.item_id, "needs_review": rp.needs_review, "ok": true }))
+        ok_json(
+            serde_json::json!({ "item_id": rp.item_id, "needs_review": rp.needs_review, "ok": true }),
+        )
     }
 
     /// 复习队列（已标记且到期）。
@@ -449,7 +471,10 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_study_read(&p)?;
-        let rows = study_svc(&self.state).reviews_due().await.map_err(from_study)?;
+        let rows = study_svc(&self.state)
+            .reviews_due()
+            .await
+            .map_err(from_study)?;
         ok_json(serde_json::json!({ "reviews": rows, "count": rows.len() }))
     }
 

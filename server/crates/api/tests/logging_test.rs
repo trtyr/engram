@@ -267,7 +267,13 @@ async fn audit_actions_land_in_logs() {
         .fetch_all(&pool)
         .await
         .unwrap_or_default();
-        let need = ["auth.login", "credentials.put", "credentials.delete", "apikey.create", "apikey.revoke"];
+        let need = [
+            "auth.login",
+            "credentials.put",
+            "credentials.delete",
+            "apikey.create",
+            "apikey.revoke",
+        ];
         if need.iter().all(|n| actions_now.iter().any(|a| a == n)) {
             break;
         }
@@ -365,7 +371,11 @@ async fn logs_query_endpoint_filters_and_paginates() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(v["logs"].as_array().unwrap().len(), 1, "limit=1 应只返 1 条");
+    assert_eq!(
+        v["logs"].as_array().unwrap().len(),
+        1,
+        "limit=1 应只返 1 条"
+    );
     assert_eq!(v["total"], serde_json::json!(1), "total 不受 limit 影响");
 
     // scope=job / scope=system 的计数口径
@@ -384,7 +394,11 @@ async fn logs_query_endpoint_filters_and_paginates() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(v["total"], serde_json::json!(4), "全部 4 行都无 job_id: {v}");
+    assert_eq!(
+        v["total"],
+        serde_json::json!(4),
+        "全部 4 行都无 job_id: {v}"
+    );
 
     // request_id 过滤
     let resp = get("request_id=rid-1").await;
@@ -684,7 +698,9 @@ async fn memory_lifecycle_queryable_by_domain() {
     let _guard = tracing::subscriber::set_default(subscriber);
 
     let (app, pg) = app().await;
-    let pool = connect_with_retry(&connection_url(&pg).await.unwrap()).await.unwrap();
+    let pool = connect_with_retry(&connection_url(&pg).await.unwrap())
+        .await
+        .unwrap();
     let writer = logging::spawn_log_writer(pool.clone(), rx);
     let token = support::login_token(&app).await;
 
@@ -711,7 +727,9 @@ async fn memory_lifecycle_queryable_by_domain() {
         .unwrap();
     assert_eq!(resp.status(), axum::http::StatusCode::CREATED, "会话写入");
     let created: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap(),
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
     )
     .unwrap();
     let sid = created["id"].as_str().expect("session id").to_string();
@@ -757,7 +775,9 @@ async fn memory_lifecycle_queryable_by_domain() {
         .unwrap();
     assert_eq!(resp.status(), axum::http::StatusCode::CREATED, "原子直写");
     let atom: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap(),
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
     )
     .unwrap();
     let aid = atom["id"].as_str().expect("atom id").to_string();
@@ -822,7 +842,10 @@ async fn memory_lifecycle_queryable_by_domain() {
         .fetch_all(&pool)
         .await
         .unwrap_or_default();
-        let total: i64 = sqlx::query_scalar("SELECT count(*) FROM logs").fetch_one(&pool).await.unwrap_or(-1);
+        let total: i64 = sqlx::query_scalar("SELECT count(*) FROM logs")
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(-1);
         panic!("memory 域三型生命周期行应到齐——总行 {total}，分布: {all:?}");
     }
 
@@ -836,8 +859,16 @@ async fn memory_lifecycle_queryable_by_domain() {
     .await
     .unwrap();
     let actions: Vec<Option<String>> = rows.iter().map(|(_, a, _)| a.clone()).collect();
-    assert!(actions.iter().any(|a| a.as_deref() == Some("write_session")), "写入 lifecycle 行: {rows:?}");
-    assert!(actions.iter().any(|a| a.as_deref() == Some("search")), "读取 lifecycle 行");
+    assert!(
+        actions
+            .iter()
+            .any(|a| a.as_deref() == Some("write_session")),
+        "写入 lifecycle 行: {rows:?}"
+    );
+    assert!(
+        actions.iter().any(|a| a.as_deref() == Some("search")),
+        "读取 lifecycle 行"
+    );
     assert!(
         rows.iter().any(|(t, _, _)| t == "audit.edit_atom"),
         "edit_atom 审计行（logs 域化路径）: {rows:?}"
@@ -875,7 +906,9 @@ async fn memory_lifecycle_queryable_by_domain() {
         .unwrap();
     assert_eq!(resp.status(), axum::http::StatusCode::OK);
     let body: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap(),
+        &axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap(),
     )
     .unwrap();
     let sys_targets: Vec<String> = body["logs"]
@@ -885,7 +918,9 @@ async fn memory_lifecycle_queryable_by_domain() {
         .filter_map(|l| l["target"].as_str().map(str::to_string))
         .collect();
     assert!(
-        !sys_targets.iter().any(|t| t.starts_with("memory.lifecycle") || t.starts_with("audit.")),
+        !sys_targets
+            .iter()
+            .any(|t| t.starts_with("memory.lifecycle") || t.starts_with("audit.")),
         "system 域不应含 memory 生命周期/审计行: {sys_targets:?}"
     );
 }

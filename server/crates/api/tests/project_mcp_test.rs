@@ -613,7 +613,7 @@ async fn project_scope_enforcement() {
         rpc(
             2,
             "tools/call",
-            json!({"name": "memory", "arguments": {"action": "search", "query": "x"}}),
+            json!({"name": "memory", "arguments": {"action": "recall", "mode": "search", "query": "x"}}),
         ),
     )
     .await;

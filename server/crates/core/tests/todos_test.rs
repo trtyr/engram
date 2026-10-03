@@ -1244,8 +1244,8 @@ async fn todos_update_fields_and_overdue_filter() {
     // 时间敏感守卫（P004 收官补）：due filter 的 today 分支用 date_trunc('day', now())
     // （PG 会话时区，测试环境=UTC）——UTC 23:00 后跑测时 now+1h 已落 UTC 次日，
     // today 集合为空是正确语义，此时跳过命中断言（overdue 不混入的断言恒成立）
-    let crosses_utc_midnight = (Utc::now() + chrono::Duration::hours(1)).date_naive()
-        != Utc::now().date_naive();
+    let crosses_utc_midnight =
+        (Utc::now() + chrono::Duration::hours(1)).date_naive() != Utc::now().date_naive();
     if !crosses_utc_midnight {
         assert_eq!(today.len(), 1);
         assert_eq!(today[0].id, future.id);

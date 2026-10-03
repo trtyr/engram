@@ -189,7 +189,9 @@ pub struct WikiDocumentAddParams {
     )]
     pub text: Option<String>,
     /// 二选一：要抓取的 URL（SSRF 校验）
-    #[schemars(description = "二选一：要抓取的 URL（自动抓取→分块→嵌入；维护 Agent 自动接力）。与 text 二选一。")]
+    #[schemars(
+        description = "二选一：要抓取的 URL（自动抓取→分块→嵌入；维护 Agent 自动接力）。与 text 二选一。"
+    )]
     pub url: Option<String>,
     /// 可选：文档名/标题（text 模式作标题；url 模式忽略）。兼容 `title` 字段名。
     #[schemars(description = "可选：文档标题（text 模式）。字段名 `name` 或 `title` 均可。")]
@@ -213,7 +215,6 @@ pub struct WikiDocumentsSearchParams {
     #[schemars(description = "可选：返回上限。默认 8。")]
     pub limit: Option<i64>,
 }
-
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiMergeParams {

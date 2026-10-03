@@ -3,13 +3,13 @@
 
 mod support;
 
-use tracing_subscriber::prelude::*;
 use axum::Json;
 use axum::routing::post;
 use engram_llm::KeyCipher;
 use engram_llm::provider::{LlmProvider, OpenAiCompatProvider, ProviderRegistry};
 use engram_llm::router::{PurposeRouter, RouteRule, RoutingTable};
 use engram_llm::types::{EmbedRequest, Purpose};
+use tracing_subscriber::prelude::*;
 
 /// 起 mock OpenAI 兼容端点（/v1/chat/completions + /v1/embeddings）。
 /// 返回 base_url。
@@ -319,8 +319,7 @@ async fn record_usage_emits_structured_log_event() {
     let (_c, registry, _router) = setup().await;
 
     // 全局注册（spawn 跨线程也生效；本文件其他测试的事件同入 collected，无碍断言）
-    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer))
-        .unwrap();
+    tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer)).unwrap();
 
     let handle = tokio::spawn(async move {
         registry

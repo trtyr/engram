@@ -18,7 +18,10 @@ async fn topic_get_full_contract() {
     let (_pool, svc, _pg) = setup().await;
 
     // 开题
-    let topic = svc.topic_create("RAG 入门", "掌握到能设计切分管线").await.unwrap();
+    let topic = svc
+        .topic_create("RAG 入门", "掌握到能设计切分管线")
+        .await
+        .unwrap();
 
     // 空态：进度 0/0，next_up 空
     let full = svc.topic_get(topic).await.unwrap().unwrap();
@@ -35,7 +38,11 @@ async fn topic_get_full_contract() {
     let full = svc.topic_get(topic).await.unwrap().unwrap();
     assert_eq!(full.progress.total, 3);
     let names: Vec<&str> = full.items.iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(names, vec!["基础流程", "切分策略", "嵌入与向量检索"], "position 升序");
+    assert_eq!(
+        names,
+        vec!["基础流程", "切分策略", "嵌入与向量检索"],
+        "position 升序"
+    );
     assert_eq!(full.next_up.len(), 3, "全 not_started 都在 next_up");
 
     // 状态机：a learned、b learning → next_up 只剩 c，in_progress = [b]
@@ -81,9 +88,16 @@ async fn error_paths() {
         Err(engram_core::study::StudyError::BadRequest(_))
     ));
     let item = svc.item_add(topic, "n", None).await.unwrap();
-    assert!(svc.item_set_status(item, "mastered").await.is_err(), "非三态拒绝");
+    assert!(
+        svc.item_set_status(item, "mastered").await.is_err(),
+        "非三态拒绝"
+    );
     // 不存在 item
-    assert!(svc.item_set_status(Uuid::now_v7(), "learned").await.is_err());
+    assert!(
+        svc.item_set_status(Uuid::now_v7(), "learned")
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -92,14 +106,18 @@ async fn topic_update_and_archive() {
     let topic = svc.topic_create("T", "旧目标").await.unwrap();
 
     // 补丁更新：goal+status 一起，name 不动
-    svc.topic_update(topic, None, Some("新目标"), Some("paused")).await.unwrap();
+    svc.topic_update(topic, None, Some("新目标"), Some("paused"))
+        .await
+        .unwrap();
     let full = svc.topic_get(topic).await.unwrap().unwrap();
     assert_eq!(full.track.name, "T");
     assert_eq!(full.track.goal, "新目标");
     assert_eq!(full.track.status, "paused");
 
     // 归档
-    svc.topic_update(topic, None, None, Some("done")).await.unwrap();
+    svc.topic_update(topic, None, None, Some("done"))
+        .await
+        .unwrap();
     let full = svc.topic_get(topic).await.unwrap().unwrap();
     assert_eq!(full.track.status, "done", "归档后数据保留（产出物留 wiki）");
 

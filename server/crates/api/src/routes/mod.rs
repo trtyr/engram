@@ -8,11 +8,11 @@ pub mod health;
 pub mod jobs_api;
 pub mod llm_api;
 pub mod logs_api;
-pub mod study_api;
 pub mod memory_api;
 pub mod migrate_api;
 pub mod project_api;
 pub mod search_api;
+pub mod study_api;
 pub mod todos_api;
 pub mod wiki_api;
 pub mod wiki_docs_api;
@@ -112,8 +112,8 @@ pub fn router(state: AppState) -> Router {
         .merge(account_routes())
         .merge(jobs_routes())
         .merge(settings_routes())
-    .merge(logs_api::logs_routes())
-    .merge(study_routes())
+        .merge(logs_api::logs_routes())
+        .merge(study_routes())
         .merge(llm_routes())
         .merge(memory_routes())
         .merge(search_routes())
@@ -321,22 +321,22 @@ fn wiki_routes() -> Router<AppState> {
         )
         // P008-T003：/wiki/ingest 承载维护 Agent 下发入口（P004-T009 曾随旧织入流水线退役，
         // 现以 Agent Harness 语义重建——见 wiki_docs_api::ingest）。
-        .route("/wiki/webreader/status", get(wiki_docs_api::webreader_status))
         .route(
-            "/wiki/webreader/test",
-            post(wiki_docs_api::webreader_test),
+            "/wiki/webreader/status",
+            get(wiki_docs_api::webreader_status),
         )
+        .route("/wiki/webreader/test", post(wiki_docs_api::webreader_test))
         .route("/wiki/pages", get(wiki_api::list_pages))
         .route("/wiki/folders", get(wiki_api::list_folders))
-        .route(
-            "/wiki/pages/{slug}/versions",
-            get(wiki_api::list_versions),
-        )
+        .route("/wiki/pages/{slug}/versions", get(wiki_api::list_versions))
         .route(
             "/wiki/pages/{slug}/versions/{version}",
             get(wiki_api::version_content),
         )
-        .route("/wiki/pages/{slug}/restore", post(wiki_api::restore_version))
+        .route(
+            "/wiki/pages/{slug}/restore",
+            post(wiki_api::restore_version),
+        )
         .route(
             "/wiki/pages/{slug}",
             get(wiki_api::get_page)

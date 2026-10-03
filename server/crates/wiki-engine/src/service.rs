@@ -399,7 +399,6 @@ impl WikiService {
         self
     }
 
-
     // ---------- purpose（wiki 灵魂；每库一份，键 wiki_purpose:{lib}） ----------
 
     pub async fn get_purpose(

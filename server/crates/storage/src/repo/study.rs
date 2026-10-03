@@ -45,12 +45,7 @@ pub struct StudyJournalRow {
 
 // ---------- track ----------
 
-pub async fn track_create(
-    pool: &PgPool,
-    id: Uuid,
-    name: &str,
-    goal: &str,
-) -> StoreResult<()> {
+pub async fn track_create(pool: &PgPool, id: Uuid, name: &str, goal: &str) -> StoreResult<()> {
     sqlx::query("INSERT INTO study_tracks (id, name, goal) VALUES ($1, $2, $3)")
         .bind(id)
         .bind(name)
@@ -209,10 +204,7 @@ pub async fn item_delete(pool: &PgPool, id: Uuid) -> StoreResult<()> {
 }
 
 /// 进度统计（core topic_get 用）。
-pub async fn track_progress(
-    pool: &PgPool,
-    track_id: Uuid,
-) -> StoreResult<(i64, i64)> {
+pub async fn track_progress(pool: &PgPool, track_id: Uuid) -> StoreResult<(i64, i64)> {
     let (total, learned): (i64, i64) = sqlx::query_as(
         "SELECT count(*), count(*) FILTER (WHERE status = 'learned') \
          FROM study_track_items WHERE track_id = $1",
@@ -258,12 +250,7 @@ pub async fn reviews_due(pool: &PgPool) -> StoreResult<Vec<StudyItemRow>> {
 
 // ---------- journal（P007 二期 T012） ----------
 
-pub async fn journal_add(
-    pool: &PgPool,
-    id: Uuid,
-    track_id: Uuid,
-    note: &str,
-) -> StoreResult<()> {
+pub async fn journal_add(pool: &PgPool, id: Uuid, track_id: Uuid, note: &str) -> StoreResult<()> {
     sqlx::query("INSERT INTO study_track_journal (id, track_id, note) VALUES ($1, $2, $3)")
         .bind(id)
         .bind(track_id)

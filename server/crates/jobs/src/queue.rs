@@ -195,15 +195,17 @@ impl JobQueue {
         data: Option<serde_json::Value>,
     ) -> Result<(), JobError> {
         // T019 域化：kind → domain 表驱动（写入层单点 emit_log）
-        let kind: Option<String> =
-            sqlx::query_scalar("SELECT kind FROM jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| JobError::Retryable(e.to_string()))?;
+        let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM jobs WHERE id = $1")
+            .bind(job_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
         let kind = kind.unwrap_or_else(|| "unknown".into());
         let mut fields = serde_json::Map::new();
-        fields.insert("job_id".into(), serde_json::Value::String(job_id.to_string()));
+        fields.insert(
+            "job_id".into(),
+            serde_json::Value::String(job_id.to_string()),
+        );
         if let Some(obj) = data.as_ref().and_then(|d| d.as_object()) {
             for (k, v) in obj {
                 fields.insert(k.clone(), v.clone());

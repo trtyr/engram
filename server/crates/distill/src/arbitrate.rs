@@ -308,7 +308,11 @@ async fn archive_candidate(pool: &sqlx::PgPool, id: Uuid) -> Result<(), JobError
 }
 
 /// T002：旧条降位。返回是否真的降了位（旧条非 active = false——调用方据此走待审路径）。
-async fn mark_superseded(pool: &sqlx::PgPool, new_id: Uuid, old_id: Uuid) -> Result<bool, JobError> {
+async fn mark_superseded(
+    pool: &sqlx::PgPool,
+    new_id: Uuid,
+    old_id: Uuid,
+) -> Result<bool, JobError> {
     let r = sqlx::query(
         "UPDATE atoms SET status = 'superseded', superseded_by = $1, updated_at = now() WHERE id = $2 AND status = 'active'",
     )

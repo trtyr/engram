@@ -73,7 +73,7 @@ pub async fn suggest_routing(
             temperature: Some(0.2),
             json_mode: true,
             max_tokens: Some(2000),
-        tools: None,
+            tools: None,
         })
         .await
         .map_err(|e| ApiError::Unavailable(e.to_string()))?;

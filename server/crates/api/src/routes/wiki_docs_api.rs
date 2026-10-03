@@ -312,8 +312,8 @@ pub(crate) async fn webreader_test(
     Json(req): Json<WebReaderTestRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&principal)?;
-    let Some(client) = engram_core::wiki_docs::web_reader::WebReaderClient::from_pool(&state.pool)
-        .await
+    let Some(client) =
+        engram_core::wiki_docs::web_reader::WebReaderClient::from_pool(&state.pool).await
     else {
         return Ok(Json(
             serde_json::json!({ "ok": false, "error": "未配置 zhipu/web_reader_key 凭据" }),
@@ -339,7 +339,6 @@ pub(crate) async fn webreader_test(
     }
 }
 
-
 /// 喂给维护 Agent（URL/文本二选一）——异步 job，返 job_id 供进度查询。
 #[utoipa::path(post, path = "/wiki/ingest",
     request_body = serde_json::Value,
@@ -350,8 +349,16 @@ pub async fn ingest(
     Json(body): Json<serde_json::Value>,
 ) -> Result<(axum::http::StatusCode, Json<serde_json::Value>), ApiError> {
     crate::auth::require_scope(&principal, "wiki")?;
-    let url = body.get("url").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
-    let text = body.get("text").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+    let url = body
+        .get("url")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let text = body
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     if url.is_some() == text.is_some() {
         return Err(ApiError::BadRequest("text 与 url 二选一".into()));
     }
@@ -367,7 +374,10 @@ pub async fn ingest(
             .unwrap_or_else(|| "阅读下方原料，沉淀为 wiki 知识页（建页/更新/互链）。".into()),
         source_url: url.map(str::to_string),
         source_text: text.map(str::to_string),
-        source_name: body.get("title").and_then(|v| v.as_str()).map(str::to_string),
+        source_name: body
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
     };
     let queue = engram_jobs::JobQueue::new(state.pool.clone());
     let job_id = engram_core::wiki_agent::enqueue_agent_task(&queue, &task)
