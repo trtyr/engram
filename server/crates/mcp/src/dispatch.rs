@@ -429,6 +429,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
             | ("assets", "runbook_save" | "runbook_restore")
             | ("credentials", "put" | "delete")
             | ("circles", "create" | "update" | "relate" | "unrelate")
+            | ("circles", "forget" | "delete" | "merge" | "attach" | "detach")
             | (
                 "study",
                 "add"
@@ -515,7 +516,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
         ) | ("assets", "kinds" | "list" | "get")
             | ("assets", "runbook" | "runbook_versions")
             | ("credentials", "list" | "get" | "reads")
-            | ("circles", "graph" | "entity" | "relations")
+            | ("circles", "graph" | "entity" | "relations" | "duplicates")
             | (
                 "wiki",
                 "search"
