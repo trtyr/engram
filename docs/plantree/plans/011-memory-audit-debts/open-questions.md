@@ -2,14 +2,12 @@
 
 > 只留未决。拍板后移入 decisions/ 并从本文件删除。
 
-## Q001 · 审计事件去向（T001 前置）
+## Q001 · 审计事件去向——**已拍板（2026-10-03）：改走 logs**
 
-`audit()` 直插 jobs 表伪造 succeeded job 行，与 P010「日志唯一时间线」冲突。候选：
-- **A. 改走 logs**：audit() 改调 queue emit（target=`audit.<kind>`，fields 带 actor/payload），
-  jobs 表不再收伪造行；审计在日志页/MCP logs 可查，与「一切以日志为唯一查看面」自洽。
-- **B. 保留现状 + 登记例外**：jobs 面继续承载审计（jobs.list 可查），文档登记
-  「审计是 jobs 面的合法内容」。
-- 若 A：jobs 表现存审计行如何处置（留停写按 0067 先例回填 logs？还是原地留存）？
+用户原话：「我们现在系统里没有 job 这个东西了，只有日志。」——审计是记忆域的
+治理记录，归 logs 流。落地：T001 实现时 `audit()` 改走 emit（target=`audit.<kind>`，
+fields 带 actor/payload），jobs 表不再收伪造 succeeded 行；历史审计行是否回填
+随实现评估（量小，倾向不回填、原地留存）。
 
 ## Q002 · revive_entity 处置（T008/T021 前置）——**已改判（2026-10-03）**
 

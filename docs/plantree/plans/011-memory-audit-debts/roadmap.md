@@ -10,6 +10,10 @@
   arbitrate 三判 7/7；107 次调用 <$0.002。评测依据与阈值分档见
   [decisions/001-jev-l01-guard.md](decisions/001-jev-l01-guard.md)；完整评测数据在
   本文件 git 历史（42cc110..bf30073）。
+  **误杀复核（2026-10-03）**：2 条「误放」段人工复核——**非 extract 误杀，是 JEV
+  措辞诱导假阳性**（均为 pi-config 项目技术决策，「用户拍板」字样诱导判 user_facts；
+  主语判据严格套属 project_internal，历史 extract 判对）。「空产出段补抽哨兵」撤销；
+  **criteria 教训入 T014 问题设计**：「用户拍板了 X」≠ 用户记忆，看 X 的实质主语。
 
 ## In Progress
 
@@ -179,8 +183,6 @@
 
 ## Deferred / 交叉引用
 
-- **空产出段 JEV 补抽哨兵**：T014 落地后的可选玩法——对 0 原子段跑 JEV，高 P（疑似
-  历史误杀）进二次精抽。前置：复核 2 条疑似误杀坐实后再立项
 - prompt_version 归因列（atoms/scenarios）→ **P001 Deferred 已挂**，不重复开
 - 实体归并 LIMIT 1 加 ORDER BY → P001 Deferred「杂项」已挂（本线 T005 补全另两半）
 - 结构观察（非缺陷，登记备查）：敏感标记在 L2 丢失——scenarios 表无 sensitive 列，
