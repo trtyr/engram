@@ -118,6 +118,26 @@
   核实后删；其余 6 条（contact-*/resume-path/music-*）合规保留。
   动机：KV 正从「精确值登记簿」退化为「不知道放哪就放这」的杂物抽屉（9 条中 2 条
   放错）——用 JEV 把准入判据从纪律变成机制。
+- [ ] **T018 · MCP memory 域动作面收敛 32→6（旧名删除，不做兼容）**
+  用户拍板（2026-10-03）：System prompt 由用户自行维护，旧名无需兼容——直接删。
+  目标形态（六动词全 mode 归并）：
+  `remember`（atom/session/append/kv——吸收 write_session/append_session/kv_put）·
+  `recall`（search/context/entities/kv_get/kv_search）·
+  `browse`（atoms/sessions/session/kv/**scenarios/persona**——吸收 list_atoms/
+  list_sessions/get_session/kv_list/scenarios_list/persona_get）·
+  `revise`（correct/persona/**archive/merge**——吸收 correct/persona_edit/
+  atom_archive/entity_merge）·
+  `review`（distill/result/confirm/discard/**duplicates**——吸收 distill/distill_result/
+  confirm/discard/atom_duplicates/entity_duplicates，duplicates 带 target 参数）·
+  `forget`（void/erase/restore/**kv**——吸收三个会话动作+kv_delete）。
+  mode 改名：session_append→append（去旧名影子）；kv_delete→forget(mode=kv)。
+  语义全覆盖 32→6，零丢失；实体 CRUD 本就不在 MCP 面（HTTP/Web），不受影响。
+  **动机（修正口径）**：MCP 每域一个工具位，tools/list 不膨胀；真实代价在 help
+  渐进发现消化 32 条（25 条重复语义）、双份参数结构维护（RememberParams 与
+  WriteSessionParams 并存）、动作选择错误率、管理台开关噪音——EN-235 改造的
+  未竟终章。变更面：dispatch.rs 动作表与 handler 合并 + golden 快照重生成 +
+  mcp_test 三处断言（照 P010 两轮门禁教训预防）+ Web 管理台跟随。验证：门禁 +
+  golden + Agent 实测（pi 自身即消费者）。
 
 ## Deferred / 交叉引用
 
