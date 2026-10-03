@@ -3,6 +3,7 @@
  * 时间窗默认近 7 天；长内容（消息/字段）默认收起，点击展开——避免整页被撑爆。
  */
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { api, type Job, type JobEvent } from '@/lib/api'
 import { Card, Empty, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls, tableCls } from '@/lib/ui'
@@ -102,6 +103,15 @@ export default function Logs() {
     loadJobs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobStatus])
+
+  // 支持 /logs#jobs 锚点直达（Dashboard 的失败徽章/活动行跳此处）
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (hash === '#jobs') {
+      const el = document.getElementById('jobs')
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [hash])
 
   // 10s 自动刷新
   useEffect(() => {
@@ -209,7 +219,10 @@ export default function Logs() {
       )}
 
       {/* ── 后台任务（原「任务」页并入） ── */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-5">
+      <div
+        id="jobs"
+        className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-5"
+      >
         <h2 className="text-sm font-semibold">后台任务</h2>
         <select className={selectCls} value={jobStatus} onChange={(e) => setJobStatus(e.target.value)}>
           <option value="">全部状态</option>
