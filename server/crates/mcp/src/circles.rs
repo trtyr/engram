@@ -17,6 +17,48 @@ pub struct CirclesEntityParams {
     /// 实体 id
     #[schemars(description = "实体 id（UUID，来自 graph 的节点或 entities 检索）。")]
     pub entity_id: String,
+    /// 可选：true = 含 superseded 历史原子（T021② 全量考古；默认仅活跃）
+    #[schemars(description = "可选：true = 含 superseded 历史原子（全量考古）；默认仅活跃。")]
+    #[serde(default)]
+    pub include_superseded: bool,
+}
+
+/// T021：forget/delete/merge/attach/detach 共用的实体 id 参数。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CirclesTargetParams {
+    /// 实体 id（操作目标）
+    #[schemars(description = "实体 id（UUID）。forget=归档目标；delete=物理删目标；merge=被并方（from）；attach/detach=挂摘目标实体。")]
+    pub entity_id: String,
+}
+
+/// T021：merge 的并入方。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CirclesMergeParams {
+    /// 被并方实体 id（from——墓碑化，原子改挂）
+    #[schemars(description = "被并方实体 id（from）：墓碑化后原子改挂到 into。")]
+    pub from_id: String,
+    /// 并入方实体 id（into——保留方，档案延续）
+    #[schemars(description = "并入方实体 id（into）：保留方，档案延续。")]
+    pub into_id: String,
+}
+
+/// T021：attach/detach 的原子挂摘参数。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CirclesAtomLinkParams {
+    /// 实体 id
+    #[schemars(description = "实体 id（UUID）。")]
+    pub entity_id: String,
+    /// 原子 id
+    #[schemars(description = "原子 id（UUID）。attach=挂上；detach=摘下。")]
+    pub atom_id: String,
+}
+
+/// T021：实体详情全量开关。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct CirclesEntityFullParams {
+    /// 实体 id
+    #[schemars(description = "实体 id（UUID）。")]
+    pub entity_id: String,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -113,7 +155,11 @@ impl EngramMcpServer {
                 let p: CirclesEntityParams = dispatch::from_args("circles", "entity", call.args)?;
                 let id = uuid::Uuid::parse_str(&p.entity_id)
                     .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "entity_id 不是合法 UUID"))?;
-                let d = svc.get_entity(id).await.map_err(memory_err)?;
+                let d = if p.include_superseded {
+                    svc.get_entity_full(id).await.map_err(memory_err)?
+                } else {
+                    svc.get_entity(id).await.map_err(memory_err)?
+                };
                 ok_json(json!({
                     "entity": d.entity,
                     "atoms": d.atoms,
@@ -144,6 +190,74 @@ impl EngramMcpServer {
                     .await
                     .map_err(memory_err)?;
                 ok_json(json!({ "entity": e, "hint": "摘要手编已留修订史（entity revisions）。" }))
+            }
+            "forget" => {
+                // T021/Q004：归档式遗忘——实体归档 + 挂链 active 原子级联归档（可恢复）
+                let p: CirclesTargetParams = dispatch::from_args("circles", "forget", call.args)?;
+                let id = uuid::Uuid::parse_str(&p.entity_id)
+                    .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "entity_id 不是合法 UUID"))?;
+                let archived = svc.forget_entity(id).await.map_err(memory_err)?;
+                ok_json(json!({
+                    "entity_id": id,
+                    "archived_atoms": archived,
+                    "hint": "归档式遗忘：实体与挂链活跃原子级联归档（可恢复）。显式清理走 action=\"delete\"。"
+                }))
+            }
+            "delete" => {
+                // T021/Q004：物理删——档案蒸发（显式清理意图，不可恢复）
+                let p: CirclesTargetParams = dispatch::from_args("circles", "delete", call.args)?;
+                let id = uuid::Uuid::parse_str(&p.entity_id)
+                    .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "entity_id 不是合法 UUID"))?;
+                svc.delete_entity(id).await.map_err(memory_err)?;
+                ok_json(json!({
+                    "entity_id": id,
+                    "deleted": true,
+                    "hint": "物理删除完成（不可恢复）。默认安全路径用 action=\"forget\"（归档可恢复）。"
+                }))
+            }
+            "merge" => {
+                // T021：实体合并——from 墓碑化，原子改挂到 into（档案延续）
+                let p: CirclesMergeParams = dispatch::from_args("circles", "merge", call.args)?;
+                let from = uuid::Uuid::parse_str(&p.from_id)
+                    .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "from_id 不是合法 UUID"))?;
+                let into = uuid::Uuid::parse_str(&p.into_id)
+                    .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "into_id 不是合法 UUID"))?;
+                let moved = svc.merge_entities(from, into).await.map_err(memory_err)?;
+                ok_json(json!({
+                    "from_id": from, "into_id": into, "moved_atoms": moved,
+                    "hint": "合并完成：from 墓碑化，原子改挂到 into。"
+                }))
+            }
+            "attach" => {
+                // T021：挂原子到实体（跨域操作按发起视角归 circles——动的是 atom_entities 边）
+                let p: CirclesAtomLinkParams =
+                    dispatch::from_args("circles", "attach", call.args)?;
+                let eid = uuid::Uuid::parse_str(&p.entity_id)
+                    .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "entity_id 不是合法 UUID"))?;
+                let aid = uuid::Uuid::parse_str(&p.atom_id)
+                    .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "atom_id 不是合法 UUID"))?;
+                svc.attach_atom(eid, aid).await.map_err(memory_err)?;
+                ok_json(json!({ "entity_id": eid, "atom_id": aid, "attached": true }))
+            }
+            "detach" => {
+                let p: CirclesAtomLinkParams =
+                    dispatch::from_args("circles", "detach", call.args)?;
+                let eid = uuid::Uuid::parse_str(&p.entity_id)
+                    .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "entity_id 不是合法 UUID"))?;
+                let aid = uuid::Uuid::parse_str(&p.atom_id)
+                    .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "atom_id 不是合法 UUID"))?;
+                svc.detach_atom(eid, aid).await.map_err(memory_err)?;
+                ok_json(json!({ "entity_id": eid, "atom_id": aid, "detached": true }))
+            }
+            "duplicates" => {
+                // T021：实体重复检测（从 memory 域按域界挪入）
+                let _: CirclesGraphParams = dispatch::from_args("circles", "duplicates", call.args)?;
+                let dups = svc.entity_duplicates().await.map_err(memory_err)?;
+                ok_json(json!({
+                    "duplicates": dups,
+                    "count": dups.len(),
+                    "hint": "同名实体分组（归一化名/数量/id 列表，EN-242）。合并用 action=\"merge\"。"
+                }))
             }
             "relate" => {
                 let p: CirclesRelateParams = dispatch::from_args("circles", "relate", call.args)?;

@@ -121,8 +121,8 @@ async fn mcp_initialize_and_list_tools() {
         "域工具描述应提示 help：{description}"
     );
     assert!(
-        description.contains("- search："),
-        "域工具描述应带操作目录：{description}"
+        description.contains("- remember："),
+        "域工具描述应带操作目录（T018 六动词）：{description}"
     );
     // inputSchema：action 必填
     assert!(
@@ -163,8 +163,9 @@ async fn mcp_tool_call_write_search_forget_journey() {
         call(
             2,
             "memory",
-            "write_session",
+            "remember",
             json!({
+                "mode": "session",
                 "turns": [
                     {"speaker": "user", "text": "我叫特让他也让，我在开发 Engram 记忆系统"},
                     {"speaker": "assistant", "text": "好的，我记住了。"}
@@ -183,8 +184,13 @@ async fn mcp_tool_call_write_search_forget_journey() {
     assert_eq!(session["agent"], "mcp-test", "agent 归因应取 key 名");
 
     // 上下文包（无蒸馏产物 → 各层为空但结构完整）
-    let (_, v) = mcp_rpc(&app, &key, call(4, "memory", "context", json!({}))).await;
-    let out = expect_result(&v, "tools/call context");
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(4, "memory", "recall", json!({"mode": "context"})),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call recall context");
     let content_text = out["content"][0]["text"].as_str().expect("文本内容");
     let pack: Value = serde_json::from_str(content_text).expect("ContextPack JSON");
     assert!(pack.get("meta").is_some(), "ContextPack 应含 meta");
@@ -238,8 +244,9 @@ async fn mcp_tool_call_l0_read_chain() {
         call(
             2,
             "memory",
-            "write_session",
+            "remember",
             json!({
+                "mode": "session",
                 "distill": "off",
                 "turns": [
                     {"speaker": "user", "text": "我在开发 Engram 记忆系统"},
@@ -249,15 +256,20 @@ async fn mcp_tool_call_l0_read_chain() {
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call write_session");
+    let out = expect_result(&v, "tools/call remember session");
     let content_text = out["content"][0]["text"].as_str().expect("文本内容");
     let session: Value = serde_json::from_str(content_text).expect("SessionDto JSON");
     assert_eq!(session["agent"], "mcp-test");
     let session_id = session["id"].as_str().unwrap().to_string();
 
-    // list_sessions 应看到它
-    let (_, v) = mcp_rpc(&app, &key, call(3, "memory", "list_sessions", json!({}))).await;
-    let out = expect_result(&v, "tools/call list_sessions");
+    // browse sessions 应看到它
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call(3, "memory", "browse", json!({"mode": "sessions"})),
+    )
+    .await;
+    let out = expect_result(&v, "tools/call browse sessions");
     let sessions: Value =
         serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert!(
@@ -276,12 +288,12 @@ async fn mcp_tool_call_l0_read_chain() {
         call(
             4,
             "memory",
-            "get_session",
-            json!({"session_id": session_id}),
+            "browse",
+            json!({"mode": "session", "session_id": session_id}),
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call get_session");
+    let out = expect_result(&v, "tools/call browse session");
     let got: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(got["id"], session["id"]);
 
@@ -292,8 +304,9 @@ async fn mcp_tool_call_l0_read_chain() {
         call(
             5,
             "memory",
-            "append_session",
+            "remember",
             json!({
+                "mode": "append",
                 "session_id": session_id,
                 "distill": "off",
                 "turns": [{"speaker": "user", "text": "补充一句"}]
@@ -301,14 +314,14 @@ async fn mcp_tool_call_l0_read_chain() {
         ),
     )
     .await;
-    let out = expect_result(&v, "tools/call append_session");
+    let out = expect_result(&v, "tools/call remember append");
     assert!(!out["isError"].as_bool().unwrap_or(false));
 
     // 实体检索工具可执行（空库合法）
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(6, "memory", "entities", json!({"q": "Engram"})),
+        call(6, "memory", "recall", json!({"mode": "entities", "q": "Engram"})),
     )
     .await;
     expect_result(&v, "tools/call entities");
@@ -317,7 +330,7 @@ async fn mcp_tool_call_l0_read_chain() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(7, "memory", "search", json!({"query": "Engram"})),
+        call(7, "memory", "recall", json!({"mode": "search", "query": "Engram"})),
     )
     .await;
     expect_result(&v, "tools/call search");
@@ -338,7 +351,7 @@ async fn mcp_scope_enforcement() {
     let (status, v) = mcp_rpc(
         &app,
         &wiki_key,
-        call(2, "memory", "search", json!({"query": "test"})),
+        call(2, "memory", "recall", json!({"mode": "search", "query": "test"})),
     )
     .await;
     assert_eq!(
@@ -449,8 +462,8 @@ async fn mcp_admin_info_endpoint() {
     let memory = tools.iter().find(|t| t["name"] == "memory").unwrap();
     assert_eq!(
         memory["actions"].as_array().unwrap().len(),
-        31,
-        "memory 域应展示 31 个操作（EN-235 六动词收编后：六动词 + KV 四动作 + 管家 correct/confirm/discard/persona_edit/distill + 浏览/治理/回执）：{memory}"
+        6,
+        "memory 域应展示 6 个操作（T018：六动词，旧名删除不兼容）：{memory}"
     );
 
     // 非 admin 拒绝
@@ -533,15 +546,15 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     let admin = login_token(&app).await;
     let key = create_key(&app, &admin, &["memory"]).await;
 
-    // 停用 memory.write_session（action 级开关）
+    // 停用 memory.remember（action 级开关，T018 六动词粒度）
     let (status, info) = put_mcp_config(
         &app,
         &admin,
-        json!({"disabled_tools": ["memory.write_session"]}),
+        json!({"disabled_tools": ["memory.remember"]}),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "action 键应通过校验：{info}");
-    assert_eq!(info["disabled_tools"], json!(["memory.write_session"]));
+    assert_eq!(info["disabled_tools"], json!(["memory.remember"]));
 
     // 域工具本身仍在 tools/list（工具级隐身只对整域停用生效）
     let (_, v) = mcp_rpc(&app, &key, rpc(1, "tools/list", json!({}))).await;
@@ -568,12 +581,12 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .expect("memory 工具");
     let description = domain["description"].as_str().unwrap_or("");
     assert!(
-        !description.contains("- write_session："),
-        "停用操作应从目录隐身：{description}"
+        !description.contains("- remember："),
+        "停用操作应从目录隐身（T018：remember 已停用）：{description}"
     );
     assert!(
-        description.contains("- search："),
-        "其余操作不受影响：{description}"
+        description.contains("- recall："),
+        "其余操作不受影响（T018：其余动词仍在目录）：{description}"
     );
 
     // tools/call 直接拒绝
@@ -583,8 +596,8 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         call(
             2,
             "memory",
-            "write_session",
-            json!({"turns": [{"speaker": "user", "text": "x"}]}),
+            "remember",
+            json!({"text": "x"}),
         ),
     )
     .await;
@@ -608,8 +621,8 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         .collect();
     assert_eq!(
         actions.len(),
-        30,
-        "停用操作应从手册隐身（31 含 write_session，停 1 剩 30）：{actions:?}"
+        5,
+        "停用操作应从手册隐身（T018：6 动词停 remember 剩 5）：{actions:?}"
     );
     assert!(!actions.contains(&"write_session"));
 
@@ -628,12 +641,16 @@ async fn mcp_tool_toggle_hides_and_rejects() {
         call(
             4,
             "memory",
-            "write_session",
-            json!({"distill": "off", "turns": [{"speaker": "user", "text": "回归测试"}]}),
+            "remember",
+            json!({
+                "mode": "session",
+                "distill": "off",
+                "turns": [{"speaker": "user", "text": "回归测试"}]
+            }),
         ),
     )
     .await;
-    expect_result(&v, "恢复后 write_session");
+    expect_result(&v, "恢复后 remember session");
 }
 
 // ---------- 渐进式发现（help / 未知 action / 坏参数自愈） ----------
@@ -1015,7 +1032,7 @@ async fn wiki_mcp_scope_enforcement() {
     let (_, v) = mcp_rpc(
         &app,
         &wiki_key,
-        call(2, "memory", "search", json!({"query": "x"})),
+        call(2, "memory", "recall", json!({"mode": "search", "query": "x"})),
     )
     .await;
     assert!(

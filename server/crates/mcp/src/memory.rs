@@ -22,6 +22,10 @@ pub struct ContextParams {
     pub include_evidence: Option<bool>,
 }
 
+/// T018：memory 域六动词白名单（旧名删除不做兼容——用户拍板 2026-10-03）。
+pub(crate) const MEMORY_VERBS: [&str; 6] =
+    ["remember", "recall", "browse", "revise", "review", "forget"];
+
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct MemoryDistillResultParams {
     /// 会话 id（write_session 返回的 id）
@@ -266,7 +270,7 @@ impl EngramMcpServer {
     /// 翻 browse / 改 revise / 审 review / 忘 forget——实现分层（L0-L3/KV）藏进 mode 参数。
     /// 开场 recall(mode="context") 装载，定向回忆 recall(mode="search")，收尾
     /// remember(mode="session") 写入；遗忘 forget（void/erase/restore 三档）。
-    /// 旧动作名（search/context/write_session/kv_* 等 18 个）全部保留为别名，行为不变。
+    /// T018（2026-10-03 用户拍板）：旧动作名全部删除不兼容——只接受六动词。
     /// 速记：remember 正文字段名是 text。操作全景：action="help"。
     #[tool(
         name = "memory",
@@ -288,7 +292,7 @@ impl EngramMcpServer {
 
     /// EN-235 六动词统一分发：存 remember / 找 recall / 翻 browse / 改 revise / 审 review /
     /// 忘 forget——六动词按 mode 归一到既有动作实现（实现分层 L0-L3/KV 藏进 mode 参数）；
-    /// 旧动作名全部保留为别名，平滑迁移不硬切。KV 门（original scope）与 help 在此统一。
+    /// T018：旧名删除不兼容，入口白名单六动词。KV 门（original scope）与 help 在此统一。
     pub(crate) async fn memory_dispatch(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -302,6 +306,15 @@ impl EngramMcpServer {
         } else {
             require_memory(&p)?;
         }
+        // T018（用户拍板 2026-10-03）：入口白名单——只接受六动词，旧名删除不做兼容。
+        if action != "help" && !MEMORY_VERBS.contains(&action.as_str()) {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "memory 域未知 action \"{action}\"——只接受六动词 remember/recall/browse/revise/review/forget（action=\"help\" 看手册；旧名已删除不兼容）"
+                ),
+            ));
+        }
         // 六动词 mode → 底层动作（参数原样透传给既有实现，未知 mode 可行动报错）。
         let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("");
         let unknown_mode = |verb: &str, allowed: &str| {
@@ -314,12 +327,12 @@ impl EngramMcpServer {
             "remember" => match mode {
                 "" | "atom" => "remember".into(),
                 "session" => "write_session".into(),
-                "session_append" => "append_session".into(),
+                "append" => "append_session".into(),
                 "kv" => "kv_put".into(),
                 _ => {
                     return Err(unknown_mode(
                         "remember",
-                        "atom（默认，一句话记忆）/ session（成段会话）/ session_append（续写会话）/ kv（精确值逐字保存）",
+                        "atom（默认，一句话记忆）/ session（成段会话）/ append（续写会话）/ kv（精确值逐字保存）",
                     ));
                 }
             },
@@ -341,31 +354,50 @@ impl EngramMcpServer {
                 "sessions" => "list_sessions".into(),
                 "session" => "get_session".into(),
                 "kv" => "kv_list".into(),
+                "scenarios" => "scenarios_list".into(),
+                "persona" => "persona_get".into(),
                 _ => {
                     return Err(unknown_mode(
                         "browse",
-                        "atoms（默认）/ sessions / session / kv",
+                        "atoms（默认）/ sessions / session / kv / scenarios / persona",
                     ));
                 }
             },
             "revise" => match mode {
                 "" | "correct" => "correct".into(),
                 "persona" => "persona_edit".into(),
-                _ => return Err(unknown_mode("revise", "correct（默认）/ persona")),
+                "archive" => "atom_archive".into(),
+                _ => {
+                    return Err(unknown_mode(
+                        "revise",
+                        "correct（默认，取代链留痕）/ persona / archive（原子归档）",
+                    ));
+                }
             },
             "review" => match mode {
                 "" | "distill" => "distill".into(),
                 "result" => "distill_result".into(),
                 "confirm" => "confirm".into(),
                 "discard" => "discard".into(),
+                "duplicates" => "atom_duplicates".into(),
                 _ => {
                     return Err(unknown_mode(
                         "review",
-                        "distill（默认）/ result / confirm / discard",
+                        "distill（默认）/ result / confirm / discard / duplicates（原子重复检测）",
                     ));
                 }
             },
-            _ => action.clone(),
+            "forget" => match mode {
+                "" | "void" | "erase" | "restore" => "forget".into(),
+                "kv" => "kv_delete".into(),
+                _ => {
+                    return Err(unknown_mode(
+                        "forget",
+                        "void（默认）/ erase / restore / kv（删 KV 精确值，需 original scope）",
+                    ));
+                }
+            },
+            _ => action.clone(), // help
         };
         if resolved != action && KV_ACTIONS.contains(&resolved.as_str()) {
             require_original(&p)?; // 六动词走 kv_* 底层动作同样要 original scope
@@ -522,13 +554,6 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "entity_duplicates" => {
-                self.memory_entity_duplicates(
-                    ctx,
-                    Parameters(dispatch::from_args("memory", "entity_duplicates", args)?),
-                )
-                .await
-            }
             "entities" => {
                 self.memory_entities(
                     ctx,
@@ -554,13 +579,6 @@ impl EngramMcpServer {
                 self.memory_kv_delete(
                     ctx,
                     Parameters(dispatch::from_args("memory", "kv_delete", args)?),
-                )
-                .await
-            }
-            "entity_merge" => {
-                self.memory_entity_merge(
-                    ctx,
-                    Parameters(dispatch::from_args("memory", "entity_merge", args)?),
                 )
                 .await
             }

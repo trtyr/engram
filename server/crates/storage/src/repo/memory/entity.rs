@@ -50,14 +50,26 @@ pub async fn list_entities(pool: &PgPool, kind: Option<&str>) -> StoreResult<Vec
 }
 
 /// 实体详情：相关原子时间线。
-pub async fn entity_atoms(pool: &PgPool, entity_id: Uuid) -> StoreResult<Vec<AtomDto>> {
-    let rows = sqlx::query_as::<_, AtomDto>(
+/// T021②：默认过滤 superseded（旧原子不再污染实体详情/时间线）；include_superseded=true 全量。
+pub async fn entity_atoms(
+    pool: &PgPool,
+    entity_id: Uuid,
+    include_superseded: bool,
+) -> StoreResult<Vec<AtomDto>> {
+    let superseded_filter = if include_superseded {
+        "TRUE"
+    } else {
+        "a.status <> 'superseded'"
+    };
+    let sql = format!(
         "SELECT a.* FROM atoms a JOIN atom_entities ae ON ae.atom_id = a.id \
-         WHERE ae.entity_id = $1 ORDER BY a.created_at DESC LIMIT 200",
-    )
-    .bind(entity_id)
-    .fetch_all(pool)
-    .await?;
+         WHERE ae.entity_id = $1 AND {superseded_filter} \
+         ORDER BY a.created_at DESC LIMIT 200"
+    );
+    let rows = sqlx::query_as::<_, AtomDto>(&sql)
+        .bind(entity_id)
+        .fetch_all(pool)
+        .await?;
     Ok(rows)
 }
 

@@ -53,7 +53,6 @@ pub(crate) use codegraph::*;
 pub(crate) use credentials::*;
 pub(crate) use guard::*;
 pub(crate) use memory::*;
-pub(crate) use memory_kv::*;
 pub(crate) use memory_sessions::*;
 pub(crate) use memory_write::*;
 pub(crate) use project_docs::*;

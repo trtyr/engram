@@ -177,7 +177,23 @@ impl MemoryService {
     /// 实体详情：画像摘要 + 相关原子时间线 + 相关场景。
     pub async fn get_entity(&self, id: Uuid) -> Result<EntityDetail, MemoryError> {
         let entity = self.entity_row(id).await?;
-        let atoms = repo::entity_atoms(&self.pool, id).await?;
+        let atoms = repo::entity_atoms(&self.pool, id, false).await?;
+        let scenarios = repo::entity_scenarios(&self.pool, id).await?;
+        let neighbors = repo::entity_neighbors(&self.pool, id).await?;
+        let relations = repo::entity_relations(&self.pool, id).await?;
+        Ok(EntityDetail {
+            entity,
+            atoms,
+            scenarios,
+            neighbors,
+            relations,
+        })
+    }
+
+    /// 实体详情全量（T021②：含 superseded 历史原子——审计/考古用，默认详情不带）。
+    pub async fn get_entity_full(&self, id: Uuid) -> Result<EntityDetail, MemoryError> {
+        let entity = self.entity_row(id).await?;
+        let atoms = repo::entity_atoms(&self.pool, id, true).await?;
         let scenarios = repo::entity_scenarios(&self.pool, id).await?;
         let neighbors = repo::entity_neighbors(&self.pool, id).await?;
         let relations = repo::entity_relations(&self.pool, id).await?;

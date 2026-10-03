@@ -19,33 +19,6 @@ pub struct PersonaGetParams {}
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AtomDuplicatesParams {}
 
-/// EN-242：同名实体检测——大小写/首尾空白不敏感的重复分组（合并动作待设计，先可观测）。
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct EntityDuplicatesParams {}
-
-impl EngramMcpServer {
-    pub(crate) async fn memory_entity_duplicates(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<EntityDuplicatesParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p: Principal = principal_of(&ctx)?;
-        require_memory(&p)?;
-        let _ = params.0;
-        let groups = self.svc().entity_duplicates().await.map_err(from_memory)?;
-        let items: Vec<_> = groups
-            .into_iter()
-            .map(|(normalized, count, ids)| {
-                serde_json::json!({ "normalized": normalized, "count": count, "entity_ids": ids })
-            })
-            .collect();
-        ok_json(serde_json::json!({
-            "count": items.len(),
-            "groups": items,
-            "hint": "同名异档清单——合并用 action=\"entity_merge\"（from_id=副档、into_id=主档，引用自动迁移）",
-        }))
-    }
-}
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AtomArchiveParams {
@@ -130,48 +103,5 @@ impl EngramMcpServer {
         }))
     }
 
-    /// 合并实体（EN-242）：from 副档并入 into 主档——引用迁移 + 副档归档（merged_into）。
-    pub(crate) async fn memory_entity_merge(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<EntityMergeParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p: Principal = principal_of(&ctx)?;
-        require_memory(&p)?;
-        let parse = |v: &str, label: &str| {
-            uuid::Uuid::parse_str(v).map_err(|_| {
-                mcp_err(
-                    ErrorCode::INVALID_PARAMS,
-                    format!(
-                        "{label} 不是合法 UUID：{v}（entity_duplicates 或 entities 拿实体 id）"
-                    ),
-                )
-            })
-        };
-        let from = parse(&params.0.from_id, "from_id")?;
-        let into = parse(&params.0.into_id, "into_id")?;
-        let moved = self
-            .svc()
-            .merge_entities(from, into)
-            .await
-            .map_err(from_memory)?;
-        ok_json(json!({
-            "merged": true,
-            "winner": into,
-            "archived": from,
-            "atom_refs_moved": moved,
-            "hint": "副档已归档（merged_into=主档），原子引用与修订史已迁移；entity_duplicates 复检应不再出现该组",
-        }))
-    }
 }
 
-/// EN-242：实体合并——from 副档并入 into 主档（引用迁移 + 副档归档）。
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct EntityMergeParams {
-    /// 被合并的副档 id（合并后 merged_into=主档 + archived 归档）
-    #[serde(default)]
-    pub from_id: String,
-    /// 保留的主档 id（收下副档的全部原子引用）
-    #[serde(default)]
-    pub into_id: String,
-}
