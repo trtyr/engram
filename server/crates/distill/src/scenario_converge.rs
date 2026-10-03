@@ -75,7 +75,7 @@ async fn fetch_stale_scenarios(
           FROM jsonb_array_elements_text(s.atom_refs) r \
           JOIN atoms a ON a.id = r::uuid AND a.status = 'active') AS members \
          FROM scenarios s \
-         WHERE EXISTS ( \
+         WHERE s.retired_at IS NULL AND EXISTS ( \
             SELECT 1 FROM jsonb_array_elements_text(s.atom_refs) r \
             LEFT JOIN atoms a ON a.id = r::uuid \
             WHERE a.id IS NULL OR a.status != 'active') \

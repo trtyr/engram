@@ -44,20 +44,33 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
         return no_atoms_reply(&ctx, &mut converge).await;
     }
 
-    let scenarios = fetch_scenarios(&ctx).await?;
-    let user = build_organize_prompt(&atoms, &scenarios);
-    let actions = organize_with_llm(&ctx, llm.as_ref(), &user, &atoms, &scenarios).await?;
+    // P012-T003：agentic 开关（settings key=organize_agentic，默认 false=旧单发路径；
+    // T004 对齐评测后由用户拍板切换）。converge_only 快速通道在上方分支，语义不变。
+    let use_agentic: bool = organize_agentic_flag(ctx.pool()).await;
+    let mut all_touched = if use_agentic {
+        let out = crate::organize_agentic::run_agentic(&ctx, llm.as_ref(), atoms.len() as i64)
+            .await?;
+        // agentic 写过的场景补 embedding/tsv（内容从库读——工具层不携带全文）
+        refresh_embeddings_by_ids(&ctx, llm.as_ref(), &out.touched).await?;
+        // retire 释放的表述随 persona 链明确剔除（F4 治——与 converge 同通道）
+        converge.removed_texts.extend(out.removed_texts);
+        out.touched
+    } else {
+        let scenarios = fetch_scenarios(&ctx).await?;
+        let user = build_organize_prompt(&atoms, &scenarios);
+        let actions = organize_with_llm(&ctx, llm.as_ref(), &user, &atoms, &scenarios).await?;
 
-    let mut touched: Vec<Uuid> = Vec::new();
-    let mut texts: Vec<String> = Vec::new();
-    let applied = apply_actions(&ctx, &actions, &mut touched, &mut texts).await?;
-    refresh_embeddings(&ctx, llm.as_ref(), &applied, &texts).await?;
+        let mut touched: Vec<Uuid> = Vec::new();
+        let mut texts: Vec<String> = Vec::new();
+        let applied = apply_actions(&ctx, &actions, &mut touched, &mut texts).await?;
+        refresh_embeddings(&ctx, llm.as_ref(), &applied, &texts).await?;
+        touched
+    };
 
-    ctx.emit(&format!("组织：{} 个场景有变动", touched.len()), None)
+    ctx.emit(&format!("组织：{} 个场景有变动", all_touched.len()), None)
         .await
         .ok();
 
-    let mut all_touched = touched;
     for sid in converge.touched {
         if !all_touched.contains(&sid) {
             all_touched.push(sid);
@@ -104,7 +117,10 @@ async fn fetch_atoms(ctx: &JobContext) -> Result<Vec<(Uuid, String, String)>, Jo
 }
 
 async fn fetch_scenarios(ctx: &JobContext) -> Result<Vec<(Uuid, String, String)>, JobError> {
-    sqlx::query_as("SELECT id, topic, summary FROM scenarios ORDER BY updated_at DESC LIMIT 100")
+    sqlx::query_as(
+        "SELECT id, topic, summary FROM scenarios WHERE retired_at IS NULL \
+         ORDER BY updated_at DESC LIMIT 100",
+    )
         .fetch_all(ctx.pool())
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))
@@ -316,6 +332,58 @@ async fn update_scenario(pool: &sqlx::PgPool, sid: Uuid, a: &Action) -> Result<(
         .execute(pool)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
+    Ok(())
+}
+
+/// P012-T003：settings 布尔开关（key=organize_agentic，默认 false）。
+async fn organize_agentic_flag(pool: &sqlx::PgPool) -> bool {
+    #[derive(serde::Deserialize, Default)]
+    struct Flag {
+        #[serde(default)]
+        enabled: bool,
+    }
+    let f: Flag = engram_storage::repo::settings::get_json(pool, "organize_agentic")
+        .await
+        .unwrap_or_default();
+    f.enabled
+}
+
+/// agentic 路径的场景重嵌：按 id 集从库读文本 → embed → 写回 embedding/tsv。
+async fn refresh_embeddings_by_ids(
+    ctx: &JobContext,
+    llm: &dyn crate::llm_port::DistillLlm,
+    sids: &[Uuid],
+) -> Result<(), JobError> {
+    if sids.is_empty() {
+        return Ok(());
+    }
+    let pool = ctx.pool();
+    let rows: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, topic || E'\n' || summary || E'\n' || body FROM scenarios \
+         WHERE id = ANY($1) AND retired_at IS NULL",
+    )
+    .bind(sids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| JobError::Retryable(e.to_string()))?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let texts: Vec<String> = rows.iter().map(|(_, t)| t.clone()).collect();
+    let embeddings = llm.embed(&texts, ctx.job.id).await?;
+    for (i, (sid, text)) in rows.iter().enumerate() {
+        sqlx::query(
+            "UPDATE scenarios SET embedding = $2, tsv = to_tsvector('simple', $3) WHERE id = $1",
+        )
+        .bind(sid)
+        .bind(pgvector::Vector::from(
+            embeddings.get(i).cloned().unwrap_or_default(),
+        ))
+        .bind(engram_search::tokenize::tsv_text(text))
+        .execute(pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+    }
     Ok(())
 }
 

@@ -2741,3 +2741,111 @@ async fn t006_extract_claim_is_batched_with_continuation() {
             .unwrap();
     assert!(extract_jobs >= 2, "应存在自续批任务（count={extract_jobs}）");
 }
+
+/// P012-T001/T002/T003：agentic 循环——模型驱动六工具完成组织并 finish 交卷；
+/// 场景建好 + 成员挂真源 + 场景补 embedding；settings 开关 organize_agentic 控制。
+#[tokio::test]
+async fn p012_agentic_loop_organizes_and_finishes() {
+    let aid = Uuid::now_v7();
+    let env = setup_with(
+        vec![
+            json!({"tool": "atoms_pending", "args": {"page": 1}}),
+            json!({"tool": "scenario_write", "args": {
+                "topic": "居住地", "summary": "用户住在杭州",
+                "body": "用户长期居住在杭州。",
+                "member_atom_ids": [aid.to_string()]
+            }}),
+            json!({"tool": "finish", "args": {"summary": "新建 1 个场景收编 1 原子"}}),
+        ],
+        None,
+    )
+    .await;
+    // 开关打开（settings 单行）
+    engram_storage::repo::settings::put_json(
+        &env.pool,
+        "organize_agentic",
+        &serde_json::json!({"enabled": true}),
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
+         VALUES ($1, 'fact', '用户住在杭州西湖区', 'active', 0.9, to_tsvector('simple', 'x'))",
+    )
+    .bind(aid)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("organize_scenarios").with_payload(json!({})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "organize_scenarios").await;
+    assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
+
+    // 场景建好 + 成员挂真源 + embedding 补齐
+    let row: (Option<Uuid>, bool) =
+        sqlx::query_as("SELECT scenario_id, embedding IS NOT NULL FROM atoms WHERE id = $1")
+            .bind(aid)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    let (sid, _atoms_emb) = row;
+    assert!(sid.is_some(), "原子应挂到新场景");
+    let (topic, retired, emb_probe): (String, Option<chrono::DateTime<chrono::Utc>>, Option<String>) =
+        sqlx::query_as(
+            "SELECT topic, retired_at, embedding::text FROM scenarios WHERE id = $1",
+        )
+        .bind(sid.unwrap())
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(topic, "居住地");
+    assert!(emb_probe.is_some(), "agentic 路径应补场景 embedding（refresh_by_ids）");
+    assert!(retired.is_none(), "正常 write 不应退役");
+}
+
+/// P012-T002：max_steps=20 硬顶（结构不变量写死）——模型不 finish 也在上限收尾，
+/// 任务成功（已执行动作保留），不再消耗 chat。
+#[tokio::test]
+async fn p012_agentic_loop_steps_capped() {
+    // 备 25 个不交卷的动作——循环应在 20 步停（不耗尽即成功收尾）
+    let mut chats = Vec::new();
+    for _ in 0..25 {
+        chats.push(json!({"tool": "atoms_pending", "args": {"page": 1}}));
+    }
+    let env = setup_with(chats, None).await;
+    engram_storage::repo::settings::put_json(
+        &env.pool,
+        "organize_agentic",
+        &serde_json::json!({"enabled": true}),
+    )
+    .await
+    .unwrap();
+    // 散落原子（否则 no_atoms_reply 直返，循环不启动）
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
+         VALUES ($1, 'fact', '散落原子内容', 'active', 0.9, to_tsvector('simple', 'x'))",
+    )
+    .bind(Uuid::now_v7())
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("organize_scenarios").with_payload(json!({})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "organize_scenarios").await;
+    assert_eq!(j.status, JobStatus::Succeeded, "上限收尾应是成功: {:?}", j.error);
+    assert_eq!(
+        env.llm.sent_user.lock().unwrap().len(),
+        crate_organize_max_steps(),
+        "循环步数应恰为硬顶 20"
+    );
+}
+
+fn crate_organize_max_steps() -> usize {
+    engram_distill::organize_agentic::ORGANIZE_MAX_STEPS
+}

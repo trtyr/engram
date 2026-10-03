@@ -12,6 +12,7 @@ pub mod extract;
 pub mod extract_model;
 pub mod llm_port;
 pub mod organize;
+pub mod organize_agentic;
 pub mod persona;
 pub mod prompts;
 pub mod reembed;
