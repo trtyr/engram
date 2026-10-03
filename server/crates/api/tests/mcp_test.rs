@@ -1351,3 +1351,20 @@ async fn study_readonly_key_write_rejected() {
     let msg = v["error"]["message"].as_str().unwrap_or_default();
     assert!(msg.contains("只读") || msg.contains("study scope"), ":ro 写应拒: {msg}");
 }
+
+#[tokio::test]
+async fn data_root_is_resolvable_and_reported() {
+    // 数据根口径（2026-10-03 codegraph 全量失效事故）：
+    // AGENT_MEMORY_DATA_DIR 未设时按 HOME fallback —— 解析结果必须可被上层读到并打进启动日志。
+    let root = engram_wiki_engine::data_root();
+    assert!(root.is_absolute(), "数据根必须是绝对路径：{}", root.display());
+    let explicit = std::env::var("AGENT_MEMORY_DATA_DIR").is_ok();
+    let expect_home_based = std::env::var("HOME")
+        .map(|h| root.starts_with(&h))
+        .unwrap_or(false);
+    assert!(
+        explicit || expect_home_based,
+        "既未显式设置、又不在 HOME 下——解析口径异常：{}",
+        root.display()
+    );
+}
