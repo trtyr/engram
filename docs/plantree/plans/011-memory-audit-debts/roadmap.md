@@ -150,6 +150,18 @@
   ③ 读取面：MCP logs.query + HTTP /logs 加 domain 参数；前端 Logs 页域切换 tab；
   ④ 连锁简化：T011/T014 落点改为 logs domain='memory' 聚合（抽取率/JEV 命中率
   SQL 一跳出），无需独立蒸馏史表。
+- [ ] **T020 · 记忆域生命周期日志补全（记全，配合 T019 归域）**
+  用户拍板（2026-10-03）：「用户记忆没有很好地做到日志记录」——实读确认读写两侧
+  全裸：写入侧 write_session/import/create_atom(直写)/kv_put **零语义日志**（kv_delete
+  反而有 audit——删有痕写无痕）；读取侧 recall(context)/search **零日志**（AI 何时
+  装载了谁的记忆无从回溯）；治理侧 audit 全在 jobs 伪造行（T001/Q001）。
+  补全点（core 写入层 emit/audit，零架构变更）：
+  ① write_session_identity / import_session：agent/轮数/sensitive/distill 策略；
+  ② create_atom 直写：kind/confidence/strength；③ kv_put：key/source（value 不记——
+  逐字值本身在表里）；④ 读取侧记**元数据**：谁/何时/mode/命中数/预算——查询正文
+  默认不记（用户对话内容），正文开关留设置面（用户拍板）。全部走 T019 domain 归域、
+  治理类走 T001 审计去向（Q001 拍板后统一）。验证：logging_test 顺序壳补用例——
+  一次完整生命周期（写→蒸→读→改→忘）在 domain='memory' 下全链可查。
 
 ## Deferred / 交叉引用
 
