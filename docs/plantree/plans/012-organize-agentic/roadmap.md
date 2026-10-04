@@ -36,9 +36,20 @@
 
 （空）
 
+## In Progress
+
+- [ ] **T005 · 门禁 + 切换（拍板已更新 2026-10-03 深夜）**
+  **用户拍板：不需要旧版兼容**——旧单发路径整体删除，agentic 成为唯一实现：
+  - 删 organize.rs 旧单发组织段（fetch_scenarios/build_organize_prompt/
+    organize_with_llm/apply_actions/Action 解析）+ organize_agentic_flag 开关 +
+    settings.organize_agentic
+  - 旧 prompt v2 退役（系统提示词已在 organize_agentic::system_prompt）
+  - T004 评测报告的「切换策略」结论作废——不复测对比再拍板，直接切
+  - 部署即 agentic（生产首次部署就是新形态，无灰度）
+  - 待与用户过一遍删除清单（等会儿会议）后执行
+
 ## Deferred
 
-- organize prompt（v2）在 agentic 形态下退役/改写为系统提示词——T003 时处理
 - 场景表规模治理（如需）——agentic 形态天然解除 top100 截断，观察后再议
 
 ## 交叉引用
