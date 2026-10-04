@@ -42,7 +42,7 @@ use utoipa::OpenApi;
         jobs_api::list_jobs, jobs_api::get_job, jobs_api::get_job_events, jobs_api::revive_job,
         llm_api::create_provider, llm_api::list_providers, llm_api::test_provider,
         llm_api::update_provider, llm_api::delete_provider, llm_api::reencrypt_providers,
-        llm_api::get_routing, llm_api::put_routing, llm_api::suggest_routing, llm_api::usage,
+        llm_api::usage,
         llm_api::create_api_key_handler, llm_api::list_api_keys, llm_api::revoke_api_key,
         llm_api::batch_revoke_api_keys, llm_api::update_api_key, llm_api::fetch_models,
         crate::mcp_admin::settings_mcp, crate::mcp_admin::settings_mcp_update,
@@ -238,14 +238,6 @@ fn settings_routes() -> Router<AppState> {
         .route(
             "/settings/llm/providers/{id}/test",
             post(llm_api::test_provider),
-        )
-        .route(
-            "/settings/llm/routing",
-            get(llm_api::get_routing).put(llm_api::put_routing),
-        )
-        .route(
-            "/settings/llm/routing/suggest",
-            post(llm_api::suggest_routing),
         )
         .route(
             "/settings/api-keys",

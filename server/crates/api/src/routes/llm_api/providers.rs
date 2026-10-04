@@ -194,7 +194,7 @@ pub async fn update_provider(
     }))
 }
 
-/// L2：删除 provider（默认拒删；routing 引用拒删带明细）。
+/// L2：删除 provider（默认拒删）。
 #[utoipa::path(delete, path = "/settings/llm/providers/{id}", responses((status = 204)))]
 pub async fn delete_provider(
     principal: axum::Extension<Principal>,
@@ -203,7 +203,7 @@ pub async fn delete_provider(
 ) -> Result<StatusCode, ApiError> {
     require_llm(&principal)?;
 
-    let Some((name, is_default)) = repo::get_provider_name_default(&state.pool, id).await? else {
+    let Some((_, is_default)) = repo::get_provider_name_default(&state.pool, id).await? else {
         return Err(ApiError::NotFound(format!("provider {id} 不存在")));
     };
     if is_default {
@@ -211,22 +211,6 @@ pub async fn delete_provider(
             "默认 provider 不可删除：请先将其他 provider 设为默认（PUT is_default=true）".into(),
         ));
     }
-    // routing 表引用检查（L4 校验保证新写入不引用幽灵；存量引用在此拦截）
-    let router = PurposeRouter::new(state.pool.clone());
-    let table = router.table().await?;
-    let referencing: Vec<String> = table
-        .routes
-        .iter()
-        .filter(|(_, chain)| chain.iter().any(|r| r.provider == name))
-        .map(|(p, _)| p.clone())
-        .collect();
-    if !referencing.is_empty() {
-        return Err(ApiError::BadRequest(format!(
-            "路由表仍引用「{name}」的 purpose：{}——请先更新 /settings/llm/routing",
-            referencing.join("、")
-        )));
-    }
-
     repo::delete_provider(&state.pool, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

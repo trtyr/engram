@@ -268,7 +268,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="概览" desc="记忆资产、系统活动与用量的概览" />
+      <PageHeader title="概览" />
 
       <PipelineHero stages={stages} distilling={distilling} />
 

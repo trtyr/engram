@@ -1,6 +1,6 @@
 //! LLM provider 管理面仓储（llm_providers 表的注册/更新/删除/列举）。
 //!
-//! 运行时读取与路由表归 engram-llm（ProviderRegistry / PurposeRouter）；
+//! 运行时读取归 engram-llm（ProviderRegistry）；
 //! 这里收口的是 Web 控制台管理面的 CRUD（SQL 从 api/llm_api.rs 收口而来）。
 //! L1：重名 UNIQUE 冲突映射 StoreError::Conflict；L3：默认唯一性事务降级。
 

@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { appConfirm } from '@/components/confirm'
 import { api, type AdminSessionDto, type ApiKey } from '@/lib/api'
-import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
+import { Card, Checkbox, Empty, ErrorBox, Spinner, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
@@ -22,8 +22,11 @@ export default function Account() {
   const [tab, setTab] = useState<AcctTab>('account')
   return (
     <div className="space-y-6">
-      <PageHeader title="账号与安全" desc="账号管理 / 活跃会话 / MCP 密钥——面向公网部署的安全操作台" />
-      <Tabs items={ACCT_TABS} value={tab} onChange={setTab} />
+      {/* 头部压缩（P014）：标题 + 标签页同一行 */}
+      <div className="flex flex-wrap items-center gap-4">
+        <h1 className="text-lg font-semibold tracking-tight">账号与安全</h1>
+        <Tabs items={ACCT_TABS} value={tab} onChange={setTab} />
+      </div>
       {tab === 'account' && <AccountPane />}
       {tab === 'sessions' && <SessionsPane />}
       {tab === 'keys' && <Keys />}

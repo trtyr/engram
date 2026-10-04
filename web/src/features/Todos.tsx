@@ -170,7 +170,7 @@ export default function Todos() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="待办" desc="不绑定项目的临时事项/灵感速记——速记、做完勾掉">
+      <PageHeader title="待办">
         <input
           className={`${inputCls} w-40`}
           placeholder="搜索待办…"

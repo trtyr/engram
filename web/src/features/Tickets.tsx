@@ -144,7 +144,7 @@ export default function Tickets() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="工单" desc="结构化问题跟踪——症状/复现/验收/解决记录，状态机流转">
+      <PageHeader title="工单">
         <input
           className={`${inputCls} w-40`}
           placeholder="搜索工单…"

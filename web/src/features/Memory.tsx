@@ -1,13 +1,13 @@
 /** Memory 域：会话 / 原子 / 场景 / 画像 / 检索。 */
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { api, type Atom, type Job, type Persona, type Scenario, type Session } from '@/lib/api'
 import {
   Card,
   Checkbox,
+  DataTable,
   Empty,
   ErrorBox,
-  PageHeader,
   Spinner,
   StatusBadge,
   Tabs,
@@ -104,11 +104,11 @@ function MemoryPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="用户记忆" desc="会话 → 蒸馏 → 原子 → 场景 → 画像，全程可溯源" />
-      {/* tab 行右侧挂蒸馏条（会话）/ 筛选器（原子）——合并节省一行 */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* 头部压缩（P014）：标题 + 标签页 + 右侧操作同一行 */}
+      <div className="flex flex-wrap items-center gap-4">
+        <h1 className="text-lg font-semibold tracking-tight">用户记忆</h1>
         <Tabs items={tabs} value={tab} onChange={setTab} />
-        <div className="flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-3">
           {tab === 'sessions' && <DistillBar />}
           {tab === 'atoms' && (
             <>
@@ -253,136 +253,109 @@ function Sessions() {
         <Empty text="暂无会话——对话通过 API / MCP 写入后在此列出，蒸馏沉淀为 L1 原子" />
       ) : (
         <>
-          <Card className="overflow-x-auto">
-          <table className={tableCls.root}>
-            <thead className={tableCls.thead}>
-              <tr>
-                <th className={`${tableCls.th} w-10`}>
-                  <Checkbox
-                    checked={selected.size === rows.length && rows.length > 0}
-                    onChange={(checked) =>
-                      setSelected(checked ? new Set(rows.map((s) => s.id)) : new Set())
-                    }
-                    label="全选本页"
-                  />
-                </th>
-                <th className={tableCls.th}>预览</th>
-                <th className={tableCls.th}>Agent</th>
-                <th className={tableCls.th}>轮次</th>
-                <th className={tableCls.th}>蒸馏</th>
-                <th className={tableCls.th}>时间</th>
-                <th className={tableCls.th} />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice((cur - 1) * pageSize, cur * pageSize).map((s) => (
-                <Fragment key={s.id}>
-                  <tr className={tableCls.row}>
-                    <td className={`${tableCls.td} w-10`}>
-                      <Checkbox
-                        checked={selected.has(s.id)}
-                        onChange={() => toggle(s.id)}
-                        label="选择该会话"
-                      />
-                    </td>
-                    <td className={`${tableCls.td} max-w-96 truncate font-medium`} title={s.content?.[0]?.text ?? ''}>
-                      {s.content?.[0]?.text ?? '（空会话）'}
-                    </td>
-                    <td className={`${tableCls.tdMono}`}>{s.agent}</td>
-                    <td className={tableCls.tdMono}>{s.content?.length ?? 0}</td>
-                    <td className={tableCls.td}>
-                      <StatusBadge status={s.distill_status} />
-                    </td>
-                    <td className={`${tableCls.td} whitespace-nowrap text-muted-foreground`}>{fmtTime(s.created_at)}</td>
-                    <td className={`${tableCls.td} text-right`}>
+          <DataTable
+            columns={[
+              {
+                key: 'select',
+                label: '',
+                thClassName: 'w-10',
+                tdClassName: 'w-10',
+                render: (s) => (
+                  <span onClick={(e) => e.stopPropagation()}>
+                    <Checkbox checked={selected.has(s.id)} onChange={() => toggle(s.id)} label="选择该会话" />
+                  </span>
+                ),
+              },
+              {
+                key: 'preview',
+                label: '预览',
+                tdClassName: 'w-full max-w-0 truncate font-medium',
+                title: (s) => s.content?.[0]?.text ?? '',
+                render: (s) => s.content?.[0]?.text ?? '（空会话）',
+              },
+              { key: 'agent', label: 'Agent', tdClassName: 'whitespace-nowrap font-mono text-xs' },
+              { key: 'turns', label: '轮次', tdClassName: 'whitespace-nowrap font-mono text-xs', render: (s) => s.content?.length ?? 0 },
+              {
+                key: 'distill',
+                label: '蒸馏',
+                tdClassName: 'whitespace-nowrap',
+                render: (s) => <StatusBadge status={s.distill_status} />,
+              },
+              { key: 'time', label: '时间', tdClassName: 'whitespace-nowrap text-muted-foreground', render: (s) => fmtTime(s.created_at) },
+            ]}
+            rows={rows.slice((cur - 1) * pageSize, cur * pageSize)}
+            rowKey={(s) => s.id}
+            onRowClick={(s) => setOpenId(openId === s.id ? null : s.id)}
+            isExpanded={(s) => openId === s.id}
+            expandable={(s) => (
+              <div className="bg-muted/30 px-4 py-3">
+                <div className="mb-2.5 flex items-center justify-between">
+                  <p className="font-mono text-xs text-muted-foreground">{s.id}</p>
+                  <div className="flex items-center gap-2">
+                    {s.distill_status === 'void' && (
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        aria-expanded={openId === s.id}
-                        onClick={() => setOpenId(openId === s.id ? null : s.id)}
+                        onClick={async () => {
+                          // 撤销作废：会话回作废前状态，被级联归档的原子一并恢复（非破坏性，无需确认）
+                          await api.post(`/memory/sessions/${s.id}/restore`)
+                          setOpenId(null)
+                          load()
+                        }}
                       >
-                        {openId === s.id ? '收起' : '详情'}
+                        恢复
                       </Button>
-                    </td>
-                  </tr>
-                  {/* 手风琴：紧贴该行下方展开逐轮对话，视线不断裂 */}
-                  {openId === s.id && (
-                    <tr>
-                      <td colSpan={7} className="border-b border-border p-0">
-                        <div className="bg-muted/30 px-4 py-3">
-                          <div className="mb-2.5 flex items-center justify-between">
-                            <p className="font-mono text-xs text-muted-foreground">{s.id}</p>
-                            <div className="flex items-center gap-2">
-                              {s.distill_status === 'void' && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={async () => {
-                                    // 撤销作废：会话回作废前状态，被级联归档的原子一并恢复（非破坏性，无需确认）
-                                    await api.post(`/memory/sessions/${s.id}/restore`)
-                                    setOpenId(null)
-                                    load()
-                                  }}
-                                >
-                                  恢复
-                                </Button>
-                              )}
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={async () => {
-                                  if (
-                                  !(await appConfirm({
-                                    title: '擦除该会话？',
-                                    description: '关联原子的溯源将标记为 erased，不可恢复。',
-                                    destructive: true,
-                                    confirmLabel: '擦除',
-                                  }))
-                                )
-                                  return
-                                  await api.del(`/memory/sessions/${s.id}`)
-                                  setOpenId(null)
-                                  load()
-                                }}
-                              >
-                                擦除
-                              </Button>
-                            </div>
-                          </div>
-                          <div className="space-y-1.5">
-                            {s.content?.map((t, i) => (
-                              <div key={i} className="flex gap-2 text-sm">
-                                <span className="w-14 shrink-0 font-mono text-xs leading-5 text-muted-foreground">
-                                  {t.speaker}
-                                </span>
-                                {t.ts && (
-                                  <span className="shrink-0 font-mono text-xs leading-5 text-muted-foreground/60">
-                                    {fmtTime(t.ts)}
-                                  </span>
-                                )}
-                                <span className="flex-1">{t.text}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-        <Pager
-          total={rows.length}
-          page={cur}
-          pageSize={pageSize}
-          onPage={setPage}
-          onPageSize={(n) => {
-            setPageSize(n)
-            setPage(1)
-          }}
-        />
+                    )}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={async () => {
+                        if (
+                          !(await appConfirm({
+                            title: '擦除该会话？',
+                            description: '关联原子的溯源将标记为 erased，不可恢复。',
+                            destructive: true,
+                            confirmLabel: '擦除',
+                          }))
+                        )
+                          return
+                        await api.del(`/memory/sessions/${s.id}`)
+                        setOpenId(null)
+                        load()
+                      }}
+                    >
+                      擦除
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  {s.content?.map((t, i) => (
+                    <div key={i} className="flex gap-2 text-sm">
+                      <span className="w-14 shrink-0 font-mono text-xs leading-5 text-muted-foreground">
+                        {t.speaker}
+                      </span>
+                      {t.ts && (
+                        <span className="shrink-0 font-mono text-xs leading-5 text-muted-foreground/60">
+                          {fmtTime(t.ts)}
+                        </span>
+                      )}
+                      <span className="flex-1">{t.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          />
+          <Pager
+            total={rows.length}
+            page={cur}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={(n) => {
+              setPageSize(n)
+              setPage(1)
+            }}
+          />
         </>
       )}
     </div>
@@ -1323,10 +1296,6 @@ function KvPane() {
   }
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        AI 管道的权威精确值存储（序列号/UUID/路径…逐字保存、回读比对）。只读——写入唯一通道是 MCP
-        memory.kv_put。
-      </p>
       <div className="flex items-center gap-2">
         <input
           className={inputCls}
@@ -1346,7 +1315,7 @@ function KvPane() {
         <Empty text="没有命中的 KV 条目" />
       ) : (
         <>
-          <div className="overflow-hidden rounded-md border border-border">
+        <Card className="overflow-x-auto">
             <table className={tableCls.root}>
               <thead className={tableCls.thead}>
                 <tr>
@@ -1373,7 +1342,7 @@ function KvPane() {
                 ))}
               </tbody>
             </table>
-          </div>
+        </Card>
           <Pager
             total={rows.length}
             page={cur}

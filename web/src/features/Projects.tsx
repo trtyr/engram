@@ -173,7 +173,7 @@ export default function Projects() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="项目" desc="项目记忆域：跨会话的工作上下文——类型驱动分类，位置 + 文档 + 规划。">
+      <PageHeader title="项目">
         <select className={selectCls} value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="">全部类型</option>
           {types.map((t) => (

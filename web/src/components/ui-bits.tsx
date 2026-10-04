@@ -2,9 +2,10 @@
  * Engram 设计系统原语：墨白正统。
  * 分层 = 1px 发丝线（零阴影）；强调 = 墨色实心；彩色只承担语义。
  */
-import type { ComponentProps, ReactNode } from 'react'
+import { Fragment, type ComponentProps, type ReactNode } from 'react'
 import { CircleAlert, Inbox, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { tableCls } from '@/lib/ui'
 
 /** 品牌印记：三层错位方——记忆的层层留痕（L0→L2），顶层实心为「当下」。 */
 export function BrandMark({ className }: { className?: string }) {
@@ -234,5 +235,133 @@ export function Spinner({ label = '加载中…' }: { label?: string }) {
       <Loader2 className="size-4 animate-spin" />
       {label}
     </div>
+  )
+}
+
+// ---------- DataTable：列头筛选（P014） ----------
+
+/** 列头筛选形态：文本输入 or 枚举下拉。 */
+export interface DataTableFilter {
+  type: 'text' | 'select'
+  placeholder?: string
+  options?: { value: string; label: string }[]
+}
+
+export interface DataTableColumn<T> {
+  key: string
+  label: string
+  render?: (row: T) => ReactNode
+  /** td 附加类（每行相同用 string；逐行定制用函数）。 */
+  tdClassName?: string | ((row: T) => string)
+  thClassName?: string
+  title?: (row: T) => string | undefined
+  filter?: DataTableFilter
+  filterValue?: string
+  onFilterChange?: (value: string) => void
+  filterAriaLabel?: string
+}
+
+interface DataTableProps<T> {
+  columns: DataTableColumn<T>[]
+  rows: T[]
+  rowKey: (row: T) => string
+  /** 整行点击（如展开详情）；勾选列自行 stopPropagation。 */
+  onRowClick?: (row: T) => void
+  /** 非空时行可展开：返回展开内容；配合 isExpanded 控制展开态。 */
+  expandable?: (row: T) => ReactNode
+  isExpanded?: (row: T) => boolean
+  empty?: string
+}
+
+/** 统一数据表（P014）：Card 壳 + 列头内嵌筛选（Excel 式）。
+ * 分页由调用方持 Pager 外置；筛选状态由调用方受控（URL 同步自理）。 */
+export function DataTable<T>({
+  columns,
+  rows,
+  rowKey,
+  onRowClick,
+  expandable,
+  isExpanded,
+  empty = '暂无数据',
+}: DataTableProps<T>) {
+  const colCount = columns.length
+  return (
+    <Card className="overflow-x-auto">
+      {rows.length === 0 ? (
+        <Empty text={empty} />
+      ) : (
+        <table className={tableCls.root}>
+          <thead className={tableCls.thead}>
+            <tr>
+              {columns.map((c) => (
+                <th key={c.key} className={`${tableCls.th} ${c.thClassName ?? ''}`}>
+                  <div className="flex flex-col gap-1">
+                    <span>{c.label}</span>
+                    {c.filter && (
+                      <div>
+                        {c.filter.type === 'text' ? (
+                          <input
+                            className="w-full min-w-24 rounded border border-input bg-card px-1.5 py-0.5 text-xs outline-none placeholder:text-muted-foreground/50 focus-visible:border-foreground/40"
+                            aria-label={c.filterAriaLabel ?? `筛选 ${c.label}`}
+                            placeholder={c.filter.placeholder ?? '筛选…'}
+                            value={c.filterValue ?? ''}
+                            onChange={(e) => c.onFilterChange?.(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : (
+                          <select
+                            className="w-full rounded border border-input bg-card px-1 py-0.5 text-xs outline-none focus-visible:border-foreground/40"
+                            aria-label={c.filterAriaLabel ?? `筛选 ${c.label}`}
+                            value={c.filterValue ?? ''}
+                            onChange={(e) => c.onFilterChange?.(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {c.filter.options?.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const expanded = isExpanded?.(row) ?? false
+              return (
+                <Fragment key={rowKey(row)}>
+                  <tr
+                    className={cn(tableCls.row, onRowClick && 'cursor-pointer')}
+                    onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  >
+                    {columns.map((c) => {
+                      const tdCls =
+                        typeof c.tdClassName === 'function' ? c.tdClassName(row) : c.tdClassName
+                      return (
+                        <td key={c.key} className={`${tableCls.td} ${tdCls ?? ''}`} title={c.title?.(row)}>
+                          {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? '')}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                  {expanded && expandable && (
+                    <tr>
+                      <td colSpan={colCount} className="border-b border-border p-0">
+                        {expandable(row)}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </Card>
   )
 }

@@ -7,7 +7,6 @@ use axum::Json;
 use axum::routing::post;
 use engram_llm::KeyCipher;
 use engram_llm::provider::{LlmProvider, OpenAiCompatProvider, ProviderRegistry};
-use engram_llm::router::{PurposeRouter, RouteRule, RoutingTable};
 use engram_llm::types::{EmbedRequest, Purpose};
 use tracing_subscriber::prelude::*;
 
@@ -46,22 +45,18 @@ async fn start_mock_llm() -> String {
     format!("http://{}", addr)
 }
 
-async fn setup() -> (support::TestPg, ProviderRegistry, PurposeRouter) {
+async fn setup() -> (support::TestPg, ProviderRegistry) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
     let cipher = KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
-    (
-        container,
-        ProviderRegistry::new(pool.clone(), cipher),
-        PurposeRouter::new(pool),
-    )
+    (container, ProviderRegistry::new(pool, cipher))
 }
 
 #[tokio::test]
 async fn provider_roundtrip_and_usage_accounting() {
-    let (_c, registry, _router) = setup().await;
+    let (_c, registry) = setup().await;
     let pool = registry_pool(&registry);
 
     let base_url = start_mock_llm().await;
@@ -128,41 +123,6 @@ async fn provider_roundtrip_and_usage_accounting() {
 }
 
 #[tokio::test]
-async fn router_config_applies_immediately() {
-    let (_c, _registry, router) = setup().await;
-    let pool = router_pool(&router);
-
-    // 初始空表
-    let t = router.table().await.unwrap();
-    assert!(t.chain(Purpose::Extract).is_empty());
-
-    // 配置路由并立即生效
-    let mut table = RoutingTable::default();
-    table.routes.insert(
-        "extract".into(),
-        vec![RouteRule {
-            provider: "deepseek".into(),
-            model: "deepseek-chat".into(),
-        }],
-    );
-    router.save(&table).await.unwrap();
-
-    let t2 = router.table().await.unwrap();
-    assert_eq!(t2.chain(Purpose::Extract)[0].model, "deepseek-chat");
-    assert!(
-        t2.chain(Purpose::Persona).is_empty(),
-        "未配置 purpose 走默认 provider"
-    );
-
-    // settings 表只有一行
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM settings WHERE key = 'llm_routing'")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(count, 1);
-}
-
-#[tokio::test]
 async fn http_error_classification() {
     // 429 → Transient；401 → Permanent
     let p = OpenAiCompatProvider::new("t", "http://127.0.0.1:1", "k");
@@ -184,15 +144,11 @@ async fn http_error_classification() {
 fn registry_pool(r: &ProviderRegistry) -> sqlx::PgPool {
     r.pool_for_test()
 }
-fn router_pool(r: &PurposeRouter) -> sqlx::PgPool {
-    r.pool_for_test()
-}
-
 // ---------- L1/L3：能力回退陷阱与默认确定性 ----------
 
 #[tokio::test]
 async fn l1_capability_mismatch_reports_not_configured() {
-    let (_c, registry, _router) = setup().await;
+    let (_c, registry) = setup().await;
     let pool = registry_pool(&registry);
 
     // embedding-only 默认 provider（旧实现 or_else(first) 会把 bge-m3 当 chat 模型选出去）
@@ -227,7 +183,7 @@ async fn l1_capability_mismatch_reports_not_configured() {
 
 #[tokio::test]
 async fn l6_embed_for_records_usage() {
-    let (_c, registry, _router) = setup().await;
+    let (_c, registry) = setup().await;
     let pool = registry_pool(&registry);
 
     let base_url = start_mock_llm().await;
@@ -316,7 +272,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CollectLayer {
 async fn record_usage_emits_structured_log_event() {
     let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let layer = CollectLayer(collected.clone());
-    let (_c, registry, _router) = setup().await;
+    let (_c, registry) = setup().await;
 
     // 全局注册（spawn 跨线程也生效；本文件其他测试的事件同入 collected，无碍断言）
     tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer)).unwrap();

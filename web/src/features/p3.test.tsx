@@ -306,28 +306,7 @@ describe('Provider 编辑 / 删除', () => {
   })
 })
 
-describe('AI 功能页全景', () => {
-  const p1 = {
-    id: 'p1',
-    name: 'openai',
-    base_url: 'https://api.openai.com/v1',
-    model_id: 'gpt-4',
-    capability: 'chat',
-    is_default: true,
-  }
-
-  it('默认 tab 展示 8 个 AI 功能点，嵌入功能点无向量供应商时提示去注册', async () => {
-    mockState.providers = [p1]
-    render(wrap(<Settings />))
-    // 默认 tab 即「AI 功能」，8 个功能点都在
-    await screen.findByText('抽取')
-    expect(screen.getByText('嵌入')).toBeInTheDocument()
-    expect(screen.getByText('画像')).toBeInTheDocument()
-    expect(screen.getByText('Wiki 生成')).toBeInTheDocument()
-    // 只有 chat provider → 嵌入功能点无匹配，提示去「供应商」注册
-    expect(screen.getByText('无匹配供应商（去「供应商」注册）')).toBeInTheDocument()
-  })
-
+describe('供应商 tab（P014：AI 功能 tab 随 PURPOSES 路由退役）', () => {
   it('供应商 tab 类型下拉可注册向量供应商（capability=embedding）', async () => {
     mockState.providers = []
     render(wrap(<Settings />))

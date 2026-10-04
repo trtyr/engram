@@ -300,7 +300,7 @@ export default function Mcp() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="MCP" desc="AI 接入管理——一个域一个域地收口：能连什么、能调什么" />
+      <PageHeader title="MCP 管理" />
       {err && <ErrorBox msg={err} />}
 
       {info === null && !err ? (

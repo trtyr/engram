@@ -10,8 +10,8 @@
  */
 import { useEffect, useState } from 'react'
 import { api, type Job, type JobEvent } from '@/lib/api'
-import { Card, Empty, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
-import { fmtTime, inputCls, selectCls, tableCls } from '@/lib/ui'
+import { Card, DataTable, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
+import { fmtTime, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import Pager from '@/components/Pager'
 
@@ -132,10 +132,7 @@ export default function Logs() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="日志"
-        desc="系统里发生的一切：请求、错误、后台执行（info 保留 30 天 / debug 7 天）"
-      >
+      <PageHeader title="日志">
         <div className="flex flex-wrap items-center gap-2">
           <select className={selectCls} value={days} onChange={(e) => setDays(e.target.value)}>
             {WINDOW_OPTIONS.map((o) => (
@@ -160,18 +157,6 @@ export default function Logs() {
             <option value="codegraph">代码图谱</option>
             <option value="system">系统</option>
           </select>
-          <select className={selectCls} value={level} onChange={(e) => setLevel(e.target.value)}>
-            <option value="">全部级别</option>
-            {['ERROR', 'WARN', 'INFO', 'DEBUG'].map((l) => (
-              <option key={l}>{l}</option>
-            ))}
-          </select>
-          <input
-            className={inputCls}
-            placeholder="搜消息/target…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
           <label className="flex items-center gap-1 text-sm">
             <input type="checkbox" checked={audit} onChange={(e) => setAudit(e.target.checked)} />
             仅审计
@@ -180,68 +165,85 @@ export default function Logs() {
       </PageHeader>
       {rows === null ? (
         <Spinner />
-      ) : rows.length === 0 ? (
-        <Empty text={`${winLabel}无日志行`} />
       ) : (
-        <Card className="overflow-x-auto">
-          <table className={tableCls.root}>
-            <thead className={tableCls.thead}>
-              <tr>
-                <th className={tableCls.th}>时间</th>
-                <th className={tableCls.th}>级别</th>
-                <th className={tableCls.th}>target</th>
-                <th className={tableCls.th}>消息</th>
-                <th className={tableCls.th}>request_id</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const jid = jobIdOf(r)
-                return (
-                  <tr key={r.id} className={tableCls.row}>
-                    <td className={`${tableCls.td} text-xs tabular-nums text-muted-foreground`}>
-                      {fmtTime(r.ts)}
-                    </td>
-                    <td className={`${tableCls.td} text-xs font-medium ${LEVEL_CLS[r.level] ?? ''}`}>
-                      {r.level}
-                    </td>
-                    <td className={`${tableCls.td} max-w-40 truncate font-mono text-xs`}>
-                      {jid ? (
-                        <button
-                          type="button"
-                          className="rounded bg-muted px-1 py-px text-info hover:underline"
-                          title="查看该执行过程"
-                          onClick={() => setOpenJob(jid)}
-                        >
-                          后台
-                        </button>
-                      ) : (
-                        r.target
-                      )}
-                    </td>
-                    <td className={`${tableCls.td} max-w-96`}>
-                      <LongText text={r.message} />
-                      {Object.keys(r.fields ?? {}).length > 0 && (
-                        <details className="mt-0.5">
-                          <summary className="cursor-pointer text-xs text-muted-foreground">
-                            字段（{Object.keys(r.fields).length}）
-                          </summary>
-                          <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-2 text-xs">
-                            {JSON.stringify(r.fields, null, 2)}
-                          </pre>
-                        </details>
-                      )}
-                    </td>
-                    <td className={`${tableCls.td} font-mono text-xs text-muted-foreground`}>
-                      {r.request_id ?? ''}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </Card>
-      )}
+          <DataTable
+            columns={[
+              {
+                key: 'ts',
+                label: '时间',
+                tdClassName: 'whitespace-nowrap text-xs tabular-nums text-muted-foreground',
+                render: (r) => fmtTime(r.ts),
+              },
+              {
+                key: 'level',
+                label: '级别',
+                tdClassName: 'whitespace-nowrap text-xs font-medium',
+                render: (r) => <span className={LEVEL_CLS[r.level] ?? ''}>{r.level}</span>,
+                filter: {
+                  type: 'select',
+                  options: [
+                    { value: '', label: '全部级别' },
+                    ...['ERROR', 'WARN', 'INFO', 'DEBUG'].map((l) => ({ value: l, label: l })),
+                  ],
+                },
+                filterValue: level,
+                onFilterChange: setLevel,
+              },
+              {
+                key: 'target',
+                label: 'target',
+                tdClassName: 'max-w-40 truncate font-mono text-xs',
+                render: (r) => {
+                  const jid = jobIdOf(r)
+                  return jid ? (
+                    <button
+                      type="button"
+                      className="rounded bg-muted px-1 py-px text-info hover:underline"
+                      title="查看该执行过程"
+                      onClick={() => setOpenJob(jid)}
+                    >
+                      后台
+                    </button>
+                  ) : (
+                    r.target
+                  )
+                },
+              },
+              {
+                key: 'message',
+                label: '消息',
+                tdClassName: 'max-w-96',
+                filter: { type: 'text', placeholder: '搜消息/target…' },
+                filterValue: q,
+                onFilterChange: setQ,
+                render: (r) => (
+                  <>
+                    <LongText text={r.message} />
+                    {Object.keys(r.fields ?? {}).length > 0 && (
+                      <details className="mt-0.5">
+                        <summary className="cursor-pointer text-xs text-muted-foreground">
+                          字段（{Object.keys(r.fields).length}）
+                        </summary>
+                        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-2 text-xs">
+                          {JSON.stringify(r.fields, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </>
+                ),
+              },
+              {
+                key: 'request_id',
+                label: 'request_id',
+                tdClassName: 'whitespace-nowrap font-mono text-xs text-muted-foreground',
+                render: (r) => r.request_id ?? '',
+              },
+            ]}
+            rows={rows}
+            rowKey={(r) => String(r.id)}
+            empty={`${winLabel}无日志行`}
+          />
+        )}
       {total > 0 && (
         <Pager
           total={total}

@@ -7,13 +7,11 @@
 pub mod crypto;
 pub mod decisions;
 pub mod provider;
-pub mod router;
 pub mod types;
 
 pub use crypto::KeyCipher;
 pub use decisions::{JevClient, JevConfig};
 pub use provider::{OpenAiCompatProvider, ProviderRegistry};
-pub use router::PurposeRouter;
 pub use types::{
     ChatMessage, ChatRequest, ChatResponse, EmbedRequest, EmbedResponse, LlmError, Purpose,
     UsageRecord,

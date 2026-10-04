@@ -198,22 +198,7 @@ impl ProviderRegistry {
         &self,
         purpose: crate::types::Purpose,
     ) -> Result<(std::sync::Arc<OpenAiCompatProvider>, String), LlmError> {
-        let table = crate::router::PurposeRouter::new(self.pool_for_test())
-            .table()
-            .await?;
-        for rule in table.chain(purpose) {
-            match self.get(&rule.provider).await {
-                Ok((p, model)) => return Ok((p, model)),
-                // L4：幽灵路由不再静默——warn 留痕（typo/改名导致的失效路由可发现）
-                Err(e) => tracing::warn!(
-                    purpose = purpose.as_str(),
-                    provider = %rule.provider,
-                    error = %e,
-                    "路由链规则失效，跳过（回落下一条或默认 provider）"
-                ),
-            }
-        }
-        // 默认回退：按能力选 provider。优先 is_default 行；缺失时兜底该能力任意一行
+        // 按 capability 选 provider。优先 is_default 行；缺失时兜底该能力任意一行
         // （EN-1：控制台建了 provider 但漏开"默认"开关曾致蒸馏链整链卡死——配置了就该能用）。
         // L3：ORDER BY 兜底确定性——存量多 default 行时取最早创建的。
         let want_embed = purpose == crate::types::Purpose::Embed;

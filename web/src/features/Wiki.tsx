@@ -233,7 +233,7 @@ export default function Wiki() {
   return (
     <div className={cn('flex flex-col gap-4 lg:gap-5', bounded && 'lg:h-[calc(100vh-3rem)]')}>
       <div className="shrink-0">
-        <PageHeader title="Wiki" desc="Agent 维护的互链知识库——目录树浏览页面，图谱看关系">
+        <PageHeader title="Wiki">
           {panel !== 'none' ? (
             <Button size="sm" variant="outline" onClick={() => setPanel('none')}>
               ← 返回 Wiki

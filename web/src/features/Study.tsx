@@ -149,7 +149,7 @@ export default function Study() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="学习" desc="学习路线图跟踪：领域→知识点状态机→挂 wiki 页。知识本体在 wiki，这里只管学到哪。" />
+      <PageHeader title="学习" />
 
       {dueCount > 0 && (
         <Card className="p-3 text-sm">

@@ -861,29 +861,6 @@ async fn llm_scope_key_manages_providers() {
     assert_eq!(resp.status(), StatusCode::OK, "llm key 应能测连通");
     let resp = send(
         &app,
-        "PUT",
-        "/settings/llm/routing",
-        key.clone(),
-        Some(r#"{"extract":[{"provider":"t","model":"m"}]}"#),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::NO_CONTENT,
-        "llm key 应能配路由（204）"
-    );
-    // 清理（路由表清空后删 provider）
-    let _ = send(
-        &app,
-        "PUT",
-        "/settings/llm/routing",
-        key.clone(),
-        Some("{}"),
-    )
-    .await;
-    let resp = send(
-        &app,
         "DELETE",
         &format!("/settings/llm/providers/{pid}"),
         key.clone(),
@@ -1795,8 +1772,6 @@ async fn openapi_snapshot() {
             "/settings/llm/providers/re-encrypt",
             "/settings/llm/providers/{id}",
             "/settings/llm/providers/{id}/test",
-            "/settings/llm/routing",
-            "/settings/llm/routing/suggest",
             "/settings/mcp",
             "/settings/rhythm",
             "/study/items/{id}",
@@ -1940,36 +1915,6 @@ async fn batch_revoke_api_keys_revokes_selected_only() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "空 ids 应 400");
-}
-
-#[tokio::test]
-async fn routing_suggest_reports_no_provider() {
-    let (app, _pg) = app().await;
-    let token = login_token(&app).await;
-
-    // 无供应商 → 400 带明确报错（AI 建议的正路径需真实 LLM，走 live 验证）
-    let resp = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/settings/llm/routing/suggest")
-                .header("content-type", "application/json")
-                .header("authorization", format!("Bearer {token}"))
-                .body(Body::from(r#"{}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "无供应商应 400");
-    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(
-        v["error"]["message"].as_str().unwrap().contains("供应商"),
-        "报错应提示注册供应商: {v:?}"
-    );
 }
 
 /// memory-rhythm 分权：cron 通道只能由 cron scope 的 key 走——防 AI 伪造 via:"cron" 审计行。
