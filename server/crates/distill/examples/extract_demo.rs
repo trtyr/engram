@@ -66,6 +66,13 @@ async fn main() {
             json_mode: true,
             max_tokens: None,
             tools: None,
+            // 关闭思考链：OpenRouter 统一 reasoning 对象；qwen3 系另认 enable_thinking
+            extras: Some({
+                let mut m = serde_json::Map::new();
+                m.insert("reasoning".into(), serde_json::json!({ "enabled": false }));
+                m.insert("enable_thinking".into(), serde_json::json!(false));
+                m
+            }),
         };
         match provider.chat(req).await {
             Ok(resp) => {

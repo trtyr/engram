@@ -257,6 +257,7 @@ impl GatewayLlm {
                 json_mode: true,
                 max_tokens: None,
             tools: None,
+            extras: None,
             })
             .await
             .map_err(|e| {

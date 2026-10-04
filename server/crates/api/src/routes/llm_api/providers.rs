@@ -342,6 +342,7 @@ pub async fn test_provider(
                     json_mode: false,
                     max_tokens: Some(1),
                     tools: None,
+                    extras: None,
                 })
                 .await,
         );

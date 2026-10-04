@@ -112,6 +112,11 @@ impl LlmProvider for OpenAiCompatProvider {
         if req.json_mode {
             body["response_format"] = serde_json::json!({ "type": "json_object" });
         }
+        if let Some(extras) = &req.extras {
+            for (k, v) in extras {
+                body[k.as_str()] = v.clone();
+            }
+        }
         // 回填消息里的 assistant.tool_calls 标准化：内部 ToolCall 是平铺 {id,name,arguments}，
         // OpenAI 线格式要求 {id,type:"function",function:{name,arguments}}——非标会被部分
         // 渠道上游按异常路径处理（P004-T010 demo 实证：非标+tool 回填稳定坏响应）

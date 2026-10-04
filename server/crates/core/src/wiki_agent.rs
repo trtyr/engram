@@ -560,6 +560,7 @@ pub async fn run_agent<P: LlmProvider + 'static>(
             // 限响应长度：部分网关对长非流式响应的聚合转发不稳（bad_response_body）
             max_tokens: Some(4096),
             tools: Some(defs.clone()),
+            extras: None,
         };
         let t0 = Instant::now();
         let resp = provider.chat(req).await.map_err(AgentError::Llm)?;

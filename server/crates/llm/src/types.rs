@@ -129,6 +129,10 @@ pub struct ChatRequest {
     pub max_tokens: Option<u32>,
     /// 可用工具（Some = 开启 tool-calling）
     pub tools: Option<Vec<ToolDef>>,
+    /// 透传到请求体的额外参数（provider 差异大：关闭思考链各家用不同字段——
+    /// OpenRouter `reasoning.enabled=false`、DashScope `enable_thinking=false`——
+    /// 统一透传通道，不在类型层枚举各家中文名。None = 不带。）
+    pub extras: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// 聊天响应。
