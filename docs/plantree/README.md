@@ -32,8 +32,10 @@
 | P008 | [wiki-frontend-agentfirst](plans/008-wiki-frontend-agentfirst/README.md) | web, server/wiki-engine, server/mcp, server/api | done | 人审机制整体移除（T001-T002）+Agent 维护流面板/版本 UI/体检补全/语义修正（T003-T006）+todos 详情/markdown（ideas 晋升 T007） | 8b97b26/f118992/7522406/b27d235/5ad386b/063d34b | 表 wiki_review_items 留停写；wiki actions 28→26 |
 | P009 | [frontend-ia-observability](plans/009-frontend-ia-observability/README.md) | web, deploy, server/api | done | 任务并入日志并移除任务入口/学习归资产域/日志 7 天窗口+长内容收起/已完成计数/账号拆三标签/网页读取归 AI 功能/生产 codegraph 数据根修复 | 2c5423a/72003f6/dbef672/cb7bf7d | — |
 | P010 | [logs-unify](plans/010-logs-unify/README.md) | server/logs, mcp, web, db | done | 日志统一为系统唯一时间线（job_events 并入 logs，迁移 67）；MCP logs 域；前端日志页重建为单线；任务概念退役 | 31ad8a4/2ad412d/891dbff/e2cb949 | — |
-| P011 | [memory-audit-debts](plans/011-memory-audit-debts/README.md) | server/distill, server/core/memory, server/storage, server/mcp, web, server/api | planning | 实读行为债 T001-T010 待拍板（Q001-Q004）+ **JEV 已拍板（决策 001）**：L0→L1 保险级联上 JEV，T013 接入面+配置（OpenRouter-only）/T014 级联落地/T015 阶段二 arbitrate+consolidate | T012 评测两轮（bf30073） | T013 接入面+JEV 配置区块 |
-| P012 | [organize-agentic](plans/012-organize-agentic/README.md) | server/distill, server/storage, server/llm | planning | L1→L2 组织者 Agent 化：六工具（查原子/搜场景/读写/合并/软删）+ agentic loop，替代 top100 全塞；删除一律软删、converge 保持确定性；成本闸与 P011 T007 合并落地 | — | T001 工具集 |
+| P011 | [memory-audit-debts](plans/011-memory-audit-debts/README.md) | server/distill, server/core/memory, server/storage, server/mcp, web, server/api | executing | 十任务 goal 收官（2026-10-04）：T001-T014/T016-T021 全落地推送 + 生产重部署 + 全量重蒸；T015（arbitrate choice 化+consolidate noul）按设计后置 | 8f11d94/43cfb21 + 生产 43cfb21 部署 | T015 阶段二（Deferred）；遗留拍板进 P013 |
+| P012 | [organize-agentic](plans/012-organize-agentic/README.md) | server/distill, server/storage, server/llm | done | agentic 唯一化收官（2026-10-04）：六工具循环+软删+迁移 0069；旧单发全链删除（8f11d94，-389 行，无开关无兼容）；生产部署+重蒸验证 | 8f11d94（distill 39 全绿/clippy 0/fmt 净） | — |
+| P013 | [review-chain-rework](plans/013-review-chain-rework/README.md) | server/core/memory, server/api, server/mcp, web, deploy | planning | 待审通道整体移除 + 生产 JEV 决策模型补配（2026-10-04 拍板登记） | — | README 三个拍板点过会 |
+| P014 | [table-filter-ui](plans/014-table-filter-ui/README.md) | web | planning | Excel 式列头筛选：DataTable 组件 + 全站列表页迁移（2026-10-04 拍板登记） | — | 三个拍板点过会 |
 
 ## Ideas
 
