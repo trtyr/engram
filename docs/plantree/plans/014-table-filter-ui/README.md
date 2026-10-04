@@ -30,6 +30,14 @@ web（ui-bits + 全部列表页 features/*.tsx）
 
 代码落点：`web/src/features/Memory.tsx:107`（PageHeader desc 删除）+ `:109-111`（tab 行与标题行合并）。注意 DistillBar 仅 sessions tab 显示、筛选器仅 atoms tab 显示（:112-113 条件渲染），合并后同行右侧区域按 tab 切换内容。
 
+### KV 表格壳未复用 Card 样式（2026-10-04 追加）
+
+用户原话：「KV 那里的表格样式有问题，没有复用列表的样式……它跟之前的那个其他的表格完全不是一个样子。」
+
+实证（2026-10-04 源码对照）：同页 Sessions 列表外壳 = `<Card className="overflow-x-auto">`（圆角卡片，与 Logs 页一致）；KvPane 外壳 = 手写 `overflow-hidden rounded-md border border-border`（裸边框 div，无卡片背景）——一圆一直视觉割裂。
+
+修法：KvPane（Memory.tsx:1349）外壳替换为 `<Card className="overflow-x-auto">`，与 Sessions/Logs 同款。一行改动，P014 开工时捎带落地。
+
 ## 拍板点
 
 1. 迁移批次顺序（哪些页先进首批）？
