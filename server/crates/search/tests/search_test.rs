@@ -1,8 +1,7 @@
-//! 检索集成测试：中文写入→混合检索命中（真 PG + pgvector）。
+//! 检索集成测试：中文写入→纯向量检索命中（真 PG + pgvector；P015 FTS 退役）。
 
 mod support;
 
-use engram_search::tokenize::tsv_text;
 use pgvector::Vector;
 
 #[tokio::test]
@@ -26,29 +25,38 @@ async fn chinese_hybrid_search_hits() {
         ("event", "2026 年 10 月 engram 项目启动"),
         ("preference", "回答里代码示例要多于解释文字"),
     ];
+    let mut embs: Vec<Vec<f32>> = Vec::new();
     for (i, (kind, content)) in samples.iter().enumerate() {
         let emb: Vec<f32> = (0..1024)
             .map(|j| ((i * 37 + j * 13) % 97) as f32 / 97.0)
             .collect();
+        embs.push(emb.clone());
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, embedding, tsv)
-             VALUES ($1, $2, $3, 'active', $4, to_tsvector('simple', $5))",
+            "INSERT INTO atoms (id, kind, content, status, embedding)
+             VALUES ($1, $2, $3, 'active', $4)",
         )
         .bind(uuid::Uuid::new_v4())
         .bind(kind)
         .bind(content)
         .bind(Vector::from(emb))
-        .bind(tsv_text(content))
         .execute(&pool)
         .await
         .unwrap();
     }
 
-    // 纯 FTS：中文关键词命中
-    let hits = engram_search::search_atoms(&pool, "用户偏好", None, 5, false, None, None)
-        .await
-        .unwrap();
-    assert!(!hits.is_empty(), "中文 FTS 应有命中");
+    // 纯向量：probe = 首条样本向量（同向量 dist=0 稳定命中）
+    let hits = engram_search::search_atoms(
+        &pool,
+        "用户偏好",
+        Some(embs[0].as_slice()),
+        5,
+        false,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(!hits.is_empty(), "向量检索应有命中");
     assert!(hits.iter().any(|h| h.snippet.contains("偏好")));
 
     // 纯向量：用一个确定性的向量（与第一条同构）命中
@@ -58,10 +66,18 @@ async fn chinese_hybrid_search_hits() {
         .unwrap();
     assert!(!hits.is_empty(), "向量通道应有命中");
 
-    // 无关查询不应误伤（空命中合法，但这里「Rust 后端」应命中决策条）
-    let hits = engram_search::search_atoms(&pool, "后端 选型", None, 5, false, None, None)
-        .await
-        .unwrap();
+    // 决策条 probe（i=3 向量）
+    let hits = engram_search::search_atoms(
+        &pool,
+        "后端 选型",
+        Some(embs[3].as_slice()),
+        5,
+        false,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     assert!(
         hits.iter().any(|h| h.snippet.contains("Rust")),
         "hits: {:?}",
@@ -112,28 +128,39 @@ async fn search_demotes_expired_atoms() {
 
     // 同题材两条（同 content 保证基础分相同）：一条过期、一条未过期
     // search crate 无 chrono 依赖，valid_until 用 SQL now()±interval 表达
+    // P015：纯向量不歧视过期——两条同 content 同向量，同分返回；
+    // 时间语义由调用方 from/to 过滤承担（见 search_filters_by_time_range）。
+    let probe: Vec<f32> = (0..1024).map(|j| ((j * 13) % 97) as f32 / 97.0).collect();
+    let vt = format!(
+        "[{}]",
+        probe
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     let expired_id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, tsv, valid_until) \
-         VALUES ($1, 'fact', '下周三要交周报', 'active', to_tsvector('simple', $2), now() - interval '1 day')",
+        "INSERT INTO atoms (id, kind, content, status, embedding, valid_until) \
+         VALUES ($1, 'fact', '下周三要交周报', 'active', $2::vector, now() - interval '1 day')",
     )
     .bind(expired_id)
-    .bind(tsv_text("下周三要交周报"))
+    .bind(&vt)
     .execute(&pool)
     .await
     .unwrap();
     let fresh_id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, tsv, valid_until) \
-         VALUES ($1, 'fact', '下周三要交周报', 'active', to_tsvector('simple', $2), now() + interval '1 day')",
+        "INSERT INTO atoms (id, kind, content, status, embedding, valid_until) \
+         VALUES ($1, 'fact', '下周三要交周报', 'active', $2::vector, now() + interval '1 day')",
     )
     .bind(fresh_id)
-    .bind(tsv_text("下周三要交周报"))
+    .bind(&vt)
     .execute(&pool)
     .await
     .unwrap();
 
-    let hits = engram_search::search_atoms(&pool, "周报", None, 10, false, None, None)
+    let hits = engram_search::search_atoms(&pool, "周报", Some(&probe), 10, false, None, None)
         .await
         .unwrap();
     let score_of = |id: uuid::Uuid| {
@@ -142,9 +169,10 @@ async fn search_demotes_expired_atoms() {
             .map(|h| h.score)
             .unwrap_or(f64::NAN)
     };
-    assert!(
-        score_of(expired_id) < score_of(fresh_id),
-        "过期原子应降权（score 更低），实得 expired={} fresh={}",
+    assert_eq!(
+        score_of(expired_id),
+        score_of(fresh_id),
+        "纯向量同距离同分——过期不歧视（时间语义走 from/to），实得 expired={} fresh={}",
         score_of(expired_id),
         score_of(fresh_id)
     );
@@ -158,14 +186,23 @@ async fn search_filters_by_time_range() {
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
 
-    // 三条同题材原子，occurred_at 分处 8/9/10 月
+    // 三条同题材原子（同向量），occurred_at 分处 8/9/10 月
+    let probe: Vec<f32> = (0..1024).map(|j| ((j * 13) % 97) as f32 / 97.0).collect();
+    let vt = format!(
+        "[{}]",
+        probe
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     for month in ["2026-08-15", "2026-09-15", "2026-10-15"] {
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, tsv, occurred_at) \
-             VALUES ($1, 'event', '时间过滤测试事件', 'active', to_tsvector('simple', $2), $3::timestamptz)",
+            "INSERT INTO atoms (id, kind, content, status, embedding, occurred_at) \
+             VALUES ($1, 'event', '时间过滤测试事件', 'active', $2::vector, $3::timestamptz)",
         )
         .bind(uuid::Uuid::now_v7())
-        .bind(tsv_text("时间过滤测试事件"))
+        .bind(&vt)
         .bind(format!("{month}T00:00:00Z"))
         .execute(&pool)
         .await
@@ -180,10 +217,17 @@ async fn search_filters_by_time_range() {
         chrono::DateTime::parse_from_rfc3339("2026-09-30T00:00:00Z")
             .unwrap()
             .into();
-    let hits =
-        engram_search::search_atoms(&pool, "时间过滤测试", None, 20, false, Some(from), Some(to))
-            .await
-            .unwrap();
+    let hits = engram_search::search_atoms(
+        &pool,
+        "时间过滤测试",
+        Some(&probe),
+        20,
+        false,
+        Some(from),
+        Some(to),
+    )
+    .await
+    .unwrap();
     assert_eq!(hits.len(), 2, "8/15~9/30 窗内应命中 8 月和 9 月两条");
 }
 
@@ -203,13 +247,12 @@ async fn zero_fts_match_uses_tight_vec_fallback() {
     e1[1] = 1.0;
     for (content, emb) in [("橙汁儿好喝", &e0), ("用户喜欢直升机游览", &e1)] {
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, embedding, tsv) \
-             VALUES ($1, 'fact', $2, 'active', $3, to_tsvector('simple', $4))",
+            "INSERT INTO atoms (id, kind, content, status, embedding) \
+             VALUES ($1, 'fact', $2, 'active', $3)",
         )
         .bind(uuid::Uuid::new_v4())
         .bind(content)
         .bind(Vector::from(emb.to_vec()))
-        .bind(tsv_text(content))
         .execute(&pool)
         .await
         .unwrap();
@@ -237,14 +280,21 @@ async fn zero_fts_match_uses_tight_vec_fallback() {
         hits.len()
     );
 
-    // 用例 3：FTS 有命中 → 词法路径不受向量兜底影响（命中项在场且 RRF 排第一）
-    let hits = engram_search::search_atoms(&pool, "橙汁", Some(&far), 10, false, None, None)
+    // 用例 3：查询向量恰为 e0（dist=0 端点）→ 只回橙汁，score 满分 1.0
+    let hits = engram_search::search_atoms(&pool, "橙汁", Some(&e0), 10, false, None, None)
         .await
         .unwrap();
-    assert!(
-        hits.first().is_some_and(|h| h.snippet.contains("橙汁")),
-        "FTS 命中路径不受向量兜底影响：{:?}",
+    assert_eq!(
+        hits.len(),
+        1,
+        "恰为样本向量的查询只命中该样本：{:?}",
         hits.iter().map(|h| &h.snippet).collect::<Vec<_>>()
+    );
+    assert!(
+        hits.first()
+            .is_some_and(|h| h.snippet.contains("橙汁") && (h.score - 1.0).abs() < 1e-6),
+        "dist=0 应命中且 score 满分：{:?}",
+        hits.first().map(|h| (h.snippet.clone(), h.score))
     );
 }
 
@@ -258,20 +308,29 @@ async fn atom_hit_title_is_content_prefix() {
     engram_storage::run_migrations(&pool).await.expect("迁移");
     let short = "用户最爱的数据库是 PostgreSQL，已使用十年";
     let long = "用户最爱的数据库是 PostgreSQL，从 2016 年开始使用，经历了从 MySQL 迁移的完整过程，十年间换过三台机器";
+    let probe: Vec<f32> = (0..1024).map(|j| ((j * 13) % 97) as f32 / 97.0).collect();
+    let vt = format!(
+        "[{}]",
+        probe
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     for content in [short, long] {
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, tsv) \
-             VALUES ($1, 'fact', $2, 'active', to_tsvector('simple', $3))",
+            "INSERT INTO atoms (id, kind, content, status, embedding) \
+             VALUES ($1, 'fact', $2, 'active', $3::vector)",
         )
         .bind(uuid::Uuid::new_v4())
         .bind(content)
-        .bind(tsv_text(content))
+        .bind(&vt)
         .execute(&pool)
         .await
         .unwrap();
     }
 
-    let hits = engram_search::search_atoms(&pool, "PostgreSQL", None, 5, false, None, None)
+    let hits = engram_search::search_atoms(&pool, "PostgreSQL", Some(&probe), 5, false, None, None)
         .await
         .unwrap();
     assert_eq!(hits.len(), 2);
@@ -302,13 +361,23 @@ async fn time_filter_prefers_occurred_at() {
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
 
+    let probe: Vec<f32> = (0..1024).map(|j| ((j * 13) % 97) as f32 / 97.0).collect();
+    let vt = format!(
+        "[{}]",
+        probe
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     // occurred_at = 9 月 2 日（过去），created_at = 现在
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, occurred_at, tsv) \
+        "INSERT INTO atoms (id, kind, content, status, embedding, occurred_at) \
          VALUES ($1, 'event', '2026-09-02（上周三）去看了牙医', 'active', \
-                 '2026-09-02T00:00:00Z'::timestamptz, to_tsvector('simple', '牙医 牙'))",
+                 $2::vector, '2026-09-02T00:00:00Z'::timestamptz)",
     )
     .bind(uuid::Uuid::new_v4())
+    .bind(&vt)
     .execute(&pool)
     .await
     .unwrap();
@@ -320,9 +389,10 @@ async fn time_filter_prefers_occurred_at() {
     let to = chrono::DateTime::parse_from_rfc3339("2026-09-03T00:00:00Z")
         .unwrap()
         .into();
-    let hits = engram_search::search_atoms(&pool, "牙医", None, 10, false, Some(from), Some(to))
-        .await
-        .unwrap();
+    let hits =
+        engram_search::search_atoms(&pool, "牙医", Some(&probe), 10, false, Some(from), Some(to))
+            .await
+            .unwrap();
     assert_eq!(
         hits.len(),
         1,
@@ -334,9 +404,10 @@ async fn time_filter_prefers_occurred_at() {
     let from2 = chrono::DateTime::parse_from_rfc3339("2026-09-04T00:00:00Z")
         .unwrap()
         .into();
-    let hits = engram_search::search_atoms(&pool, "牙医", None, 10, false, Some(from2), None)
-        .await
-        .unwrap();
+    let hits =
+        engram_search::search_atoms(&pool, "牙医", Some(&probe), 10, false, Some(from2), None)
+            .await
+            .unwrap();
     assert!(hits.is_empty(), "occurred_at 在窗口外不应命中");
 }
 
@@ -366,13 +437,12 @@ async fn vec_fallback_keeps_relative_neighbors_drops_tail() {
     ];
     for (content, emb) in &rows {
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, embedding, tsv) \
-             VALUES ($1, 'fact', $2, 'active', $3, to_tsvector('simple', $4))",
+            "INSERT INTO atoms (id, kind, content, status, embedding) \
+             VALUES ($1, 'fact', $2, 'active', $3)",
         )
         .bind(uuid::Uuid::new_v4())
         .bind(content)
         .bind(Vector::from(emb.clone()))
-        .bind(engram_search::tokenize::tsv_text(content))
         .execute(&pool)
         .await
         .unwrap();
