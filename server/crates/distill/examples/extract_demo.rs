@@ -66,11 +66,17 @@ async fn main() {
             json_mode: true,
             max_tokens: None,
             tools: None,
-            // 关闭思考链：OpenRouter 统一 reasoning 对象；qwen3 系另认 enable_thinking
+            // 关闭思考链（各家字段不同）：MiniMax-M3 用 thinking.type=disabled（官方文档）；
+            // OpenRouter 统一 reasoning.enabled=false；DashScope qwen3 用 enable_thinking=false
             extras: Some({
                 let mut m = serde_json::Map::new();
-                m.insert("reasoning".into(), serde_json::json!({ "enabled": false }));
-                m.insert("enable_thinking".into(), serde_json::json!(false));
+                let is_minimax = model.starts_with("MiniMax");
+                if is_minimax {
+                    m.insert("thinking".into(), serde_json::json!({ "type": "disabled" }));
+                } else {
+                    m.insert("reasoning".into(), serde_json::json!({ "enabled": false }));
+                    m.insert("enable_thinking".into(), serde_json::json!(false));
+                }
                 m
             }),
         };
