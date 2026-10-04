@@ -8,6 +8,7 @@ mod entity;
 mod kv;
 mod ops;
 mod persona;
+mod persona_doc;
 mod scenarios;
 mod sessions;
 pub use atoms::*;
@@ -15,6 +16,7 @@ pub use entity::*;
 pub use kv::*;
 pub use ops::*;
 pub use persona::*;
+pub use persona_doc::*;
 pub use scenarios::*;
 pub use sessions::*;
 

@@ -32,6 +32,8 @@ pub(super) fn memory_routes_group0() -> Router<AppState> {
         .route("/memory/purge", post(memory_api::purge_agent))
         .route("/memory/export", get(memory_api::export_memory))
         .route("/memory/distill", post(memory_api::trigger_distill))
+        .route("/memory/maintain", post(memory_api::trigger_maintain))
+        .route("/memory/persona-doc", get(memory_api::persona_doc))
         .route(
             "/memory/atoms",
             get(memory_api::list_atoms).post(memory_api::create_atom),

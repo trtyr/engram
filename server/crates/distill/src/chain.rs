@@ -14,11 +14,16 @@ pub fn register_handlers(runner: Runner, llm: LlmRef) -> Runner {
     let l_organize = llm.clone();
     let l_persona = llm.clone();
     let l_consolidate = llm.clone();
+    let l_maintain = llm.clone();
     let l_reembed = llm.clone();
     runner
         .register("extract_atoms", move |ctx| {
             let llm = l_extract.clone();
             async move { crate::extract::run(ctx, llm).await }
+        })
+        .register("maintain_memory", move |ctx| {
+            let llm = l_maintain.clone();
+            async move { crate::maintain_agent::run(ctx, llm).await }
         })
         .register("organize_scenarios", move |ctx| {
             let llm = l_organize.clone();

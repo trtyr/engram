@@ -2423,3 +2423,88 @@ async fn p012_agentic_loop_steps_capped() {
 fn crate_organize_max_steps() -> usize {
     engram_distill::organize_agentic::ORGANIZE_MAX_STEPS
 }
+
+/// P015 离线整理 Agent：判重合并 + 画像文档维护 + finish 收尾。
+#[tokio::test]
+async fn maintain_agent_merges_and_edits_persona_doc() {
+    let id_a = Uuid::now_v7();
+    let id_b = Uuid::now_v7();
+    let env = setup(vec![
+        json!({"tool": "atoms_recent", "args": {"limit": 10}}),
+        json!({"tool": "atom_merge", "args": {"keep_id": id_a.to_string(), "merge_ids": [id_b.to_string()]}}),
+        json!({"tool": "persona_doc_read", "args": {}}),
+        json!({"tool": "persona_doc_edit", "args": {"content": "# 用户画像\n\n- 协作偏好：最烦别人催 review（已验证）", "summary": "补充协作偏好"}}),
+        json!({"tool": "finish", "args": {"summary": "合并 1 组，画像初建"}}),
+    ])
+    .await;
+
+    // seed：两条语义重复的 active 原子
+    for (id, content, refs) in [
+        (
+            id_a,
+            "用户最烦别人催 review，自己安排节奏",
+            json!([{"session_id": Uuid::now_v7()}]),
+        ),
+        (
+            id_b,
+            "用户不喜欢被人催 review",
+            json!([{"session_id": Uuid::now_v7()}]),
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, tsv, strength, source_kind) \
+             VALUES ($1, 'preference', $2, 0.95, 'active', $3, NULL, to_tsvector('simple', $2), 'fact', 'agent_inferred')",
+        )
+        .bind(id)
+        .bind(content)
+        .bind(refs)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
+
+    env.queue
+        .enqueue(JobTemplate::new("maintain_memory").with_payload(json!({"reason": "manual"})))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "maintain_memory").await;
+    assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
+
+    // B 被归档并指向 A；A 保持 active
+    assert_eq!(j.attempts, 1, "不应有重试: {:?}", j.error);
+    let (st_b, sup): (String, Option<Uuid>) =
+        sqlx::query_as("SELECT status, superseded_by FROM atoms WHERE id = $1")
+            .bind(id_b)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(st_b, "archived");
+    assert_eq!(sup, Some(id_a));
+    let st_a: String = sqlx::query_scalar("SELECT status FROM atoms WHERE id = $1")
+        .bind(id_a)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(st_a, "active");
+
+    // 画像文档：首建 version=1，内容来自 Agent 编辑
+    let (doc, ver): (String, i32) =
+        sqlx::query_as("SELECT content, version FROM persona_doc WHERE id = 1")
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert_eq!(ver, 1);
+    assert!(doc.contains("已验证"), "画像应包含编辑内容: {doc}");
+
+    // 任务结果回执
+    let payload = j.progress.map(|p| p.0).unwrap_or(json!({}));
+    assert_eq!(payload.get("merged").and_then(|v| v.as_u64()), Some(1));
+    assert_eq!(
+        payload.get("persona_edited").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}

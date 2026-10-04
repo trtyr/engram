@@ -79,6 +79,7 @@ pub type HandlerFn = Arc<
 pub const WORKFLOW_KINDS: &[&str] = &[
     "extract_atoms",
     "organize_scenarios",
+    "maintain_memory",
     "distill_persona",
     "consolidate",
     "reembed_memory",
@@ -89,8 +90,8 @@ pub const WORKFLOW_KINDS: &[&str] = &[
 /// kind → 功能域（T019 日志域化）：写入层单点归域，与迁移 0068 回填同表驱动。
 pub fn domain_for_kind(kind: &str) -> &'static str {
     match kind {
-        "extract_atoms" | "organize_scenarios" | "distill_persona" | "consolidate"
-        | "reembed_memory" | "deep_purge" => "memory",
+        "extract_atoms" | "organize_scenarios" | "maintain_memory" | "distill_persona"
+        | "consolidate" | "reembed_memory" | "deep_purge" => "memory",
         k if k.starts_with("wiki_") => "wiki",
         k if k.starts_with("cg_") => "codegraph",
         _ => "system",

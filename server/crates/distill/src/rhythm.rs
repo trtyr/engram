@@ -193,7 +193,7 @@ pub async fn bootstrap(queue: &JobQueue, pool: &PgPool) -> Result<usize, JobErro
 /// 下一期（cron 语义）。停用时跳过续期与工作（已排的下一期跑完即自然停）。
 pub fn register_rhythm(runner: Runner, llm: LlmRef) -> Runner {
     let l_extract = llm.clone();
-    let l_consolidate = llm;
+    let l_consolidate = llm.clone();
     runner
         .register(KIND_EXTRACT, move |ctx| {
             let llm = l_extract.clone();
@@ -209,7 +209,7 @@ pub fn register_rhythm(runner: Runner, llm: LlmRef) -> Runner {
             }
         })
         .register(KIND_CONSOLIDATE, move |ctx| {
-            let llm = l_consolidate.clone();
+            let _l_consolidate = l_consolidate.clone();
             async move {
                 let cfg = load_config(ctx.pool()).await;
                 if !cfg.enabled {
@@ -218,7 +218,13 @@ pub fn register_rhythm(runner: Runner, llm: LlmRef) -> Runner {
                 for t in next_templates(Utc::now(), &cfg, local_offset()) {
                     ctx.enqueue_next(t).await?;
                 }
-                crate::consolidate::run(ctx, llm).await
+                // P015：每日整理节律改由离线整理 Agent 承担（判重/归档/画像）
+                ctx.enqueue_next(
+                    engram_jobs::JobTemplate::new("maintain_memory")
+                        .with_payload(serde_json::json!({"reason": "rhythm"})),
+                )
+                .await?;
+                Ok(serde_json::json!({"enqueued": "maintain_memory"}))
             }
         })
 }

@@ -305,3 +305,42 @@ pub async fn reembed_memory(
     svc(&state).reembed().await.map_err(me)?;
     Ok(StatusCode::ACCEPTED)
 }
+
+/// 画像活文档（P015）：当前版 + 历史。
+#[utoipa::path(get, path = "/memory/persona-doc",
+    responses((status = 200, body = serde_json::Value)))]
+pub async fn persona_doc(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Query(p): Query<PersonaDocParams>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_memory_read(&principal)?;
+    Ok(Json(
+        svc(&state)
+            .persona_doc(p.history_limit.unwrap_or(10))
+            .await
+            .map_err(me)?,
+    ))
+}
+
+#[derive(Deserialize, IntoParams)]
+pub struct PersonaDocParams {
+    pub history_limit: Option<i64>,
+}
+
+/// 手动触发离线整理 Agent（判重/归档/画像维护）。cron 通道专用。
+#[utoipa::path(post, path = "/memory/maintain",
+    responses((status = 200, body = serde_json::Value)))]
+pub async fn trigger_maintain(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_cron(&principal)?;
+    let by = actor_of(&principal);
+    Ok(Json(
+        svc(&state)
+            .trigger_maintain(by.as_str())
+            .await
+            .map_err(me)?,
+    ))
+}

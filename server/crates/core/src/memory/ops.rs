@@ -17,6 +17,43 @@ impl MemoryService {
     /// 手动触发蒸馏（AI 记忆管家）：撞车守卫——running extract_atoms 存在时只提示不投递
     /// （任务列表不留空跑记录）。mode："distill"（默认）/ "rebuild"（画像全量重建）/
     /// "sleep"（预留——内置节律线后开放）。
+    /// P015：手动触发离线整理 Agent（判重/归档/画像）。撞车守卫：运行中即提示。
+    pub async fn trigger_maintain(&self, by: &str) -> Result<serde_json::Value, MemoryError> {
+        let running = repo::count_running_maintain(&self.pool).await?;
+        if running > 0 {
+            return Ok(serde_json::json!({
+                "already_running": true,
+                "hint": "整理巡逻进行中——等它完成看效果",
+            }));
+        }
+        let job = self
+            .queue
+            .enqueue(
+                engram_jobs::JobTemplate::new("maintain_memory")
+                    .with_payload(serde_json::json!({"reason": "manual", "triggered_by": by})),
+            )
+            .await
+            .map_err(|e| MemoryError::Storage(e.to_string()))?;
+        Ok(serde_json::json!({
+            "already_running": false,
+            "jobs": [{ "id": job.id.to_string(), "kind": job.kind }],
+        }))
+    }
+
+    /// 画像活文档（P015）：当前版 + 近 N 版历史。
+    pub async fn persona_doc(&self, history_limit: i64) -> Result<serde_json::Value, MemoryError> {
+        let doc = repo::persona_doc_get(&self.pool)
+            .await
+            .map_err(|e| MemoryError::Storage(e.to_string()))?;
+        let history = repo::persona_doc_history(&self.pool, history_limit)
+            .await
+            .map_err(|e| MemoryError::Storage(e.to_string()))?;
+        Ok(serde_json::json!({
+            "doc": doc,
+            "history": history,
+        }))
+    }
+
     pub async fn trigger_distill_manual(
         &self,
         full: bool,

@@ -10,6 +10,7 @@ pub mod entity_portraits;
 pub mod extract;
 pub mod extract_model;
 pub mod llm_port;
+pub mod maintain_agent;
 pub mod organize;
 pub mod organize_agentic;
 pub mod persona;
