@@ -3,7 +3,7 @@
  * 分层 = 1px 发丝线（零阴影）；强调 = 墨色实心；彩色只承担语义。
  */
 import { Fragment, type ComponentProps, type ReactNode } from 'react'
-import { CircleAlert, Inbox, Loader2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronsUpDown, CircleAlert, Inbox, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { tableCls } from '@/lib/ui'
 
@@ -261,6 +261,11 @@ export interface DataTableColumn<T> {
   filterAriaLabel?: string
 }
 
+export interface DataTableSort {
+  key: string
+  dir: 'asc' | 'desc'
+}
+
 interface DataTableProps<T> {
   columns: DataTableColumn<T>[]
   rows: T[]
@@ -271,6 +276,9 @@ interface DataTableProps<T> {
   expandable?: (row: T) => ReactNode
   isExpanded?: (row: T) => boolean
   empty?: string
+  /** 受控排序（P014）：点列头切三态 asc→desc→null；排序语义（本地/服务端）由调用方定。 */
+  sort?: DataTableSort | null
+  onSortChange?: (s: DataTableSort | null) => void
 }
 
 /** 统一数据表（P014）：Card 壳 + 列头内嵌筛选（Excel 式）。
@@ -283,8 +291,17 @@ export function DataTable<T>({
   expandable,
   isExpanded,
   empty = '暂无数据',
+  sort,
+  onSortChange,
 }: DataTableProps<T>) {
   const colCount = columns.length
+
+  const cycleSort = (key: string) => {
+    if (!onSortChange) return
+    if (sort?.key !== key) onSortChange({ key, dir: 'asc' })
+    else if (sort.dir === 'asc') onSortChange({ key, dir: 'desc' })
+    else onSortChange(null)
+  }
   return (
     <Card className="overflow-x-auto">
       {rows.length === 0 ? (
@@ -293,10 +310,32 @@ export function DataTable<T>({
         <table className={tableCls.root}>
           <thead className={tableCls.thead}>
             <tr>
-              {columns.map((c) => (
+              {columns.map((c) => {
+                const sortable = onSortChange != null
+                const active = sort?.key === c.key
+                const SortIcon = active ? (sort!.dir === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+                return (
                 <th key={c.key} className={`${tableCls.th} ${c.thClassName ?? ''}`}>
                   <div className="flex flex-col gap-1">
-                    <span>{c.label}</span>
+                    <span className="flex items-center gap-1">
+                      {c.label}
+                      {sortable && (
+                        <button
+                          type="button"
+                          aria-label={`按${c.label}排序${active ? `（当前${sort!.dir === 'asc' ? '升序' : '降序'}）` : ''}`}
+                          className={cn(
+                            'shrink-0 transition-colors',
+                            active ? 'text-foreground' : 'text-muted-foreground/40 hover:text-foreground',
+                          )}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            cycleSort(c.key)
+                          }}
+                        >
+                          <SortIcon className="size-3" />
+                        </button>
+                      )}
+                    </span>
                     {c.filter && (
                       <div>
                         {c.filter.type === 'text' ? (
@@ -327,7 +366,8 @@ export function DataTable<T>({
                     )}
                   </div>
                 </th>
-              ))}
+                )
+              })}
             </tr>
           </thead>
           <tbody>

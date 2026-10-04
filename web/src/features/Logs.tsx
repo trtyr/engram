@@ -10,7 +10,7 @@
  */
 import { useEffect, useState } from 'react'
 import { api, type Job, type JobEvent } from '@/lib/api'
-import { Card, DataTable, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
+import { Card, DataTable, PageHeader, Spinner, StatusBadge, type DataTableSort } from '@/components/ui-bits'
 import { fmtTime, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import Pager from '@/components/Pager'
@@ -90,6 +90,8 @@ export default function Logs() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [openJob, setOpenJob] = useState<string | null>(null)
+  // 列头排序（DataTable 受控三态；服务端分页下排序作用于当前页）
+  const [sort, setSort] = useState<DataTableSort | null>(null)
 
   const loadLogs = () => {
     const p = new URLSearchParams({
@@ -239,8 +241,18 @@ export default function Logs() {
                 render: (r) => r.request_id ?? '',
               },
             ]}
-            rows={rows}
+            rows={(() => {
+              if (!sort) return rows
+              const dir = sort.dir === 'asc' ? 1 : -1
+              return [...rows].sort((a, b) =>
+                sort.key === 'level'
+                  ? dir * a.level.localeCompare(b.level)
+                  : dir * a.ts.localeCompare(b.ts),
+              )
+            })()}
             rowKey={(r) => String(r.id)}
+            sort={sort}
+            onSortChange={setSort}
             empty={`${winLabel}无日志行`}
           />
         )}

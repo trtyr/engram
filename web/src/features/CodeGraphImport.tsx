@@ -45,7 +45,6 @@ export default function CodeGraphImport() {
     <div className="space-y-4">
       <PageHeader
         title="代码图谱 · 导入"
-        desc="两个入口：① git 仓库地址（服务端 clone 后自动建索引）② 上传本机 codegraph index 产出的 codegraph.db"
       >
         <CgTabs />
       </PageHeader>

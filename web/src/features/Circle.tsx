@@ -18,7 +18,6 @@ export default function Circle() {
     <div className="space-y-6">
       <PageHeader
         title="圈子"
-        desc="你的世界里的人与事——按实体浏览记忆，图谱看关系，档案看细节"
       />
       <Galaxy
         key={entity ?? 'none'}

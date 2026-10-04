@@ -142,7 +142,6 @@ export default function Credentials() {
     <div className="space-y-6">
       <PageHeader
         title="凭据台账"
-        desc="机密值一等台账：静态加密落库、按名取用、取用留痕。列表永不回显值——揭示是显式动作且每次留痕。"
       />
       {err && <ErrorBox msg={err} />}
       {notice && (

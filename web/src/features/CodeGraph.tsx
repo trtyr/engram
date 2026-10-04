@@ -97,7 +97,6 @@ export default function CodeGraph() {
     <div className="flex h-[calc(100vh-3rem)] min-h-[520px] flex-col gap-3">
       <PageHeader
         title="代码图谱"
-        desc="看已导入的代码库：左侧选条目，右侧看状态、跑查询、看调用图（可全屏）"
       >
         <CgTabs />
       </PageHeader>

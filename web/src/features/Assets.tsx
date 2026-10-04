@@ -217,7 +217,6 @@ export default function Assets() {
     <div className="space-y-5">
       <PageHeader
         title="资产"
-        desc="台账：我拥有的、可以被操作的东西（主机 / 云实例 / 域名 / 账号 / 设备）。身份唯一——项目只**引用**它，不重抄一遍。"
       >
         <div className="flex items-center gap-2">
           <input

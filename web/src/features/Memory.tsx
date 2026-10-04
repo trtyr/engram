@@ -11,6 +11,7 @@ import {
   Spinner,
   StatusBadge,
   Tabs,
+  type DataTableSort,
 } from '@/components/ui-bits'
 import { PersonaHistoryDrawer } from '@/components/PersonaHistory'
 import ClampText from '@/components/ClampText'
@@ -170,6 +171,8 @@ function Sessions() {
   // 翻页（前端切页：拉满后本地分页，支持页码直跳）
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  // 列头排序（DataTable 受控三态；本地排序——数据已全量在前端）
+  const [sort, setSort] = useState<DataTableSort | null>(null)
   const load = () => api.get<Session[]>('/memory/sessions?limit=200').then(setRows).catch((e) => setErr(e.message))
   useEffect(() => {
     load()
@@ -283,8 +286,19 @@ function Sessions() {
               },
               { key: 'time', label: '时间', tdClassName: 'whitespace-nowrap text-muted-foreground', render: (s) => fmtTime(s.created_at) },
             ]}
-            rows={rows.slice((cur - 1) * pageSize, cur * pageSize)}
+            rows={(() => {
+              // 全量排序后再分页（数据 limit=200 已全量在前端）
+              const sorted = sort
+                ? [...rows].sort((a, b) => {
+                    const dir = sort.dir === 'asc' ? 1 : -1
+                    return dir * String(a.created_at).localeCompare(String(b.created_at))
+                  })
+                : rows
+              return sorted.slice((cur - 1) * pageSize, cur * pageSize)
+            })()}
             rowKey={(s) => s.id}
+            sort={sort}
+            onSortChange={setSort}
             onRowClick={(s) => setOpenId(openId === s.id ? null : s.id)}
             isExpanded={(s) => openId === s.id}
             expandable={(s) => (
