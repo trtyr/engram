@@ -6,6 +6,10 @@
   延迟 -88% token -93%）+ few-shot 判例 + ChatRequest extras 透传通道 + 效果 demo 4 样本全对
 - 落库切片（本地验证 ✅）：抽取 → conf<0.55 过滤 → 批量向量化（Qwen3-Embedding-8B 1024 维）→
   INSERT demo_atoms（pgvector + tsv）→ 回读确认。examples/extract_demo.rs 一体化管道
+- **正式入库管道（6970dc5 ✅）**：extract persist 直落 active（原 candidate 待仲裁）+
+  conf<0.55 丢弃（无待审通道）+ 成功直接链 organize；在线仲裁整体退役（arbitrate.rs/
+  链注册/arbitrate_atoms 任务类型/WORKFLOW_KINDS/P_ARBITRATE，-981 行）；
+  判重与取代移交离线整理。distill 34 绿/jobs 15 绿/clippy 0
 
 ## In Progress
 
