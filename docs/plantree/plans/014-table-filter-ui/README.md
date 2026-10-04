@@ -51,6 +51,12 @@ web（ui-bits + 全部列表页 features/*.tsx）
 2. 行加 cursor-pointer + onClick 整行切换 openId；Checkbox 单元格 stopPropagation 防误勾
 3. 删「详情」按钮列（th 空列与 td 按钮同删），手风琴 colSpan 7→6
 
+### KV pane 说明小字删除（2026-10-04 追加）
+
+用户原话：「AI 管道的权威精确值存储（序列号/UUID/路径…逐字保存、回读比对）。只读——写入唯一通道是 MCP memory.kv_put。这种没有任何意义的小字，给我去掉。」
+
+落点：Memory.tsx:1326-1329（KvPane 顶部 `<p>` 说明段整段删）。同类说明小字如其他 pane 还有，登记时一律视为候选删除（Empty 提示除外——那是空态指引不是说明）。
+
 ## 拍板点
 
 1. 迁移批次顺序（哪些页先进首批）？
