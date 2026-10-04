@@ -46,7 +46,10 @@
   - 旧 prompt v2 退役（系统提示词已在 organize_agentic::system_prompt）
   - T004 评测报告的「切换策略」结论作废——不复测对比再拍板，直接切
   - 部署即 agentic（生产首次部署就是新形态，无灰度）
-  - 待与用户过一遍删除清单（等会儿会议）后执行
+  - **已执行 ✅ 8f11d94**（同夜）：organize.rs 重写（503→169 行，-389 行旧链）、
+    prompts v2 退役、DistillParams.step 避让、测试面全量对齐 agentic mock；
+    顺带修 agentic 化引入的 scenario_write 重算缺 bind 真 bug（t003 逮住）。
+    distill 39 全绿；clippy 0；fmt 净
 
 ## Deferred
 
