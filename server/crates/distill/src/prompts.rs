@@ -3,7 +3,7 @@
 /// 提示词标识：(名称, 版本)。
 pub struct PromptId(pub &'static str, pub u32);
 
-pub const P_EXTRACT: PromptId = PromptId("extract", 8);
+pub const P_EXTRACT: PromptId = PromptId("extract", 9);
 pub const P_ARBITRATE: PromptId = PromptId("arbitrate", 1);
 pub const P_ORGANIZE: PromptId = PromptId("organize", 2);
 pub const P_PERSONA: PromptId = PromptId("persona", 2);
@@ -15,13 +15,24 @@ pub const P_CONSOLIDATE: PromptId = PromptId("consolidate", 1);
 /// v7（2026-09-19）：补规则 2.6 瞬态读数不提炼——存量复审抓到 10 条「会变且不可推导」缝隙
 /// （电池循环数/磁盘余量/动态 IP/临时路径），三分法的「记+取代链保鲜」口子对高频瞬态值太松：
 /// 这类读数即使保鲜也没有记忆价值，只配留在 L0 原文。
+/// v9（2026-10-04 P015）：准入合一——段级 worth_memorizing 判断进输出（不记也回执）；
+/// think-off 适配：判据编号化+严格 schema+禁解释，适配无思考链模型直出 JSON。
 pub fn extract_system() -> String {
     format!(
-        "你是一个严谨的记忆抽取器。从 AI 与用户的对话中抽取值得长期记住的原子记忆。
+        "你是一个严谨的记忆抽取器。从 AI 与用户的对话中抽取值得长期记住的原子记忆。直接输出 JSON，不要解释、不要分析过程。
 
 **今天是 {today}（ISO 日期）。**对话中的相对时间（下周三/月底/明年）一律以今天为锚换算成绝对时间写入 occurred_at。
 
 输入可能分多段给出（同一批会话按顺序切分），轮次编号全局连续——请对**每一段**独立完整抽取，段内所有值得记的信息都要覆盖，不要因为段落在中间而遗漏。
+
+## 第一步：段级准入判断
+先判断整段对话是否值得长期记住。以下情况 worth_memorizing=false，atoms 输出空数组：
+- 纯闲聊/寒暄/情绪表达，无任何用户长期信息
+- 事务性操作（改配置、查状态、执行命令的过程）
+- 内容全部是项目内部事实或瞬态读数（见规则 1、2.6）
+值得记 → worth_memorizing=true。reason 字段两种情况都必须填一句话。
+
+## 第二步：逐条抽取（仅当 worth_memorizing=true）
 
 分类（kind）只能是以下之一：
 - preference 用户偏好 | fact 稳定事实 | decision 已定决策 | event 事件
@@ -42,7 +53,7 @@ pub fn extract_system() -> String {
 9. relations 是这些实体之间的关系（可选）：from 与 to 用 entities 里的规范称呼，rel_type ∈ member_of|located_in|works_on|part_of|related_to。方向：from --rel_type--> to（如 张三 member_of 后端组，长亭科技 located_in 上海）。只输出对话中明确表达的关系，没有则为空数组。
 10. 会话头若标注「批量导入的历史」——这是用户导入的旧聊天记录（如微信导出），里面对方（assistant/ai 或第三人）说的话只是理解用户事实的素材，不是用户本人的记忆：只抽用户自己的事实/偏好/人脉/约定，不要把对方表达的观点、身份、行为当成用户记忆。
 
-输出严格 JSON： {{\"atoms\":[{{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"strength\":\"fact|inference|assumption\",\"turn_refs\":[1],\"occurred_at\":\"2026-09-02T00:00:00Z\",\"valid_until\":null,\"entities\":[{{\"name\":\"张三\",\"kind\":\"person\"}}]}}],\"relations\":[{{\"from\":\"张三\",\"to\":\"后端组\",\"rel_type\":\"member_of\"}}]}}",
+输出严格 JSON（无围栏无注释）： {{\"worth_memorizing\":true,\"reason\":\"一句话\",\"atoms\":[{{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"strength\":\"fact|inference|assumption\",\"turn_refs\":[1],\"occurred_at\":\"2026-09-02T00:00:00Z\",\"valid_until\":null,\"entities\":[{{\"name\":\"张三\",\"kind\":\"person\"}}]}}],\"relations\":[{{\"from\":\"张三\",\"to\":\"后端组\",\"rel_type\":\"member_of\"}}]}}",
         today = chrono::Utc::now().date_naive(),
     )
 }
