@@ -20,6 +20,7 @@
 - T00v Settings 页：desc/说明小字删 + JEV 卡挪「供应商」+ 网页读取独立「额外功能」**tab**（已拍板）改名「智谱网络读取工具」
 - T00u Settings 头部布局压缩：标题与 Tabs 同行（与 Memory 同款模式，P014 通用头部压缩）
 - T00t 全面清扫令（2026-10-04 拍板）：desc 小字全站 11 处清零 + 头部压缩全站应用 + 「MCP」页改名「MCP 管理」——清单见 README 全站清单表
+- T00s PURPOSES 逐 purpose 选 API 退役（2026-10-04 查证完毕）：后端路由机制活着但生产从未配置（llm_routing 键不存在）= 死 UI；删前端选择器+「AI 功能」tab、后端路由链+3 端点；Purpose 枚举保留（记账维度）；测试面三处对齐——方案见 README
 
 ## Deferred
 

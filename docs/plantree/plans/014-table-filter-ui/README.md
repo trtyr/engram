@@ -99,6 +99,21 @@ web（ui-bits + 全部列表页 features/*.tsx）
 
 头部压缩模式全站应用：标题 + Tabs/操作 同行（desc 删除后统一执行）。
 
+### AI 功能列表（PURPOSES 逐 purpose 选 API）旧说法清理（2026-10-04 追加，查证完毕待执行）
+
+用户原话：「AI 工作这里，它已有的这些东西很多都是旧的说法，你看看后端还存在吗？没有的话直接删掉吧，因为现在我们这个用户记忆已经不是这套逻辑了。」
+
+**查证结论（2026-10-04 源码 + 生产实查）**：
+
+1. 前端 PURPOSES 8 项（extract/arbitrate/embed/organize/consolidate/wiki_analysis/persona/wiki_generation）描述的「便宜/中等/最强模型」三档路由说法已不成立——现行架构只有 capability 两档（chat/embedding）+ JEV 决策模型独立区块（P011 决策 001）
+2. 后端 Purpose 路由机制**代码活着但从未使用**：router.rs（PurposeRouter/RoutingTable）+ provider.rs resolve 的路由链 + 3 个 API 端点（GET/PUT /settings/llm/routing + POST suggest）都在；但生产 settings 键 `llm_routing` **不存在**（路由表从未配置）——所有 purpose 全程走 capability 默认，UI 是死的
+3. Purpose 枚举本身仍被 llm_usage 记账/日志消费——**枚举保留，只删路由能力**
+
+**删除方案（分级）**：
+- 前端：PURPOSES 常量 + Routing 组件 + 「AI 功能」tab 整体退役；JevPane 挪「供应商」tab、WebReaderPane 挪新「额外功能」tab（Settings tab 重排为：供应商/节律/危险操作/数据迁移/额外功能）
+- 后端：llm/src/router.rs 全删 + llm_api/routing.rs 三端点全删 + mod.rs 注册删 + resolve 路由链逻辑删（直接 capability 默认）
+- 测试面：llm_settings_test l4_routing_put_validation 删；auth_test 三处（:865 路由权限段 / :1798 端点枚举两行 / :1946 suggest 测试）删
+
 ## 拍板点
 
 1. 迁移批次顺序（哪些页先进首批）？
