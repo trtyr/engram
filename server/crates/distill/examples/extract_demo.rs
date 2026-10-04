@@ -1,15 +1,17 @@
 //! 抽取效果 demo（P015 语义调整模型 v9）：原始会话 → 原子候选，真模型直跑看效果。
+//! P015 落库切片：抽取 → 过滤 → 向量化 → INSERT 本地 demo_atoms 表 → 回读展示。
 //!
 //! 用法：
-//!   DEMO_BASE_URL=https://openrouter.ai/api/v1 \
+//!   DEMO_BASE_URL=https://newapi.trtyr.top/v1 \
 //!   DEMO_API_KEY=<key> \
-//!   DEMO_MODEL=qwen/qwen3.8-27b:free \
+//!   DEMO_MODEL=MiniMax-M3 \
+//!   DEMO_DATABASE_URL=postgresql://127.0.0.1/engram_ingest_demo \
 //!   cargo run -p engram-distill --example extract_demo
 //!
-//! 不入库不入链——纯 prompt 效果验证。
+//! 入库目标 = 本地 demo_atoms 精简表（非正式 atoms——管道验证用，正式链路改造后续切片）。
 
 use engram_llm::provider::OpenAiCompatProvider;
-use engram_llm::types::{ChatMessage, ChatRequest};
+use engram_llm::types::{ChatMessage, ChatRequest, EmbedRequest};
 use engram_llm::provider::LlmProvider as _;
 
 #[tokio::main]
@@ -17,6 +19,8 @@ async fn main() {
     let base_url = std::env::var("DEMO_BASE_URL").unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());
     let api_key = std::env::var("DEMO_API_KEY").expect("DEMO_API_KEY 未设置");
     let model = std::env::var("DEMO_MODEL").unwrap_or_else(|_| "qwen/qwen3.8-27b:free".into());
+    let db_url = std::env::var("DEMO_DATABASE_URL").unwrap_or_else(|_| "postgresql://127.0.0.1/engram_ingest_demo".into());
+    let embed_model = std::env::var("DEMO_EMBED_MODEL").unwrap_or_else(|_| "Qwen/Qwen3-Embedding-8B".into());
 
     let provider = OpenAiCompatProvider::new("demo", base_url, api_key);
     let system = engram_distill::prompts::extract_system();
@@ -54,6 +58,42 @@ async fn main() {
                 .into(),
         ),
     ];
+
+    let pool = match sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&db_url)
+        .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[落库跳过] 本地库不可达（{e}）——只展示抽取效果");
+            return;
+        }
+    };
+
+    // demo 精简表：抽取输出直接落库 + 向量化（正式 atoms 管道改造后续切片）
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
+        .execute(&pool)
+        .await
+        .expect("pgvector 扩展不可用");
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS demo_atoms (
+             id UUID PRIMARY KEY,
+             kind TEXT NOT NULL,
+             content TEXT NOT NULL,
+             confidence REAL NOT NULL,
+             status TEXT NOT NULL DEFAULT 'active',
+             embedding vector(1024),
+             tsv tsvector,
+             source_refs JSONB NOT NULL DEFAULT '[]',
+             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+         )",
+    )
+    .execute(&pool)
+    .await
+    .expect("建表失败");
+
+    let mut inserted: Vec<(uuid::Uuid, String)> = Vec::new();
 
     for (title, dialogue) in &samples {
         println!("\n{}", "=".repeat(64));
@@ -110,6 +150,67 @@ async fn main() {
                                 );
                             }
                         }
+
+                        // ---- 落库：过滤 → 批量向量化 → INSERT ----
+                        let mut kept: Vec<(uuid::Uuid, String, String, f64)> = Vec::new();
+                        for a in v.get("atoms").and_then(|x| x.as_array()).unwrap_or(&vec![]) {
+                            let conf = a.get("confidence").and_then(|x| x.as_f64()).unwrap_or(0.0);
+                            let content = a.get("content").and_then(|x| x.as_str()).unwrap_or("");
+                            let kind = a.get("kind").and_then(|x| x.as_str()).unwrap_or("fact");
+                            if conf < 0.55 || content.is_empty() {
+                                println!("  [丢弃] conf={conf:.2} {content}");
+                                continue;
+                            }
+                            kept.push((uuid::Uuid::now_v7(), kind.into(), content.into(), conf));
+                        }
+                        if kept.is_empty() {
+                            continue;
+                        }
+                        let inputs: Vec<String> = kept.iter().map(|(_, _, c, _)| c.clone()).collect();
+                        match provider
+                            .embed(EmbedRequest {
+                                model: embed_model.clone(),
+                                inputs: inputs.clone(),
+                                dimensions: Some(1024),
+                            })
+                            .await
+                        {
+                            Ok(emb) => {
+                                println!(
+                                    "  向量化：{} 条 → {} 维（{}ms）",
+                                    inputs.len(),
+                                    emb.embeddings.first().map(|e| e.len()).unwrap_or(0),
+                                    emb.latency_ms
+                                );
+                                for (i, (id, kind, content, conf)) in kept.iter().enumerate() {
+                                    let vec_text = format!(
+                                        "[{}]",
+                                        emb.embeddings[i]
+                                            .iter()
+                                            .map(|f| f.to_string())
+                                            .collect::<Vec<_>>()
+                                            .join(",")
+                                    );
+                                    let r = sqlx::query(
+                                        "INSERT INTO demo_atoms (id, kind, content, confidence, embedding, tsv, source_refs) \
+                                         VALUES ($1, $2, $3, $4, $5::vector, to_tsvector('simple', $3), '[\"demo\"]'::jsonb)",
+                                    )
+                                    .bind(id)
+                                    .bind(kind)
+                                    .bind(content)
+                                    .bind(*conf as f32)
+                                    .bind(&vec_text)
+                                    .execute(&pool)
+                                    .await;
+                                    match r {
+                                        Ok(_) => println!("  已落库 {} ({})", content, &id.to_string()[..8]),
+                                        Err(e) => println!("  [落库失败] {content}：{e}"),
+                                    }
+                                }
+                            }
+                            Err(e) => println!("  [向量化失败，本批未落库：{}]", e),
+                        }
+                        let _ = &mut inserted;
                     }
                     Err(e) => {
                         println!("  [JSON 解析失败：{}] 原文：{}", e, resp.content.trim());
@@ -119,4 +220,27 @@ async fn main() {
             Err(e) => println!("  [调用失败：{}]", e),
         }
     }
+
+    // ---- 落库回读展示 ----
+    println!("\n{}", "=".repeat(64));
+    println!("【回读 demo_atoms 全表】");
+    println!("{}", "=".repeat(64));
+    let rows = sqlx::query_as::<_, (uuid::Uuid, String, String, f32, Option<String>, Option<i32>)>(
+        "SELECT id, kind, content, confidence, embedding::text, array_length(embedding::text::float4[], 1) FROM demo_atoms ORDER BY created_at",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_default();
+    for (id, kind, content, conf, _emb, dims) in rows {
+        println!(
+            "  {} {:9} {:.2}  {}\n         id={} 向量维度={:?}",
+            &id.to_string()[..8],
+            kind,
+            conf,
+            content,
+            &id.to_string()[..8],
+            dims,
+        );
+    }
+    let _ = inserted;
 }
