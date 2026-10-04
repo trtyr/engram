@@ -6,7 +6,6 @@
 mod support;
 
 use engram_core::unified::UnifiedSearch;
-use engram_search::tokenize::tsv_text;
 use uuid::Uuid;
 
 async fn setup() -> (sqlx::PgPool, UnifiedSearch, support::TestPg) {
@@ -29,11 +28,10 @@ async fn unified_search_fuses_three_domains() {
 
     // 1. memory：atom
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, tsv) \
-         VALUES ($1, 'fact', '用户偏好使用 Rust 编程', 0.9, 'active', '[]'::jsonb, false, NULL, to_tsvector('simple', $2))",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding) \
+         VALUES ($1, 'fact', '用户偏好使用 Rust 编程', 0.9, 'active', '[]'::jsonb, false, NULL)",
     )
     .bind(Uuid::now_v7())
-    .bind(tsv_text("用户偏好使用 Rust 编程"))
     .execute(&pool)
     .await
     .unwrap();
@@ -54,7 +52,6 @@ async fn unified_search_fuses_three_domains() {
     )
     .bind(Uuid::now_v7())
     .bind(doc_id)
-    .bind(tsv_text("Rust 语言的内存安全特性"))
     .execute(&pool)
     .await
     .unwrap();
@@ -65,7 +62,6 @@ async fn unified_search_fuses_three_domains() {
          VALUES ($1, (SELECT id FROM wiki_libraries WHERE slug = 'main'), 'rust-page', 'Rust', 'concept', 'Rust 是一门系统编程语言', '{}'::jsonb, 'llm', 1, to_tsvector('simple', $2))",
     )
     .bind(Uuid::now_v7())
-    .bind(tsv_text("Rust 是一门系统编程语言"))
     .execute(&pool)
     .await
     .unwrap();

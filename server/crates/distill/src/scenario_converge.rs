@@ -174,7 +174,7 @@ async fn recompute_scenario(
     let text = format!("{topic2}\n{summary}\n{body}");
     sqlx::query(
         "UPDATE scenarios SET topic = $2, summary = $3, body = $4, \
-         atom_refs = $5::jsonb, embedding = $6, tsv = to_tsvector('simple', $7), \
+         atom_refs = $5::jsonb, embedding = $6, \
          version = version + 1, updated_at = now() WHERE id = $1",
     )
     .bind(sid)
@@ -189,7 +189,6 @@ async fn recompute_scenario(
             .cloned()
             .unwrap_or_default(),
     ))
-    .bind(engram_search::tokenize::tsv_text(&text))
     .execute(pool)
     .await
     .map_err(|e| JobError::Retryable(e.to_string()))?;

@@ -28,7 +28,7 @@ pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobE
 
     // P012：agentic 六工具循环（唯一实现——旧单发路径已删除）
     let out = crate::organize_agentic::run_agentic(&ctx, llm.as_ref(), atoms.len() as i64).await?;
-    // agentic 写过的场景补 embedding/tsv（内容从库读——工具层不携带全文）
+    // agentic 写过的场景补 embedding（内容从库读——工具层不携带全文）
     refresh_embeddings_by_ids(&ctx, llm.as_ref(), &out.touched).await?;
     // retire 释放的表述随 persona 链明确剔除（F4 治——与 converge 同通道）
     let mut all_touched = out.touched;
@@ -97,8 +97,8 @@ fn payload_uuids(ctx: &JobContext, key: &str) -> Vec<Uuid> {
         .unwrap_or_default()
 }
 
-/// agentic 路径的场景重嵌：按 id 集从库读文本 → embed → 写回 embedding/tsv。
-/// embed 失败容忍（无 embedding provider 时降级只写 tsv，embedding 留待 reembed 补）。
+/// agentic 路径的场景重嵌：按 id 集从库读文本 → embed → 写回 embedding。
+/// embed 失败容忍（失败时保持旧 embedding，留待下次巡逻/重嵌补）。
 async fn refresh_embeddings_by_ids(
     ctx: &JobContext,
     llm: &dyn crate::llm_port::DistillLlm,
@@ -121,18 +121,14 @@ async fn refresh_embeddings_by_ids(
     }
     let texts: Vec<String> = rows.iter().map(|(_, t)| t.clone()).collect();
     let embeddings = llm.embed(&texts, ctx.job.id).await.unwrap_or_default();
-    for (i, (sid, text)) in rows.iter().enumerate() {
+    for (i, (sid, _text)) in rows.iter().enumerate() {
         let emb = embeddings.get(i).cloned().map(pgvector::Vector::from);
-        sqlx::query(
-            "UPDATE scenarios SET embedding = COALESCE($2, embedding), \
-             tsv = to_tsvector('simple', $3) WHERE id = $1",
-        )
-        .bind(sid)
-        .bind(emb)
-        .bind(engram_search::tokenize::tsv_text(text))
-        .execute(pool)
-        .await
-        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        sqlx::query("UPDATE scenarios SET embedding = COALESCE($2, embedding) WHERE id = $1")
+            .bind(sid)
+            .bind(emb)
+            .execute(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
     }
     Ok(())
 }

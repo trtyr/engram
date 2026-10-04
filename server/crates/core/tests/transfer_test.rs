@@ -23,7 +23,7 @@ async fn transfer_roundtrip_and_idempotency() {
     .await
     .unwrap();
     let aid = uuid::Uuid::now_v7();
-    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) VALUES ($1,'fact','用户喜欢 Rust',0.95,'active',$2,to_tsvector('simple','用户喜欢 Rust'))")
+    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs) VALUES ($1,'fact','用户喜欢 Rust',0.95,'active',$2)")
         .bind(aid)
         .bind(serde_json::json!([{"session_id": sid.to_string()}]))
         .execute(&pool).await.unwrap();
@@ -269,13 +269,6 @@ async fn transfer_roundtrip_and_idempotency() {
         sid.to_string(),
         "原子↔会话引用应随 id 保留"
     );
-    let tsv_ok: bool =
-        sqlx::query_scalar("SELECT tsv @@ to_tsquery('simple','rust') FROM atoms WHERE id = $1")
-            .bind(aid)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert!(tsv_ok, "导入应重建 tsv（FTS 可检索）");
     let wiki_ok: bool = sqlx::query_scalar(
         "SELECT tsv @@ to_tsquery('simple','页面') FROM wiki_pages WHERE slug='transfer-page'",
     )

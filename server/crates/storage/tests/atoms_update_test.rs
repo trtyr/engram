@@ -21,8 +21,8 @@ async fn seed_full_atom(pool: &sqlx::PgPool) -> (Uuid, Uuid) {
     let sup = Uuid::now_v7();
     // superseded_by 有 FK——被指向的原子先落
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
-         VALUES ($1, 'fact', '旧版本原子', 'archived', 0.9, to_tsvector('simple', '旧版本原子'))",
+        "INSERT INTO atoms (id, kind, content, status, confidence) \
+         VALUES ($1, 'fact', '旧版本原子', 'archived', 0.9)",
     )
     .bind(sup)
     .execute(pool)
@@ -30,9 +30,8 @@ async fn seed_full_atom(pool: &sqlx::PgPool) -> (Uuid, Uuid) {
     .unwrap();
     sqlx::query(
         "INSERT INTO atoms (id, kind, content, status, confidence, occurred_at, valid_until, \
-         superseded_by, sensitive, tsv) \
-         VALUES ($1, 'fact', '种子原子', 'active', 0.9, $2, $3, $4, TRUE, \
-         to_tsvector('simple', '种子原子'))",
+         superseded_by, sensitive) \
+         VALUES ($1, 'fact', '种子原子', 'active', 0.9, $2, $3, $4, TRUE)",
     )
     .bind(id)
     .bind(occurred)
@@ -83,7 +82,6 @@ async fn t004_three_state_clearable_fields() {
         None,
         None,
         None,
-        "种子原子",
         "fact",
     )
     .await
@@ -108,7 +106,6 @@ async fn t004_three_state_clearable_fields() {
         Some(Some(new_oa)),
         Some(Some(false)),
         None,
-        "种子原子",
         "fact",
     )
     .await
@@ -132,7 +129,6 @@ async fn t004_three_state_clearable_fields() {
         Some(None),
         Some(Some(true)),
         None,
-        "种子原子",
         "fact",
     )
     .await

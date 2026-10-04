@@ -106,7 +106,7 @@ fn emb(seed: usize) -> Vector {
 }
 
 /// L0 → extract（解析重试，直落 active+向量化）→ organize（空动作收尾）。
-/// 验证：会话 done、原子 active、低置信（<0.55）丢弃、embedding/tsv/source_refs 齐全。
+/// 验证：会话 done、原子 active、低置信（<0.55）丢弃、embedding/source_refs 齐全。
 #[tokio::test]
 async fn extract_with_retry_and_full_refs() {
     let env = setup(vec![
@@ -150,9 +150,9 @@ async fn extract_with_retry_and_full_refs() {
         .unwrap();
     assert_eq!(st, "done");
 
-    // P015：conf<0.55 丢弃 → 只有 1 条落库；active 直落、无待审、embedding+tsv+source_refs 齐全
-    let rows: Vec<(String, String, bool, bool, bool, serde_json::Value)> = sqlx::query_as(
-        "SELECT content, status, needs_review, embedding IS NOT NULL, tsv IS NOT NULL, source_refs \
+    // P015：conf<0.55 丢弃 → 只有 1 条落库；active 直落、无待审、embedding+source_refs 齐全
+    let rows: Vec<(String, String, bool, bool, serde_json::Value)> = sqlx::query_as(
+        "SELECT content, status, needs_review, embedding IS NOT NULL, source_refs \
          FROM atoms ORDER BY created_at",
     )
     .fetch_all(&env.pool)
@@ -162,11 +162,11 @@ async fn extract_with_retry_and_full_refs() {
     let mac = &rows[0];
     assert_eq!(mac.1, "active");
     assert!(!mac.2, "P015 无待审通道");
-    assert!(mac.3 && mac.4, "embedding 与 tsv 都应生成");
+    assert!(mac.3, "embedding 应生成");
     assert!(
-        mac.5.to_string().contains(&sid.to_string()),
+        mac.4.to_string().contains(&sid.to_string()),
         "source_refs 指向 L0: {}",
-        mac.5
+        mac.4
     );
 
     env.handle
@@ -342,12 +342,16 @@ async fn consolidate_generates_entity_portraits() {
         .fetch_one(&env.pool).await.unwrap();
     for i in 0..3 {
         let aid = Uuid::now_v7();
-        sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
-                     VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $3))")
-            .bind(aid)
-            .bind(format!("关于张三的事实 {i}"))
-            .bind(format!("zhangsan {i}"))
-            .execute(&env.pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs) \
+                     VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb)",
+        )
+        .bind(aid)
+        .bind(format!("关于张三的事实 {i}"))
+        .bind(format!("zhangsan {i}"))
+        .execute(&env.pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
             .bind(aid)
             .bind(zhang)
@@ -362,12 +366,16 @@ async fn consolidate_generates_entity_portraits() {
         .fetch_one(&env.pool).await.unwrap();
     for i in 0..2 {
         let aid = Uuid::now_v7();
-        sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
-                     VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $3))")
-            .bind(aid)
-            .bind(format!("Engram 项目事实 {i}"))
-            .bind(format!("engram {i}"))
-            .execute(&env.pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs) \
+                     VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb)",
+        )
+        .bind(aid)
+        .bind(format!("Engram 项目事实 {i}"))
+        .bind(format!("engram {i}"))
+        .execute(&env.pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
             .bind(aid)
             .bind(eng)
@@ -385,10 +393,15 @@ async fn consolidate_generates_entity_portraits() {
     .await
     .unwrap();
     let aid = Uuid::now_v7();
-    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
-                 VALUES ($1, 'fact', '王五旧事实', 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $2))")
-        .bind(aid).bind("wangwu old")
-        .execute(&env.pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs) \
+                 VALUES ($1, 'fact', '王五旧事实', 0.9, 'active', '[]'::jsonb)",
+    )
+    .bind(aid)
+    .bind("wangwu old")
+    .execute(&env.pool)
+    .await
+    .unwrap();
     sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
         .bind(aid)
         .bind(wang)
@@ -398,12 +411,16 @@ async fn consolidate_generates_entity_portraits() {
     // 王五原子数只有 1（低于阈值，双保险跳过）——再补两条使密度=3，验证「新鲜摘要」才是跳过原因
     for i in 0..2 {
         let a2 = Uuid::now_v7();
-        sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv, created_at) \
-                     VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $3), now() - interval '1 day')")
-            .bind(a2)
-            .bind(format!("王五更旧事实 {i}"))
-            .bind(format!("wangwu {i}"))
-            .execute(&env.pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, created_at) \
+                     VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, now() - interval '1 day')",
+        )
+        .bind(a2)
+        .bind(format!("王五更旧事实 {i}"))
+        .bind(format!("wangwu {i}"))
+        .execute(&env.pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO atom_entities (atom_id, entity_id) VALUES ($1, $2)")
             .bind(a2)
             .bind(wang)
@@ -646,18 +663,15 @@ async fn consolidate_backfills_relations_for_stale_entities() {
     .await
     .unwrap();
 
-    for (eid, content, tsv) in [
-        (gd, "权志龙是 BIGBANG 的队长", "gd bigbang"),
-        (bb, "BIGBANG 是韩国男团", "bigbang group"),
-    ] {
+    for (eid, content) in [(gd, "权志龙是 BIGBANG 的队长"), (bb, "BIGBANG 是韩国男团")]
+    {
         let aid = Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
-             VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $3))",
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs) \
+             VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb)",
         )
         .bind(aid)
         .bind(content)
-        .bind(tsv)
         .execute(&env.pool)
         .await
         .unwrap();
@@ -702,8 +716,8 @@ async fn reembed_memory_fills_missing_vectors() {
 
     for (i, status) in ["active", "active", "archived"].iter().enumerate() {
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
-             VALUES ($1, 'fact', $2, 0.9, $3, '[]'::jsonb, to_tsvector('simple', $4))",
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs) \
+             VALUES ($1, 'fact', $2, 0.9, $3, '[]'::jsonb)",
         )
         .bind(Uuid::now_v7())
         .bind(format!("记忆事实 {i}"))
@@ -714,8 +728,8 @@ async fn reembed_memory_fills_missing_vectors() {
         .unwrap();
     }
     sqlx::query(
-        "INSERT INTO scenarios (id, topic, summary, body, atom_refs, tsv) \
-         VALUES ($1, '主题', '场景摘要', '正文', '[]'::jsonb, to_tsvector('simple', $2))",
+        "INSERT INTO scenarios (id, topic, summary, body, atom_refs) \
+         VALUES ($1, '主题', '场景摘要', '正文', '[]'::jsonb)",
     )
     .bind(Uuid::now_v7())
     .bind("scene")
@@ -1434,11 +1448,11 @@ async fn extract_skips_distill_off_sessions() {
 // 架构治理 task-3：五个蒸馏 job 的 MockLlm 覆盖（主分支 + 错误分支）
 // ============================================================================
 
-/// 直插一条原子（测试用最小列集：id/kind/content/confidence/status/embedding/tsv）。
+/// 直插一条原子（测试用最小列集：id/kind/content/confidence/status/embedding）。
 async fn insert_atom(env: &Env, id: Uuid, content: &str, status: &str) {
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, embedding, tsv) \
-         VALUES ($1, 'fact', $2, 0.9, $3, $4, to_tsvector('simple', $2))",
+        "INSERT INTO atoms (id, kind, content, confidence, status, embedding) \
+         VALUES ($1, 'fact', $2, 0.9, $3, $4)",
     )
     .bind(id)
     .bind(content)
@@ -1952,8 +1966,8 @@ async fn t003_scenario_member_reassignment_recomputes_refs() {
     // X 挂 A（初始真源）、Z 挂 A（留在 A 的成员）
     for aid in [x, z] {
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, confidence, scenario_id, tsv) \
-             VALUES ($1, 'fact', $3, 'active', 0.9, $2, to_tsvector('simple', $3))",
+            "INSERT INTO atoms (id, kind, content, status, confidence, scenario_id) \
+             VALUES ($1, 'fact', $3, 'active', 0.9, $2)",
         )
         .bind(aid)
         .bind(a)
@@ -2097,8 +2111,8 @@ async fn t005_entity_substring_no_longer_swallows() {
     }
     let aid = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
-         VALUES ($1, 'fact', '用户研究云', 'active', 0.9, to_tsvector('simple', '用户研究云'))",
+        "INSERT INTO atoms (id, kind, content, status, confidence) \
+         VALUES ($1, 'fact', '用户研究云', 'active', 0.9)",
     )
     .bind(aid)
     .execute(&pool)
@@ -2123,8 +2137,8 @@ async fn t005_entity_substring_no_longer_swallows() {
     //   （注意「王小明」不含连续子串「小王」——王-小-明，字符串层面本就不归并）
     let aid2 = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
-         VALUES ($1, 'fact', '小王同志来拜访', 'active', 0.9, to_tsvector('simple', '小王同志来拜访'))",
+        "INSERT INTO atoms (id, kind, content, status, confidence) \
+         VALUES ($1, 'fact', '小王同志来拜访', 'active', 0.9)",
     )
     .bind(aid2)
     .execute(&pool)
@@ -2193,8 +2207,8 @@ async fn t008_archived_entity_revives_with_continuity() {
     // 同名重现（旧名完整出现在新名里 → 复用归档档）
     let aid = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
-         VALUES ($1, 'fact', '老王师傅来串门', 'active', 0.9, to_tsvector('simple', '老王师傅来串门'))",
+        "INSERT INTO atoms (id, kind, content, status, confidence) \
+         VALUES ($1, 'fact', '老王师傅来串门', 'active', 0.9)",
     )
     .bind(aid)
     .execute(&pool)
@@ -2334,8 +2348,8 @@ async fn p012_agentic_loop_organizes_and_finishes() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
-         VALUES ($1, 'fact', '用户住在杭州西湖区', 'active', 0.9, to_tsvector('simple', 'x'))",
+        "INSERT INTO atoms (id, kind, content, status, confidence) \
+         VALUES ($1, 'fact', '用户住在杭州西湖区', 'active', 0.9)",
     )
     .bind(aid)
     .execute(&env.pool)
@@ -2394,8 +2408,8 @@ async fn p012_agentic_loop_steps_capped() {
     .unwrap();
     // 散落原子（否则 no_atoms_reply 直返，循环不启动）
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
-         VALUES ($1, 'fact', '散落原子内容', 'active', 0.9, to_tsvector('simple', 'x'))",
+        "INSERT INTO atoms (id, kind, content, status, confidence) \
+         VALUES ($1, 'fact', '散落原子内容', 'active', 0.9)",
     )
     .bind(Uuid::now_v7())
     .execute(&env.pool)
@@ -2452,8 +2466,8 @@ async fn maintain_agent_merges_and_edits_persona_doc() {
         ),
     ] {
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, tsv, strength, source_kind) \
-             VALUES ($1, 'preference', $2, 0.95, 'active', $3, NULL, to_tsvector('simple', $2), 'fact', 'agent_inferred')",
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, strength, source_kind) \
+             VALUES ($1, 'preference', $2, 0.95, 'active', $3, NULL, 'fact', 'agent_inferred')",
         )
         .bind(id)
         .bind(content)

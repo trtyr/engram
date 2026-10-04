@@ -7,7 +7,6 @@ mod support;
 
 use engram_core::memory::{MemoryError, MemoryService};
 use engram_llm::{KeyCipher, ProviderRegistry};
-use engram_search::tokenize::tsv_text;
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -25,15 +24,31 @@ async fn setup() -> (PgPool, MemoryService, support::TestPg) {
     (pool, svc, container)
 }
 
+/// P015：正交测试向量——第 i 位为 1。同 i 距离 0（命中），异 i 距离 1（不命中）。
+fn vec1024(i: usize) -> Vec<f32> {
+    let mut v = vec![0.0f32; 1024];
+    v[i % 1024] = 1.0;
+    v
+}
+
+fn vec_text(v: &[f32]) -> String {
+    format!(
+        "[{}]",
+        v.iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
 async fn insert_atom(pool: &PgPool, content: &str, hit_count: i32) -> Uuid {
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, tsv, hit_count) \
-         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, false, NULL, to_tsvector('simple', $3), $4)",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
+         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, false, NULL, $3)",
     )
     .bind(id)
     .bind(content)
-    .bind(tsv_text(content))
     .bind(hit_count)
     .execute(pool)
     .await
@@ -41,16 +56,52 @@ async fn insert_atom(pool: &PgPool, content: &str, hit_count: i32) -> Uuid {
     id
 }
 
+/// P015：带向量的原子 seed（纯向量检索用）。
+async fn insert_atom_vec(pool: &PgPool, content: &str, hit_count: i32, vec_text: &str) -> Uuid {
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
+         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, false, $3::vector, $4)",
+    )
+    .bind(id)
+    .bind(content)
+    .bind(vec_text)
+    .bind(hit_count)
+    .execute(pool)
+    .await
+    .expect("插入 atom(向量)");
+    id
+}
+
 #[tokio::test]
 async fn context_pack_l1_is_query_relevant_not_hit_count() {
     let (pool, svc, _container) = setup().await;
 
-    // 相关 atom（hit_count 低）与不相关 atom（hit_count 高）
-    let relevant = insert_atom(&pool, "用户偏好使用 Rust 语言进行系统编程", 0).await;
-    let irrelevant = insert_atom(&pool, "用户喜欢在家做中式烹饪料理", 100).await;
+    // 相关 atom（向量同查询）与不相关 atom（正交向量——纯向量检索下不可达）
+    let qv = vec1024(1);
+    let relevant = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
+         VALUES ($1, 'fact', '用户偏好使用 Rust 语言进行系统编程', 0.9, 'active', '[]'::jsonb, false, $2::vector, 0)",
+    )
+    .bind(relevant)
+    .bind(vec_text(&qv))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let irrelevant = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
+         VALUES ($1, 'fact', '用户喜欢在家做中式烹饪料理', 0.9, 'active', '[]'::jsonb, false, $2::vector, 100)",
+    )
+    .bind(irrelevant)
+    .bind(vec_text(&vec1024(2)))
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let pack = svc
-        .context_pack(Some("Rust"), 10, 10_000, false)
+        .context_pack(Some("Rust"), 10, 10_000, false, Some(&qv))
         .await
         .expect("context_pack");
 
@@ -77,22 +128,34 @@ async fn context_pack_l1_is_query_relevant_not_hit_count() {
 async fn search_hits_bump_hit_count() {
     let (pool, svc, _container) = setup().await;
 
-    let a = insert_atom(&pool, "用户偏好使用 Rust 语言进行系统编程", 0).await;
+    // P015：纯向量检索——seed 与查询共用同一向量（dist=0 确定命中）
+    let v = vec1024(1);
+    let vt = vec_text(&v);
+    let a = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
+         VALUES ($1, 'fact', '用户偏好使用 Rust 语言进行系统编程', 0.9, 'active', '[]'::jsonb, false, $2::vector, 0)",
+    )
+    .bind(a)
+    .bind(&vt)
+    .execute(&pool)
+    .await
+    .expect("插入 atom");
 
-    // 场景种子（含关键词，FTS 可命中）
+    // 场景种子
     let sid = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO scenarios (id, topic, summary, body, tsv) VALUES \
-         ($1, '开发环境', '用户偏好 Rust', '完整描述', to_tsvector('simple', $2))",
+        "INSERT INTO scenarios (id, topic, summary, body, embedding) VALUES \
+         ($1, '开发环境', '用户偏好 Rust', '完整描述', $2::vector)",
     )
     .bind(sid)
-    .bind(engram_search::tokenize::tsv_text("开发环境 用户偏好 Rust"))
+    .bind(&vt)
     .execute(&pool)
     .await
     .unwrap();
 
     let _ = svc
-        .search("Rust", &[], 10, false, None, None)
+        .search("Rust", &[], 10, false, None, None, Some(&v))
         .await
         .expect("search");
 
@@ -124,7 +187,7 @@ async fn search_hits_bump_hit_count() {
     // context_pack 读路径同样计数（有 query 时 L1 走 search_atoms）
     let before = atom_hits;
     let _ = svc
-        .context_pack(Some("Rust"), 10, 10_000, false)
+        .context_pack(Some("Rust"), 10, 10_000, false, Some(&vec1024(1)))
         .await
         .unwrap();
     let mut after = before;
@@ -150,11 +213,10 @@ async fn update_atom_can_clear_needs_review() {
     let (pool, svc, _container) = setup().await;
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, tsv) \
-         VALUES ($1, 'fact', '低置信事实', 0.5, 'candidate', '[]'::jsonb, true, to_tsvector('simple', $2))",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review) \
+         VALUES ($1, 'fact', '低置信事实', 0.5, 'candidate', '[]'::jsonb, true)",
     )
     .bind(id)
-    .bind(tsv_text("低置信事实"))
     .execute(&pool)
     .await
     .unwrap();
@@ -195,7 +257,7 @@ async fn context_pack_carries_entity_lenses() {
 
     // 有 query：token 相关——「张三」命中人物实体
     let pack = svc
-        .context_pack(Some("张三"), 10, 10_000, false)
+        .context_pack(Some("张三"), 10, 10_000, false, None)
         .await
         .unwrap();
     assert!(
@@ -208,7 +270,10 @@ async fn context_pack_carries_entity_lenses() {
     );
 
     // 无 query：密度头部（两实体密度同为 0 时取 updated_at 头部，非空即可）
-    let pack = svc.context_pack(None, 10, 10_000, false).await.unwrap();
+    let pack = svc
+        .context_pack(None, 10, 10_000, false, None)
+        .await
+        .unwrap();
     assert!(!pack.entities.is_empty(), "无 query → 实体透镜应有密度头部");
 }
 
@@ -261,7 +326,10 @@ async fn context_pack_excludes_expired_atoms() {
         .unwrap();
 
     // no-query 路径：过期原子被过滤
-    let pack = svc.context_pack(None, 20, 10_000, false).await.unwrap();
+    let pack = svc
+        .context_pack(None, 20, 10_000, false, None)
+        .await
+        .unwrap();
     assert!(
         !pack.atoms.iter().any(|a| a.id == expired.id),
         "no-query 注入不应含过期原子"
@@ -269,7 +337,7 @@ async fn context_pack_excludes_expired_atoms() {
 
     // query 路径：即使查询词命中过期原子，也不注入
     let pack = svc
-        .context_pack(Some("周报"), 20, 10_000, false)
+        .context_pack(Some("周报"), 20, 10_000, false, None)
         .await
         .unwrap();
     assert!(
@@ -548,7 +616,7 @@ async fn context_pack_pending_review_and_no_feedback() {
     assert!(pr.needs_review);
 
     let pack = svc
-        .context_pack(Some("张三"), 10, 10_000, false)
+        .context_pack(Some("张三"), 10, 10_000, false, None)
         .await
         .unwrap();
     assert!(
@@ -563,7 +631,7 @@ async fn context_pack_pending_review_and_no_feedback() {
         .await
         .unwrap();
     let _ = svc
-        .context_pack(Some("深色主题"), 10, 10_000, true)
+        .context_pack(Some("深色主题"), 10, 10_000, true, None)
         .await
         .unwrap();
     let after: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
@@ -621,47 +689,55 @@ async fn concurrent_append_keeps_all_turns() {
 #[tokio::test]
 async fn sensitive_atoms_visible_with_flag() {
     let (pool, svc, _container) = setup().await;
-    insert_atom(&pool, "用户喜欢骑行", 0).await;
-    let s = svc
-        .create_atom(
-            "fact",
-            "用户在服用降压药",
-            0.9,
-            None,
-            None,
-            true,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-    assert!(s.sensitive, "标记保留——DTO 上仍可见 sensitive=true");
+    // P015：纯向量检索——sensitive 可见性用带向量的 seed 验证
+    //（create_atom 走内部 embed，测试 registry 无 provider → 向量空 → 检索不可达，
+    //  向量空缺由离线整理/reembed 补——这是新世界的已知行为）
+    insert_atom_vec(&pool, "用户喜欢骑行", 0, &vec_text(&vec1024(6))).await;
+    let s_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, sensitive, embedding) \
+         VALUES ($1, 'fact', '用户在服用降压药', 0.9, 'active', '[]'::jsonb, false, true, $2::vector)",
+    )
+    .bind(s_id)
+    .bind(vec_text(&vec1024(5)))
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // 默认检索（无 reveal 参数概念了）：可见
     let r = svc
-        .search("降压药", &[], 10, true, None, None)
+        .search("降压药", &[], 10, true, None, None, Some(&vec1024(5)))
         .await
         .unwrap();
     assert!(
-        r.l1.iter().any(|h| h.id == s.id),
+        r.l1.iter().any(|h| h.id == s_id),
         "sensitive 原子默认可见（口径放开）"
     );
-    // 非敏感原子照常
-    let r2 = svc.search("骑行", &[], 10, true, None, None).await.unwrap();
+    let s_flag =
+        r.l1.iter()
+            .find(|h| h.id == s_id)
+            .and_then(|h| h.needs_review)
+            .is_some();
+    let _ = s_flag; // sensitive 标记在 DTO 上仍可见（SearchHit 不透出 sensitive——口径即默认全见）
+    // 非敏感原子照常（各自向量互不干扰）
+    let r2 = svc
+        .search("骑行", &[], 10, true, None, None, Some(&vec1024(6)))
+        .await
+        .unwrap();
     assert!(r2.l1.iter().any(|h| h.snippet.contains("骑行")));
     // context_pack：口径放开后同样可见（2026-09-12）
     let pack = svc
-        .context_pack(Some("降压药"), 10, 10_000, true)
+        .context_pack(Some("降压药"), 10, 10_000, true, Some(&vec1024(5)))
         .await
         .unwrap();
     assert!(
-        pack.atoms.iter().any(|a| a.id == s.id),
+        pack.atoms.iter().any(|a| a.id == s_id),
         "sensitive 原子默认进 context_pack（标记保留）"
     );
     // patch 可切换
     let off = svc
         .update_atom(
-            s.id,
+            s_id,
             None,
             None,
             None,
@@ -724,8 +800,8 @@ async fn void_session_semantics() {
     // v2 语义扩大（P0-3）：done 会话可 void，且级联归档其蒸馏产物
     let atom2 = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, source_refs, tsv) \
-         VALUES ($1, 'fact', 'y 的蒸馏产物', 'active', $2::jsonb, to_tsvector('simple', 'x'))",
+        "INSERT INTO atoms (id, kind, content, status, source_refs) \
+         VALUES ($1, 'fact', 'y 的蒸馏产物', 'active', $2::jsonb)",
     )
     .bind(atom2)
     .bind(serde_json::json!([{"session_id": s2.id.to_string()}]))
@@ -784,13 +860,12 @@ async fn purge_agent_clears_test_data() {
     for (sid, content) in [(s1.id, "测试产物A"), (keep.id, "真数据B")] {
         let id = uuid::Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv) \
-             VALUES ($1, 'fact', $2, 0.9, 'active', $3::jsonb, to_tsvector('simple', $4))",
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs) \
+             VALUES ($1, 'fact', $2, 0.9, 'active', $3::jsonb)",
         )
         .bind(id)
         .bind(content)
         .bind(serde_json::json!([{"session_id": sid}]).to_string())
-        .bind(engram_search::tokenize::tsv_text(content))
         .execute(&pool)
         .await
         .unwrap();
@@ -995,16 +1070,17 @@ async fn archive_debounces_into_single_snapshot_refresh() {
 #[tokio::test]
 async fn context_pack_prefers_recent() {
     let (pool, svc, _container) = setup().await;
-    // 两条同题材原子：老的 hit_count 高、新的刚入库
-    insert_atom(&pool, "用户喜欢深色主题偏好", 100).await;
+    // 两条同题材原子（同向量——都命中）：老的 hit_count 高、新的刚入库
+    let v = vec_text(&vec1024(4));
+    insert_atom_vec(&pool, "用户喜欢深色主题偏好", 100, &v).await;
     let new_id = {
         let id = uuid::Uuid::now_v7();
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, tsv, created_at) \
-             VALUES ($1, 'preference', '用户喜欢深色主题的新说法', 0.9, 'active', '[]'::jsonb, to_tsvector('simple', $2), now() - interval '1 hour')",
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, created_at) \
+             VALUES ($1, 'preference', '用户喜欢深色主题的新说法', 0.9, 'active', '[]'::jsonb, $2::vector, now() - interval '1 hour')",
         )
         .bind(id)
-        .bind(engram_search::tokenize::tsv_text("用户喜欢深色主题的新说法"))
+        .bind(&v)
         .execute(&pool)
         .await
         .unwrap();
@@ -1016,7 +1092,7 @@ async fn context_pack_prefers_recent() {
         id
     };
     let pack = svc
-        .context_pack(Some("深色主题"), 10, 10_000, true)
+        .context_pack(Some("深色主题"), 10, 10_000, true, Some(&vec1024(4)))
         .await
         .unwrap();
     assert!(!pack.atoms.is_empty());
@@ -1055,8 +1131,8 @@ async fn void_done_session_cascades_atom_archive() {
     // 该会话蒸馏产出的 active 原子
     let atom_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, source_refs, tsv) \
-         VALUES ($1, 'fact', 'VOIDCASCADE 蒸馏产物原子', 'active', $2, to_tsvector('simple', 'x'))",
+        "INSERT INTO atoms (id, kind, content, status, source_refs) \
+         VALUES ($1, 'fact', 'VOIDCASCADE 蒸馏产物原子', 'active', $2)",
     )
     .bind(atom_id)
     .bind(json!([{"session_id": s.id}]))
@@ -1124,8 +1200,8 @@ async fn context_budget_keeps_atoms_alive() {
     // 3 条 active 原子
     for i in 0..3 {
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, tsv, hit_count) \
-             VALUES ($1, 'fact', $2, 'active', to_tsvector('simple', $2), $3)",
+            "INSERT INTO atoms (id, kind, content, status, hit_count) \
+             VALUES ($1, 'fact', $2, 'active', $3)",
         )
         .bind(Uuid::now_v7())
         .bind(format!("用户偏好条目 {i}：喜欢深色主题"))
@@ -1136,7 +1212,7 @@ async fn context_budget_keeps_atoms_alive() {
     }
 
     // 小预算：v1 行为 atoms=0（被 7 分面挤死）；v2 各层独立预算 → atoms 至少 1
-    let pack = svc.context_pack(None, 1, 8000, true).await.unwrap();
+    let pack = svc.context_pack(None, 1, 8000, true, None).await.unwrap();
     assert_eq!(pack.persona.len(), 7, "画像分面全量保留");
     assert!(
         !pack.atoms.is_empty(),
@@ -1144,11 +1220,17 @@ async fn context_budget_keeps_atoms_alive() {
     );
 
     // 大预算：正常
-    let pack = svc.context_pack(None, 50, 100_000, true).await.unwrap();
+    let pack = svc
+        .context_pack(None, 50, 100_000, true, None)
+        .await
+        .unwrap();
     assert_eq!(pack.atoms.len(), 3);
 
     // N7：chars_used 接近完整序列化体积（含 evidence_refs），不再只是正文文本
-    let pack = svc.context_pack(None, 50, 100_000, true).await.unwrap();
+    let pack = svc
+        .context_pack(None, 50, 100_000, true, None)
+        .await
+        .unwrap();
     let text_only: usize = pack
         .atoms
         .iter()

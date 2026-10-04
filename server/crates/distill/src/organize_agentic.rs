@@ -59,51 +59,37 @@ async fn tool_atoms_pending(pool: &PgPool, page: i64) -> Result<Value, JobError>
     }))
 }
 
-/// scenarios_search：关键词 tsv 腿 + 向量腿（embed 失败降级纯 tsv）。
+/// scenarios_search：纯向量检索（查询文本现场向量化；P015 FTS 退役）。
 async fn tool_scenarios_search(
     pool: &PgPool,
     llm: &dyn DistillLlm,
     job_id: Uuid,
     query: &str,
 ) -> Result<Value, JobError> {
-    let terms = engram_search::tokenize::tokenize(query);
-    let tsquery = terms.join(" | ");
-    let tsv_rows: Vec<(Uuid, String, String)> = sqlx::query_as(
-        "SELECT id, topic, summary FROM scenarios \
-         WHERE retired_at IS NULL AND tsv @@ to_tsquery('simple', $1) \
-         ORDER BY ts_rank(tsv, to_tsquery('simple', $1)) DESC LIMIT 5",
-    )
-    .bind(&tsquery)
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
-    // 向量腿（best-effort——embed 失败降级纯 tsv）
-    let mut vec_rows: Vec<(Uuid, String, String)> = Vec::new();
-    if let Ok(Some(v)) = llm
+    // P015：纯向量检索（FTS 退役）——查询文本现场向量化
+    let vec_rows: Vec<(Uuid, String, String)> = if let Ok(Some(v)) = llm
         .embed(std::slice::from_ref(&query.to_string()), job_id)
         .await
         .map(|vecs| vecs.first().cloned())
     {
-        {
-            vec_rows = sqlx::query_as(
-                "SELECT id, topic, summary FROM scenarios \
-                 WHERE retired_at IS NULL AND embedding IS NOT NULL \
-                 ORDER BY embedding <=> $1 LIMIT 5",
-            )
-            .bind(pgvector::Vector::from(v.clone()))
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default();
-        }
-    }
-    // 合并去重（tsv 优先）
-    let mut seen: HashSet<Uuid> = HashSet::new();
-    let mut merged: Vec<Value> = Vec::new();
-    for (id, topic, summary) in tsv_rows.into_iter().chain(vec_rows) {
-        if seen.insert(id) {
-            merged.push(json!({"id": id.to_string(), "topic": topic, "summary": summary}));
-        }
-    }
+        sqlx::query_as(
+            "SELECT id, topic, summary FROM scenarios \
+             WHERE retired_at IS NULL AND embedding IS NOT NULL \
+             ORDER BY embedding <=> $1 LIMIT 5",
+        )
+        .bind(pgvector::Vector::from(v.clone()))
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let merged: Vec<Value> = vec_rows
+        .into_iter()
+        .map(|(id, topic, summary)| {
+            json!({"id": id.to_string(), "topic": topic, "summary": summary})
+        })
+        .collect();
     Ok(json!({
         "query": query,
         "results": merged,

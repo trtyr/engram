@@ -43,8 +43,8 @@ async fn run_one(agentic: bool, key: &str) -> (sqlx::PgPool, RunOutcome, support
         let kind = a["kind"].as_str().unwrap();
         let content = a["content"].as_str().unwrap();
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, confidence, tsv) \
-             VALUES ($1, $2, $3, 'active', 0.9, to_tsvector('simple', $3))",
+            "INSERT INTO atoms (id, kind, content, status, confidence) \
+             VALUES ($1, $2, $3, 'active', 0.9)",
         )
         .bind(id)
         .bind(kind)

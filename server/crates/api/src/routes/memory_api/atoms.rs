@@ -244,6 +244,7 @@ pub async fn search(
                 req.no_feedback,
                 req.from,
                 req.to,
+                None,
             )
             .await
             .map_err(me)?,
@@ -277,6 +278,7 @@ pub async fn context(
                 p.budget_items.unwrap_or(20),
                 p.budget_chars.unwrap_or(8000),
                 p.no_feedback,
+                None,
             )
             .await
             .map_err(me)?,

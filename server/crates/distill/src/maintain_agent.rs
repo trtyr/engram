@@ -46,14 +46,27 @@ fn system_prompt() -> &'static str {
 全部完成后 finish（summary 里报告合并/归档/画像编辑的计数）。步数有限（30），别在同一主题上反复横跳。"
 }
 
-/// 工具：tsv 全文搜 active 原子。
-async fn tool_atoms_search(pool: &PgPool, q: &str, limit: i64) -> Result<Value, JobError> {
+/// 工具：纯向量搜 active 原子（查询文本现场向量化；P015 FTS 退役）。
+async fn tool_atoms_search(
+    pool: &PgPool,
+    llm: &dyn DistillLlm,
+    job_id: uuid::Uuid,
+    q: &str,
+    limit: i64,
+) -> Result<Value, JobError> {
+    let embeddings = llm
+        .embed(std::slice::from_ref(&q.to_string()), job_id)
+        .await?;
+    let qv = embeddings
+        .first()
+        .cloned()
+        .ok_or_else(|| JobError::Retryable("embed 返回空".into()))?;
     let rows: Vec<(uuid::Uuid, String, String, f32, Option<String>)> = sqlx::query_as(
         "SELECT id, kind, content, confidence, occurred_at::text FROM atoms \
-         WHERE status = 'active' AND tsv @@ plainto_tsquery('simple', $1) \
-         ORDER BY updated_at DESC LIMIT $2",
+         WHERE status = 'active' AND embedding IS NOT NULL \
+         ORDER BY embedding <=> $1 LIMIT $2",
     )
-    .bind(q)
+    .bind(pgvector::Vector::from(qv))
     .bind(limit.clamp(1, 50))
     .fetch_all(pool)
     .await
@@ -201,7 +214,7 @@ pub async fn run_maintain(ctx: &JobContext, llm: &dyn DistillLlm) -> Result<Valu
                     .unwrap_or("")
                     .to_string();
                 let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
-                tool_atoms_search(pool, &q, limit).await?
+                tool_atoms_search(pool, llm, ctx.job.id, &q, limit).await?
             }
             "atoms_recent" => {
                 let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);

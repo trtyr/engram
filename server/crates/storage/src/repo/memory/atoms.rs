@@ -62,13 +62,12 @@ pub async fn insert_atom(
     occurred_at: Option<DateTime<Utc>>,
     valid_until: Option<DateTime<Utc>>,
     embedding: Option<Vec<f32>>,
-    tsv: &str,
     strength: &str,
     source_kind: &str,
 ) -> StoreResult<AtomDto> {
     let row = sqlx::query_as::<_, AtomDto>(
-        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive, occurred_at, valid_until, source_refs, embedding, tsv, strength, source_kind) \
-         VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, '[]'::jsonb, $9, to_tsvector('simple', $10), $11, $12) RETURNING *",
+        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive, occurred_at, valid_until, source_refs, embedding, strength, source_kind) \
+         VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, '[]'::jsonb, $9, $10, $11) RETURNING *",
     )
     .bind(id)
     .bind(kind)
@@ -79,7 +78,6 @@ pub async fn insert_atom(
     .bind(occurred_at)
     .bind(valid_until)
     .bind(embedding.map(pgvector::Vector::from))
-    .bind(tsv)
     .bind(strength)
     .bind(source_kind)
     .fetch_one(pool)
@@ -97,18 +95,16 @@ pub async fn correct_atom(
     kind: &str,
     text: &str,
     embedding: Option<Vec<f32>>,
-    tsv: &str,
 ) -> StoreResult<Option<AtomDto>> {
     let mut tx = pool.begin().await?;
     let new_row = sqlx::query_as::<_, AtomDto>(
-        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, source_refs, embedding, tsv, strength, source_kind) \
-         VALUES ($1, $2, $3, 0.95, 'active', false, '[]'::jsonb, $4, to_tsvector('simple', $5), 'fact', 'user_stated') RETURNING *",
+        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, source_refs, embedding, strength, source_kind) \
+         VALUES ($1, $2, $3, 0.95, 'active', false, '[]'::jsonb, $4, 'fact', 'user_stated') RETURNING *",
     )
     .bind(new_id)
     .bind(kind)
     .bind(text)
     .bind(embedding.map(pgvector::Vector::from))
-    .bind(tsv)
     .fetch_one(&mut *tx)
     .await?;
     let updated = sqlx::query(
@@ -276,16 +272,15 @@ pub async fn update_atom_full(
     valid_until: Option<Option<DateTime<Utc>>>,
     sensitive: Option<Option<bool>>,
     embedding: Option<Vec<f32>>,
-    tsv: &str,
     kind: &str,
 ) -> StoreResult<AtomDto> {
     let row = sqlx::query_as::<_, AtomDto>(
-        "UPDATE atoms SET content = $2, confidence = $3, status = $4, kind = $12, needs_review = COALESCE($5, needs_review), \
-             superseded_by = CASE WHEN $13 THEN $6 ELSE superseded_by END, \
-             occurred_at = CASE WHEN $14 THEN $7 ELSE occurred_at END, \
-             valid_until = CASE WHEN $15 THEN $8 ELSE valid_until END, \
-             sensitive = CASE WHEN $16 THEN $9 ELSE sensitive END, \
-             embedding = COALESCE($10, embedding), tsv = to_tsvector('simple', $11), updated_at = now() \
+        "UPDATE atoms SET content = $2, confidence = $3, status = $4, kind = $11, needs_review = COALESCE($5, needs_review), \
+             superseded_by = CASE WHEN $12 THEN $6 ELSE superseded_by END, \
+             occurred_at = CASE WHEN $13 THEN $7 ELSE occurred_at END, \
+             valid_until = CASE WHEN $14 THEN $8 ELSE valid_until END, \
+             sensitive = CASE WHEN $15 THEN $9 ELSE sensitive END, \
+             embedding = COALESCE($10, embedding), updated_at = now() \
          WHERE id = $1 RETURNING *",
     )
     .bind(id)
@@ -298,7 +293,6 @@ pub async fn update_atom_full(
     .bind(valid_until.flatten())
     .bind(sensitive.flatten().unwrap_or(false))
     .bind(embedding.map(pgvector::Vector::from))
-    .bind(tsv)
     .bind(kind)
     .bind(superseded_by.is_some())
     .bind(occurred_at.is_some())

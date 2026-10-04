@@ -309,8 +309,8 @@ async fn persist_atoms(
         // P015：直落 active（无候选态/无待审）——判重与取代由离线整理负责
         let needs_review = false;
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, occurred_at, valid_until, sensitive, embedding, tsv, strength, source_kind)
-             VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $10, to_tsvector('simple', $11), $12, 'agent_inferred')",
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, occurred_at, valid_until, sensitive, embedding, strength, source_kind)
+             VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $10, $11, 'agent_inferred')",
         )
         .bind(id)
         .bind(&p.kind)
@@ -328,7 +328,6 @@ async fn persist_atoms(
                 .filter(|v| v.iter().any(|&x| x != 0.0))
                 .map(|v| pgvector::Vector::from(v.clone())),
         )
-        .bind(engram_search::tokenize::tsv_text(&p.content))
         .bind(&p.strength)
         .execute(pool)
         .await

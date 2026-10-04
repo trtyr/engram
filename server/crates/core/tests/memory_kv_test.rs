@@ -204,7 +204,7 @@ async fn search_literal_fallback_hits_atom_and_kv() {
     let (pool, svc, _pg) = setup().await;
     // 直接 SQL 插一个含唯一字面量的原子（绕过 embedding——模拟双腿零命中场景）
     let lit = "ZQXK-778812";
-    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, tsv) VALUES ($1, 'fact', $2, 0.9, to_tsvector('simple', $2))")
+    sqlx::query("INSERT INTO atoms (id, kind, content, confidence) VALUES ($1, 'fact', $2, 0.9)")
         .bind(uuid::Uuid::now_v7())
         .bind(format!("机房门禁码 {lit}"))
         .execute(&pool)
@@ -216,7 +216,10 @@ async fn search_literal_fallback_hits_atom_and_kv() {
         .unwrap();
 
     // FTS 对该字面量的命中不稳定（分词链路），兜底必须接住——atom 与 kv 都要回来
-    let resp = svc.search(lit, &[], 20, true, None, None).await.unwrap();
+    let resp = svc
+        .search(lit, &[], 20, true, None, None, None)
+        .await
+        .unwrap();
     let ids: Vec<_> = resp.l1.iter().map(|h| h.id).collect();
     assert!(!resp.l1.is_empty(), "字面量兜底不应为空");
     assert!(
@@ -269,13 +272,13 @@ async fn kv_authority_channel_merges_despite_fts_noise() {
         .await
         .unwrap();
     // 噪音原子：FTS 会命中 zx/vgate 等碎片的其他行
-    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, tsv) VALUES ($1, 'fact', 'ZX 系列网关型号大全 7741 家族', 0.9, to_tsvector('simple', 'ZX 系列网关型号大全 7741 家族'))")
+    sqlx::query("INSERT INTO atoms (id, kind, content, confidence) VALUES ($1, 'fact', 'ZX 系列网关型号大全 7741 家族', 0.9)")
         .bind(uuid::Uuid::now_v7())
         .execute(&pool)
         .await
         .unwrap();
     let resp = svc
-        .search("ZX-VGATE-7741", &[], 20, true, None, None)
+        .search("ZX-VGATE-7741", &[], 20, true, None, None, None)
         .await
         .unwrap();
     assert!(

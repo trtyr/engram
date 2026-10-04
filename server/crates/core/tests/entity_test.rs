@@ -4,7 +4,6 @@ mod support;
 
 use engram_core::memory::MemoryService;
 use engram_llm::{KeyCipher, ProviderRegistry};
-use engram_search::tokenize::tsv_text;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -24,12 +23,11 @@ async fn setup() -> (PgPool, MemoryService, support::TestPg) {
 async fn insert_atom(pool: &PgPool, content: &str) -> Uuid {
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, tsv) \
-         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, false, NULL, to_tsvector('simple', $3))",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding) \
+         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, false, NULL)",
     )
     .bind(id)
     .bind(content)
-    .bind(tsv_text(content))
     .execute(pool)
     .await
     .expect("插入 atom");

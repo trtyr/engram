@@ -105,16 +105,21 @@ impl MemoryService {
         no_feedback: bool,
         from: Option<chrono::DateTime<chrono::Utc>>,
         to: Option<chrono::DateTime<chrono::Utc>>,
+        // P015：调用方自带查询向量（None = 内部 embed）。纯向量检索时代这是确定性测试与服务编排的通道。
+        query_vec: Option<&[f32]>,
     ) -> Result<SearchResponse, MemoryError> {
         if max_items < 0 {
             return Err(MemoryError::BadRequest(format!(
                 "max_items 不能为负（收到 {max_items}）"
             )));
         }
-        let qv = self
-            .try_embed_query(&[query.to_string()])
-            .await
-            .and_then(|v| v.first().cloned());
+        let qv = match query_vec {
+            Some(v) => Some(v.to_vec()),
+            None => self
+                .try_embed_query(&[query.to_string()])
+                .await
+                .and_then(|v| v.first().cloned()),
+        };
         let all = layers.is_empty();
         let want_e = all || layers.contains(&"entities");
         let want_l1 = all || layers.contains(&"l1");
@@ -365,6 +370,8 @@ impl MemoryService {
         budget_items: usize,
         budget_chars: usize,
         no_feedback: bool,
+        // P015：调用方自带查询向量（None = 内部 embed）
+        query_vec: Option<&[f32]>,
     ) -> Result<ContextPack, MemoryError> {
         let mut chars_used = 0usize;
         let mut truncated = false;
@@ -373,12 +380,15 @@ impl MemoryService {
         // 此前只数正文文本，chars_used 远小于真实注入体积，字符预算形同虚设。
 
         // 有 query 时预计算 query 向量（L2/L1 共用，避免重复 embed）
-        let qv: Option<Vec<f32>> = match query {
-            Some(q) => self
-                .try_embed_query(&[q.to_string()])
-                .await
-                .and_then(|v| v.first().cloned()),
-            None => None,
+        let qv: Option<Vec<f32>> = match query_vec {
+            Some(v) => Some(v.to_vec()),
+            None => match query {
+                Some(q) => self
+                    .try_embed_query(&[q.to_string()])
+                    .await
+                    .and_then(|v| v.first().cloned()),
+                None => None,
+            },
         };
 
         // L3 画像：v2 修复 N3（不计入 budget_items 条数）+ 字符子预算 ≤40%——

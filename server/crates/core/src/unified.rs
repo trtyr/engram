@@ -139,7 +139,7 @@ impl UnifiedSearch {
 
         // 三域并行检索 + 实体层（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
         tokio::join!(
-            mem.search(query, &["l1", "l2"], per_domain, true, None, None),
+            mem.search(query, &["l1", "l2"], per_domain, true, None, None, None),
             async {
                 let mut out = Vec::new();
                 for lib in &lib_ids {

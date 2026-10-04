@@ -156,6 +156,7 @@ impl EngramMcpServer {
                 params.0.budget_items.unwrap_or(20),
                 params.0.budget_chars.unwrap_or(8000),
                 false,
+                None,
             )
             .await
             .map_err(from_memory)?;
@@ -194,6 +195,7 @@ impl EngramMcpServer {
                 false,
                 from,
                 to,
+                None,
             )
             .await
             .map_err(from_memory)?;

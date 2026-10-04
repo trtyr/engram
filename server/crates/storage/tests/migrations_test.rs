@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 70 份迁移：0070 = persona_doc 画像活文档——P015 离线整理）
+    // 版本可查（当前 71 份迁移：0071 = 记忆域 FTS 退役（drop tsv）——P015）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(70), "0001-0070 迁移应已应用");
+    assert_eq!(version, Some(71), "0001-0071 迁移应已应用");
 
     // 0056（代码图谱入口收敛）：dest_mode 列形态——NOT NULL + 落库默认 default + 二值 CHECK。
     // 历史行回填 custom 是迁移的语义保证（生产库实测见《代码图谱入口收敛 · roadmap》）；

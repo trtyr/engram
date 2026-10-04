@@ -73,7 +73,7 @@ impl EngramMcpServer {
             }
             let r = self
                 .svc()
-                .search(&q, &["l1", "l2", "entities"], max, false, None, None)
+                .search(&q, &["l1", "l2", "entities"], max, false, None, None, None)
                 .await;
             Some(match r {
                 Ok(r) => json!({

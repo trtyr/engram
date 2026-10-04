@@ -160,7 +160,6 @@ impl MemoryService {
             occurred_at,
             valid_until,
             emb.and_then(|v| v.into_iter().next()),
-            &engram_search::tokenize::tsv_text(text),
             strength.unwrap_or("fact"),
             source_kind.unwrap_or("user_stated"),
         )
@@ -216,7 +215,6 @@ impl MemoryService {
             &cur.kind,
             t,
             emb.and_then(|v| v.into_iter().next()),
-            &engram_search::tokenize::tsv_text(t),
         )
         .await?
         .ok_or_else(|| {
@@ -378,7 +376,6 @@ impl MemoryService {
             valid_until,
             sensitive,
             emb.and_then(|v| v.into_iter().next()),
-            &engram_search::tokenize::tsv_text(&new_content),
             new_kind,
         )
         .await?;
