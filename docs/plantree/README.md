@@ -36,6 +36,7 @@
 | P012 | [organize-agentic](plans/012-organize-agentic/README.md) | server/distill, server/storage, server/llm | done | agentic 唯一化收官（2026-10-04）：六工具循环+软删+迁移 0069；旧单发全链删除（8f11d94，-389 行，无开关无兼容）；生产部署+重蒸验证 | 8f11d94（distill 39 全绿/clippy 0/fmt 净） | — |
 | P013 | [review-chain-rework](plans/013-review-chain-rework/README.md) | server/core/memory, server/api, server/mcp, web, deploy | planning | 待审通道整体移除 + 生产 JEV 决策模型补配（2026-10-04 拍板登记） | — | README 三个拍板点过会 |
 | P014 | [table-filter-ui](plans/014-table-filter-ui/README.md) | web | planning | Excel 式列头筛选：DataTable 组件 + 全站列表页迁移（2026-10-04 拍板登记） | — | 三个拍板点过会 |
+| P015 | [distill-agent-unify](plans/015-distill-agent-unify/README.md) | server/distill, server/core/memory, server/search, server/storage, web | planning | 蒸馏链全面 Agent 化：维护 Agent 四工具（查/入库/修改/删除）替代向量仲裁 + embedding 退役评估（2026-10-04 拍板登记） | — | README 四个拍板点过会 |
 
 ## Ideas
 
