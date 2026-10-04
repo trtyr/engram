@@ -10,17 +10,20 @@
 //!
 //! 入库目标 = 本地 demo_atoms 精简表（非正式 atoms——管道验证用，正式链路改造后续切片）。
 
+use engram_llm::provider::LlmProvider as _;
 use engram_llm::provider::OpenAiCompatProvider;
 use engram_llm::types::{ChatMessage, ChatRequest, EmbedRequest};
-use engram_llm::provider::LlmProvider as _;
 
 #[tokio::main]
 async fn main() {
-    let base_url = std::env::var("DEMO_BASE_URL").unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());
+    let base_url =
+        std::env::var("DEMO_BASE_URL").unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());
     let api_key = std::env::var("DEMO_API_KEY").expect("DEMO_API_KEY 未设置");
     let model = std::env::var("DEMO_MODEL").unwrap_or_else(|_| "qwen/qwen3.8-27b:free".into());
-    let db_url = std::env::var("DEMO_DATABASE_URL").unwrap_or_else(|_| "postgresql://127.0.0.1/engram_ingest_demo".into());
-    let embed_model = std::env::var("DEMO_EMBED_MODEL").unwrap_or_else(|_| "Qwen/Qwen3-Embedding-8B".into());
+    let db_url = std::env::var("DEMO_DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://127.0.0.1/engram_ingest_demo".into());
+    let embed_model =
+        std::env::var("DEMO_EMBED_MODEL").unwrap_or_else(|_| "Qwen/Qwen3-Embedding-8B".into());
 
     let provider = OpenAiCompatProvider::new("demo", base_url, api_key);
     let system = engram_distill::prompts::extract_system();
@@ -101,7 +104,10 @@ async fn main() {
         println!("{}", "=".repeat(64));
         let req = ChatRequest {
             model: model.clone(),
-            messages: vec![ChatMessage::system(system.clone()), ChatMessage::user(dialogue.clone())],
+            messages: vec![
+                ChatMessage::system(system.clone()),
+                ChatMessage::user(dialogue.clone()),
+            ],
             temperature: Some(0.1),
             json_mode: true,
             max_tokens: None,
@@ -122,22 +128,38 @@ async fn main() {
         };
         match provider.chat(req).await {
             Ok(resp) => {
-                println!("模型输出（{}ms / in:{} out:{} tok）：", resp.latency_ms, resp.input_tokens, resp.output_tokens);
+                println!(
+                    "模型输出（{}ms / in:{} out:{} tok）：",
+                    resp.latency_ms, resp.input_tokens, resp.output_tokens
+                );
                 match serde_json::from_str::<serde_json::Value>(resp.content.trim()) {
                     Ok(v) => {
                         let worth = v.get("worth_memorizing").and_then(|x| x.as_bool());
                         let reason = v.get("reason").and_then(|x| x.as_str()).unwrap_or("-");
-                        println!("  准入判断：worth_memorizing={:?}  reason：{}", worth, reason);
+                        println!(
+                            "  准入判断：worth_memorizing={:?}  reason：{}",
+                            worth, reason
+                        );
                         if let Some(atoms) = v.get("atoms").and_then(|x| x.as_array()) {
                             if atoms.is_empty() {
                                 println!("  原子：（空）");
                             }
                             for (i, a) in atoms.iter().enumerate() {
                                 let kind = a.get("kind").and_then(|x| x.as_str()).unwrap_or("?");
-                                let conf = a.get("confidence").and_then(|x| x.as_f64()).unwrap_or(0.0);
-                                let strength = a.get("strength").and_then(|x| x.as_str()).unwrap_or("?");
-                                let content = a.get("content").and_then(|x| x.as_str()).unwrap_or("?");
-                                println!("  [{}] ({} / {} / {:.2}) {}", i + 1, kind, strength, conf, content);
+                                let conf =
+                                    a.get("confidence").and_then(|x| x.as_f64()).unwrap_or(0.0);
+                                let strength =
+                                    a.get("strength").and_then(|x| x.as_str()).unwrap_or("?");
+                                let content =
+                                    a.get("content").and_then(|x| x.as_str()).unwrap_or("?");
+                                println!(
+                                    "  [{}] ({} / {} / {:.2}) {}",
+                                    i + 1,
+                                    kind,
+                                    strength,
+                                    conf,
+                                    content
+                                );
                             }
                         }
                         if let Some(rels) = v.get("relations").and_then(|x| x.as_array()) {
@@ -166,7 +188,8 @@ async fn main() {
                         if kept.is_empty() {
                             continue;
                         }
-                        let inputs: Vec<String> = kept.iter().map(|(_, _, c, _)| c.clone()).collect();
+                        let inputs: Vec<String> =
+                            kept.iter().map(|(_, _, c, _)| c.clone()).collect();
                         match provider
                             .embed(EmbedRequest {
                                 model: embed_model.clone(),
@@ -203,7 +226,11 @@ async fn main() {
                                     .execute(&pool)
                                     .await;
                                     match r {
-                                        Ok(_) => println!("  已落库 {} ({})", content, &id.to_string()[..8]),
+                                        Ok(_) => println!(
+                                            "  已落库 {} ({})",
+                                            content,
+                                            &id.to_string()[..8]
+                                        ),
                                         Err(e) => println!("  [落库失败] {content}：{e}"),
                                     }
                                 }

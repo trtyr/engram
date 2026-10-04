@@ -139,7 +139,7 @@ impl MemoryService {
         }
         // A4 幂等护栏：同 kind + 同内容（trim 后）的 active 原子已存在则直接返回它——
         // AI 重试/重复直写不会双份（2026-08-31 测试方实测两条一模一样的生日原子）。
-        // 近重复的语义合并仍归 arbitrate/consolidate，这里只挡精确重复。
+        // 近重复的语义合并归离线整理/consolidate，这里只挡精确重复。
         if let Some(existing) = repo::find_active_atom(&self.pool, kind, text).await? {
             tracing::info!(atom_id = %existing.id, "直写命中已有同内容原子，幂等返回");
             return Ok(existing);

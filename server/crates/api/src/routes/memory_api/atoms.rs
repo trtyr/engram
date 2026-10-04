@@ -134,7 +134,7 @@ pub struct UpdateAtomRequest {
     pub status: Option<String>,
     /// 人审结论：true=转待审，false=通过（清标记）
     pub needs_review: Option<bool>,
-    /// correction 取代链：本原子被哪条新原子取代（arbitrate 自动维护，手动 correction 补链）
+    /// correction 取代链：本原子被哪条新原子取代（蒸馏链自动维护，手动 correction 补链）
     /// 三态：缺省=不动 / null=清空 / 值=设置（T004）
     pub superseded_by: Option<Option<Uuid>>,
     #[serde(default, deserialize_with = "opt_flex_dt3")]

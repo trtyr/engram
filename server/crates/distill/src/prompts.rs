@@ -4,7 +4,6 @@
 pub struct PromptId(pub &'static str, pub u32);
 
 pub const P_EXTRACT: PromptId = PromptId("extract", 9);
-pub const P_ARBITRATE: PromptId = PromptId("arbitrate", 1);
 pub const P_ORGANIZE: PromptId = PromptId("organize", 2);
 pub const P_PERSONA: PromptId = PromptId("persona", 2);
 pub const P_CONSOLIDATE: PromptId = PromptId("consolidate", 1);
@@ -108,22 +107,6 @@ pub fn relation_backfill_system() -> String {
 6. 只做一跳：列表外新实体（第 2 层）的进一步关系不再抽取。
 
 输出严格 JSON：{\"relations\":[{\"from\":\"权志龙\",\"to\":\"BIGBANG\",\"rel_type\":\"member_of\",\"source_hint\":\"world_knowledge\",\"to_kind\":\"group\"}]}".into()
-}
-
-/// L1 仲裁：候选 × 既有相似 → 新增/重复/矛盾。
-pub fn arbitrate_system() -> String {
-    "你是一个记忆仲裁器。对每条候选记忆（candidate），结合与其相似的既有记忆（existing）判定：
-
-- new：既有记忆中没有等价或矛盾信息 → 应作为新记忆保留
-- duplicate：与某条既有记忆表达同一事实（措辞可不同）→ 应丢弃候选
-- contradicts：与某条既有记忆陈述同一主题但事实相反/已过时 → 候选取代既有记忆
-
-判定要义：
-1. 语义等价才算 duplicate（「喜欢简洁回答」vs「偏好简短回复」= duplicate）。
-2. 主题相同但信息相反（「住上海」vs「住北京」）= contradicts，以候选为准（更新的信息）。
-3. 同一主题的信息互补增量（「住上海」+「在陆家嘴上班」）= new。
-
-输出严格 JSON：{\"verdicts\":[{\"candidate_id\":\"...\",\"disposition\":\"new|duplicate|contradicts\",\"target_id\":\"existing 的 id，仅后两种需要\"}]}".into()
 }
 
 /// L1→L2：未归组原子聚类为场景块。

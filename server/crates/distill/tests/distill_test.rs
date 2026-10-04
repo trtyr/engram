@@ -105,8 +105,8 @@ fn emb(seed: usize) -> Vector {
     )
 }
 
-/// L0 → extract（解析重试）→ arbitrate（兜底转正）→ organize（空动作收尾）。
-/// 验证：会话 done、候选 active、embedding/tsv/source_refs 齐全。
+/// L0 → extract（解析重试，直落 active+向量化）→ organize（空动作收尾）。
+/// 验证：会话 done、原子 active、低置信（<0.55）丢弃、embedding/tsv/source_refs 齐全。
 #[tokio::test]
 async fn extract_with_retry_and_full_refs() {
     let env = setup(vec![
@@ -115,8 +115,6 @@ async fn extract_with_retry_and_full_refs() {
             {"kind": "fact", "content": "用户用 Mac 开发", "confidence": 0.9, "turn_refs": [1]},
             {"kind": "preference", "content": "用户喜欢暗色主题", "confidence": 0.5, "turn_refs": [1]},
         ]}),
-        // arbitrate：占位 id 不命中 → 兜底转正
-        json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
         // organize：空动作（链收尾）
         json!({"tool": "finish", "args": {"summary": ""}}),
     ])
@@ -141,15 +139,8 @@ async fn extract_with_retry_and_full_refs() {
         "解析重试后应成功: {:?}",
         j.error
     );
-    let j2 = wait_done(&env.queue, "arbitrate_atoms").await;
-    assert_eq!(
-        j2.status,
-        JobStatus::Succeeded,
-        "占位裁决走兜底: {:?}",
-        j2.error
-    );
-    let j3 = wait_done(&env.queue, "organize_scenarios").await;
-    assert_eq!(j3.status, JobStatus::Succeeded);
+    let j2 = wait_done(&env.queue, "organize_scenarios").await;
+    assert_eq!(j2.status, JobStatus::Succeeded);
 
     // 会话 done
     let st: String = sqlx::query_scalar("SELECT distill_status FROM raw_sessions WHERE id = $1")
@@ -159,7 +150,7 @@ async fn extract_with_retry_and_full_refs() {
         .unwrap();
     assert_eq!(st, "done");
 
-    // 两条候选：active、低置信标 needs_review、embedding+tsv+source_refs
+    // P015：conf<0.55 丢弃 → 只有 1 条落库；active 直落、无待审、embedding+tsv+source_refs 齐全
     let rows: Vec<(String, String, bool, bool, bool, serde_json::Value)> = sqlx::query_as(
         "SELECT content, status, needs_review, embedding IS NOT NULL, tsv IS NOT NULL, source_refs \
          FROM atoms ORDER BY created_at",
@@ -167,17 +158,16 @@ async fn extract_with_retry_and_full_refs() {
     .fetch_all(&env.pool)
     .await
     .unwrap();
-    assert_eq!(rows.len(), 2);
-    let (mac, dark) = (&rows[0], &rows[1]);
+    assert_eq!(rows.len(), 1, "0.5 低置信应被丢弃");
+    let mac = &rows[0];
     assert_eq!(mac.1, "active");
-    assert!(!mac.2, "高置信不需待审");
+    assert!(!mac.2, "P015 无待审通道");
     assert!(mac.3 && mac.4, "embedding 与 tsv 都应生成");
     assert!(
         mac.5.to_string().contains(&sid.to_string()),
         "source_refs 指向 L0: {}",
         mac.5
     );
-    assert!(dark.2, "confidence 0.5 应标 needs_review");
 
     env.handle
         .shutdown_and_wait(std::time::Duration::from_secs(5))
@@ -185,182 +175,6 @@ async fn extract_with_retry_and_full_refs() {
 }
 
 /// 仲裁三分支（真实 id）+ organize 归组 + persona 版本化：一条龙。
-#[tokio::test]
-async fn arbitrate_branches_organize_and_persona_history() {
-    // 三条候选（真实 id）
-    let c_new = Uuid::now_v7();
-    let c_dup = Uuid::now_v7();
-    let c_con = Uuid::now_v7();
-    // 既有：dup 靶子 + con 靶子
-    let t_dup = Uuid::now_v7();
-    let t_con = Uuid::now_v7();
-
-    let env = setup(vec![
-        // arbitrate：三分支
-        json!({"verdicts": [
-            {"candidate_id": c_new.to_string(), "disposition": "new"},
-            {"candidate_id": c_dup.to_string(), "disposition": "duplicate", "target_id": t_dup.to_string()},
-            {"candidate_id": c_con.to_string(), "disposition": "contradicts", "target_id": t_con.to_string()},
-        ]}),
-        // organize：建场景收编 new + con（agentic：scenario_write → finish）
-        json!({"tool": "scenario_write", "args": {
-            "topic": "居住地", "summary": "用户移居深圳", "body": "用户已从广州搬到深圳定居。",
-            "member_atom_ids": [c_new.to_string(), c_con.to_string()]
-        }}),
-        json!({"tool": "finish", "args": {"summary": "建 1 场景收编 2 原子"}}),
-        // persona v1
-        json!({"aspects": [
-            {"aspect": "identity", "content": "用户现居深圳。"},
-        ]}),
-        // persona v2（手动再跑）
-        json!({"aspects": [
-            {"aspect": "identity", "content": "用户现居深圳，在广州生活过多年。"},
-        ]}),
-    ])
-    .await;
-
-    for (id, content, seed) in [
-        (c_new, "用户会写 Rust", 1),
-        (c_dup, "用户偏好简短回复", 2),
-        (c_con, "用户现在定居深圳", 3),
-    ] {
-        sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, confidence, embedding, tsv) \
-             VALUES ($1, 'fact', $2, 'candidate', 0.9, $3, to_tsvector('simple', $4))",
-        )
-        .bind(id)
-        .bind(content)
-        .bind(emb(seed))
-        .bind(engram_search::tokenize::tsv_text(content))
-        .execute(&env.pool)
-        .await
-        .unwrap();
-    }
-    for (id, content, seed) in [(t_dup, "用户喜欢简短的回答", 4), (t_con, "用户住在广州", 5)]
-    {
-        sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, confidence, embedding, tsv, hit_count) \
-             VALUES ($1, 'fact', $2, 'active', 0.9, $3, to_tsvector('simple', $4), 2)",
-        )
-        .bind(id)
-        .bind(content)
-        .bind(emb(seed))
-        .bind(engram_search::tokenize::tsv_text(content))
-        .execute(&env.pool)
-        .await
-        .unwrap();
-    }
-
-    // 入队 arbitrate（payload 指定候选）
-    env.queue
-        .enqueue(
-            JobTemplate::new("arbitrate_atoms")
-                .with_payload(json!({"candidate_ids": [c_new, c_dup, c_con]})),
-        )
-        .await
-        .unwrap();
-
-    for kind in ["arbitrate_atoms", "organize_scenarios", "distill_persona"] {
-        let j = wait_done(&env.queue, kind).await;
-        assert_eq!(j.status, JobStatus::Succeeded, "{kind} 失败: {:?}", j.error);
-    }
-
-    // 三分支断言
-    // new → active
-    let (s,): (String,) = sqlx::query_as("SELECT status FROM atoms WHERE id = $1")
-        .bind(c_new)
-        .fetch_one(&env.pool)
-        .await
-        .unwrap();
-    assert_eq!(s, "active");
-    // duplicate → 候选归档保留（B6：不再物理删除）+ superseded_by 溯源 + 靶子 hit_count+1
-    let (dup_status, dup_sup): (String, Option<Uuid>) =
-        sqlx::query_as("SELECT status, superseded_by FROM atoms WHERE id = $1")
-            .bind(c_dup)
-            .fetch_one(&env.pool)
-            .await
-            .unwrap();
-    assert_eq!(dup_status, "archived", "duplicate 候选应归档保留（可审计）");
-    assert_eq!(dup_sup, Some(t_dup), "归档候选 superseded_by 指向既有条");
-    let hits: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
-        .bind(t_dup)
-        .fetch_one(&env.pool)
-        .await
-        .unwrap();
-    assert_eq!(hits, 3, "靶子 hit_count 2→3");
-    // contradicts → 旧 superseded + 链到新
-    let (old_status, sup_by): (String, Option<Uuid>) =
-        sqlx::query_as("SELECT status, superseded_by FROM atoms WHERE id = $1")
-            .bind(t_con)
-            .fetch_one(&env.pool)
-            .await
-            .unwrap();
-    assert_eq!(old_status, "superseded");
-    assert_eq!(sup_by, Some(c_con));
-
-    // organize：场景 + 归组
-    let (topic, refs, sid): (String, serde_json::Value, Uuid) =
-        sqlx::query_as("SELECT topic, atom_refs, id FROM scenarios")
-            .fetch_one(&env.pool)
-            .await
-            .unwrap();
-    assert_eq!(topic, "居住地");
-    assert_eq!(refs.as_array().map(|a| a.len()), Some(2));
-    let grouped: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM atoms WHERE scenario_id IS NOT NULL AND status = 'active'",
-    )
-    .fetch_one(&env.pool)
-    .await
-    .unwrap();
-    assert_eq!(grouped, 2, "new+con 应归组");
-
-    // persona v1
-    let (v1, ver): (String, i32) = sqlx::query_as(
-        "SELECT content, version FROM persona_aspects WHERE aspect = 'identity' ORDER BY version DESC LIMIT 1",
-    )
-    .fetch_one(&env.pool)
-    .await
-    .unwrap();
-    assert!(v1.contains("深圳"));
-    assert_eq!(ver, 1);
-
-    // 手动再跑 persona → v2 + history + evidence
-    env.queue
-        .enqueue(JobTemplate::new("distill_persona").with_payload(json!({"scenario_ids": [sid]})))
-        .await
-        .unwrap();
-    // 轮询 DB 等 v2 落库（wait_done 可能匹配到第一次的终态 job，不可靠——既有 flaky 根因）
-    let mut history: Vec<(i32, String)> = Vec::new();
-    for _ in 0..100 {
-        history = sqlx::query_as(
-            "SELECT version, content FROM persona_aspects WHERE aspect = 'identity' ORDER BY version",
-        )
-        .fetch_all(&env.pool)
-        .await
-        .unwrap();
-        if history.len() >= 2 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert_eq!(history.len(), 2, "两个版本: {history:?}");
-    assert!(history[1].1.contains("广州"));
-    let evidence: serde_json::Value = sqlx::query_scalar(
-        "SELECT evidence_refs FROM persona_aspects WHERE aspect = 'identity' AND version = 2",
-    )
-    .fetch_one(&env.pool)
-    .await
-    .unwrap();
-    assert!(
-        evidence.to_string().contains(&sid.to_string()),
-        "evidence 指向场景: {evidence}"
-    );
-
-    env.handle
-        .shutdown_and_wait(std::time::Duration::from_secs(5))
-        .await;
-}
-
 /// 防抖：同窗口两次触发复用同一任务；到期执行取走全部 pending 会话。
 #[tokio::test]
 async fn debounce_bucket_shares_job() {
@@ -510,78 +324,6 @@ async fn persona_evidence_per_aspect() {
         .shutdown_and_wait(std::time::Duration::from_secs(5))
         .await;
 }
-#[tokio::test]
-async fn arbitrate_null_embedding_falls_back_to_fts() {
-    let c_no_emb = Uuid::now_v7(); // 候选：embedding NULL
-    let target = Uuid::now_v7(); // 既有 active：与候选文本共享关键词（FTS 可命中），带向量
-
-    let env = setup(vec![
-        // arbitrate：对无嵌入候选给出 duplicate 判定（证明它进了 LLM 仲裁而非直通转正）
-        json!({"verdicts": [
-            {"candidate_id": c_no_emb.to_string(), "disposition": "duplicate", "target_id": target.to_string()},
-        ]}),
-        // organize：空动作收尾（无转正 → 不入队，本条仅为队列兜底）
-        json!({"tool": "finish", "args": {"summary": ""}}),
-    ])
-    .await;
-
-    // 候选无嵌入（模拟 embed 失败/上游异常的产物）
-    sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, confidence, embedding, tsv) \
-         VALUES ($1, 'fact', '用户喜欢简洁的中文回复', 'candidate', 0.9, NULL, to_tsvector('simple', $2))",
-    )
-    .bind(c_no_emb)
-    .bind(engram_search::tokenize::tsv_text("用户喜欢简洁的中文回复"))
-    .execute(&env.pool)
-    .await
-    .unwrap();
-
-    // 既有 active：语义相近（关键词重叠），有嵌入
-    sqlx::query(
-        "INSERT INTO atoms (id, kind, content, status, confidence, embedding, tsv, hit_count) \
-         VALUES ($1, 'preference', '用户喜欢简洁中文回答', 'active', 0.9, $2, to_tsvector('simple', $3), 1)",
-    )
-    .bind(target)
-    .bind(emb(9))
-    .bind(engram_search::tokenize::tsv_text("用户喜欢简洁中文回答"))
-    .execute(&env.pool)
-    .await
-    .unwrap();
-
-    env.queue
-        .enqueue(
-            JobTemplate::new("arbitrate_atoms").with_payload(json!({"candidate_ids": [c_no_emb]})),
-        )
-        .await
-        .unwrap();
-    let j = wait_done(&env.queue, "arbitrate_atoms").await;
-    assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
-
-    // B6 语义：duplicate → 归档 + superseded_by（而非物理删除）——同时证明候选
-    // 真的经过 LLM 仲裁（旧代码里无嵌入候选会直通 active）
-    let (status, sup_by): (String, Option<Uuid>) =
-        sqlx::query_as("SELECT status, superseded_by FROM atoms WHERE id = $1")
-            .bind(c_no_emb)
-            .fetch_one(&env.pool)
-            .await
-            .unwrap();
-    assert_eq!(
-        status, "archived",
-        "无嵌入候选应被仲裁（duplicate → archived）"
-    );
-    assert_eq!(sup_by, Some(target));
-    let hits: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
-        .bind(target)
-        .fetch_one(&env.pool)
-        .await
-        .unwrap();
-    assert_eq!(hits, 2, "靶子 hit_count 1→2");
-
-    env.handle
-        .shutdown_and_wait(std::time::Duration::from_secs(5))
-        .await;
-}
-
 /// 实体档案自动生成：consolidate 对高密度滞后实体 LLM 聚合摘要；
 /// 低密度（<3 原子）与摘要新鲜的实体跳过；LLM 失败仅告警不拖垮主链。
 #[tokio::test]
@@ -722,8 +464,6 @@ async fn extract_creates_and_links_entities() {
              "entities": [{"name": "张三", "kind": "person"}]},
             {"kind": "preference", "content": "用户喜欢暗色主题", "confidence": 0.9, "turn_refs": [1]}
         ]}),
-        // arbitrate：占位 id 不命中 → 兜底转正
-        json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
         json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
@@ -750,8 +490,6 @@ async fn extract_creates_and_links_entities() {
         "extract 应成功: {:?}",
         j.error
     );
-    wait_done(&env.queue, "arbitrate_atoms").await;
-
     let atom_n: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms")
         .fetch_one(&env.pool)
         .await
@@ -824,8 +562,6 @@ async fn extract_inherits_session_sensitive() {
         "extract 应成功: {:?}",
         j.error
     );
-    wait_done(&env.queue, "arbitrate_atoms").await;
-
     let sensitive_n: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms WHERE sensitive")
         .fetch_one(&env.pool)
         .await
@@ -870,8 +606,6 @@ async fn extract_creates_relations() {
         "extract 应成功: {:?}",
         j.error
     );
-    wait_done(&env.queue, "arbitrate_atoms").await;
-
     // 关系落库：张三 member_of 后端组，source=distill
     let rel_n: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM entity_relations WHERE rel_type = 'member_of' AND source = 'distill'",
@@ -1079,54 +813,6 @@ async fn extract_carries_event_time() {
 /// 双胞胎案：种子「周日晚上不安排长任务」SQL 直插无嵌入；蒸馏产出近义候选
 /// 「周日晚上不排长任务」——修复前 ANN 分支看不见种子 → 候选直通转正成双胞胎。
 /// 断言：LLM 收到的仲裁 prompt 里出现种子内容（FTS 补位把它喂了进去）。
-#[tokio::test]
-async fn arbitrate_similar_pool_reaches_embeddingless_seed() {
-    let env = setup(vec![
-        json!({"atoms": [
-            {"kind": "convention", "content": "周日晚上不排长任务", "confidence": 0.9, "turn_refs": [1]}
-        ]}),
-        json!({"verdicts": []}), // 裁决结果不重要——断言在 prompt 里
-        json!({"tool": "finish", "args": {"summary": ""}}),
-    ])
-    .await;
-
-    // 种子：无嵌入（SQL 直插漏嵌的真实形态），tsv 齐全
-    let seed = Uuid::now_v7();
-    sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, tsv) \
-         VALUES ($1, 'preference', '周日晚上不安排长任务', 0.75, 'active', '[]'::jsonb, false, NULL, to_tsvector('simple', $2))",
-    )
-    .bind(seed)
-    .bind(engram_search::tokenize::tsv_text("周日晚上不安排长任务"))
-    .execute(&env.pool)
-    .await
-    .unwrap();
-
-    let sid = Uuid::now_v7();
-    sqlx::query("INSERT INTO raw_sessions (id, agent, content) VALUES ($1, 'pi', $2)")
-        .bind(sid)
-        .bind(session(&[("user", "说好了周日晚上不排长任务，留白")]))
-        .execute(&env.pool)
-        .await
-        .unwrap();
-
-    env.queue
-        .enqueue(JobTemplate::new("extract_atoms"))
-        .await
-        .unwrap();
-    let _ = wait_done(&env.queue, "arbitrate_atoms").await;
-
-    let prompts = env.llm.sent_user.lock().unwrap();
-    let arb_prompt = prompts
-        .iter()
-        .find(|p| p.contains("候选[0]"))
-        .expect("应发出仲裁 prompt");
-    assert!(
-        arb_prompt.contains("周日晚上不安排长任务"),
-        "仲裁相似列表应包含无嵌入种子（FTS 补位），实得 prompt：\n{arb_prompt}"
-    );
-}
-
 /// R3 画像退休：分面超 7 天未更新 → 即使 payload 无新场景也以近期场景强制重写。
 // F3 快照收敛：含 archived 成员的场景——活跃≥1 重算（atom_refs 重写为活跃成员）、
 // 全非活跃解散删除。
@@ -1800,15 +1486,7 @@ async fn jobs_mock_extract_main_and_error() {
         "主分支应成功: {:?}",
         j.error
     );
-    // extract 只落 candidate，随后把链交给 arbitrate（本条无相似 → 直接转正）；
-    // 断言必须等链上仲裁跑完看最终态，否则与候选态断言竞态。
-    let j2 = wait_done(&env.queue, "arbitrate_atoms").await;
-    assert_eq!(
-        j2.status,
-        JobStatus::Succeeded,
-        "链上仲裁应成功: {:?}",
-        j2.error
-    );
+    // P015：抽取直落 active（无候选态/无在线仲裁）
     let (n, st): (i64, String) = sqlx::query_as("SELECT count(*), min(status) FROM atoms")
         .fetch_one(&env.pool)
         .await
@@ -1847,68 +1525,6 @@ async fn jobs_mock_extract_main_and_error() {
 }
 
 /// arbitrate：主分支按裁决归档候选并写取代链；错误分支失败且候选保持 candidate（无部分写入）。
-#[tokio::test]
-async fn jobs_mock_arbitrate_main_and_error() {
-    let active = Uuid::now_v7();
-    let cand = Uuid::now_v7();
-    let env = setup(vec![json!({"verdicts": [
-        {"candidate_id": cand.to_string(), "disposition": "duplicate", "target_id": active.to_string()}
-    ]})])
-    .await;
-    insert_atom(&env, active, "用户用 Mac 开发", "active").await;
-    insert_atom(&env, cand, "用户用 Mac 开发", "candidate").await;
-    env.queue
-        .enqueue(JobTemplate::new("arbitrate_atoms").with_payload(json!({"candidate_ids": [cand]})))
-        .await
-        .unwrap();
-    let j = wait_done(&env.queue, "arbitrate_atoms").await;
-    assert_eq!(
-        j.status,
-        JobStatus::Succeeded,
-        "主分支应成功: {:?}",
-        j.error
-    );
-    assert_eq!(atom_status(&env, cand).await, "archived", "判重应归档候选");
-    let sup: Option<Uuid> = sqlx::query_scalar("SELECT superseded_by FROM atoms WHERE id = $1")
-        .bind(cand)
-        .fetch_one(&env.pool)
-        .await
-        .unwrap();
-    assert_eq!(sup, Some(active), "归档必须补取代指针（R1 取代链不断）");
-    let hits: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
-        .bind(active)
-        .fetch_one(&env.pool)
-        .await
-        .unwrap();
-    assert_eq!(hits, 1, "判重应给既有条计一次命中");
-    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
-
-    // 错误分支：同样的素材 + 垃圾响应 → 失败，且候选不动
-    let active2 = Uuid::now_v7();
-    let cand2 = Uuid::now_v7();
-    let env = setup(vec![
-        serde_json::Value::String("不是 JSON".into()),
-        serde_json::Value::String("仍不是 JSON".into()),
-    ])
-    .await;
-    insert_atom(&env, active2, "用户用 Mac 开发", "active").await;
-    insert_atom(&env, cand2, "用户用 Mac 开发", "candidate").await;
-    env.queue
-        .enqueue(
-            JobTemplate::new("arbitrate_atoms").with_payload(json!({"candidate_ids": [cand2]})),
-        )
-        .await
-        .unwrap();
-    let j = wait_done(&env.queue, "arbitrate_atoms").await;
-    assert_ne!(j.status, JobStatus::Succeeded, "解析全败应判失败");
-    assert_eq!(
-        atom_status(&env, cand2).await,
-        "candidate",
-        "裁决失败不得部分写入（候选应原地不动）"
-    );
-    env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
-}
-
 /// organize：主分支按动作建场景并回填 atom.scenario_id；错误分支失败且不建场景。
 #[tokio::test]
 async fn jobs_mock_organize_main_and_error() {
@@ -2300,83 +1916,6 @@ async fn jev_gate_degrades_to_passthrough_with_visible_event() {
 
 /// T002 回归：contradicts 取代落空（旧条已 archived）时候选不得直接 active——
 /// 先 supersede 后 promote；降位失败 → 候选提级 needs_review，杜绝同主题双 active。
-#[tokio::test]
-async fn t002_contradicts_stale_target_degrades_to_review() {
-    let c_con = Uuid::now_v7();
-    let t_con = Uuid::now_v7(); // 旧条：archived（取代落空）
-    let t_act = Uuid::now_v7(); // 活体相似锚：让候选交到 LLM 而非 no_similar 直通
-    let env = setup(vec![
-        json!({"verdicts": [
-            {"candidate_id": c_con.to_string(), "disposition": "contradicts",
-             "target_id": t_con.to_string()},
-        ]}),
-        json!({"tool": "finish", "args": {"summary": ""}}),
-    ])
-    .await;
-    // embedding 相似对（同 arbitrate_branches 的 con 组）——不落 no_similar 直通，交 LLM 裁决
-    // t_active：活体相似锚（保证候选进入 LLM 仲裁而非 no_similar 直通）；
-    // t_con：archived 旧条（verdict 指认它 → 取代落空 = T002 场景）
-    for (id, status, needs_review, seed) in [
-        (c_con, "candidate", false, 3),
-        (t_con, "archived", false, 5),
-        (t_act, "active", false, 4),
-    ] {
-        sqlx::query(
-            "INSERT INTO atoms (id, kind, content, status, confidence, needs_review, embedding, tsv) \
-             VALUES ($1, 'fact', $3, $2, 0.9, $4, $5, to_tsvector('simple', $3))",
-        )
-        .bind(id)
-        .bind(status)
-        .bind(format!("内容-{id}"))
-        .bind(needs_review)
-        .bind(emb(seed))
-        .execute(&env.pool)
-        .await
-        .unwrap();
-    }
-    env.queue
-        .enqueue(
-            JobTemplate::new("arbitrate_atoms").with_payload(json!({"candidate_ids": [c_con]})),
-        )
-        .await
-        .unwrap();
-    let j = wait_done(&env.queue, "arbitrate_atoms").await;
-    assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
-
-    // 候选：转正但提级待审（取代落空 → 不直接生效）
-    let (st, nr): (String, bool) =
-        sqlx::query_as("SELECT status, needs_review FROM atoms WHERE id = $1")
-            .bind(c_con)
-            .fetch_one(&env.pool)
-            .await
-            .unwrap();
-    assert_eq!(st, "active", "候选应转正（信息不丢）");
-    assert!(nr, "取代落空的候选必须提级待审（T002）");
-
-    // 旧条：保持 archived——supersede 不落、无双 active
-    let (st, sb): (String, Option<Uuid>) =
-        sqlx::query_as("SELECT status, superseded_by FROM atoms WHERE id = $1")
-            .bind(t_con)
-            .fetch_one(&env.pool)
-            .await
-            .unwrap();
-    assert_eq!(st, "archived", "旧条不应被改成 superseded");
-    assert!(sb.is_none());
-
-    // 全库断言：除测试自建的相似锚 t_act 外，不得有未审 active（取代落空候选必须提级）
-    let unreviewed: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM atoms WHERE status = 'active' AND needs_review = FALSE AND id <> $1",
-    )
-    .bind(t_act)
-    .fetch_all(&env.pool)
-    .await
-    .unwrap();
-    assert!(
-        unreviewed.is_empty(),
-        "取代落空时不允许无审双 active（意外 active: {unreviewed:?}）"
-    );
-}
-
 /// T003 回归：场景成员归属牌（atoms.scenario_id）为唯一真源，atom_refs 按真源重算——
 /// 被挪去其他场景的成员自动从原场景缓存消失（不再「并集只进不出」）。
 #[tokio::test]

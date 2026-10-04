@@ -11,7 +11,6 @@ use crate::llm_port::{GatewayLlm, LlmRef};
 /// 注册全部蒸馏 handler（main 装配用）。
 pub fn register_handlers(runner: Runner, llm: LlmRef) -> Runner {
     let l_extract = llm.clone();
-    let l_arbitrate = llm.clone();
     let l_organize = llm.clone();
     let l_persona = llm.clone();
     let l_consolidate = llm.clone();
@@ -20,10 +19,6 @@ pub fn register_handlers(runner: Runner, llm: LlmRef) -> Runner {
         .register("extract_atoms", move |ctx| {
             let llm = l_extract.clone();
             async move { crate::extract::run(ctx, llm).await }
-        })
-        .register("arbitrate_atoms", move |ctx| {
-            let llm = l_arbitrate.clone();
-            async move { crate::arbitrate::run(ctx, llm).await }
         })
         .register("organize_scenarios", move |ctx| {
             let llm = l_organize.clone();

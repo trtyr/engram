@@ -203,7 +203,10 @@ async fn run_claimed(
     .await
     .ok();
 
-    enqueue_arbitrate(&ctx, &candidate_ids).await?;
+    // P015：在线仲裁退役——抽取直落 active + 向量化；判重/取代移交离线整理。
+    // 组织仍链式触发（无仲裁接棒后由 extract 直接链），离线整理上线后移交。
+    ctx.enqueue_next(JobTemplate::new("organize_scenarios"))
+        .await?;
     Ok(json!({"session_ids": session_ids, "candidate_ids": candidate_ids}))
 }
 
@@ -281,8 +284,19 @@ async fn extract_segment(
 async fn persist_atoms(
     ctx: &JobContext,
     llm: &dyn crate::llm_port::DistillLlm,
-    pending: Vec<PendingAtom>,
+    mut pending: Vec<PendingAtom>,
 ) -> Result<Vec<Uuid>, JobError> {
+    if pending.is_empty() {
+        return Ok(Vec::new());
+    }
+    // P015：宁缺毋滥——低置信直接丢弃（无待审通道）；准入语义在抽取 prompt 内（v9 worth_memorizing）
+    let dropped = pending.iter().filter(|p| p.confidence < 0.55).count();
+    if dropped > 0 {
+        ctx.emit(&format!("低置信丢弃 {dropped} 条（conf<0.55）"), None)
+            .await
+            .ok();
+    }
+    pending.retain(|p| p.confidence >= 0.55);
     if pending.is_empty() {
         return Ok(Vec::new());
     }
@@ -292,11 +306,11 @@ async fn persist_atoms(
     let mut candidate_ids = Vec::with_capacity(pending.len());
     for (i, p) in pending.into_iter().enumerate() {
         let id = Uuid::now_v7();
-        // needs_review 双通道：置信 <0.55 自动待审（A1）+ JEV 双阈段强制提级（T014）
-        let needs_review = p.confidence < 0.55 || p.force_review;
+        // P015：直落 active（无候选态/无待审）——判重与取代由离线整理负责
+        let needs_review = false;
         sqlx::query(
             "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, occurred_at, valid_until, sensitive, embedding, tsv, strength, source_kind)
-             VALUES ($1, $2, $3, $4, 'candidate', $5, $6, $7, $8, $9, $10, to_tsvector('simple', $11), $12, 'agent_inferred')",
+             VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $10, to_tsvector('simple', $11), $12, 'agent_inferred')",
         )
         .bind(id)
         .bind(&p.kind)
@@ -461,17 +475,5 @@ async fn mark_sessions_done(ctx: &JobContext, session_ids: &[Uuid]) -> Result<()
         .execute(ctx.pool())
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
-    Ok(())
-}
-
-/// 5. 链式入队仲裁。
-async fn enqueue_arbitrate(ctx: &JobContext, candidate_ids: &[Uuid]) -> Result<(), JobError> {
-    if !candidate_ids.is_empty() {
-        ctx.enqueue_next(
-            JobTemplate::new("arbitrate_atoms")
-                .with_payload(json!({"candidate_ids": candidate_ids})),
-        )
-        .await?;
-    }
     Ok(())
 }
