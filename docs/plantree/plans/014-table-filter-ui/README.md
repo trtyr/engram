@@ -38,6 +38,19 @@ web（ui-bits + 全部列表页 features/*.tsx）
 
 修法：KvPane（Memory.tsx:1349）外壳替换为 `<Card className="overflow-x-auto">`，与 Sessions/Logs 同款。一行改动，P014 开工时捎带落地。
 
+### 会话列表：预览列吃满 + 干掉「详情」按钮（2026-10-04 追加）
+
+用户原话：「“会话”这里的列表，最右侧留白太多了。把那里的“详细”给我去掉。点击这个“会话”，就能直接查看。留白干掉，预览加宽。」
+
+实证（2026-10-04 源码对照，Memory.tsx Sessions 表格）：
+- 预览列 `max-w-96`（384px）钳死 → 剩余宽度摊给右侧稀疏列，行右侧大片留白
+- 最后一列是「详情」ghost 按钮，而展开手风琴本可整行触发
+
+修法：
+1. 预览 td 去 `max-w-96`（保留 truncate + title），让预览列吃满剩余宽
+2. 行加 cursor-pointer + onClick 整行切换 openId；Checkbox 单元格 stopPropagation 防误勾
+3. 删「详情」按钮列（th 空列与 td 按钮同删），手风琴 colSpan 7→6
+
 ## 拍板点
 
 1. 迁移批次顺序（哪些页先进首批）？
