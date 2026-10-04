@@ -177,6 +177,8 @@ async fn tool_scenario_write(
                  WHERE id = ANY($1) AND retired_at IS NULL",
             )
             .bind(&affected)
+            .bind(summary)
+            .bind(body)
             .execute(pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;

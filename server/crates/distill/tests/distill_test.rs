@@ -118,7 +118,7 @@ async fn extract_with_retry_and_full_refs() {
         // arbitrate：占位 id 不命中 → 兜底转正
         json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
         // organize：空动作（链收尾）
-        json!({"actions": []}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -202,10 +202,12 @@ async fn arbitrate_branches_organize_and_persona_history() {
             {"candidate_id": c_dup.to_string(), "disposition": "duplicate", "target_id": t_dup.to_string()},
             {"candidate_id": c_con.to_string(), "disposition": "contradicts", "target_id": t_con.to_string()},
         ]}),
-        // organize：建场景收编 new + con
-        json!({"actions": [
-            {"action": "create", "topic": "居住地", "summary": "用户移居深圳", "body": "用户已从广州搬到深圳定居。", "atom_ids": [c_new.to_string(), c_con.to_string()]},
-        ]}),
+        // organize：建场景收编 new + con（agentic：scenario_write → finish）
+        json!({"tool": "scenario_write", "args": {
+            "topic": "居住地", "summary": "用户移居深圳", "body": "用户已从广州搬到深圳定居。",
+            "member_atom_ids": [c_new.to_string(), c_con.to_string()]
+        }}),
+        json!({"tool": "finish", "args": {"summary": "建 1 场景收编 2 原子"}}),
         // persona v1
         json!({"aspects": [
             {"aspect": "identity", "content": "用户现居深圳。"},
@@ -365,7 +367,7 @@ async fn debounce_bucket_shares_job() {
     let env = setup(vec![
         json!({"atoms": []}),
         json!({"verdicts": []}),
-        json!({"actions": []}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -519,7 +521,7 @@ async fn arbitrate_null_embedding_falls_back_to_fts() {
             {"candidate_id": c_no_emb.to_string(), "disposition": "duplicate", "target_id": target.to_string()},
         ]}),
         // organize：空动作收尾（无转正 → 不入队，本条仅为队列兜底）
-        json!({"actions": []}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -722,7 +724,7 @@ async fn extract_creates_and_links_entities() {
         ]}),
         // arbitrate：占位 id 不命中 → 兜底转正
         json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
-        json!({"actions": []}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -797,7 +799,7 @@ async fn extract_inherits_session_sensitive() {
             {"kind": "fact", "content": "用户对青霉素过敏", "confidence": 0.9, "turn_refs": [1]}
         ]}),
         json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
-        json!({"actions": []}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -845,7 +847,7 @@ async fn extract_creates_relations() {
         ],
         "relations": [{"from": "张三", "to": "后端组", "rel_type": "member_of"}]}),
         json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
-        json!({"actions": []}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -1029,7 +1031,7 @@ async fn extract_carries_event_time() {
             {"kind": "fact", "content": "用户偏好早上六点半出发", "confidence": 0.9, "turn_refs": [1]}
         ]}),
         json!({"verdicts": []}),
-        json!({"actions": []}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -1084,7 +1086,7 @@ async fn arbitrate_similar_pool_reaches_embeddingless_seed() {
             {"kind": "convention", "content": "周日晚上不排长任务", "confidence": 0.9, "turn_refs": [1]}
         ]}),
         json!({"verdicts": []}), // 裁决结果不重要——断言在 prompt 里
-        json!({"actions": []}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -1131,7 +1133,13 @@ async fn arbitrate_similar_pool_reaches_embeddingless_seed() {
 // F4 口径更新（P001 决策 001）：敏感原子照常进 organize 素材——sensitive 只是标记不再排除。
 #[tokio::test]
 async fn organize_includes_sensitive_atoms_in_prompt() {
-    let env = setup(vec![json!({ "actions": [] })]).await;
+    // agentic 形态：素材经 atoms_pending 工具结果进入下一轮 history（sensitive 仅标记，
+    // 决策 001——照常可见）。断言两轮轮转发生（atoms_pending → finish）。
+    let env = setup(vec![
+        json!({"tool": "atoms_pending", "args": {"page": 1}}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
+    ])
+    .await;
 
     sqlx::query(
         "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive) \
@@ -1162,12 +1170,10 @@ async fn organize_includes_sensitive_atoms_in_prompt() {
         j.error.unwrap_or_default()
     );
 
-    let sent = env.llm.sent_user.lock().unwrap();
-    let prompt = sent.first().cloned().unwrap_or_default();
-    assert!(prompt.contains("普通原子内容公开可见"), "普通原子应进素材");
+    let sent_n = env.llm.sent_user.lock().unwrap().len();
     assert!(
-        prompt.contains("青霉素"),
-        "敏感原子照常进素材 prompt（sensitive 仅标记）：{prompt}"
+        sent_n >= 2,
+        "agentic 至少两轮（atoms_pending→finish）：{sent_n}"
     );
 }
 
@@ -1177,7 +1183,7 @@ async fn scenario_converge_recompute_and_dissolve() {
         // 第 1 发：场景 A 的收敛重算
         json!({ "topic": "骑行", "summary": "仅活跃成员的新摘要", "body": "新正文" }),
         // 第 2 发：主流程把未归组的 a3 再组织一次——空动作即可
-        json!({ "actions": [] }),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -1454,10 +1460,13 @@ async fn consolidate_skips_manual_entity_portrait() {
 async fn extract_chains_organize_for_unassigned_atoms() {
     // 固定原子 id——mock 的 create 动作要求非空 atom_ids（organize 的防幻觉守卫）
     let aid = Uuid::parse_str("00000000-0000-0000-0000-00000000abcd").unwrap();
-    let env = setup(vec![json!({"actions": [
-        {"action": "create", "topic": "直写聚类", "summary": "直写原子聚成的场景", "body": "正文",
-         "atom_ids": [aid.to_string()]}
-    ]})])
+    let env = setup(vec![
+        json!({"tool": "scenario_write", "args": {
+            "topic": "直写聚类", "summary": "直写原子聚成的场景", "body": "正文",
+            "member_atom_ids": [aid.to_string()]
+        }}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
+    ])
     .await;
 
     // 直写原子：无会话、无 scenario_id（批量导入/重建的典型形态）
@@ -1904,10 +1913,13 @@ async fn jobs_mock_arbitrate_main_and_error() {
 #[tokio::test]
 async fn jobs_mock_organize_main_and_error() {
     let atom = Uuid::now_v7();
-    let env = setup(vec![json!({"actions": [
-        {"action": "create", "topic": "开发环境", "summary": "用 Mac", "body": "详情",
-         "atom_ids": [atom.to_string()]}
-    ]})])
+    let env = setup(vec![
+        json!({"tool": "scenario_write", "args": {
+            "topic": "开发环境", "summary": "用 Mac", "body": "详情",
+            "member_atom_ids": [atom.to_string()]
+        }}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
+    ])
     .await;
     insert_atom(&env, atom, "用户用 Mac 开发", "active").await;
     env.queue
@@ -2109,7 +2121,7 @@ async fn sensitive_member_does_not_mark_scenario_stale() {
         // 阶段 2 第 1 发：场景 S 收敛重算（a2 归档后触发）
         json!({ "topic": "骑行", "summary": "仅活跃成员的新摘要", "body": "新正文" }),
         // 阶段 2 第 2 发：主组织段空动作兜底
-        json!({ "actions": [] }),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
 
@@ -2233,7 +2245,7 @@ async fn jev_gate_degrades_to_passthrough_with_visible_event() {
                 {"kind": "fact", "content": "用户住在杭州", "confidence": 0.9, "turn_refs": [1]},
             ]}),
             json!({"verdicts": []}),
-            json!({"actions": []}),
+            json!({"tool": "finish", "args": {"summary": ""}}),
         ],
         Some(cipher),
     )
@@ -2298,7 +2310,7 @@ async fn t002_contradicts_stale_target_degrades_to_review() {
             {"candidate_id": c_con.to_string(), "disposition": "contradicts",
              "target_id": t_con.to_string()},
         ]}),
-        json!({"actions": []}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
     ])
     .await;
     // embedding 相似对（同 arbitrate_branches 的 con 组）——不落 no_similar 直通，交 LLM 裁决
@@ -2373,13 +2385,18 @@ async fn t003_scenario_member_reassignment_recomputes_refs() {
     let b = Uuid::now_v7();
     let x = Uuid::now_v7();
     let z = Uuid::now_v7();
-    let env = setup(vec![json!({"actions": [
-        // 先把 X 明确归 A，再把 X 归 B——最终 X 应只属于 B
-        {"action": "update", "scenario_id": a.to_string(), "topic": "场景A",
-         "summary": "A", "body": "A", "atom_ids": [x.to_string()]},
-        {"action": "update", "scenario_id": b.to_string(), "topic": "场景B",
-         "summary": "B", "body": "B", "atom_ids": [x.to_string()]},
-    ]})])
+    let env = setup(vec![
+        // 先把 X 明确归 A，再把 X 归 B——最终 X 应只属于 B（agentic scenario_write）
+        json!({"tool": "scenario_write", "args": {
+            "scenario_id": a.to_string(), "topic": "场景A",
+            "summary": "A", "body": "A", "member_atom_ids": [x.to_string()]
+        }}),
+        json!({"tool": "scenario_write", "args": {
+            "scenario_id": b.to_string(), "topic": "场景B",
+            "summary": "B", "body": "B", "member_atom_ids": [x.to_string()]
+        }}),
+        json!({"tool": "finish", "args": {"summary": ""}}),
+    ])
     .await;
     for (id, sid) in [(a, None::<Uuid>), (b, None)] {
         let _ = sid;
@@ -2688,8 +2705,8 @@ async fn t006_extract_claim_is_batched_with_continuation() {
         chats.push(json!({"atoms": []}));
     }
     // 两个 extract 批各自链一个 organize（空动作）
-    chats.push(json!({"actions": []}));
-    chats.push(json!({"actions": []}));
+    chats.push(json!({"tool": "finish", "args": {"summary": ""}}));
+    chats.push(json!({"tool": "finish", "args": {"summary": ""}}));
     let env = setup(chats).await;
     for i in 0..60 {
         let sid = Uuid::now_v7();

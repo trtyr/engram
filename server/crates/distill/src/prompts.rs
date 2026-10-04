@@ -113,25 +113,6 @@ pub fn scenario_refresh_system() -> String {
         .to_string()
 }
 
-pub fn organize_system() -> String {
-    "你是一个知识组织器。把新原子记忆归入场景知识块（scenario）：
-
-- 若某条既有 scenario 的主题契合（如「开发环境」「沟通偏好」），把相关原子并入它（action=update，给出精简后的 summary 与 body）。
-- **主题名与某条既有场景仅措辞/详略差异**（如「星云项目」vs「星云项目概况」、「编码偏好」vs「用户开发偏好」）时，必须视为**同一场景**用 action=update 并入，严禁另建新场景——重复场景会永久污染 L2。
-- 否则为成组的原子创建新 scenario（action=create，起一个 ≤6 字的主题名）。
-- 与任何主题都不相关的孤立原子可以不处理（留在未归组状态）。
-- 若新原子与既有场景的 summary/body 信息**冲突**（如居住地变更、工具更换），必须 update 该场景以反映最新事实，不能忽略。
-- **strength=inference 的原子**并入场景时，对应信息在 summary/body 里必须带「（推断）」后缀；strength=fact 才能写成确定陈述。严禁把推断洗成事实。
-
-summary 是对这组原子**具体内容**的概括（如「用户偏好简洁中文回复，现居北京用 Mac」），不要写成目录式描述；body 是 2~4 句的完整描述，均用中文。
-**summary/body 中的时间一律写绝对日期**（如「9 月 9 日骑行」，依据原文换算），不要保留「下周三」这类相对词——快照会长期存在，相对词会随时间失效（O1）。
-update 时 atom_ids 只需列新增的原子。
-
-输出严格 JSON：{\"actions\":[{\"action\":\"create\",\"topic\":\"...\",\"summary\":\"...\",\"body\":\"...\",\"atom_ids\":[\"...\"]}]}
-update 的格式：{\"action\":\"update\",\"scenario_id\":\"<既有场景 id>\",\"summary\":\"...\",\"body\":\"...\",\"atom_ids\":[\"新增原子 id\"]}".into()
-}
-
-/// L2→L3：从场景块更新用户画像分面。
 pub fn persona_system() -> String {
     "你是一个用户画像维护器。根据有变动的场景知识块（scenarios），更新用户画像的分面（aspect）。
 
