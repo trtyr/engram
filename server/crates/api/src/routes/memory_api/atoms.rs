@@ -173,7 +173,7 @@ pub async fn atom_revisions(
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct SearchRequest {
     pub query: String,
-    /// 层过滤：["l1","l2","l3","entities"]，空 = 全部
+    /// 层过滤：["l1","entities"]，空 = 全部（P015 场景层退役：l2/l3 已不存在）
     #[serde(default)]
     pub layers: Vec<String>,
     pub max_items: Option<i64>,

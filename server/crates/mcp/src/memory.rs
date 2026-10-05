@@ -76,9 +76,9 @@ pub struct SearchParams {
     /// 检索词
     #[schemars(description = "检索词。中英文均可，混合检索（全文+向量）。")]
     pub query: String,
-    /// 层过滤：["l1","l2","l3","entities"]，空 = 全部
+    /// 层过滤：["l1","entities"]，空 = 全部（P015 场景层退役：l2/l3 已不存在，传入为惰性 no-op）
     #[schemars(
-        description = "可选：限定检索层。l1=原子事实, l2=场景, l3=画像, entities=人物/项目/主题/群组/地点。空 = 全部层。"
+        description = "可选：限定检索层。l1=原子事实, entities=人物/项目/主题/群组/地点。空 = 全部层。"
     )]
     pub layers: Option<Vec<String>>,
     /// 每层最大命中数（默认 20）
@@ -269,7 +269,7 @@ impl EngramMcpServer {
     // scope 检查在各域实现方法内原样保留；这里只做 help 渲染与 action 分发。
 
     /// 用户记忆域（单一入口）。六动词（EN-235，2026-09-26）：存 remember / 找 recall /
-    /// 翻 browse / 改 revise / 审 review / 忘 forget——实现分层（L0-L3/KV）藏进 mode 参数。
+    /// 翻 browse / 改 revise / 审 review / 忘 forget——实现分层（L0→L1+实体/KV，P015 场景层退役后双层）藏进 mode 参数。
     /// 开场 recall(mode="context") 装载，定向回忆 recall(mode="search")，收尾
     /// remember(mode="session") 写入；遗忘 forget（void/erase/restore 三档）。
     /// T018（2026-10-03 用户拍板）：旧动作名全部删除不兼容——只接受六动词。
@@ -293,7 +293,7 @@ impl EngramMcpServer {
     }
 
     /// EN-235 六动词统一分发：存 remember / 找 recall / 翻 browse / 改 revise / 审 review /
-    /// 忘 forget——六动词按 mode 归一到既有动作实现（实现分层 L0-L3/KV 藏进 mode 参数）；
+    /// 忘 forget——六动词按 mode 归一到既有动作实现（实现分层 L0→L1+实体/KV 藏进 mode 参数）；
     /// T018：旧名删除不兼容，入口白名单六动词。KV 门（original scope）与 help 在此统一。
     pub(crate) async fn memory_dispatch(
         &self,

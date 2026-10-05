@@ -235,9 +235,7 @@ async fn distill_trigger_guard_and_maintain() {
     let ctx = Ctx::new().await;
 
     // 1. 无 running：触发成功（P015：手动触发统一投离线整理 Agent maintain_memory）
-    let v = ctx
-        .mem("review", json!({ "mode": "distill" }))
-        .await;
+    let v = ctx.mem("review", json!({ "mode": "distill" })).await;
     assert_eq!(v["already_running"], false);
     let kinds: Vec<&str> = v["jobs"]
         .as_array()
@@ -245,7 +243,10 @@ async fn distill_trigger_guard_and_maintain() {
         .iter()
         .map(|j| j["kind"].as_str().unwrap())
         .collect();
-    assert!(kinds.contains(&"maintain_memory"), "应投 maintain_memory：{v}");
+    assert!(
+        kinds.contains(&"maintain_memory"),
+        "应投 maintain_memory：{v}"
+    );
 
     // 2. 撞车守卫：手工造一条 running maintain_memory（直连测试库）→
     //    already_running 且不重复投递（任务列表不留空跑记录）
@@ -258,10 +259,11 @@ async fn distill_trigger_guard_and_maintain() {
     .execute(&pool)
     .await
     .unwrap();
-    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'maintain_memory'")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'maintain_memory'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
     let v = ctx.mem("review", json!({ "mode": "distill",})).await;
     assert_eq!(v["already_running"], true);
