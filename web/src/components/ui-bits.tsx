@@ -317,7 +317,7 @@ export function DataTable<T>({
                 return (
                 <th key={c.key} className={`${tableCls.th} ${c.thClassName ?? ''}`}>
                   <div className="flex flex-col gap-1">
-                    <span className="flex items-center gap-1">
+                    <span className="flex items-center gap-1 whitespace-nowrap">
                       {c.label}
                       {sortable && (
                         <button
