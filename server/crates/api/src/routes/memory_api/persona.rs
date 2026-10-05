@@ -1,136 +1,40 @@
-//! `memory_api` 的实现切片（架构治理 2026-09-21：自 memory_api.rs 纯搬移，零行为变化）。
+//! 画像活文档（persona_doc）——离线整理 Agent 维护，用户可手动编辑（P015 场景层退役：
+//! 旧分面画像（persona_aspects）连同 scenarios 一起退役，画像唯一形态 = 单份 Markdown 活文档）。
 
 use super::*;
 
-#[utoipa::path(get, path = "/memory/scenarios", responses((status = 200, body = [ScenarioDto])))]
-pub async fn list_scenarios(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-) -> Result<Json<Vec<ScenarioDto>>, ApiError> {
-    require_memory_read(&principal)?;
-    Ok(Json(svc(&state).list_scenarios(100).await.map_err(me)?))
-}
-
-#[utoipa::path(get, path = "/memory/scenarios/{id}",
-    responses((status = 200, body = ScenarioDto)))]
-pub async fn get_scenario(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<ScenarioDto>, ApiError> {
-    require_memory_read(&principal)?;
-    Ok(Json(svc(&state).get_scenario(id).await.map_err(me)?))
-}
-
-#[utoipa::path(get, path = "/memory/persona", responses((status = 200, body = [PersonaVersion])))]
-pub async fn get_persona(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-) -> Result<Json<Vec<PersonaVersion>>, ApiError> {
-    require_memory_read(&principal)?;
-    Ok(Json(svc(&state).persona().await.map_err(me)?))
-}
-
-#[derive(Deserialize, IntoParams)]
-pub struct HistoryParams {
-    pub aspect: String,
-}
-
-#[utoipa::path(get, path = "/memory/persona/history", params(HistoryParams),
-    responses((status = 200, body = [PersonaVersion])))]
-pub async fn persona_history(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-    Query(p): Query<HistoryParams>,
-) -> Result<Json<Vec<PersonaVersion>>, ApiError> {
-    require_memory_read(&principal)?;
-    Ok(Json(
-        svc(&state).persona_history(&p.aspect).await.map_err(me)?,
-    ))
-}
-
 #[derive(Deserialize, utoipa::ToSchema)]
-pub struct RollbackRequest {
-    pub aspect: String,
-    pub to_version: i32,
+pub struct PersonaDocEditRequest {
+    /// 全量新内容（Markdown 活文档，整文替换——历史自动留版本链）
+    pub content: String,
+    /// 摘要；缺省沿用旧 summary
+    pub summary: Option<String>,
 }
 
-/// 回滚分面到历史版本（以新版本落地，历史不可变）。
-#[utoipa::path(post, path = "/memory/persona/rollback",
-    request_body = RollbackRequest,
-    responses((status = 200, body = PersonaVersion)))]
-pub async fn persona_rollback(
+/// 用户手动编辑画像活文档（Admin-only；与离线整理 Agent 同一条 save_doc 通道，版本链留痕）。
+#[utoipa::path(post, path = "/memory/persona-doc",
+    request_body = PersonaDocEditRequest,
+    responses((status = 200, body = Object)))]
+pub async fn persona_doc_edit(
     principal: axum::Extension<Principal>,
     State(state): State<AppState>,
-    Json(req): Json<RollbackRequest>,
-) -> Result<Json<PersonaVersion>, ApiError> {
+    Json(req): Json<PersonaDocEditRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     require_memory(&principal)?;
-    // 回滚 = 改写语义（重写当前版本 + 钉住），仅限用户
+    // 编辑画像是"用户直改"语义——AI 禁入（它有离线整理 Agent 通道）
     if !matches!(&*principal, Principal::Admin) {
         return Err(ApiError::Forbidden(
-            "画像回滚仅限用户（Web 登录态）；AI 纠错走 correction 流程".into(),
+            "画像编辑仅限用户（Web 登录态）——AI 的画像认知由离线整理 Agent 维护".into(),
         ));
     }
-    let actor = actor_of(&principal);
+    let content = req.content.trim();
+    if content.is_empty() {
+        return Err(ApiError::BadRequest("画像内容不能为空".into()));
+    }
     Ok(Json(
         svc(&state)
-            .persona_rollback(&req.aspect, req.to_version, &actor)
+            .persona_doc_edit(content, req.summary.as_deref())
             .await
             .map_err(me)?,
     ))
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct PersonaEditRequest {
-    /// 分面（identity/preferences/skills/constraints/communication_style/goals/routines）
-    pub aspect: String,
-    /// 新内容；缺省时不改内容
-    pub content: Option<String>,
-    /// false = 解除钉住，回归蒸馏管辖（手编保护关闭）
-    pub pinned: Option<bool>,
-}
-
-/// 用户编辑画像分面（留痕：新版本 manually_edited=true + 审计行）。
-#[utoipa::path(patch, path = "/memory/persona",
-    request_body = PersonaEditRequest,
-    responses(
-        (status = 200, body = PersonaVersion, description = "编辑/解钉后的分面最新版"),
-        (status = 403, body = crate::error::ErrorEnvelope),
-    ))]
-pub async fn persona_edit(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-    Json(req): Json<PersonaEditRequest>,
-) -> Result<Json<PersonaVersion>, ApiError> {
-    require_memory(&principal)?;
-    // 编辑画像是"用户直改"语义——AI 禁入（它有自己的蒸馏/correction 通道）
-    if !matches!(&*principal, Principal::Admin) {
-        return Err(ApiError::Forbidden(
-            "画像编辑仅限用户（Web 登录态）——AI 的画像认知由蒸馏与 correction 维护".into(),
-        ));
-    }
-    let actor = actor_of(&principal);
-    let svc = svc(&state);
-    if let Some(content) = req.content.as_deref() {
-        let v = svc
-            .persona_edit(&req.aspect, content, &actor)
-            .await
-            .map_err(me)?;
-        return Ok(Json(v));
-    }
-    match req.pinned {
-        Some(false) => svc.persona_unpin(&req.aspect, &actor).await.map_err(me)?,
-        Some(true) => {
-            svc.persona_repin(&req.aspect, &actor).await.map_err(me)?;
-        }
-        None => {}
-    }
-    let latest = svc
-        .persona_history(&req.aspect)
-        .await
-        .map_err(me)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| ApiError::NotFound(format!("分面 {} 不存在", req.aspect)))?;
-    Ok(Json(latest))
 }

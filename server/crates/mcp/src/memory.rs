@@ -17,7 +17,7 @@ pub struct ContextParams {
     pub budget_chars: Option<usize>,
     /// 证据溯源（默认关）
     #[schemars(
-        description = "可选：true = 携带证据溯源字段（persona.evidence_refs / atom.source_refs / scenario.atom_refs 的 ID 数组）。默认 false——溯源 ID 客户端几乎不消费，省上下文（R 报告 P1-5）；审计需要时再开。"
+        description = "可选：true = 携带证据溯源字段（atom.source_refs 的 ID 数组）。默认 false——溯源 ID 客户端几乎不消费，省上下文（R 报告 P1-5）；审计需要时再开。"
     )]
     pub include_evidence: Option<bool>,
 }
@@ -57,7 +57,7 @@ pub struct MemoryBrowseParams {
 pub struct MemoryReviseParams {
     /// 子操作
     #[schemars(
-        description = "改=纠错与画像修订。mode：\"correct\"（默认，纠正原子——取代链留痕）/ \"persona\"（画像分面编辑，编辑后蒸馏不覆盖）。其余参数与原动作同名平铺。"
+        description = "改=纠错。mode：\"correct\"（默认，纠正原子——取代链留痕）。其余参数与原动作同名平铺。"
     )]
     pub mode: Option<String>,
 }
@@ -140,7 +140,7 @@ impl EngramMcpServer {
     ///
     /// 何时用：会话开始时调用一次，冷启动装载「这个用户是谁、在忙什么、有什么偏好与约束」。
     /// 何时不用：需要回忆某个具体细节时用 memory_search（更省 token）；本工具是全景而非定向检索。
-    /// 返回：persona（画像分面）、scenarios（场景）、atoms（原子事实）、entities（实体）、
+    /// 返回：atoms（原子事实）、entities（实体）、
     /// pending_review（待用户复核的低置信度条目，可顺带提醒用户）。
     pub(crate) async fn memory_context(
         &self,
@@ -210,7 +210,7 @@ impl EngramMcpServer {
                 .and_then(|x| x.as_array())
                 .is_none_or(|a| a.is_empty())
         };
-        if ["sessions", "atoms", "scenarios", "persona", "entities"]
+        if ["sessions", "atoms", "entities"]
             .iter()
             .all(|k| layer_empty(k))
         {
@@ -350,23 +350,20 @@ impl EngramMcpServer {
                 "sessions" => "list_sessions".into(),
                 "session" => "get_session".into(),
                 "kv" => "kv_list".into(),
-                "scenarios" => "scenarios_list".into(),
-                "persona" => "persona_get".into(),
                 _ => {
                     return Err(unknown_mode(
                         "browse",
-                        "atoms（默认）/ sessions / session / kv / scenarios / persona",
+                        "atoms（默认）/ sessions / session / kv",
                     ));
                 }
             },
             "revise" => match mode {
                 "" | "correct" => "correct".into(),
-                "persona" => "persona_edit".into(),
                 "archive" => "atom_archive".into(),
                 _ => {
                     return Err(unknown_mode(
                         "revise",
-                        "correct（默认，取代链留痕）/ persona / archive（原子归档）",
+                        "correct（默认，取代链留痕）/ archive（原子归档）",
                     ));
                 }
             },
@@ -450,13 +447,6 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "persona_edit" => {
-                self.memory_persona_edit(
-                    ctx,
-                    Parameters(dispatch::from_args("memory", "persona_edit", args)?),
-                )
-                .await
-            }
             "distill" => {
                 self.memory_distill(
                     ctx,
@@ -531,20 +521,6 @@ impl EngramMcpServer {
                 self.memory_list_atoms(
                     ctx,
                     Parameters(dispatch::from_args("memory", "list_atoms", args)?),
-                )
-                .await
-            }
-            "scenarios_list" => {
-                self.memory_scenarios_list(
-                    ctx,
-                    Parameters(dispatch::from_args("memory", "scenarios_list", args)?),
-                )
-                .await
-            }
-            "persona_get" => {
-                self.memory_persona_get(
-                    ctx,
-                    Parameters(dispatch::from_args("memory", "persona_get", args)?),
                 )
                 .await
             }

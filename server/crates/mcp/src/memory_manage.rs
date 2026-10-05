@@ -1,19 +1,7 @@
-//! memory 管理面动作（EN-230）：L2 场景浏览 / L3 画像浏览 / 重复原子检测 / 原子归档。
+//! memory 管理面动作（EN-230）：重复原子检测 / 原子归档（P015：场景/画像浏览已随场景层退役）。
 //! 分发接线在 memory.rs 的 action match；scope 走 require_memory。
 
 use super::*;
-
-/// EN-230①：L2 场景浏览——不依赖 search 命中，直接翻库存。
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct ScenariosListParams {
-    /// 可选：最多返回条数（默认 100，上限 500）
-    #[serde(default)]
-    pub limit: Option<i64>,
-}
-
-/// EN-230①：L3 画像浏览——分面版本史全列（persona_edit 前先看当前形态）。
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct PersonaGetParams {}
 
 /// EN-230②：重复/近似原子检测——归一化内容完全相同的 active 原子分组。
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -26,40 +14,6 @@ pub struct AtomArchiveParams {
 }
 
 impl EngramMcpServer {
-    pub(crate) async fn memory_scenarios_list(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<ScenariosListParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p: Principal = principal_of(&ctx)?;
-        require_memory(&p)?;
-        let limit = params.0.limit.unwrap_or(100).clamp(1, 500);
-        let scenarios = self
-            .svc()
-            .list_scenarios(limit)
-            .await
-            .map_err(from_memory)?;
-        ok_json(json!({
-            "count": scenarios.len(),
-            "scenarios": scenarios,
-        }))
-    }
-
-    pub(crate) async fn memory_persona_get(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<PersonaGetParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p: Principal = principal_of(&ctx)?;
-        require_memory(&p)?;
-        let _ = params.0;
-        let persona = self.svc().persona().await.map_err(from_memory)?;
-        ok_json(json!({
-            "count": persona.len(),
-            "versions": persona,
-        }))
-    }
-
     pub(crate) async fn memory_atom_duplicates(
         &self,
         ctx: RequestContext<RoleServer>,

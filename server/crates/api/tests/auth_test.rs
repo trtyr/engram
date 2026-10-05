@@ -200,8 +200,7 @@ async fn api_key_memory_journey() {
     for uri in [
         "/memory/sessions?limit=5",
         "/memory/atoms?limit=5",
-        "/memory/scenarios?limit=5",
-        "/memory/persona",
+        "/memory/persona-doc",
         "/memory/entities",
         "/memory/entities/graph",
         "/memory/embeddings/status",
@@ -250,14 +249,7 @@ async fn api_key_memory_journey() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK, "key 应能取 context_pack");
-    let resp = send(&app, "POST", "/memory/distill", Some("{}"))
-        .await
-        .unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::ACCEPTED,
-        "key 应能触发蒸馏（202）"
-    );
+    // P015 场景层退役：/memory/distill 端点退役（手动触发统一 /memory/maintain，cron scope only）
 
     // 跨域越权：memory-only key 摸别的域必须 403
     for uri in ["/wiki/documents", "/wiki/pages", "/codegraph/projects"] {
@@ -1054,9 +1046,9 @@ async fn deep_purge_requires_scope_and_confirm_phrase() {
     .unwrap();
     assert_eq!(audit, 1, "审计链应完整（短语+执行者+计数）");
 
-    // 清空后四层全零
+    // 清空后三层全零（P015 场景层退役：scenarios 表已 drop）
     let n: i64 = sqlx::query_scalar(
-        "SELECT (SELECT count(*) FROM raw_sessions) + (SELECT count(*) FROM atoms) + (SELECT count(*) FROM scenarios)",
+        "SELECT (SELECT count(*) FROM raw_sessions) + (SELECT count(*) FROM atoms)",
     )
     .fetch_one(&state.pool)
     .await
@@ -1322,37 +1314,28 @@ async fn edit_split_persona_and_entity_user_only() {
     let admin = login_token(&app).await;
     let mem_key = create_key(&app, &admin, &["memory"]).await;
 
-    // amk_ PATCH persona → 403
+    // amk_ POST persona-doc → 403（画像编辑仅用户；P015：旧 PATCH /memory/persona 分面族退役）
     let resp = app
         .clone()
         .oneshot(
             axum::http::Request::builder()
-                .method("PATCH")
-                .uri("/memory/persona")
+                .method("POST")
+                .uri("/memory/persona-doc")
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {mem_key}"))
-                .body(axum::body::Body::from(
-                    r#"{"aspect":"constraints","content":"手编内容"}"#,
-                ))
+                .body(axum::body::Body::from(r#"{"content":"手编内容"}"#))
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
-    // amk_ rollback → 403；amk_ entity PATCH → 403
-    for (method, uri, body) in [
-        (
-            "POST",
-            "/memory/persona/rollback",
-            r#"{"aspect":"constraints","to_version":1}"#.to_string(),
-        ),
-        (
-            "PATCH",
-            "/memory/entities/00000000-0000-0000-0000-000000000000",
-            r#"{"summary":"x"}"#.to_string(),
-        ),
-    ] {
+    // amk_ entity PATCH → 403
+    for (method, uri, body) in [(
+        "PATCH",
+        "/memory/entities/00000000-0000-0000-0000-000000000000",
+        r#"{"summary":"x"}"#.to_string(),
+    )] {
         let resp = app
             .clone()
             .oneshot(
@@ -1369,30 +1352,27 @@ async fn edit_split_persona_and_entity_user_only() {
         assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{method} {uri}");
     }
 
-    // admin 编辑 persona → v1 手编钉住
+    // admin 编辑 persona-doc → v1 落库（P015：分面手编钉住语义随 persona_aspects 退役）
     let resp = app
         .oneshot(
             axum::http::Request::builder()
-                .method("PATCH")
-                .uri("/memory/persona")
+                .method("POST")
+                .uri("/memory/persona-doc")
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {admin}"))
-                .body(axum::body::Body::from(
-                    r#"{"aspect":"constraints","content":"用户手编的约束"}"#,
-                ))
+                .body(axum::body::Body::from(r#"{"content":"用户手编的约束"}"#))
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let (me, version): (bool, i32) = sqlx::query_as(
-        "SELECT manually_edited, version FROM persona_aspects WHERE aspect = 'constraints' ORDER BY version DESC LIMIT 1",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (content, version): (String, i32) =
+        sqlx::query_as("SELECT content, version FROM persona_doc WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(version, 1);
-    assert!(me, "手编应置 manually_edited");
+    assert_eq!(content, "用户手编的约束");
 }
 
 /// erase_session 分权：memory-only key 403 / memory+erase key 204（admin 全权）。
@@ -1709,7 +1689,6 @@ async fn openapi_snapshot() {
             "/memory/atoms/{id}",
             "/memory/atoms/{id}/revisions",
             "/memory/context",
-            "/memory/distill",
             "/memory/embeddings/status",
             "/memory/entities",
             "/memory/entities/batch",
@@ -1725,13 +1704,9 @@ async fn openapi_snapshot() {
             "/memory/export",
             "/memory/kv",
             "/memory/kv/{key}",
-            "/memory/persona",
-            "/memory/persona/history",
-            "/memory/persona/rollback",
+            "/memory/persona-doc",
             "/memory/purge",
             "/memory/reembed",
-            "/memory/scenarios",
-            "/memory/scenarios/{id}",
             "/memory/search",
             "/memory/sessions",
             "/memory/sessions/batch-erase",
@@ -1917,50 +1892,46 @@ async fn batch_revoke_api_keys_revokes_selected_only() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "空 ids 应 400");
 }
 
-/// memory-rhythm 分权：cron 通道只能由 cron scope 的 key 走——防 AI 伪造 via:"cron" 审计行。
-/// （内置节律线 2026-09-23：外部 cron 退役，heartbeat/status 端点已删，原 3/4/4b/5 步随之移除）
+/// memory-rhythm 分权：整理巡逻端点只能由 cron scope 的 key 走（P015：/memory/distill 退役，
+/// 手动触发统一 /memory/maintain；防 AI 伪造触发者审计行）。
 #[tokio::test]
-async fn cron_scope_gates_distill_channel() {
+async fn cron_scope_gates_maintain_channel() {
     let (app, _pg) = app().await;
     let token = login_token(&app).await;
     let mem_key = create_key(&app, &token, &["memory"]).await;
     let cron_key = create_key(&app, &token, &["memory", "cron"]).await;
 
-    // 1. memory-only key 带 via:cron → 403（AI 不能标 cron）
+    // 1. memory-only key → 403（整理巡逻是 cron scope 专属）
     let resp = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/memory/distill")
+                .uri("/memory/maintain")
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {mem_key}"))
-                .body(Body::from(r#"{"full":true,"via":"cron"}"#))
+                .body(Body::from("{}"))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN, "AI 标 cron 应 403");
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN, "AI 触发整理应 403");
 
-    // 2. cron key 带 via:cron → 202
+    // 2. cron key → 200
     let resp = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/memory/distill")
+                .uri("/memory/maintain")
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {cron_key}"))
-                .body(Body::from(r#"{"full":true,"via":"cron"}"#))
+                .body(Body::from("{}"))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::ACCEPTED,
-        "cron key 标 cron 应 202"
-    );
+    assert_eq!(resp.status(), StatusCode::OK, "cron key 触发整理应 200");
 }
 
 /// W-3（2026-09-04）：doc-search 空 query 三问 400——与 /search 空查询口径对齐，

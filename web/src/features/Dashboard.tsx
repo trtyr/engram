@@ -7,8 +7,6 @@ import {
   type Atom,
   type Document,
   type Job,
-  type Persona,
-  type Scenario,
   type Session,
   type UsageRow,
   type WikiPage,
@@ -27,7 +25,7 @@ interface Stage {
   level: string
   tag: string
   label: string
-  tab: 'sessions' | 'atoms' | 'scenarios' | 'persona'
+  tab: 'sessions' | 'atoms'
   count: number
   delta: number
 }
@@ -146,11 +144,9 @@ export default function Dashboard() {
   const [core, setCore] = useState<{
     atoms: Atom[]
     sessions: Session[]
-    scenarios: Scenario[]
     docs: Document[]
     pages: WikiPage[]
   } | null>(null)
-  const [persona, setPersona] = useState<Persona[] | null>(null)
   const [cg, setCg] = useState<{ id: string }[] | null>(null)
   const [jobs, setJobs] = useState<Job[] | null>(null)
   const [usage, setUsage] = useState<UsageRow[] | null>(null)
@@ -167,15 +163,13 @@ export default function Dashboard() {
     Promise.all([
       api.get<Atom[]>('/memory/atoms?limit=500'),
       api.get<Session[]>('/memory/sessions?limit=500'),
-      api.get<Scenario[]>('/memory/scenarios?limit=500'),
       // EN-57：wiki 两路单独降级——缺库/报错时置空，其余统计照常渲染。
       // 概览页不因单一数据源故障整页白屏（memory 域失败仍整页报错——那是系统性故障）。
       api.get<Document[]>('/wiki/documents?limit=200').catch(() => [] as Document[]),
       api.get<WikiPage[]>('/wiki/pages?limit=300').catch(() => [] as WikiPage[]),
     ])
-      .then(([atoms, sessions, scenarios, docs, pages]) => setCore({ atoms, sessions, scenarios, docs, pages }))
+      .then(([atoms, sessions, docs, pages]) => setCore({ atoms, sessions, docs, pages }))
       .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
-    api.get<Persona[]>('/memory/persona').then(setPersona).catch(() => setPersona([]))
     api.get<{ id: string }[]>('/codegraph/projects').then(setCg).catch(() => setCg([]))
     api.get<Job[]>('/jobs?limit=8').then(setJobs).catch(() => setJobs([]))
     api.get<UsageRow[]>('/llm/usage').then(setUsage).catch(() => setUsage([]))
@@ -236,15 +230,6 @@ export default function Dashboard() {
       count: activeAtoms.length,
       delta: activeAtoms.filter((a) => withinWeek(a.created_at)).length,
     },
-    {
-      level: 'L2',
-      tag: '场景',
-      label: '场景',
-      tab: 'scenarios',
-      count: core.scenarios.length,
-      delta: core.scenarios.filter((s) => withinWeek(s.updated_at)).length,
-    },
-    { level: 'L3', tag: '画像', label: '画像', tab: 'persona', count: persona?.length ?? 0, delta: 0 },
   ]
 
   const stats = [

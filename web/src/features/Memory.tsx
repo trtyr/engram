@@ -1,7 +1,7 @@
 /** Memory 域：会话 / 原子 / 场景 / 画像 / 检索。 */
 import { useEffect, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { api, type Atom, type Job, type Persona, type Scenario, type Session } from '@/lib/api'
+import { api, type Atom, type Job, type Session } from '@/lib/api'
 import {
   Card,
   Checkbox,
@@ -13,8 +13,6 @@ import {
   Tabs,
   type DataTableSort,
 } from '@/components/ui-bits'
-import { PersonaHistoryDrawer } from '@/components/PersonaHistory'
-import ClampText from '@/components/ClampText'
 import Pager from '@/components/Pager'
 import { fmtTime, relTime, inputCls, selectCls, tableCls } from '@/lib/ui'
 import { useSystemStatus } from '@/lib/status'
@@ -22,7 +20,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { appConfirm, type ConfirmOptions } from '@/components/confirm'
 
-type Tab = 'sessions' | 'atoms' | 'review' | 'scenarios' | 'persona' | 'search' | 'kv'
+type Tab = 'sessions' | 'atoms' | 'review' | 'persona' | 'search' | 'kv'
 
 /** 原子 kind 枚举（迁移 0005 CHECK）——筛选器与表格共用。 */
 const ATOM_KINDS = ['preference', 'fact', 'decision', 'event', 'insight', 'correction', 'failure', 'convention']
@@ -40,15 +38,6 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 /** 画像分面中英对照（迁移 0005 CHECK 枚举的 7 个分面）。 */
-const ASPECT_LABEL: Record<string, string> = {
-  identity: '身份',
-  preferences: '偏好',
-  skills: '技能',
-  constraints: '约束',
-  communication_style: '沟通风格',
-  goals: '目标',
-  routines: '例行',
-}
 /** 蒸馏管线条：已退役——计数融进 tab 标签（Tabs 的 count/pulse），省一整行 chrome。 */
 
 /** 路由入口：按 search 键重挂载——palette/概览带 ?tab=&entity= 深链进来时重新读参。 */
@@ -65,7 +54,7 @@ function MemoryPage() {
   const [tab, setTab] = useState<Tab>(() => {
     // 支持 ?tab= 深链（Dashboard 管线主视觉点击穿透 / palette 实体直达）：仅首次挂载读一次
     const t = new URLSearchParams(window.location.search).get('tab')
-    const valid: readonly string[] = ['sessions', 'atoms', 'review', 'scenarios', 'persona', 'search', 'kv']
+    const valid: readonly string[] = ['sessions', 'atoms', 'review', 'search', 'kv']
     return valid.includes(t ?? '') ? (t as Tab) : 'sessions'
   })
   // 原子筛选状态提升——筛选器挂在 tab 行右侧（与蒸馏条同款布局，省一整行）
@@ -73,20 +62,16 @@ function MemoryPage() {
   const [atomStatus, setAtomStatus] = useState('active')
   const [atomReview, setAtomReview] = useState(false)
   // tab 计数（原管线条带的职责）：挂载时取一次；蒸馏脉冲只表「正在炼」（processing）
-  const [counts, setCounts] = useState<{ l0: number; l1: number; l2: number; l3: number; review: number; kv: number } | null>(null)
+  const [counts, setCounts] = useState<{ l0: number; l1: number; review: number; kv: number } | null>(null)
   useEffect(() => {
     Promise.all([
       api.get<Session[]>('/memory/sessions?limit=500').catch(() => []),
       api.get<Atom[]>('/memory/atoms?limit=500').catch(() => []),
-      api.get<Scenario[]>('/memory/scenarios?limit=500').catch(() => []),
-      api.get<Persona[]>('/memory/persona').catch(() => []),
       api.get<KvEntry[]>('/memory/kv?limit=500').catch(() => []),
-    ]).then(([s, a, sc, p, kv]) => {
+    ]).then(([s, a, kv]) => {
       setCounts({
         l0: s.length,
         l1: a.filter((x) => x.status === 'active' || x.status === 'candidate').length,
-        l2: sc.length,
-        l3: p.length,
         review: a.filter((x) => x.needs_review).length,
         kv: kv.length,
       })
@@ -98,8 +83,7 @@ function MemoryPage() {
     { value: 'sessions' as Tab, label: '会话', count: counts?.l0, pulse: distilling > 0 },
     { value: 'atoms' as Tab, label: '原子', count: counts?.l1 },
     { value: 'review' as Tab, label: '待审', count: counts?.review },
-    { value: 'scenarios' as Tab, label: '场景', count: counts?.l2 },
-    { value: 'persona' as Tab, label: '画像', count: counts?.l3 },
+    { value: 'persona' as Tab, label: '画像' },
     { value: 'kv' as Tab, label: 'KV', count: counts?.kv },
   ]
 
@@ -148,8 +132,7 @@ function MemoryPage() {
       {tab === 'atoms' && <Atoms kind={atomKind} review={atomReview} status={atomStatus} />}
 
       {tab === 'review' && <ReviewQueue onGoAtoms={() => setTab('atoms')} />}
-      {tab === 'scenarios' && <Scenarios />}
-      {tab === 'persona' && <PersonaView onGoScenario={() => setTab('scenarios')} />}
+      {tab === 'persona' && <PersonaDocPane />}
       {tab === 'kv' && <KvPane />}
       {tab === 'search' && (
         <SearchPane
@@ -425,7 +408,7 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
   const [superseding, setSuperseding] = useState<string | null>(null)
   const [historyAtom, setHistoryAtom] = useState<Atom | null>(null)
   // 重嵌修复：缺失向量可见 + 一键补嵌（换 embedding 供应商后的修复路径）
-  const [missing, setMissing] = useState<{ atoms_missing: number; scenarios_missing: number } | null>(null)
+  const [missing, setMissing] = useState<{ atoms_missing: number } | null>(null)
   const [reembedMsg, setReembedMsg] = useState('')
   // 翻页（前端切页：拉满后本地分页，支持页码直跳）
   const [page, setPage] = useState(1)
@@ -434,7 +417,7 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
   const { distilling } = useSystemStatus()
   useEffect(() => {
     api
-      .get<{ atoms_missing: number; scenarios_missing: number }>('/memory/embeddings/status')
+      .get<{ atoms_missing: number }>('/memory/embeddings/status')
       .then(setMissing)
       .catch(() => {})
   }, [])
@@ -468,10 +451,10 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
 
   return (
     <div className="space-y-4">
-      {missing && missing.atoms_missing + missing.scenarios_missing > 0 && (
+      {missing && missing.atoms_missing > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
           <span className="text-xs text-warning">
-            {missing.atoms_missing} 条原子 / {missing.scenarios_missing} 条场景缺向量——混合检索对它们退化为纯 FTS
+            {missing.atoms_missing} 条原子缺向量——写侧已即时嵌入，此提示通常为迁移/重嵌残留
           </span>
           <Button
             size="sm"
@@ -684,177 +667,6 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
   )
 }
 
-function Scenarios() {
-  const [rows, setRows] = useState<Scenario[] | null>(null)
-  const [openId, setOpenId] = useState<string | null>(null)
-  useEffect(() => {
-    api.get<Scenario[]>('/memory/scenarios').then(setRows).catch(() => {})
-  }, [])
-  if (!rows) return <Spinner />
-  if (rows.length === 0) return <Empty text="暂无场景——蒸馏组织阶段把相关原子聚合成场景" />
-  return (
-    <div className="grid gap-4 md:grid-cols-2">
-      {rows.map((s) => (
-        <Card key={s.id} className="p-4">
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              className="text-left font-medium transition-colors hover:text-muted-foreground"
-              onClick={() => setOpenId(openId === s.id ? null : s.id)}
-              aria-expanded={openId === s.id}
-              title="点击展开/收起聚合的原子"
-            >
-              {s.topic}
-            </button>
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">v{s.version}</span>
-          </div>
-          <ClampText content={s.summary} title={s.topic} meta={`v${s.version} · ${relTime(s.updated_at)}`} maxHeight={120} />
-          <p className="mt-3 flex items-center gap-2 font-mono text-xs text-muted-foreground/70">
-            <span>{s.atom_refs.length} 原子</span>
-            <span aria-hidden="true">·</span>
-            <span>{relTime(s.updated_at)}</span>
-          </p>
-          {/* 展开看场景聚合的原子清单（L2 的溯源面） */}
-          {openId === s.id && (
-            <div className="mt-3 border-t border-border pt-2.5">
-              <p className="mb-1.5 font-mono text-xs text-muted-foreground">atom_refs</p>
-              <ul className="space-y-1">
-                {s.atom_refs.map((id) => (
-                  <li key={id} className="font-mono text-xs text-muted-foreground">
-                    {id}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </Card>
-      ))}
-    </div>
-  )
-}
-
-function PersonaView({ onGoScenario }: { onGoScenario: () => void }) {
-  const [rows, setRows] = useState<Persona[] | null>(null)
-  // 历史走右侧抽屉（2026-08-31 P1.1）：内联展开会把同行等高卡一起拉爆
-  const [drawerAspect, setDrawerAspect] = useState<string | null>(null)
-  const [editingAspect, setEditingAspect] = useState<string | null>(null)
-  const [aspectDraft, setAspectDraft] = useState('')
-  const refresh = () => api.get<Persona[]>('/memory/persona').then(setRows).catch(() => {})
-  useEffect(() => {
-    refresh()
-  }, [])
-  if (!rows) return <Spinner />
-  // F3：空内容分面不展示（素材清空后分面退休为空版本——快照与源同生共死）
-  const visible = rows.filter((p) => p.content.trim() !== '')
-  if (visible.length === 0)
-    return <Empty text="画像为空——蒸馏 persona 阶段从原子与场景提炼长期画像" />
-
-  return (
-    <>
-    {/* 同行等高（去掉 items-start——那让每张卡各自为高，参差）；Card 需 flex 撑满 */}
-    <div className="grid gap-4 md:grid-cols-2">
-      {visible.map((p) => (
-        <Card key={p.id} className="flex flex-col p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <h3 className="font-medium">{ASPECT_LABEL[p.aspect] ?? p.aspect}</h3>
-              <p className="font-mono text-xs text-muted-foreground">
-                {p.aspect} · v{p.version} · {relTime(p.created_at)}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              {p.manually_edited && (
-                <span
-                  className="rounded bg-success/15 px-1.5 py-0.5 font-mono text-xs text-success"
-                  title="用户钉住：蒸馏绕开此分面（清退仍优先）"
-                >
-                  已钉住
-                </span>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setEditingAspect(p.aspect)
-                  setAspectDraft(p.content)
-                }}
-              >
-                编辑
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                title={p.manually_edited ? '解除钉住：回归蒸馏管辖' : '钉住：蒸馏不覆盖此分面'}
-                onClick={async () => {
-                  await api.patch('/memory/persona', { aspect: p.aspect, pinned: !p.manually_edited })
-                  await refresh()
-                }}
-              >
-                {p.manually_edited ? '解锁' : '钉住'}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setDrawerAspect(p.aspect)}>
-                历史
-              </Button>
-            </div>
-          </div>
-          {editingAspect === p.aspect ? (
-            <div className="mt-2 space-y-2">
-              <textarea
-                aria-label="分面内容"
-                className={`${inputCls} min-h-32 w-full`}
-                value={aspectDraft}
-                onChange={(e) => setAspectDraft(e.target.value)}
-              />
-              <div className="flex gap-1.5">
-                <Button
-                  size="sm"
-                  onClick={async () => {
-                    await api.patch('/memory/persona', { aspect: p.aspect, content: aspectDraft })
-                    setEditingAspect(null)
-                    await refresh()
-                  }}
-                >
-                  保存（钉住）
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setEditingAspect(null)}>
-                  取消
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <ClampText
-              content={p.content}
-              title={ASPECT_LABEL[p.aspect] ?? p.aspect}
-              meta={`${p.aspect} · v${p.version} · ${relTime(p.created_at)}`}
-            />
-          )}
-          <p className="mt-3 font-mono text-xs text-muted-foreground/70">
-            {(() => {
-              const ev = (p.evidence_refs && typeof p.evidence_refs === 'object' ? p.evidence_refs : {}) as {
-                atoms?: string[]
-                sessions?: string[]
-                scenarios?: string[]
-              }
-              return `证据 ${ev.atoms?.length ?? 0} 原子 · ${ev.sessions?.length ?? 0} 会话 · ${ev.scenarios?.length ?? 0} 场景`
-            })()}
-          </p>
-        </Card>
-      ))}
-    </div>
-    {/* 抽屉在网格容器外——fixed 元素不该做 grid 子项 */}
-    {drawerAspect && (
-      <PersonaHistoryDrawer
-        key={drawerAspect}
-        aspect={drawerAspect}
-        label={ASPECT_LABEL[drawerAspect] ?? drawerAspect}
-        onClose={() => setDrawerAspect(null)}
-        onGoScenario={onGoScenario}
-        onMutated={refresh}
-      />
-    )}
-    </>
-  )
-}
 
 interface EntityHit {
   id: string
@@ -1057,11 +869,9 @@ function SearchPane({
   const [r, setR] = useState<{
     entities: EntityHit[]
     l1: { id: string; snippet: string; score: number }[]
-    l2: { id: string; title: string | null; snippet: string }[]
-    l3: Persona[]
   } | null>(null)
   const [err, setErr] = useState('')
-  const empty = r !== null && r.entities.length + r.l1.length + r.l2.length + r.l3.length === 0
+  const empty = r !== null && r.entities.length + r.l1.length === 0
   return (
     <div className="space-y-4">
       <form
@@ -1151,20 +961,6 @@ function SearchPane({
                   >
                     查看
                   </button>
-                </p>
-              ))}
-            </ResultSection>
-            <ResultSection title="L2 场景" count={r.l2.length}>
-              {r.l2.map((h) => (
-                <p key={h.id} className="py-2 text-sm">
-                  <span className="font-medium">{h.title}</span> — {h.snippet}
-                </p>
-              ))}
-            </ResultSection>
-            <ResultSection title="L3 画像" count={r.l3.length}>
-              {r.l3.map((p) => (
-                <p key={p.id} className="py-2 text-sm">
-                  <span className="font-medium">[{p.aspect}]</span> {p.content}
                 </p>
               ))}
             </ResultSection>
@@ -1266,6 +1062,52 @@ function AtomHistoryDrawer({ atom, onClose }: { atom: Atom; onClose: () => void 
   )
 }
 
+
+/** 画像活文档（persona_doc）：离线整理 Agent 维护的单份 Markdown 活文档 + 版本史（只读；手动编辑走 POST /memory/persona-doc）。 */
+interface PersonaDocData {
+  doc: { content: string; summary: string | null; version: number; updated_at: string } | null
+  history: { version: number; summary: string | null; created_at: string }[]
+}
+function PersonaDocPane() {
+  const [data, setData] = useState<PersonaDocData | null>(null)
+  useEffect(() => {
+    api
+      .get<PersonaDocData>('/memory/persona-doc?history_limit=10')
+      .then(setData)
+      .catch(() => setData({ doc: null, history: [] }))
+  }, [])
+  if (!data) return <Spinner />
+  const { doc, history } = data
+  return (
+    <Card className="space-y-3 p-4">
+      {doc ? (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">画像 v{doc.version}</span>
+            <span className="text-xs text-muted-foreground">{fmtTime(doc.updated_at)}</span>
+          </div>
+          {doc.summary && <p className="text-xs text-muted-foreground">{doc.summary}</p>}
+          <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap font-sans text-sm leading-relaxed">{doc.content}</pre>
+          {history.length > 0 && (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">版本史（{history.length}）</summary>
+              <ul className="mt-1 space-y-0.5">
+                {history.map((h) => (
+                  <li key={h.version}>
+                    v{h.version} · {fmtTime(h.created_at)}
+                    {h.summary ? ` · ${h.summary}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
+      ) : (
+        <Empty text="画像尚未生成——记忆蒸馏后由离线整理 Agent 自动维护" />
+      )}
+    </Card>
+  )
+}
 
 /** KV 精确值条目（EN-60 治理面只读；写入唯一通道是 MCP memory.kv_put）。 */
 interface KvEntry {

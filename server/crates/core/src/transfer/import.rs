@@ -44,12 +44,10 @@ fn each(v: Option<&Value>, key: &str) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// memory 域导入计数（六个子域）。
+/// memory 域导入计数（四个子域）。
 struct MemoryImported {
     sessions: DomainCount,
     atoms: DomainCount,
-    scenarios: DomainCount,
-    persona: DomainCount,
     entities: DomainCount,
     relations: DomainCount,
 }
@@ -76,20 +74,13 @@ pub(super) async fn run_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
     let (t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip) = import_tail_domains(pool, data).await?;
     // 工单/待办关联须在 todos 之后（两端 id 都要在库）
     let c_todo_link = import_todo_links_domain(pool, data).await?;
-    let (c_session, c_atom, c_scenario, c_persona, c_entity, c_relation) = (
-        mem.sessions,
-        mem.atoms,
-        mem.scenarios,
-        mem.persona,
-        mem.entities,
-        mem.relations,
-    );
+    let (c_session, c_atom, c_entity, c_relation) =
+        (mem.sessions, mem.atoms, mem.entities, mem.relations);
 
     Ok(json!({
         "format": "engram-transfer",
         "memory": {
             "sessions": c_session.to_json(), "atoms": c_atom.to_json(),
-            "scenarios": c_scenario.to_json(), "persona": c_persona.to_json(),
             "entities": c_entity.to_json(), "relations": c_relation.to_json(),
             "atom_entities": c_atom_entity.to_json(),
         },
@@ -115,18 +106,12 @@ pub(super) async fn run_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
     }))
 }
 
-/// memory 域导入：sessions → scenarios → atoms（外键序：scenarios 先于 atoms；自引用 FK 后置回填）
-/// → persona → entities → relations。
+/// memory 域导入：sessions → atoms（自引用 FK 后置回填）→ entities → relations。
+/// P015 场景层退役：scenarios/persona 域不再迁移（旧包含着这两段会被忽略）。
 async fn import_memory_domain(pool: &PgPool, data: &Value) -> Result<MemoryImported> {
     let mut c_session = DomainCount::default();
     for it in each(data.get("memory"), "sessions") {
         c_session.merge(DomainCount::bump(repo::import_session(pool, &it).await?));
-    }
-    // 外键序：scenarios 先于 atoms（atoms.scenario_id → scenarios）——顺序颠倒会在
-    // 干净库导入时违反 atoms_scenario_id_fkey（公网加固 t9 往返演练抓出并修复）
-    let mut c_scenario = DomainCount::default();
-    for it in each(data.get("memory"), "scenarios") {
-        c_scenario.merge(DomainCount::bump(repo::import_scenario(pool, &it).await?));
     }
     // superseded_by 是表内自引用 FK（atoms → atoms.id）——行序随机，插入期置 NULL，
     // 全量入库后统一回填（公网加固 t9 往返演练抓出）
@@ -140,10 +125,6 @@ async fn import_memory_domain(pool: &PgPool, data: &Value) -> Result<MemoryImpor
     }
     backfill_superseded_atoms(pool, data).await?;
 
-    let mut c_persona = DomainCount::default();
-    for it in each(data.get("memory"), "persona") {
-        c_persona.merge(DomainCount::bump(repo::import_persona(pool, &it).await?));
-    }
     let mut c_entity = DomainCount::default();
     for it in each(data.get("memory"), "entities") {
         c_entity.merge(DomainCount::bump(repo::import_entity(pool, &it).await?));
@@ -157,8 +138,6 @@ async fn import_memory_domain(pool: &PgPool, data: &Value) -> Result<MemoryImpor
     Ok(MemoryImported {
         sessions: c_session,
         atoms: c_atom,
-        scenarios: c_scenario,
-        persona: c_persona,
         entities: c_entity,
         relations: c_relation,
     })

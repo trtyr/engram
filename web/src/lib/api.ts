@@ -162,26 +162,7 @@ export interface Atom {
   needs_review: boolean
   sensitive?: boolean
   hit_count: number
-  scenario_id: string | null
   source_refs: { session_id?: string; erased?: boolean }[]
-  created_at: string
-}
-export interface Scenario {
-  id: string
-  topic: string
-  summary: string
-  atom_refs: string[]
-  version: number
-  updated_at: string
-}
-export interface Persona {
-  id: string
-  aspect: string
-  content: string
-  evidence_refs: unknown
-  version: number
-  prompt_version: string | null
-  manually_edited?: boolean
   created_at: string
 }
 export interface Job {
@@ -277,7 +258,6 @@ export interface EntityRelation {
 export interface EntityDetail {
   entity: EntityNode
   atoms: Atom[]
-  scenarios: Scenario[]
   neighbors: EntityNode[]
   relations: EntityRelation[]
 }

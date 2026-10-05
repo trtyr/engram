@@ -5,19 +5,13 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))] // 架构治理 task-5：生产代码禁裸崩溃（测试豁免）
 
 pub mod chain;
-pub mod consolidate;
-pub mod entity_portraits;
 pub mod extract;
 pub mod extract_model;
 pub mod llm_port;
 pub mod maintain_agent;
-pub mod organize;
-pub mod organize_agentic;
-pub mod persona;
 pub mod prompts;
 pub mod reembed;
 pub mod rhythm;
-pub mod scenario_converge;
 
 pub use chain::{gateway_llm, register_handlers, trigger_auto_extract};
 pub use llm_port::{DistillLlm, GatewayLlm};

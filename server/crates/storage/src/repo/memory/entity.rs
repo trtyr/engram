@@ -73,20 +73,6 @@ pub async fn entity_atoms(
     Ok(rows)
 }
 
-/// 实体详情：相关场景。
-pub async fn entity_scenarios(pool: &PgPool, entity_id: Uuid) -> StoreResult<Vec<ScenarioDto>> {
-    let rows = sqlx::query_as::<_, ScenarioDto>(
-        "SELECT DISTINCT ON (s.id) s.* FROM scenarios s \
-         JOIN atoms a ON a.scenario_id = s.id \
-         JOIN atom_entities ae ON ae.atom_id = a.id \
-         WHERE ae.entity_id = $1 LIMIT 50",
-    )
-    .bind(entity_id)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows)
-}
-
 /// 实体详情：共现邻居（共享原子的其他实体，按共现次数降序）。
 pub async fn entity_neighbors(pool: &PgPool, entity_id: Uuid) -> StoreResult<Vec<EntityDto>> {
     let rows = sqlx::query_as::<_, EntityDto>(

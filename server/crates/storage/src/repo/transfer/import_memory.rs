@@ -22,8 +22,8 @@ pub async fn import_session(pool: &PgPool, v: &Value) -> StoreResult<bool> {
 pub async fn import_atom(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     let content = str_of(v, "content", "");
     let res = sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, superseded_by, needs_review, sensitive, scenario_id, occurred_at, valid_until, source_refs, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO atoms (id, kind, content, confidence, status, superseded_by, needs_review, sensitive, occurred_at, valid_until, source_refs, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) ON CONFLICT (id) DO NOTHING",
     )
     .bind(id_of(v, "id"))
     .bind(str_of(v, "kind", "fact"))
@@ -33,7 +33,6 @@ pub async fn import_atom(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     .bind(id_of(v, "superseded_by"))
     .bind(v.get("needs_review").and_then(|x| x.as_bool()).unwrap_or(false))
     .bind(v.get("sensitive").and_then(|x| x.as_bool()).unwrap_or(false))
-    .bind(id_of(v, "scenario_id"))
     .bind(ts(v, "occurred_at"))
     .bind(ts(v, "valid_until"))
     .bind(v.get("source_refs").cloned().unwrap_or(serde_json::json!([])))
@@ -56,42 +55,6 @@ pub async fn backfill_atom_superseded_by(
         .execute(pool)
         .await?;
     Ok(())
-}
-
-pub async fn import_scenario(pool: &PgPool, v: &Value) -> StoreResult<bool> {
-    let res = sqlx::query(
-        "INSERT INTO scenarios (id, topic, summary, body, atom_refs, version, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO NOTHING",
-    )
-    .bind(id_of(v, "id"))
-    .bind(str_of(v, "topic", ""))
-    .bind(str_of(v, "summary", ""))
-    .bind(str_of(v, "body", ""))
-    .bind(v.get("atom_refs").cloned().unwrap_or(serde_json::json!([])))
-    .bind(v.get("version").and_then(|x| x.as_i64()).unwrap_or(1) as i32)
-    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
-    .bind(ts(v, "updated_at").unwrap_or_else(Utc::now))
-    .execute(pool)
-    .await?;
-    Ok(res.rows_affected() > 0)
-}
-
-pub async fn import_persona(pool: &PgPool, v: &Value) -> StoreResult<bool> {
-    let res = sqlx::query(
-        "INSERT INTO persona_aspects (id, aspect, content, evidence_refs, version, prompt_version, manually_edited, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO NOTHING",
-    )
-    .bind(id_of(v, "id"))
-    .bind(str_of(v, "aspect", ""))
-    .bind(str_of(v, "content", ""))
-    .bind(v.get("evidence_refs").cloned().unwrap_or(serde_json::json!([])))
-    .bind(v.get("version").and_then(|x| x.as_i64()).unwrap_or(1) as i32)
-    .bind(v.get("prompt_version").and_then(|x| x.as_str()))
-    .bind(v.get("manually_edited").and_then(|x| x.as_bool()).unwrap_or(false))
-    .bind(ts(v, "created_at").unwrap_or_else(Utc::now))
-    .execute(pool)
-    .await?;
-    Ok(res.rows_affected() > 0)
 }
 
 pub async fn import_entity(pool: &PgPool, v: &Value) -> StoreResult<bool> {

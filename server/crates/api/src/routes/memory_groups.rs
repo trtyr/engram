@@ -31,9 +31,11 @@ pub(super) fn memory_routes_group0() -> Router<AppState> {
         )
         .route("/memory/purge", post(memory_api::purge_agent))
         .route("/memory/export", get(memory_api::export_memory))
-        .route("/memory/distill", post(memory_api::trigger_distill))
         .route("/memory/maintain", post(memory_api::trigger_maintain))
-        .route("/memory/persona-doc", get(memory_api::persona_doc))
+        .route(
+            "/memory/persona-doc",
+            get(memory_api::persona_doc).post(memory_api::persona_doc_edit),
+        )
         .route(
             "/memory/atoms",
             get(memory_api::list_atoms).post(memory_api::create_atom),
@@ -50,17 +52,6 @@ pub(super) fn memory_routes_group1() -> Router<AppState> {
         .route(
             "/memory/atoms/{id}/revisions",
             axum::routing::get(memory_api::atom_revisions),
-        )
-        .route("/memory/scenarios", get(memory_api::list_scenarios))
-        .route("/memory/scenarios/{id}", get(memory_api::get_scenario))
-        .route(
-            "/memory/persona",
-            get(memory_api::get_persona).patch(memory_api::persona_edit),
-        )
-        .route("/memory/persona/history", get(memory_api::persona_history))
-        .route(
-            "/memory/persona/rollback",
-            post(memory_api::persona_rollback),
         )
         .route("/memory/search", post(memory_api::search))
         .route("/memory/context", get(memory_api::context))

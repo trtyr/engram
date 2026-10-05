@@ -3,51 +3,6 @@
 use super::*;
 
 impl MemoryService {
-    /// 回滚分面到历史版本（以新版本号落地当前内容——历史不可变）。
-    /// 编辑分面（version+1 落钉：manually_edited=true，蒸馏产出对该分面落库前被守卫丢弃）。
-    /// 编辑能力：用户 Web 编辑与 AI persona_edit（收录哲学线授权的执行器）共用此路；
-    /// 钉住 = 蒸馏绕开，解冻 = persona_unpin。
-    pub async fn persona_edit(
-        &self,
-        aspect: &str,
-        content: &str,
-        actor: &str,
-    ) -> Result<PersonaVersion, MemoryError> {
-        let content = content.trim();
-        if content.is_empty() || content.chars().count() > 4000 {
-            return Err(MemoryError::BadRequest("分面内容需 1~4000 字".into()));
-        }
-        let next_v = repo::persona_max_version(&self.pool, aspect)
-            .await?
-            .flatten()
-            .map(|v| v + 1)
-            .unwrap_or(1);
-        repo::insert_persona_pinned(&self.pool, Uuid::now_v7(), aspect, content, next_v).await?;
-        self.audit(
-            "edit_persona",
-            json!({
-                "aspect": aspect, "by": actor, "action": "edit", "version": next_v,
-            }),
-        )
-        .await;
-        self.persona_history(aspect)
-            .await
-            .map(|mut v| v.swap_remove(0))
-    }
-
-    /// 解除钉住：分面回归蒸馏管辖（下次 consolidate/退休可重写）。
-    pub async fn persona_unpin(&self, aspect: &str, actor: &str) -> Result<(), MemoryError> {
-        repo::persona_unpin(&self.pool, aspect).await?;
-        self.audit(
-            "edit_persona",
-            json!({
-                "aspect": aspect, "by": actor, "action": "unpin",
-            }),
-        )
-        .await;
-        Ok(())
-    }
-
     /// 实体摘要版本链（圈子强化）：手编档案的历史，最近在前。
     pub async fn entity_revisions(
         &self,
@@ -101,68 +56,6 @@ impl MemoryService {
         Ok(())
     }
 
-    /// 重新钉住（用户解锁后想再钉：为当前内容写一条钉住版本）。
-    pub async fn persona_repin(
-        &self,
-        aspect: &str,
-        actor: &str,
-    ) -> Result<PersonaVersion, MemoryError> {
-        let (content, v) = repo::persona_latest(&self.pool, aspect)
-            .await?
-            .ok_or_else(|| MemoryError::NotFound(format!("分面 {aspect} 不存在")))?;
-        repo::insert_persona_pinned(&self.pool, Uuid::now_v7(), aspect, &content, v + 1).await?;
-        self.audit(
-            "edit_persona",
-            json!({
-                "aspect": aspect, "by": actor, "action": "repin", "version": v + 1,
-            }),
-        )
-        .await;
-        self.persona_history(aspect)
-            .await
-            .map(|mut h| h.swap_remove(0))
-    }
-
-    pub async fn persona_rollback(
-        &self,
-        aspect: &str,
-        to_version: i32,
-        actor: &str,
-    ) -> Result<PersonaVersion, MemoryError> {
-        let target = repo::persona_version(&self.pool, aspect, to_version)
-            .await?
-            .ok_or_else(|| MemoryError::NotFound(format!("版本 {aspect}#{to_version} 不存在")))?;
-
-        let next_v = repo::persona_max_version(&self.pool, aspect)
-            .await?
-            .flatten()
-            .map(|v| v + 1)
-            .unwrap_or(1);
-
-        repo::insert_persona_rollback(
-            &self.pool,
-            Uuid::now_v7(),
-            aspect,
-            &target.content,
-            next_v,
-            &json!({"rollback_to": to_version}),
-        )
-        .await?;
-        // 回滚 = 人工钉住（蒸馏绕开，直到解锁）
-        self.audit(
-            "edit_persona",
-            json!({
-                "aspect": aspect, "by": actor, "action": "rollback", "to_version": to_version,
-            }),
-        )
-        .await;
-        self.persona_history(aspect)
-            .await
-            .map(|mut v| v.swap_remove(0))
-    }
-
-    // ---------- 实体（记忆星系） ----------
-
     /// 活体实体列表（按记忆密度降序）。
     pub async fn list_entities(&self, kind: Option<&str>) -> Result<Vec<EntityDto>, MemoryError> {
         Ok(repo::list_entities(&self.pool, kind).await?)
@@ -174,17 +67,15 @@ impl MemoryService {
             .ok_or_else(|| MemoryError::NotFound(format!("实体 {id} 不存在")))
     }
 
-    /// 实体详情：画像摘要 + 相关原子时间线 + 相关场景。
+    /// 实体详情：画像摘要 + 相关原子时间线。
     pub async fn get_entity(&self, id: Uuid) -> Result<EntityDetail, MemoryError> {
         let entity = self.entity_row(id).await?;
         let atoms = repo::entity_atoms(&self.pool, id, false).await?;
-        let scenarios = repo::entity_scenarios(&self.pool, id).await?;
         let neighbors = repo::entity_neighbors(&self.pool, id).await?;
         let relations = repo::entity_relations(&self.pool, id).await?;
         Ok(EntityDetail {
             entity,
             atoms,
-            scenarios,
             neighbors,
             relations,
         })
@@ -194,13 +85,11 @@ impl MemoryService {
     pub async fn get_entity_full(&self, id: Uuid) -> Result<EntityDetail, MemoryError> {
         let entity = self.entity_row(id).await?;
         let atoms = repo::entity_atoms(&self.pool, id, true).await?;
-        let scenarios = repo::entity_scenarios(&self.pool, id).await?;
         let neighbors = repo::entity_neighbors(&self.pool, id).await?;
         let relations = repo::entity_relations(&self.pool, id).await?;
         Ok(EntityDetail {
             entity,
             atoms,
-            scenarios,
             neighbors,
             relations,
         })

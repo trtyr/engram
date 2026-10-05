@@ -19,11 +19,8 @@ use crate::prompts;
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {
     let sessions = claim_pending_sessions(&ctx).await?;
     if sessions.is_empty() {
-        // P-B（直写重建死路）：无待蒸馏会话 ≠ 无事可做——直写原子（scenario_id NULL）
-        // 也要进场景聚类。organize 自带空输入幂等（收敛扫描 + 未归组原子），空转成本可忽略。
-        ctx.enqueue_next(JobTemplate::new("organize_scenarios"))
-            .await?;
-        return Ok(json!({"session_ids": [], "candidate_ids": [], "chained_organize": true}));
+        // P015 场景层退役：无待蒸馏会话即无事可做（整理归离线节律，不再链式）。
+        return Ok(json!({"session_ids": [], "candidate_ids": []}));
     }
     let session_ids: Vec<Uuid> = sessions.iter().map(|s| s.id).collect();
 
@@ -203,10 +200,8 @@ async fn run_claimed(
     .await
     .ok();
 
-    // P015：在线仲裁退役——抽取直落 active + 向量化；判重/取代移交离线整理。
-    // 组织仍链式触发（无仲裁接棒后由 extract 直接链），离线整理上线后移交。
-    ctx.enqueue_next(JobTemplate::new("organize_scenarios"))
-        .await?;
+    // P015：抽取直落 active + 向量化即完成——判重/归档/画像归离线整理 Agent
+    // （节律每天巡逻 + 手动触发），写入链不再串行接棒。
     Ok(json!({"session_ids": session_ids, "candidate_ids": candidate_ids}))
 }
 

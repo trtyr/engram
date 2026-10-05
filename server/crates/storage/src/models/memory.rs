@@ -37,7 +37,6 @@ pub struct AtomDto {
     /// P3 隐私标记：医疗/感情/财务类——默认不进检索与 context_pack，reveal 才可见
     pub sensitive: bool,
     pub hit_count: i32,
-    pub scenario_id: Option<Uuid>,
     /// 事件时间（extract 以当天为锚把相对时间解析成绝对；created_at 只是记录时间）
     pub occurred_at: Option<DateTime<Utc>>,
     /// 有效期（到期事件可过滤/降权）
@@ -71,17 +70,6 @@ pub struct KvEntryDto {
 
 /// KV 陈旧阈值（天）：updated_at 超过该值提示「可能已过期」。
 pub const KV_STALE_DAYS: i64 = 14;
-
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct ScenarioDto {
-    pub id: Uuid,
-    pub topic: String,
-    pub summary: String,
-    #[schema(value_type = Object)]
-    pub atom_refs: serde_json::Value,
-    pub version: i32,
-    pub updated_at: DateTime<Utc>,
-}
 
 /// 原子改写留痕（编辑能力：旧值 + 谁改的）。append-only，随原子级联删除。
 #[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
@@ -123,22 +111,9 @@ pub struct EntityRelationDto {
 pub struct TimelineEvent {
     pub id: Uuid,
     pub at: DateTime<Utc>,
-    /// atom | scenario | entity
+    /// atom | entity
     pub kind: String,
     pub content: String,
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
-pub struct PersonaVersion {
-    pub id: Uuid,
-    pub aspect: String,
-    pub content: String,
-    #[schema(value_type = Object)]
-    pub evidence_refs: serde_json::Value,
-    pub version: i32,
-    pub prompt_version: Option<String>,
-    pub manually_edited: bool,
-    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]

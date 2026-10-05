@@ -84,10 +84,9 @@ async fn entity_lifecycle_create_attach_graph_merge() {
     let all = svc.list_entities(None).await.unwrap();
     assert_eq!(all.len(), 3);
 
-    // 详情：原子时间线 + 关联场景（无场景时空数组）
+    // 详情：原子时间线（P015 场景层退役：EntityDetail 无 scenarios 字段）
     let detail = svc.get_entity(zhang.id).await.unwrap();
     assert_eq!(detail.atoms.len(), 3);
-    assert!(detail.scenarios.is_empty());
 
     // 图：共现边 张三—Engram weight=2
     let graph = svc.entity_graph().await.unwrap();

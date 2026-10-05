@@ -947,11 +947,9 @@ function DeepPurgePane() {
     Promise.all([
       api.get<unknown[]>('/memory/sessions?limit=500'),
       api.get<unknown[]>('/memory/atoms?limit=500'),
-      api.get<unknown[]>('/memory/scenarios?limit=500'),
-      api.get<unknown[]>('/memory/persona'),
       api.get<unknown[]>('/memory/entities'),
     ])
-      .then(([s, a, sc, p, e]) => setStats({ 会话: s.length, 原子: a.length, 场景: sc.length, 画像: p.length, 实体: e.length }))
+      .then(([s, a, e]) => setStats({ 会话: s.length, 原子: a.length, 实体: e.length }))
       .catch(() => setStats({}))
   }, [open, stats])
 

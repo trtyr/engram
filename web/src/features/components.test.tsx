@@ -1,10 +1,10 @@
 /**
  * 关键组件交互测试（Phase 6 出口标准）：
- * atoms 表格操作 / persona 版本历史与回滚 / Wiki 编辑器保存。
- * 以 Memory Atoms、PersonaView、Wiki PagesPane 的行为面为对象。
+ * atoms 表格操作 / Wiki 编辑器保存。（P015：persona/scenarios 面已随场景层退役）
+ * 以 Memory Atoms、Wiki PagesPane 的行为面为对象。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 // ---- api mock ----
@@ -13,27 +13,18 @@ vi.mock('@/lib/api', () => {
     id: string; slug: string; title: string; page_type: string; folder: string; content: string
     frontmatter: Record<string, unknown>; origin: string; version: number; updated_at: string
   }
-  const state: { atoms: unknown[]; persona: PersonaLike[]; history: PersonaLike[]; pages: WikiPageM[]; wikiPage?: WikiPageM; draftContent?: string } = {
+  const state: { atoms: unknown[]; pages: WikiPageM[]; wikiPage?: WikiPageM; draftContent?: string } = {
     atoms: [],
-    persona: [],
-    history: [],
     pages: [],
   }
   const api = {
     get: vi.fn(async (p: string) => {
       if (p.startsWith('/memory/atoms')) return state.atoms
-      if (p.startsWith('/memory/persona/history')) return state.history
-      if (p.startsWith('/memory/persona')) return state.persona
-      if (p.startsWith('/memory/scenarios')) return []
       if (p.startsWith('/wiki/pages/')) return state.wikiPage as unknown as Record<string, unknown>
       if (p.startsWith('/wiki/pages')) return state.pages
       return []
     }),
     post: vi.fn(async (p: string, _b?: unknown) => {
-      if (p === '/memory/persona/rollback') {
-        state.persona = state.history.slice(0, 1)
-        return state.persona[0]
-      }
       if (p === '/memory/atoms') return {}
       return {}
     }),
@@ -63,15 +54,6 @@ vi.mock('@/lib/api', () => {
   return { api }
 })
 
-interface PersonaLike {
-  id: string
-  aspect: string
-  content: string
-  version: number
-  evidence_refs: unknown
-  prompt_version: string | null
-  created_at: string
-}
 interface AtomLike {
   id: string
   kind: string
@@ -81,7 +63,6 @@ interface AtomLike {
   superseded_by: string | null
   needs_review: boolean
   hit_count: number
-  scenario_id: string | null
   source_refs: unknown[]
   created_at: string
 }
@@ -102,8 +83,6 @@ interface WikiPageLike {
 import { api } from '@/lib/api'
 interface MockState {
   atoms: AtomLike[]
-  persona: PersonaLike[]
-  history: PersonaLike[]
   pages: WikiPageLike[]
   wikiPage?: WikiPageLike
   draftContent?: string
@@ -111,7 +90,6 @@ interface MockState {
 const mockState = (api as unknown as { __state: MockState }).__state
 
 import Memory from '@/features/Memory'
-import { GlobalConfirm } from '@/components/confirm'
 import Wiki from '@/features/Wiki'
 
 const wrap = (ui: React.ReactElement) => <MemoryRouter initialEntries={['/']}>{ui}</MemoryRouter>
@@ -119,8 +97,6 @@ const wrap = (ui: React.ReactElement) => <MemoryRouter initialEntries={['/']}>{u
 beforeEach(() => {
   vi.clearAllMocks()
   mockState.atoms = []
-  mockState.persona = []
-  mockState.history = []
   mockState.pages = []
   mockState.wikiPage = undefined
 })
@@ -128,8 +104,8 @@ beforeEach(() => {
 describe('Atoms 表格操作', () => {
   it('归档 active 原子后从列表消失（PATCH + 重取）', async () => {
     mockState.atoms = [
-      { id: 'a1', kind: 'preference', content: '用户偏好简洁', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 2, scenario_id: null, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
-      { id: 'a2', kind: 'fact', content: '用户住上海', confidence: 0.85, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, scenario_id: null, source_refs: [], created_at: '2026-08-20T00:01:00Z' },
+      { id: 'a1', kind: 'preference', content: '用户偏好简洁', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 2, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
+      { id: 'a2', kind: 'fact', content: '用户住上海', confidence: 0.85, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, source_refs: [], created_at: '2026-08-20T00:01:00Z' },
     ]
     render(wrap(<Memory />))
     fireEvent.click(screen.getByRole('button', { name: '原子' }))
@@ -145,7 +121,7 @@ describe('Atoms 表格操作', () => {
 
   it('双击进入行内编辑，Enter 保存 PATCH 新内容', async () => {
     mockState.atoms = [
-      { id: 'a1', kind: 'fact', content: '旧内容', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, scenario_id: null, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
+      { id: 'a1', kind: 'fact', content: '旧内容', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
     ]
     render(wrap(<Memory />))
     fireEvent.click(screen.getByRole('button', { name: '原子' }))
@@ -161,7 +137,7 @@ describe('Atoms 表格操作', () => {
 
   it('supersede 面板：新增新事实 + 归档旧条', async () => {
     mockState.atoms = [
-      { id: 'old', kind: 'fact', content: '用户住在上海', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, scenario_id: null, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
+      { id: 'old', kind: 'fact', content: '用户住在上海', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
     ]
     render(wrap(<Memory />))
     fireEvent.click(screen.getByRole('button', { name: '原子' }))
@@ -178,37 +154,6 @@ describe('Atoms 表格操作', () => {
   })
 })
 
-describe('Persona 版本历史与回滚', () => {
-  it('展示分面，查历史，回滚到上一版本', async () => {
-    mockState.persona = [
-      { id: 'p2', aspect: 'identity', content: '用户居住在北京。v2', version: 2, evidence_refs: {}, prompt_version: '1', created_at: '2026-08-20T02:00:00Z' },
-    ]
-    mockState.history = [
-      { id: 'p2', aspect: 'identity', content: '用户居住在北京。v2', version: 2, evidence_refs: {}, prompt_version: '1', created_at: '2026-08-20T02:00:00Z' },
-      { id: 'p1', aspect: 'identity', content: '用户居住在上海。v1', version: 1, evidence_refs: {}, prompt_version: '1', created_at: '2026-08-20T01:00:00Z' },
-    ]
-    render(wrap(<><Memory /><GlobalConfirm /></>))
-    fireEvent.click(screen.getByRole('button', { name: '画像' }))
-    await screen.findByText('用户居住在北京。v2')
-    // 历史 → 右侧抽屉（2026-08-31 P1 重构）
-    fireEvent.click(screen.getByRole('button', { name: '历史' }))
-    const dlg = await screen.findByRole('dialog', { name: /历史/ })
-    // v1 内容会出现多处（diff 删除段 + 版本列表预览）——findAllByText 断言至少一处
-    expect((await within(dlg).findAllByText(/用户居住在上海。/)).length).toBeGreaterThan(0)
-    // diff 方向语义断言：基线=v1(上海) → 对比=v2(北京)，北京必须在绿(增)、上海必须在红(删)
-    const addSeg = [...dlg.querySelectorAll('span.bg-success\\/10')].map((s) => s.textContent).join('')
-    const delSeg = [...dlg.querySelectorAll('span.bg-destructive\\/10')].map((s) => s.textContent).join('')
-    expect(addSeg).toContain('北京')
-    expect(delSeg).toContain('上海')
-    // 回滚走 body 形式（后端 Json<RollbackRequest>——query 形式会被 axum 拒）；经应用内确认弹窗
-    fireEvent.click(within(dlg).getByRole('button', { name: '回滚' }))
-    const confirmDlg = await screen.findByRole('alertdialog')
-    fireEvent.click(within(confirmDlg).getByRole('button', { name: '回滚' }))
-    await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith('/memory/persona/rollback', { aspect: 'identity', to_version: 1 })
-    })
-  })
-})
 
 describe('Wiki 编辑器保存', () => {
   it('进入编辑、改内容、保存为 human 版本（PUT + 版本递增）', async () => {

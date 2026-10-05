@@ -15,8 +15,7 @@ use engram_jobs::types::Job;
 use engram_jobs::{JobQueue, JobTemplate};
 use engram_llm::ProviderRegistry;
 use engram_llm::types::Purpose;
-use engram_search::tokenize::tokenize;
-use engram_search::{SearchHit, search_atoms, search_scenarios};
+use engram_search::{SearchHit, search_atoms};
 use engram_storage::repo::memory as repo;
 use engram_storage::{PgPool, StoreError};
 use serde::Serialize;
@@ -46,15 +45,11 @@ impl From<StoreError> for MemoryError {
 
 pub use engram_storage::models::memory::{
     AtomDto, AtomRevision, EntityDto, EntityRelationDto, EntityRevision, GraphEdge, KvEntryDto,
-    PersonaVersion, ScenarioDto, SessionDto, TimelineEvent,
+    SessionDto, TimelineEvent,
 };
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ContextPack {
-    /// L3：画像分面（当前版本，全量）
-    pub persona: Vec<PersonaVersion>,
-    /// L2：相关/最近场景
-    pub scenarios: Vec<ScenarioDto>,
     /// L1：补充原子
     pub atoms: Vec<AtomDto>,
     /// 实体透镜：用户世界里的人/项目/主题（有 query 按相关，无 query 按密度头部）
@@ -76,8 +71,6 @@ pub struct SearchResponse {
     /// 实体命中（主角先行——搜人名/项目名先给实体再给相关原子）
     pub entities: Vec<SearchHit>,
     pub l1: Vec<SearchHit>,
-    pub l2: Vec<SearchHit>,
-    pub l3: Vec<PersonaVersion>,
     pub query: String,
 }
 
@@ -112,7 +105,6 @@ pub const REL_TYPES: [&str; 5] = [
 pub struct EntityDetail {
     pub entity: EntityDto,
     pub atoms: Vec<AtomDto>,
-    pub scenarios: Vec<ScenarioDto>,
     /// 共现邻居：与当前实体共享原子的其他实体（按共现次数降序，最多 20）
     pub neighbors: Vec<EntityDto>,
     /// 类型化关系（有向）：本实体作为 from 或 to 的关系
@@ -128,11 +120,10 @@ pub struct EntityGraph {
     pub relations: Vec<EntityRelationDto>,
 }
 
-/// 记忆域缺失向量统计（重嵌修复入口）。
+/// 记忆域缺失向量统计（重嵌修复入口）。P015 场景层退役：只有 atoms。
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct EmbeddingStatus {
     pub atoms_missing: i64,
-    pub scenarios_missing: i64,
 }
 
 // ---------- 服务 ----------

@@ -19,7 +19,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use engram_core::memory::{
     AtomDto, ContextPack, EmbeddingStatus, EntityDetail, EntityDto, EntityGraph, KvEntryDto,
-    MemoryError, MemoryService, PersonaVersion, ScenarioDto, SearchResponse, SessionDto,
+    MemoryError, MemoryService, SearchResponse, SessionDto,
 };
 use engram_search::{SearchHit, search_entities};
 use serde::Deserialize;

@@ -33,11 +33,9 @@ const KIND_LABEL: Record<string, string> = {
 
 export default function Galaxy({
   initialEntity,
-  onGoPersona,
   onGoAtoms,
 }: {
   initialEntity?: string | null
-  onGoPersona: () => void
   onGoAtoms: () => void
 }) {
   const [graph, setGraph] = useState<EntityGraph | null>(null)
@@ -341,7 +339,6 @@ export default function Galaxy({
               <EntityGalaxy
                 graph={galaxyData}
                 onSelect={setSelected}
-                onGoPersona={onGoPersona}
               />
             </Suspense>
               </>
@@ -428,7 +425,7 @@ function EntityDetailPane({
 
   if (err) return <ErrorBox msg={err} />
   if (!detail) return <Spinner />
-  const { entity, atoms, scenarios, neighbors, relations } = detail
+  const { entity, atoms, neighbors, relations } = detail
 
   return (
     <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -636,19 +633,6 @@ function EntityDetailPane({
           )}
         </section>
 
-        {/* 相关场景 */}
-        {scenarios.length > 0 && (
-          <section>
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">相关场景（{scenarios.length}）</h3>
-            <div className="flex flex-wrap gap-1.5">
-              {scenarios.map((s) => (
-                <span key={s.id} className="rounded border border-border px-1.5 py-px text-xs text-muted-foreground" title={s.summary}>
-                  {s.topic}
-                </span>
-              ))}
-            </div>
-          </section>
-        )}
 
         {/* 原子时间线 */}
         <section>
@@ -869,7 +853,7 @@ function TimelineView() {
   }, [])
   if (!events) return <div className="min-h-0 flex-1 animate-pulse rounded-lg bg-muted/30" />
   if (events.length === 0) return <Empty text="暂无记忆事件——蒸馏后这里会形成时间脉络" />
-  const kindLabel: Record<string, string> = { atom: '原子', scenario: '场景', entity: '实体' }
+  const kindLabel: Record<string, string> = { atom: '原子', entity: '实体' }
   return (
     <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-card">
       <ul className="divide-y divide-border/60">

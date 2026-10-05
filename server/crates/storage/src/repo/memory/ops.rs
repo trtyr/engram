@@ -30,25 +30,20 @@ pub async fn purge_agent_tx(pool: &PgPool, agent: &str) -> StoreResult<(i64, i64
 /// TRUNCATE CASCADE 一发解 FK——调用层负责 erase scope + confirm 双因子。
 pub async fn purge_deep(pool: &PgPool) -> StoreResult<Value> {
     let mut tx = pool.begin().await?;
-    let counts: (i64, i64, i64, i64, i64) = sqlx::query_as(
+    let counts: (i64, i64, i64) = sqlx::query_as(
         "SELECT \
             (SELECT count(*) FROM raw_sessions), \
             (SELECT count(*) FROM atoms), \
-            (SELECT count(*) FROM entities WHERE merged_into IS NULL), \
-            (SELECT count(*) FROM scenarios), \
-            (SELECT count(*) FROM persona_aspects)",
+            (SELECT count(*) FROM entities WHERE merged_into IS NULL)",
     )
     .fetch_one(&mut *tx)
     .await?;
-    sqlx::query(
-        "TRUNCATE atom_entities, entities, persona_aspects, scenarios, atoms, raw_sessions CASCADE",
-    )
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("TRUNCATE atom_entities, entities, atoms, raw_sessions CASCADE")
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(serde_json::json!({
         "sessions": counts.0, "atoms": counts.1, "entities": counts.2,
-        "scenarios": counts.3, "persona": counts.4,
     }))
 }
 
@@ -57,9 +52,6 @@ pub async fn timeline(pool: &PgPool, limit: i64) -> StoreResult<Vec<TimelineEven
     Ok(sqlx::query_as::<_, TimelineEvent>(
         "SELECT a.id, COALESCE(a.occurred_at, a.created_at) AS at, 'atom' AS kind, a.content \
          FROM atoms a WHERE a.status = 'active' \
-         UNION ALL \
-         SELECT s.id, s.created_at AS at, 'scenario' AS kind, s.topic \
-         FROM scenarios s \
          UNION ALL \
          SELECT e.id, e.created_at AS at, 'entity' AS kind, e.name \
          FROM entities e WHERE e.merged_into IS NULL AND e.archived_at IS NULL \
@@ -70,18 +62,14 @@ pub async fn timeline(pool: &PgPool, limit: i64) -> StoreResult<Vec<TimelineEven
     .await?)
 }
 
-/// 记忆域缺失向量统计（重嵌修复入口的状态面）：(atoms_missing, scenarios_missing)。
-pub async fn embedding_missing_counts(pool: &PgPool) -> StoreResult<(i64, i64)> {
+/// 记忆域缺失向量统计（重嵌修复入口的状态面）。P015 场景层退役：只有 atoms。
+pub async fn embedding_missing_counts(pool: &PgPool) -> StoreResult<i64> {
     let atoms_missing: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM atoms WHERE status = 'active' AND embedding IS NULL",
     )
     .fetch_one(pool)
     .await?;
-    let scenarios_missing: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM scenarios WHERE embedding IS NULL")
-            .fetch_one(pool)
-            .await?;
-    Ok((atoms_missing, scenarios_missing))
+    Ok(atoms_missing)
 }
 
 /// 编辑/清空类审计（T001/Q001 拍板 2026-10-03「系统里没有 job，只有日志」）：

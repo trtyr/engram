@@ -123,7 +123,7 @@ async fn context_pack_l1_is_query_relevant_not_hit_count() {
     }
 }
 
-/// B9：检索命中异步回写 hit_count（atoms + scenarios）。
+/// B9：检索命中异步回写 hit_count（P015 场景层退役：只有 atoms）。
 #[tokio::test]
 async fn search_hits_bump_hit_count() {
     let (pool, svc, _container) = setup().await;
@@ -142,47 +142,25 @@ async fn search_hits_bump_hit_count() {
     .await
     .expect("插入 atom");
 
-    // 场景种子
-    let sid = Uuid::now_v7();
-    sqlx::query(
-        "INSERT INTO scenarios (id, topic, summary, body, embedding) VALUES \
-         ($1, '开发环境', '用户偏好 Rust', '完整描述', $2::vector)",
-    )
-    .bind(sid)
-    .bind(&vt)
-    .execute(&pool)
-    .await
-    .unwrap();
-
     let _ = svc
         .search("Rust", &[], 10, false, None, None, Some(&v))
         .await
         .expect("search");
 
-    // 回写是异步的：轮询等它落地
+    // 回写是异步的：轮询等它落地（P015 场景层退役：只有 atoms）
     let mut atom_hits = 0i32;
-    let mut scen_hits = 0i32;
     for _ in 0..50 {
         atom_hits = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
             .bind(a)
             .fetch_one(&pool)
             .await
             .unwrap();
-        scen_hits = sqlx::query_scalar("SELECT hit_count FROM scenarios WHERE id = $1")
-            .bind(sid)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        if atom_hits >= 1 && scen_hits >= 1 {
+        if atom_hits >= 1 {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     assert!(atom_hits >= 1, "atoms.hit_count 应回写（实际 {atom_hits}）");
-    assert!(
-        scen_hits >= 1,
-        "scenarios.hit_count 应回写（实际 {scen_hits}）"
-    );
 
     // context_pack 读路径同样计数（有 query 时 L1 走 search_atoms）
     let before = atom_hits;
@@ -998,74 +976,6 @@ async fn export_contains_all_domains() {
 }
 
 /// P10 新鲜度混排：同分近似的命中，新的排前。
-// F4 治：批量归档 → 30s 防抖只入队一个快照收敛 job（converge_only）。
-#[tokio::test]
-async fn archive_debounces_into_single_snapshot_refresh() {
-    let (pool, svc, _c) = setup().await;
-
-    let started_at = chrono::Utc::now();
-    // 1 场景 + 3 活跃成员
-    let mut atoms = vec![];
-    for i in 0..3 {
-        atoms.push(
-            svc.create_atom(
-                "fact",
-                &format!("成员{i}"),
-                0.9,
-                None,
-                None,
-                false,
-                None,
-                None,
-            )
-            .await
-            .unwrap(),
-        );
-    }
-    let sid = Uuid::now_v7();
-    let refs: Vec<Uuid> = atoms.iter().map(|a| a.id).collect();
-    sqlx::query("INSERT INTO scenarios (id, topic, summary, body, atom_refs, version) VALUES ($1, 'T', 'S', 'B', $2, 1)")
-        .bind(sid)
-        .bind(sqlx::types::Json(&refs))
-        .execute(&pool)
-        .await
-        .unwrap();
-
-    // 批量归档（同一防抖窗口内 3 次 update_atom）
-    for a in &atoms {
-        svc.update_atom(
-            a.id,
-            None,
-            None,
-            None,
-            Some("archived"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            "test",
-        )
-        .await
-        .unwrap();
-    }
-
-    // 防抖断言：只统计本测试窗口内新产生的 job（测试库独立，但同库内其他并发用例
-    // 也可能触发 organize_scenarios —— 以 created_at 收口到本用例开始时刻之后，
-    // 且断言「≤1」表达防抖语义：3 连归档不得产生 3 个 job）
-    let n: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM jobs WHERE kind = 'organize_scenarios' \
-         AND payload->>'converge_only' = 'true' AND created_at >= $1",
-    )
-    .bind(started_at)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert!(
-        n <= 1,
-        "3 连归档应合并为 ≤1 个快照刷新 job（30s 防抖），实际 {n}"
-    );
-}
 
 #[tokio::test]
 async fn context_pack_prefers_recent() {
@@ -1173,30 +1083,6 @@ async fn void_done_session_cascades_atom_archive() {
 async fn context_budget_keeps_atoms_alive() {
     let (pool, svc, _pg) = setup().await;
 
-    // 7 个画像分面（与真实分布一致）
-    for (i, aspect) in [
-        "identity",
-        "preferences",
-        "skills",
-        "constraints",
-        "communication_style",
-        "goals",
-        "routines",
-    ]
-    .iter()
-    .enumerate()
-    {
-        sqlx::query(
-            "INSERT INTO persona_aspects (id, aspect, content, version, evidence_refs) \
-             VALUES ($1, $2, $3, 1, '[]'::jsonb)",
-        )
-        .bind(Uuid::now_v7())
-        .bind(*aspect)
-        .bind(format!("分面 {i} 内容"))
-        .execute(&pool)
-        .await
-        .unwrap();
-    }
     // 3 条 active 原子
     for i in 0..3 {
         sqlx::query(
@@ -1211,13 +1097,9 @@ async fn context_budget_keeps_atoms_alive() {
         .unwrap();
     }
 
-    // 小预算：v1 行为 atoms=0（被 7 分面挤死）；v2 各层独立预算 → atoms 至少 1
+    // 小预算：budget_items=1 时 atoms 至少 1（P015 场景层退役：无 l2/l3 挤占）
     let pack = svc.context_pack(None, 1, 8000, true, None).await.unwrap();
-    assert_eq!(pack.persona.len(), 7, "画像分面全量保留");
-    assert!(
-        !pack.atoms.is_empty(),
-        "budget_items=1 时 atoms 不应被 persona 挤成 0（N3 回归）"
-    );
+    assert!(!pack.atoms.is_empty(), "budget_items=1 时 atoms 不应为空");
 
     // 大预算：正常
     let pack = svc
@@ -1231,18 +1113,15 @@ async fn context_budget_keeps_atoms_alive() {
         .context_pack(None, 50, 100_000, true, None)
         .await
         .unwrap();
-    let text_only: usize = pack
-        .atoms
-        .iter()
-        .map(|a| a.content.len())
-        .chain(pack.persona.iter().map(|p| p.content.len()))
-        .sum();
+    let text_only: usize = pack.atoms.iter().map(|a| a.content.len()).sum();
     assert!(
         pack.meta.chars_used >= text_only,
-        "chars_used 应按完整序列化计量（含 evidence_refs）：{} < 正文和 {text_only}",
+        "chars_used 应按完整序列化计量：{} < 正文和 {text_only}",
         pack.meta.chars_used
     );
 }
+
+/// R7/D21：非法 distill 值响亮拒绝（此前 "sometimes"/"manaul" 静默落入 auto 语义）。
 
 /// R7/D21：非法 distill 值响亮拒绝（此前 "sometimes"/"manaul" 静默落入 auto 语义）。
 #[tokio::test]

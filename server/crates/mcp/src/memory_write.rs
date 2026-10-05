@@ -51,34 +51,12 @@ pub struct ReviewActionParams {
     pub atom_id: String,
 }
 
-/// 编辑画像分面（AI 记忆管家）：version+1 落钉，蒸馏不再覆盖该分面。
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct PersonaEditParams {
-    /// 分面名（七值之一）
-    #[schemars(
-        description = "画像分面：identity | preferences | skills | constraints | communication_style | goals | routines。"
-    )]
-    pub aspect: String,
-    /// 分面的完整新内容（1~4000 字，自包含描述——落库后蒸馏不再覆盖）
-    #[schemars(
-        description = "该分面的完整新版本内容（1~4000 字，中文自包含描述）。落库即钉住（manually_edited）——蒸馏产出对该分面不再生效。"
-    )]
-    pub content: String,
-}
-
-/// 手动触发蒸馏链（AI 记忆管家）：撞车守卫——正在蒸馏时只提示不重复投递。
+/// 手动触发整理巡逻（P015：蒸馏链手动触发统一为离线整理 Agent——判重/归档/画像维护）。
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DistillParams {
-    /// true 时附带 consolidate 全量整理
-    #[schemars(
-        description = "可选：true 时在蒸馏链外附带 consolidate 全量整理（近重复合并）。缺省 false。"
-    )]
+    /// 无参数（兼容保留空结构）
+    #[schemars(description = "无参数——整理巡逻由节律自动跑，此动作用于手动补一轮。")]
     pub full: Option<bool>,
-    /// 底层动作步（T018 改名避让六动词 mode 分派键）：distill（默认）| rebuild | sleep（预留）
-    #[schemars(
-        description = "可选底层动作步：\"distill\"（默认，触发蒸馏链）/ \"rebuild\"（画像全量重建——以全部场景重算所有非钉住分面，记忆清理/修订后用）/ \"sleep\"（记忆巩固——内置节律上线后开放，当前返回未上线提示）。"
-    )]
-    pub step: Option<String>,
 }
 
 #[tool_router(router = memory_write_router)]
@@ -259,48 +237,6 @@ impl EngramMcpServer {
         ok_json(v)
     }
 
-    /// 编辑画像分面（AI 记忆管家）：用户说「画像里加上/改掉 XXX」时使用。
-    ///
-    /// version+1 落钉（manually_edited=true）——蒸馏产出对该分面落库前被守卫丢弃，
-    /// 即编辑后蒸馏不会再覆盖。分面仅限七值之一；解冻走 Web 解钉（persona_unpin）。
-    pub(crate) async fn memory_persona_edit(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<PersonaEditParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        require_memory(&p)?;
-        let ep = params.0;
-        const ASPECTS: [&str; 7] = [
-            "identity",
-            "preferences",
-            "skills",
-            "constraints",
-            "communication_style",
-            "goals",
-            "routines",
-        ];
-        if !ASPECTS.contains(&ep.aspect.as_str()) {
-            return Err(mcp_err(
-                ErrorCode::INVALID_PARAMS,
-                format!("aspect 仅限 {}（收到 {}）", ASPECTS.join("/"), ep.aspect),
-            ));
-        }
-        let actor = match &p {
-            engram_core::auth::Principal::Admin => "admin".to_string(),
-            engram_core::auth::Principal::ApiKey { name, .. } => format!("key:{name}"),
-        };
-        let v = self
-            .svc()
-            .persona_edit(&ep.aspect, &ep.content, &actor)
-            .await
-            .map_err(from_memory)?;
-        let mut out = serde_json::to_value(&v).unwrap_or(serde_json::json!({}));
-        out["hint"] =
-            json!("分面已编辑并钉住（manually_edited）——蒸馏产出对该分面不再生效；解冻走 Web 解钉");
-        ok_json(out)
-    }
-
     /// 手动触发蒸馏链（AI 记忆管家）：撞车守卫——正在蒸馏时只提示不重复投递。
     ///
     /// 用户说「触发一下蒸馏」「把积压的蒸馏了」时使用。running 的 extract_atoms
@@ -312,18 +248,14 @@ impl EngramMcpServer {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
         require_memory(&p)?;
-        let dp = params.0;
+        let _ = params.0;
         let actor = match &p {
             engram_core::auth::Principal::Admin => "admin".to_string(),
             engram_core::auth::Principal::ApiKey { name, .. } => format!("key:{name}"),
         };
         let v = self
             .svc()
-            .trigger_distill_manual(
-                dp.full.unwrap_or(false),
-                dp.step.as_deref().unwrap_or("distill"),
-                &actor,
-            )
+            .trigger_maintain(&actor)
             .await
             .map_err(from_memory)?;
         ok_json(v)

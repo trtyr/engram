@@ -49,7 +49,7 @@ memory 域用法（六动词，2026-09-26 收敛：存/找/翻/改/审/忘；旧
 1. 会话开始：{\"action\":\"recall\",\"mode\":\"context\"} 装载用户画像与近期记忆，再开始对话；
 2. 对话中需要背景：{\"action\":\"recall\",\"mode\":\"search\",\"query\":\"…\"} 定向回忆，或 {\"action\":\"recall\",\"mode\":\"entities\"} 按人/项目/主题查档案；翻清单用 {\"action\":\"browse\"}；
 3. 记一句话事实：{\"action\":\"remember\",\"text\":\"…\"}；成段对话收尾 {\"action\":\"remember\",\"mode\":\"session\",\"turns\":[…]}（蒸馏自动沉淀），长对话分段 {\"action\":\"remember\",\"mode\":\"session_append\"}；
-4. 纠错与画像：{\"action\":\"revise\",\"mode\":\"correct\"}（取代链留痕）/ {\"action\":\"revise\",\"mode\":\"persona\"}（分面编辑后蒸馏不覆盖）；蒸馏复核 {\"action\":\"review\"}；
+4. 纠错：{\"action\":\"revise\",\"mode\":\"correct\"}（取代链留痕）；蒸馏复核 {\"action\":\"review\"}；
 5. 精确值逐字保存：{\"action\":\"remember\",\"mode\":\"kv\",\"key\":\"…\",\"value\":\"…\"}（序列号/端口/路径等，蒸馏零介入）；**机密凭据（API Key/Token/密码）不进 memory——走 credentials 域**（加密落库+取用审计）；
 6. 用户明确表达遗忘：「别记住这个」→ {\"action\":\"forget\"}（void 会话作废且蒸馏产物级联归档；误作废用 mode=\"restore\" 撤销）。
 

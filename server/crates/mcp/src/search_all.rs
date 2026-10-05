@@ -73,12 +73,11 @@ impl EngramMcpServer {
             }
             let r = self
                 .svc()
-                .search(&q, &["l1", "l2", "entities"], max, false, None, None, None)
+                .search(&q, &["l1", "entities"], max, false, None, None, None)
                 .await;
             Some(match r {
                 Ok(r) => json!({
                     "l1": r.l1.iter().map(|h| json!({"id": h.id, "score": h.score, "snippet": h.snippet})).collect::<Vec<_>>(),
-                    "l2": r.l2.iter().map(|h| json!({"id": h.id, "title": h.title, "snippet": h.snippet})).collect::<Vec<_>>(),
                     "entities": r.entities.iter().map(|h| json!({"id": h.id, "title": h.title, "kind": h.kind})).collect::<Vec<_>>(),
                 }),
                 Err(e) => json!({ "error": e.to_string() }),

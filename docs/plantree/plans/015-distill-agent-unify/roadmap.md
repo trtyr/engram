@@ -27,12 +27,22 @@
 
 ## In Progress
 
-（无——待收官门禁：api/mcp 测试套 + fmt/clippy 全绿后提交推送）
+- **场景层退役（蓝图 v2 收官刀，2026-10-05）**：
+  - 任务链：organize.rs/organize_agentic.rs/scenario_converge.rs/consolidate.rs/persona//entity_portraits.rs
+    六文件删；extract 不再链 organize（写入即终，整理归离线节律+手动）；trigger/trigger_manual
+    /trigger_distill_manual 死代码删；WORKFLOW_KINDS 收敛 4 kind
+  - 迁移 0072：drop scenarios / atoms.scenario_id / persona_aspects（不可逆，生产备份兑底）
+  - 检索：hybrid search_scenarios 删；core search l2/l3 层删（collect_layers [bool;2]）；
+    context_pack 只剩 atoms+entities；unified l2 融合删；reembed 只补 atoms
+  - API：/memory/scenarios×2、/memory/persona 分面族 4 端点、/memory/distill 删；
+    persona-doc POST 手动编辑加（Admin-only，save_doc 通道）
+  - MCP：browse/revise 的 scenarios/persona mode 删；distill 触发改投 maintain；golden 重生成
+  - 前端：场景 tab 删；画像 tab 重生为 PersonaDocPane（persona-doc 只读+版本史）；
+    Dashboard L2/L3 卡片删；onGoPersona 链删
+  - 测试：distill 42→18、memory_test 退役测试删+三测试改造（hit_count/reembed 单值化）
 
 ## Next
 
-- **场景层退役（已决，蓝图 v2）**：organize 链下架（在线最后一个旧链环节）、
-  scenarios 层按蓝图处置（降级为原子上标签或整体退役）——离线整理 Agent 已接管其职责
 - 生产部署拍板（P015 全链：抽取 v9.1 直落 + 离线整理 + 纯向量检索 + 无场景层）
 
 ## Deferred

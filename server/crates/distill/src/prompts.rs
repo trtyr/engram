@@ -4,9 +4,6 @@
 pub struct PromptId(pub &'static str, pub u32);
 
 pub const P_EXTRACT: PromptId = PromptId("extract", 9);
-pub const P_ORGANIZE: PromptId = PromptId("organize", 2);
-pub const P_PERSONA: PromptId = PromptId("persona", 2);
-pub const P_CONSOLIDATE: PromptId = PromptId("consolidate", 1);
 
 /// L0→L1：从原始会话抽取候选原子记忆。
 /// v6（2026-09-18 收录哲学线）：主语判据大修——存量抽查 85% 污染实证后重写收录判据：
@@ -70,82 +67,4 @@ pub fn extract_system() -> String {
 输出严格 JSON（无围栏无注释）： {{\"worth_memorizing\":true,\"reason\":\"一句话\",\"atoms\":[{{\"kind\":\"...\",\"content\":\"...\",\"confidence\":0.9,\"strength\":\"fact|inference|assumption\",\"turn_refs\":[1],\"occurred_at\":\"2026-09-02T00:00:00Z\",\"valid_until\":null,\"entities\":[{{\"name\":\"张三\",\"kind\":\"person\"}}]}}],\"relations\":[{{\"from\":\"张三\",\"to\":\"后端组\",\"rel_type\":\"member_of\"}}]}}",
         today = chrono::Utc::now().date_naive(),
     )
-}
-
-/// 实体档案聚合：从记忆切片生成实体画像摘要（切片视图，非独立记忆系统）。
-pub fn entity_portrait_system() -> String {
-    "你是一个记忆档案员。给你一个实体（人物/项目/主题/群组）以及用户记忆中涉及它的事实列表，请聚合为一段简明的实体档案。
-
-规则：
-1. 2~3 句中文，陈述式，只依据给出的事实，不要臆测。
-2. 概括这个实体与用户的关系及关键特征（职责/偏好/约定/近况），信息以最近的为准。
-3. 时间一律写绝对日期（R2：档案是长期快照，相对词会过期）。
-4. 输出严格 JSON：{\"summary\":\"...\"}".into()
-}
-
-/// 关系回溯 v2（常识边层级模型，收录哲学线 task-8）：从「实体 + 其涉及记忆」抽实体间关系
-/// （存量实体无 session 可重放时的兜底）。输出区分记忆明示（distill）与世界常识（world_knowledge）；
-/// 允许常识引入列表外新实体（第 2 层语境），但第 2 层不再扩展（一跳为止）。
-pub fn relation_backfill_system() -> String {
-    "你是单用户 AI 长期记忆系统的关系抽取器。给你一组实体（name[kind]）及其涉及的记忆，抽取实体间的关系。
-
-关系类型（rel_type）限定五类：
-- member_of：成员归属（人属于乐队/团队/组织）
-- located_in：位于（机构/人在某地）
-- works_on：在做（个人/团队在做某项目）
-- part_of：部分（某物是某整体的部分）
-- related_to：泛相关
-
-规则：
-1. from 必须用给定实体列表里的规范称呼；to 优先用列表内实体，若关系指向列表外的实体（如记忆提到「用户常听权志龙的歌」而列表有「权志龙」，常识告诉你权志龙属于「BIGBANG」），可以引入列表外的新实体作为 to（给出 name 与 kind 推断 person|group|project|topic|place）。
-2. 每条关系必须带 source_hint 字段：
-   - \"memory_stated\"：记忆内容里明确表达的关系（照原文，不改写）
-   - \"world_knowledge\"：你的世界常识补的关系（列表外新实体必然属于此类）
-3. 方向 from --rel_type--> to（如「权志龙 member_of BIGBANG」= 权志龙属于 BIGBANG，方向不能反）。
-4. 记忆里表达的多是「用户与实体的关系」（用户常听某歌手、用户在某公司工作、用户毕业于某大学），这些不是实体间关系，不要抽。
-5. 一对实体可有多条不同关系；没有明确或高置信常识关系则输出空数组——不确定的宁可不抽。
-6. 只做一跳：列表外新实体（第 2 层）的进一步关系不再抽取。
-
-输出严格 JSON：{\"relations\":[{\"from\":\"权志龙\",\"to\":\"BIGBANG\",\"rel_type\":\"member_of\",\"source_hint\":\"world_knowledge\",\"to_kind\":\"group\"}]}".into()
-}
-
-/// L1→L2：未归组原子聚类为场景块。
-/// F3 场景快照重算：只依据给出的活跃成员原子重写场景（成员有归档/删除时收敛）。
-pub fn scenario_refresh_system() -> String {
-    "你维护单用户 AI 长期记忆系统的 L2 场景快照。\n\
-     给你一个场景的当前主题和它的活跃成员原子（非活跃成员已剔除）。\n\
-     依据这些活跃成员重写该场景的快照，使其与现存内容一致：\n\
-     1. topic 简洁主题名；summary 一两句话概括；body 需要时展开细节。\n\
-     2. 只依据给出的原子，不要臆测或保留已不在成员里的旧信息。\n\
-     3. 时间一律写绝对日期（如「9 月 9 日骑行」），不保留相对词。\n\
-     输出严格 JSON：{\"topic\": \"...\", \"summary\": \"...\", \"body\": \"...\"}"
-        .to_string()
-}
-
-pub fn persona_system() -> String {
-    "你是一个用户画像维护器。根据有变动的场景知识块（scenarios），更新用户画像的分面（aspect）。
-
-分面只能是：identity（身份认同）| preferences（偏好）| skills（技能）|
-constraints（约束/雷区）| communication_style（沟通风格）| goals（目标）| routines（习惯）
-
-规则：
-1. 只输出需要更新（新增信息或信息变化）的分面，content 是该分面的**完整新版本**（融合旧版与新增信息的自包含描述，中文，2~5 句）。
-2. 当前画像为空的分面，只要场景里有对应信息，就必须产出初始版本。
-3. 没有任何分面需要更新时输出空数组。
-4. 证据要充分：scenarios 中没有的信息不要写。
-5. **content 中的时间一律写绝对日期**（如「9 月 9 日骑行」）——画像是长期快照，「下周三」这类相对词会随时间变成过期废话（R2）。
-5.5 **推断必须带标记**：场景里「（推断）」标注的信息是推断不是事实——写进画像时必须保留「（推断）」后缀（如「用户可能在杭州工作（推断）」），严禁抹掉标记写成确定陈述。
-6. 每个分面必须标注 evidence_scenarios：该分面结论**实际依据**的场景编号（如 [\"S1\",\"S3\"]）——只列真正支撑该分面内容的场景，不要把全部场景都列上。
-
-输出严格 JSON：{\"aspects\":[{\"aspect\":\"...\",\"content\":\"...\",\"evidence_scenarios\":[\"S1\"]}]}"
-    .into()
-}
-
-/// 整理：近重复合并判定。
-pub fn consolidate_system() -> String {
-    "你是一个记忆整理器。每组候选（cluster）是若干条疑似重复的原子记忆。
-判断组内哪些与第一条语义等价（同一事实的不同措辞）。
-
-输出严格 JSON：{\"merges\":[{\"keep_id\":\"保留的那条\",\"merge_ids\":[\"语义等价、应并入的其他条\"]}]}
-语义不等价的组输出空 merges 或直接不列出。".into()
 }

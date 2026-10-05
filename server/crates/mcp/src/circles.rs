@@ -165,7 +165,6 @@ impl EngramMcpServer {
                 ok_json(json!({
                     "entity": d.entity,
                     "atoms": d.atoms,
-                    "scenarios": d.scenarios,
                     "relations": d.relations,
                 }))
             }

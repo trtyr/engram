@@ -1,42 +1,6 @@
-//! `memory_api` 的实现切片（架构治理 2026-09-21：自 memory_api.rs 纯搬移，零行为变化）。
+//! `memory_api` 的实现切片（架构治理 2026-09-21：自 memory_api.rs 纯搬移；P015 蒸馏手动触发统一走 /memory/maintain）。
 
 use super::*;
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct DistillRequest {
-    /// true 时附带 consolidate
-    #[serde(default)]
-    pub full: bool,
-    /// 触发通道："cron"（外部定时器）或缺省（人工/AI 主动）。
-    /// cron 通道的 consolidate 走日桶幂等——同日重复调用只跑一次全量整理。
-    #[serde(default)]
-    pub via: Option<String>,
-}
-
-/// 手动触发蒸馏链。
-#[utoipa::path(post, path = "/memory/distill",
-    request_body = DistillRequest,
-    responses((status = 202, body = [engram_jobs::Job])))]
-pub async fn trigger_distill(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-    Json(req): Json<DistillRequest>,
-) -> Result<(StatusCode, Json<Vec<engram_jobs::Job>>), ApiError> {
-    require_memory(&principal)?;
-    let by = actor_of(&principal);
-    let via = if req.via.as_deref() == Some("cron") {
-        // cron 通道只能由 cron scope 的 key 走——防 AI 伪造 cron 审计行
-        require_cron(&principal)?;
-        "cron"
-    } else {
-        "manual"
-    };
-    let jobs = svc(&state)
-        .trigger_distill(req.full, via, by.as_str())
-        .await
-        .map_err(me)?;
-    Ok((StatusCode::ACCEPTED, Json(jobs)))
-}
 
 #[derive(Deserialize, IntoParams)]
 pub struct ListAtomsParams {

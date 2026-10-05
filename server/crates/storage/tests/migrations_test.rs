@@ -13,9 +13,9 @@ async fn migrations_apply_on_clean_pgvector() {
         .await
         .expect("迁移执行");
 
-    // 版本可查（当前 71 份迁移：0071 = 记忆域 FTS 退役（drop tsv）——P015）
+    // 版本可查（当前 72 份迁移：0072 = 场景层退役（drop scenarios/atoms.scenario_id/persona_aspects）——P015）
     let version = engram_storage::current_version(&pool).await.unwrap();
-    assert_eq!(version, Some(71), "0001-0071 迁移应已应用");
+    assert_eq!(version, Some(72), "0001-0072 迁移应已应用");
 
     // 0056（代码图谱入口收敛）：dest_mode 列形态——NOT NULL + 落库默认 default + 二值 CHECK。
     // 历史行回填 custom 是迁移的语义保证（生产库实测见《代码图谱入口收敛 · roadmap》）；
@@ -198,8 +198,7 @@ async fn all_domain_tables_exist_with_columns() {
         "admin_sessions",
         "raw_sessions",
         "atoms",
-        "scenarios",
-        "persona_aspects",
+        "persona_doc",
         "wiki_documents",
         "wiki_chunks",
         "wiki_sources",

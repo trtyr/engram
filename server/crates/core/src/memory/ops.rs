@@ -3,17 +3,6 @@
 use super::*;
 
 impl MemoryService {
-    pub async fn trigger_distill(
-        &self,
-        full: bool,
-        via: &str,
-        by: &str,
-    ) -> Result<Vec<Job>, MemoryError> {
-        engram_distill::chain::trigger(&self.queue, full, via, by)
-            .await
-            .map_err(|e| MemoryError::Storage(e.to_string()))
-    }
-
     /// 手动触发蒸馏（AI 记忆管家）：撞车守卫——running extract_atoms 存在时只提示不投递
     /// （任务列表不留空跑记录）。mode："distill"（默认）/ "rebuild"（画像全量重建）/
     /// "sleep"（预留——内置节律线后开放）。
@@ -51,75 +40,6 @@ impl MemoryService {
         Ok(serde_json::json!({
             "doc": doc,
             "history": history,
-        }))
-    }
-
-    pub async fn trigger_distill_manual(
-        &self,
-        full: bool,
-        mode: &str,
-        by: &str,
-    ) -> Result<serde_json::Value, MemoryError> {
-        if mode == "sleep" {
-            return Err(MemoryError::BadRequest(
-                "睡眠（记忆巩固）尚未上线——依赖内置节律线，敬请期待".into(),
-            ));
-        }
-        if mode == "rebuild" {
-            // 画像全量重建（收录哲学线 task-10）：不入蒸馏链，直接投递 distill_persona
-            // 全量重建任务（payload.full_rebuild → persona.rs 以全部场景重算所有非钉住分面）。
-            // 撞车守卫：running 的 distill_persona 存在时只提示不投递（与 extract 同模）。
-            let running = repo::count_running_persona(&self.pool).await?;
-            if running > 0 {
-                return Ok(serde_json::json!({
-                    "already_running": true,
-                    "hint": "画像全量重建进行中——等它完成看效果，再决定是否重来",
-                }));
-            }
-            let job = self
-                .queue
-                .enqueue(
-                    engram_jobs::JobTemplate::new("distill_persona")
-                        .with_payload(serde_json::json!({"full_rebuild": true}))
-                        .with_idempotency_key(format!(
-                            "persona-rebuild-{}",
-                            chrono::Utc::now().format("%Y%m%d%H%M")
-                        )),
-                )
-                .await
-                .map_err(|e| MemoryError::Storage(e.to_string()))?;
-            return Ok(serde_json::json!({
-                "already_running": false,
-                "hint": "画像全量重建已触发：以全部场景重算所有非钉住分面（manually_edited 豁免）",
-                "jobs": [{ "id": job.id.to_string(), "kind": job.kind }],
-            }));
-        }
-        if mode != "distill" {
-            return Err(MemoryError::BadRequest(format!(
-                "mode 仅支持 distill / sleep（收到 {mode}）"
-            )));
-        }
-        let running = repo::count_running_extract(&self.pool).await?;
-        if running > 0 {
-            return Ok(serde_json::json!({
-                "already_running": true,
-                "running": running,
-                "hint": "当前正在蒸馏中——等它完成看看效果，再决定是否手动触发",
-            }));
-        }
-        let jobs = self.trigger_distill(full, "manual", by).await?;
-        let list: Vec<serde_json::Value> = jobs
-            .iter()
-            .map(|j| serde_json::json!({ "id": j.id.to_string(), "kind": j.kind }))
-            .collect();
-        Ok(serde_json::json!({
-            "already_running": false,
-            "hint": if full {
-                "已触发蒸馏 + 全量整理（consolidate）"
-            } else {
-                "已触发蒸馏链（抽取→仲裁→归组→画像）"
-            },
-            "jobs": list,
         }))
     }
 
@@ -241,33 +161,21 @@ impl MemoryService {
             .collect())
     }
 
-    // ---------- L2 / L3 ----------
-
-    pub async fn list_scenarios(&self, limit: i64) -> Result<Vec<ScenarioDto>, MemoryError> {
-        Ok(repo::list_scenarios(&self.pool, limit.min(200)).await?)
+    /// 用户手动编辑画像活文档（与离线整理 Agent 同一条 save_doc 通道，版本链留痕）。
+    pub async fn persona_doc_edit(
+        &self,
+        content: &str,
+        summary: Option<&str>,
+    ) -> Result<serde_json::Value, MemoryError> {
+        repo::persona_doc_save(&self.pool, content, summary)
+            .await
+            .map_err(|e| MemoryError::Storage(e.to_string()))?;
+        let doc = repo::persona_doc_get(&self.pool)
+            .await
+            .map_err(|e| MemoryError::Storage(e.to_string()))?;
+        Ok(serde_json::json!({ "doc": doc }))
     }
 
-    pub async fn get_scenario(&self, id: Uuid) -> Result<ScenarioDto, MemoryError> {
-        repo::find_scenario(&self.pool, id)
-            .await?
-            .ok_or_else(|| MemoryError::NotFound(format!("场景 {id} 不存在")))
-    }
-
-    /// 当前画像（每分面最新版）。
-    pub async fn persona(&self) -> Result<Vec<PersonaVersion>, MemoryError> {
-        Ok(repo::persona_current(&self.pool).await?)
-    }
-
-    /// 分面版本历史。
-    pub async fn persona_history(&self, aspect: &str) -> Result<Vec<PersonaVersion>, MemoryError> {
-        Ok(repo::persona_history(&self.pool, aspect).await?)
-    }
-
-    /// P11/SEC-E 按 agent 清场（测试隔离，2026-09-03 彻底化）：该 agent **全部**会话
-    /// 物理删除（pending/processing/done/void 一视同仁，sensitive 原文不留——
-    /// 此前 done 会话残留曾导致敏感原始对话留库）+ 其产出的 active 原子归档（可恢复）。
-    /// 返回 (erased_sessions, archived_atoms)。顺序敏感：先归档原子（JOIN 会话判归属）
-    /// 再删会话——删会话后 JOIN 不可判归属。
     pub async fn purge_agent(&self, agent: &str) -> Result<(i64, i64), MemoryError> {
         Ok(repo::purge_agent_tx(&self.pool, agent).await?)
     }
@@ -304,14 +212,12 @@ impl MemoryService {
         .ok();
     }
 
-    /// P4 全量导出（数据主权）：记忆域五表完整快照，JSON 随身带走。
+    /// P4 全量导出（数据主权）：记忆域三表完整快照，JSON 随身带走（P015：scenarios/persona 已退役）。
     /// sensitive 原子是否包含由调用方决定（决策 001 后生产路由默认包含——
     /// 隐私面语义随决策 001 收敛为「标记不排除」；include_sensitive 只是开关）。
     pub async fn export(&self, include_sensitive: bool) -> Result<serde_json::Value, MemoryError> {
         let sessions = repo::list_all_sessions(&self.pool).await?;
         let atoms = repo::list_atoms_all(&self.pool, include_sensitive).await?;
-        let scenarios = repo::list_scenarios_all(&self.pool).await?;
-        let persona = repo::persona_all(&self.pool).await?;
         let entities = repo::entities_for_export(&self.pool).await?;
         Ok(serde_json::json!({
             "format": "engram-memory-export",
@@ -319,12 +225,10 @@ impl MemoryService {
             "exported_at": chrono::Utc::now(),
             "counts": {
                 "sessions": sessions.len(), "atoms": atoms.len(),
-                "scenarios": scenarios.len(), "persona": persona.len(),
                 "entities": entities.len(),
             },
             "sensitive_excluded": !include_sensitive,
-            "sessions": sessions, "atoms": atoms, "scenarios": scenarios,
-            "persona": persona, "entities": entities,
+            "sessions": sessions, "atoms": atoms, "entities": entities,
         }))
     }
 

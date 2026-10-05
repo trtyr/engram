@@ -3,13 +3,10 @@
 use super::*;
 
 impl MemoryService {
-    /// 记忆域缺失向量统计（重嵌修复入口的状态面）。
+    /// 记忆域缺失向量统计（重嵌修复入口的状态面）。P015 场景层退役：只有 atoms。
     pub async fn embedding_status(&self) -> Result<EmbeddingStatus, MemoryError> {
-        let (atoms_missing, scenarios_missing) = repo::embedding_missing_counts(&self.pool).await?;
-        Ok(EmbeddingStatus {
-            atoms_missing,
-            scenarios_missing,
-        })
+        let atoms_missing = repo::embedding_missing_counts(&self.pool).await?;
+        Ok(EmbeddingStatus { atoms_missing })
     }
 
     /// 入队重嵌（换 embedding 供应商后的修复路径；job 见 distill::reembed）。
@@ -123,24 +120,14 @@ impl MemoryService {
         let all = layers.is_empty();
         let want_e = all || layers.contains(&"entities");
         let want_l1 = all || layers.contains(&"l1");
-        let want_l2 = all || layers.contains(&"l2");
-        let want_l3 = all || layers.contains(&"l3");
 
-        // 实体：token 命中（名字加权）——主角先行
-        let (entities, l1, l2, l3) = self
-            .collect_layers(
-                query,
-                qv.as_deref(),
-                max_items,
-                from,
-                to,
-                [want_e, want_l1, want_l2, want_l3],
-            )
+        // 实体：token 命中（名字加权）——主角先行；L1 原子（P015：l2/l3 层已随场景层退役）
+        let (entities, l1) = self
+            .collect_layers(query, qv.as_deref(), max_items, from, to, [want_e, want_l1])
             .await?;
         // B9：命中反馈（异步 best-effort，不阻塞返回）；no_feedback=true 跳过（B6 污染防护）
         if !no_feedback {
             self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
-            self.fire_hit_feedback("scenarios", l2.iter().map(|h| h.id).collect());
         }
         // T020：读取生命周期——只记元数据（层命中数/体量），查询正文不落日志
         self.emit_mem_log(
@@ -150,7 +137,6 @@ impl MemoryService {
                 "hits": {
                     "entities": entities.len(),
                     "l1_atoms": l1.len(),
-                    "l2_scenarios": l2.len(),
                 },
                 "no_feedback": no_feedback,
             }),
@@ -159,8 +145,6 @@ impl MemoryService {
         Ok(SearchResponse {
             entities,
             l1,
-            l2,
-            l3,
             query: query.to_string(),
         })
     }
@@ -174,25 +158,6 @@ impl MemoryService {
         Ok(engram_search::search_entities(&self.pool, query, max_items)
             .await
             .map_err(StoreError::from)?)
-    }
-
-    /// L3 画像层检索：jieba 分词双侧匹配打分排序（弃子串 contains——跨词边界/无序不可靠）。
-    async fn persona_hits(&self, query: &str) -> Result<Vec<PersonaVersion>, MemoryError> {
-        let tokens: std::collections::HashSet<String> = tokenize(query).into_iter().collect();
-        let mut scored: Vec<(usize, PersonaVersion)> = self
-            .persona()
-            .await?
-            .into_iter()
-            .map(|p| {
-                let ct: std::collections::HashSet<String> =
-                    tokenize(&p.content).into_iter().collect();
-                let s = tokens.intersection(&ct).count();
-                (s, p)
-            })
-            .filter(|(s, _)| *s > 0)
-            .collect();
-        scored.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
-        Ok(scored.into_iter().map(|(_, p)| p).collect())
     }
 
     /// 实体透镜（小预算 ~20%）：AI 冷启动要知道用户世界里都有谁。
@@ -363,7 +328,7 @@ impl MemoryService {
         Ok(l1)
     }
 
-    /// 冷启动上下文包：L3 全量 + L2 相关/最近 + L1 补充，预算裁剪。
+    /// 冷启动上下文包：L1 补充 + 实体透镜，预算裁剪（P015：l2/l3 段随场景层退役）。
     pub async fn context_pack(
         &self,
         query: Option<&str>,
@@ -379,7 +344,7 @@ impl MemoryService {
         // v2 修复（N7）：按**完整序列化体积**计量（含 evidence_refs/source_refs）——
         // 此前只数正文文本，chars_used 远小于真实注入体积，字符预算形同虚设。
 
-        // 有 query 时预计算 query 向量（L2/L1 共用，避免重复 embed）
+        // 有 query 时预计算 query 向量（L1 用）
         let qv: Option<Vec<f32>> = match query_vec {
             Some(v) => Some(v.to_vec()),
             None => match query {
@@ -390,48 +355,6 @@ impl MemoryService {
                 None => None,
             },
         };
-
-        // L3 画像：v2 修复 N3（不计入 budget_items 条数）+ 字符子预算 ≤40%——
-        // evidence_refs 计入计量后 7 个分面可能吃光整段预算，把 atoms/scenarios 挤成 0。
-        // 画像先取（上限 40%），剩余预算全数让给场景/实体/原子。
-        let persona_char_cap = budget_chars * 2 / 5;
-        let persona: Vec<PersonaVersion> = self
-            .persona()
-            .await?
-            .into_iter()
-            .take_while(|p| count_json(&p, persona_char_cap, &mut chars_used, &mut truncated))
-            .collect();
-
-        // L2：有 query 按相关性，否则最近。v2（N3）：条数上限语义 = budget_items，
-        // 保底 1——此前 budget_items*2/5 在小预算下把场景挤成 0。
-        let scenario_cap = (budget_items * 2 / 5).max(1).min(budget_items.max(1));
-        let scenarios = if let Some(q) = query {
-            search_scenarios(&self.pool, q, qv.as_deref(), (scenario_cap as i64).max(3))
-                .await
-                .map_err(StoreError::from)?
-        } else {
-            self.list_scenarios((scenario_cap as i64).max(3))
-                .await?
-                .into_iter()
-                .map(|s| SearchHit {
-                    id: s.id,
-                    score: 0.0,
-                    title: Some(s.topic.clone()),
-                    snippet: s.summary.clone(),
-                    kind: None,
-                    needs_review: None,
-                })
-                .collect::<Vec<_>>()
-        };
-        let mut out_scenarios = Vec::new();
-        for h in scenarios.into_iter().take(scenario_cap) {
-            match self.get_scenario(h.id).await {
-                Ok(s) if count_json(&s, budget_chars, &mut chars_used, &mut truncated) => {
-                    out_scenarios.push(s)
-                }
-                _ => break,
-            }
-        }
 
         // 实体透镜（小预算 ~20%）：AI 冷启动要知道用户世界里都有谁
         let ent_budget = (budget_items / 5).max(2).min(budget_items.max(1));
@@ -449,12 +372,10 @@ impl MemoryService {
         truncated |= trunc_a;
 
         let pending_review = self
-            .pack_feedback_and_review(&out_atoms, &out_scenarios, no_feedback)
+            .pack_feedback_and_review(&out_atoms, no_feedback)
             .await?;
 
         Ok(ContextPack {
-            persona,
-            scenarios: out_scenarios,
             atoms: out_atoms,
             entities: out_entities,
             pending_review,
@@ -465,8 +386,7 @@ impl MemoryService {
             },
         })
     }
-    /// 分层收集：实体（名字加权）+ L1（atoms，含 KV 权威通道与 ILIKE 补漏）+ L2 场景 + L3 画像。
-    #[allow(clippy::too_many_arguments)]
+    /// 分层收集：实体（名字加权）+ L1（atoms，含 KV 权威通道与 ILIKE 补漏）。
     async fn collect_layers(
         &self,
         query: &str,
@@ -474,17 +394,9 @@ impl MemoryService {
         max_items: i64,
         from: Option<chrono::DateTime<chrono::Utc>>,
         to: Option<chrono::DateTime<chrono::Utc>>,
-        want: [bool; 4],
-    ) -> Result<
-        (
-            Vec<SearchHit>,
-            Vec<SearchHit>,
-            Vec<SearchHit>,
-            Vec<engram_storage::models::memory::PersonaVersion>,
-        ),
-        MemoryError,
-    > {
-        let [want_e, want_l1, want_l2, want_l3] = want;
+        want: [bool; 2],
+    ) -> Result<(Vec<SearchHit>, Vec<SearchHit>), MemoryError> {
+        let [want_e, want_l1] = want;
         let entities = if want_e {
             self.entity_hits(query, max_items).await?
         } else {
@@ -506,33 +418,18 @@ impl MemoryService {
             .kv_and_literal_supplement(query, want_l1, max_items, l1)
             .await?;
 
-        let l2 = if want_l2 {
-            search_scenarios(&self.pool, query, qv, max_items)
-                .await
-                .map_err(StoreError::from)?
-        } else {
-            vec![]
-        };
-        // L3：小体量——分词双侧匹配打分排序（见助手）
-        let l3 = if want_l3 {
-            self.persona_hits(query).await?
-        } else {
-            vec![]
-        };
-        Ok((entities, l1, l2, l3))
+        Ok((entities, l1))
     }
     /// 命中反馈（B9：读路径也计热度；no_feedback=true 跳过——B6 污染防护）+ 待审代问队列（不计热度）。
     async fn pack_feedback_and_review(
         &self,
         out_atoms: &[AtomDto],
-        out_scenarios: &[ScenarioDto],
         no_feedback: bool,
     ) -> Result<Vec<AtomDto>, MemoryError> {
         // B9：context_pack 也是使用（AI 冷启动读路径），同样计热度；
         // no_feedback=true 供 harness 注入/测试使用——不刷热度（B6 污染防护）
         if !no_feedback {
             self.fire_hit_feedback("atoms", out_atoms.iter().map(|a| a.id).collect());
-            self.fire_hit_feedback("scenarios", out_scenarios.iter().map(|s| s.id).collect());
         }
 
         // 待审代问（议题三）：队列里的低置信项带给 AI——下次对话顺口确认一句，

@@ -8,7 +8,7 @@
  * ① **「我」锚点**：固定在最中、**不连任何边**（旧版的「我-实体」轮辐边是「密集成菊花团」的病根），
  *    布局只由实体间真实共现/关系驱动；
  * ② **kind 配色**（`ENTITY_KIND_COLOR`）+ 度数越大越大；
- * ③ 点击实体 → 看档案（`onSelect`）；点击「我」 → 跳画像（`onGoPersona`）；
+ * ③ 点击实体 → 看档案（`onSelect`）；
  * ④ **常识边视觉分层**：`source='world_knowledge'` 的边半透明细线（第 2 层实体天然止步于此）；
  * ⑤ 坐标持久化（「重排布局」= 清坐标重新炸开），由共享引擎统一负责。
  */
@@ -32,11 +32,9 @@ function themeColors() {
 export default function EntityGalaxy({
   graph,
   onSelect,
-  onGoPersona,
 }: {
   graph: GraphData
   onSelect: (id: string) => void
-  onGoPersona: () => void
 }) {
   const themeTick = useThemeTick()
 
@@ -83,7 +81,7 @@ export default function EntityGalaxy({
       // 实体量级（数百）+ 记忆边界紧：初值把节点调小（滑杆语义，用户可再调）
       initialDisplay={{ nodeSize: 0.5 }}
       initialForces={{ center: 0.6, repel: 10, linkStrength: 1, linkDistance: 250 }}
-      onPick={(id) => (id === ME ? onGoPersona() : onSelect(id))}
+      onPick={onSelect}
       className="relative min-h-0 flex-1"
       legend={
         <>

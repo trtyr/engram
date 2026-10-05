@@ -27,10 +27,6 @@ async fn transfer_roundtrip_and_idempotency() {
         .bind(aid)
         .bind(serde_json::json!([{"session_id": sid.to_string()}]))
         .execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO scenarios (id, topic, summary, body, version) VALUES ($1,'Rust 偏好','语言偏好','话题正文',1)")
-        .bind(uuid::Uuid::now_v7()).execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO persona_aspects (id, aspect, content, version) VALUES ($1,'preferences','偏好 Rust',1)")
-        .bind(uuid::Uuid::now_v7()).execute(&pool).await.unwrap();
     let eid = uuid::Uuid::now_v7();
     sqlx::query(
         "INSERT INTO entities (id, name, kind, summary) VALUES ($1,'engram','project','记忆平台')",
@@ -207,7 +203,7 @@ async fn transfer_roundtrip_and_idempotency() {
     );
 
     // ---------- 清库（模拟一台空 B 机） ----------
-    sqlx::query("TRUNCATE raw_sessions, atoms, scenarios, persona_aspects, entities, entity_relations, atom_entities, wiki_pages, wiki_documents, wiki_chunks, wiki_sources, wiki_review_items, wiki_links, projects, project_locations, project_docs, project_files, project_file_versions, assets, project_links, todos, todo_links CASCADE")
+    sqlx::query("TRUNCATE raw_sessions, atoms, entities, entity_relations, atom_entities, wiki_pages, wiki_documents, wiki_chunks, wiki_sources, wiki_review_items, wiki_links, projects, project_locations, project_docs, project_files, project_file_versions, assets, project_links, todos, todo_links CASCADE")
         .execute(&pool).await.unwrap();
 
     // ---------- 导入 ----------

@@ -115,47 +115,6 @@ pub async fn search_atoms(
         .collect())
 }
 
-/// scenarios 纯向量检索。`query_vec` None 时空结果。
-pub async fn search_scenarios(
-    pool: &PgPool,
-    _query: &str,
-    query_vec: Option<&[f32]>,
-    limit: i64,
-) -> Result<Vec<SearchHit>, sqlx::Error> {
-    let Some(qv) = query_vec else {
-        return Ok(vec![]);
-    };
-    let qvec = Vector::from(qv.to_vec());
-    let rows = sqlx::query(
-        "SELECT id, topic, summary, embedding <=> $1 AS dist FROM scenarios \
-         WHERE embedding IS NOT NULL AND retired_at IS NULL \
-         AND embedding <=> $1 <= (SELECT min(embedding <=> $1) FROM scenarios \
-             WHERE embedding IS NOT NULL AND retired_at IS NULL) + $2 \
-         AND embedding <=> $1 <= $3 \
-         ORDER BY dist LIMIT $4",
-    )
-    .bind(&qvec)
-    .bind(*VEC_RELATIVE_MARGIN)
-    .bind(*VEC_MAX_DISTANCE)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|r| {
-            let dist: f64 = r.get("dist");
-            SearchHit {
-                id: r.get("id"),
-                score: round3((1.0f64 - dist).max(0.0)),
-                title: r.get::<Option<String>, _>("topic"),
-                snippet: r.get("summary"),
-                kind: None,
-                needs_review: None,
-            }
-        })
-        .collect())
-}
-
 /// 实体检索（token 命中，名字加权）。实体无嵌入/FTS 索引且体量小——名字与摘要的
 /// jieba token 直接匹配，名字命中权重 1.0、摘要命中 0.3：搜「张三」应先给实体本人。
 pub async fn search_entities(

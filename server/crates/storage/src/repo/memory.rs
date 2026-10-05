@@ -7,17 +7,13 @@ mod atoms;
 mod entity;
 mod kv;
 mod ops;
-mod persona;
 mod persona_doc;
-mod scenarios;
 mod sessions;
 pub use atoms::*;
 pub use entity::*;
 pub use kv::*;
 pub use ops::*;
-pub use persona::*;
 pub use persona_doc::*;
-pub use scenarios::*;
 pub use sessions::*;
 
 use chrono::{DateTime, Utc};
@@ -28,7 +24,7 @@ use crate::PgPool;
 use crate::error::StoreResult;
 use crate::models::memory::{
     AtomDto, AtomRevision, EntityDto, EntityRelationDto, EntityRevision, GraphEdge, KvEntryDto,
-    PersonaVersion, ScenarioDto, SessionDto, TimelineEvent,
+    SessionDto, TimelineEvent,
 };
 
 // ---------- L0 会话 ----------

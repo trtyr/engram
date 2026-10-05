@@ -22,7 +22,6 @@ export default function Circle() {
       <Galaxy
         key={entity ?? 'none'}
         initialEntity={entity}
-        onGoPersona={() => navigate('/memory?tab=persona')}
         onGoAtoms={() => navigate('/memory?tab=atoms')}
       />
     </div>

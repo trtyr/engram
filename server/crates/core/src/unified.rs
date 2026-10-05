@@ -264,16 +264,6 @@ fn merge_domain_hits(
                 extra: serde_json::json!({ "layer": "l1", "kind": h.kind }),
             });
         }
-        for h in res.l2 {
-            merged.push(UnifiedHit {
-                domain: "memory".into(),
-                id: h.id,
-                title: h.title,
-                snippet: h.snippet,
-                score: 0.0,
-                extra: serde_json::json!({ "layer": "l2", "kind": h.kind }),
-            });
-        }
     } else {
         tracing::warn!("统一检索：memory 域失败，跳过");
     }

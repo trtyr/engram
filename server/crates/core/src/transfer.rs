@@ -1,7 +1,7 @@
 //! 迁移编排：全系统导出聚合、导入（冲突跳过，分域报告）、技能导入闭环。
 //!
 //! 迁移包格式（engram-transfer v1）：
-//! `{format, version, exported_at, counts, memory:{sessions,atoms,scenarios,persona,entities,relations},
+//! `{format, version, exported_at, counts, memory:{sessions,atoms,entities,relations},
 //!   wiki:{pages:[...]}, projects:{projects,locations,docs}}`
 //!
 //! 导入语义：冲突跳过（主键/slug/name 已存在即 skip）——迁移（空机全量进）与
@@ -38,8 +38,7 @@ pub type Result<T> = std::result::Result<T, TransferError>;
 
 /// 全系统导出聚合（迁移包 v1）。
 pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
-    let (sessions, atoms, scenarios, persona, entities, relations) =
-        repo::export_memory(pool).await?;
+    let (sessions, atoms, entities, relations) = repo::export_memory(pool).await?;
     let wiki_libraries = repo::export_wiki_libraries(pool).await?;
     let wiki_pages = repo::export_wiki_pages(pool).await?;
     let (projects, locations, docs) = repo::export_projects(pool).await?;
@@ -67,7 +66,6 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
         "exported_at": chrono::Utc::now().to_rfc3339(),
         "counts": {
             "sessions": sessions.len(), "atoms": atoms.len(),
-            "scenarios": scenarios.len(), "persona": persona.len(),
             "entities": entities.len(), "relations": relations.len(),
             "wiki_libraries": wiki_libraries.len(),
     "wiki_pages": wiki_pages.len(),
@@ -83,8 +81,8 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
             "wiki_promotions": wiki_promotions.len(),
         },
         "memory": {
-            "sessions": sessions, "atoms": atoms, "scenarios": scenarios,
-            "persona": persona, "entities": entities, "relations": relations,
+            "sessions": sessions, "atoms": atoms,
+            "entities": entities, "relations": relations,
             "atom_entities": atom_entities,
         },
         "wiki": {

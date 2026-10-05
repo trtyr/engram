@@ -61,8 +61,8 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
         "memory" => action_docs![
             "remember", false, "存=一句话记忆。mode：atom（默认）/ session（成段会话）/ append（续写会话）/ kv（精确值逐字保存）；其余参数同名平铺。T018：旧名 write_session/append_session/kv_put 已删不兼容" => crate::RememberParams;
             "recall", false, "找=记忆检索总入口。mode：search（默认）/ context（开场装载）/ entities / kv_get / kv_search；其余参数同名平铺。T018：旧名已删不兼容" => crate::MemoryRecallParams;
-            "browse", false, "翻=清单浏览。mode：atoms（默认）/ sessions / session / kv / scenarios（场景清单）/ persona（画像分面）；其余参数同名平铺。T018：旧名已删不兼容" => crate::MemoryBrowseParams;
-            "revise", false, "改=纠错与修订。mode：correct（默认，取代链留痕）/ persona（分面编辑后蒸馏不覆盖）/ archive（原子归档）；其余参数同名平铺。T018：旧名已删不兼容；实体合并按域界在 circles" => crate::MemoryReviseParams;
+            "browse", false, "翻=清单浏览。mode：atoms（默认）/ sessions / session / kv；其余参数同名平铺。T018：旧名已删不兼容" => crate::MemoryBrowseParams;
+            "revise", false, "改=纠错与修订。mode：correct（默认，取代链留痕）/ archive（原子归档）；其余参数同名平铺。T018：旧名已删不兼容；实体合并按域界在 circles" => crate::MemoryReviseParams;
             "review", false, "审=蒸馏与复核。mode：distill（默认）/ result（蒸馏回执）/ confirm / discard / duplicates（原子重复检测）；其余参数同名平铺。T018：旧名已删不兼容；实体重复检测按域界在 circles" => crate::MemoryReviewParams;
             "forget", true, "忘=遗忘。mode：void（默认，作废会话级联归档产物）/ erase（物理删除，需 erase scope）/ restore（撤销 void）/ kv（删 KV 精确值，需 original scope）" => crate::ForgetParams;
         ],
@@ -400,7 +400,6 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "correct"
                 | "confirm"
                 | "discard"
-                | "persona_edit"
                 | "distill"
                 | "write_session"
                 | "append_session"
@@ -501,8 +500,6 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                 | "get_session"
                 | "list_atoms"
                 | "entities"
-                | "scenarios_list"
-                | "persona_get"
                 | "atom_duplicates"
                 | "entity_duplicates"
         ) | (

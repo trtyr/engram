@@ -28,30 +28,13 @@ use crate::error::StoreResult;
 /// memory 域五表 + 实体关系（不含派生列 embedding/tsv/hit_count）。
 pub async fn export_memory(
     pool: &PgPool,
-) -> StoreResult<(
-    Vec<Value>,
-    Vec<Value>,
-    Vec<Value>,
-    Vec<Value>,
-    Vec<Value>,
-    Vec<Value>,
-)> {
+) -> StoreResult<(Vec<Value>, Vec<Value>, Vec<Value>, Vec<Value>)> {
     let sessions: Vec<Value> =
         sqlx::query_scalar("SELECT to_jsonb(s) FROM raw_sessions s ORDER BY s.created_at")
             .fetch_all(pool)
             .await?;
     let atoms: Vec<Value> = sqlx::query_scalar(
         "SELECT to_jsonb(a) - 'embedding' - 'tsv' - 'hit_count' FROM atoms a ORDER BY a.created_at",
-    )
-    .fetch_all(pool)
-    .await?;
-    let scenarios: Vec<Value> = sqlx::query_scalar(
-        "SELECT to_jsonb(s) - 'embedding' - 'hit_count' FROM scenarios s ORDER BY s.created_at",
-    )
-    .fetch_all(pool)
-    .await?;
-    let persona: Vec<Value> = sqlx::query_scalar(
-        "SELECT to_jsonb(p) FROM persona_aspects p ORDER BY p.aspect, p.version",
     )
     .fetch_all(pool)
     .await?;
@@ -64,7 +47,7 @@ pub async fn export_memory(
         sqlx::query_scalar("SELECT to_jsonb(r) FROM entity_relations r ORDER BY r.created_at")
             .fetch_all(pool)
             .await?;
-    Ok((sessions, atoms, scenarios, persona, entities, relations))
+    Ok((sessions, atoms, entities, relations))
 }
 
 // ---------- 导入（幂等，冲突跳过） ----------
