@@ -413,8 +413,6 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
   // 翻页（前端切页：拉满后本地分页，支持页码直跳）
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
-  // 列头内容筛选（DataTable 受控，客户端过滤）
-  const [contentQ, setContentQ] = useState('')
   // 蒸馏进行中（系统状态轮询源）才有新原子产出——闲时不轮询，省请求
   const { distilling } = useSystemStatus()
   useEffect(() => {
@@ -528,10 +526,6 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
               {
                 key: 'content',
                 label: '内容',
-                filter: { type: 'text', placeholder: '搜内容…' },
-                filterValue: contentQ,
-                onFilterChange: setContentQ,
-                filterAriaLabel: '搜原子内容',
                 render: (a) =>
                   editing === a.id ? (
                     <span className="flex items-center gap-1.5">
@@ -654,7 +648,7 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
                 ),
               },
             ]}
-            rows={rows.filter((a) => !contentQ || a.content.includes(contentQ)).slice((cur - 1) * pageSize, cur * pageSize)}
+            rows={rows.slice((cur - 1) * pageSize, cur * pageSize)}
             rowKey={(a) => a.id}
           />
           <Pager

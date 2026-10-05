@@ -238,14 +238,7 @@ export function Spinner({ label = '加载中…' }: { label?: string }) {
   )
 }
 
-// ---------- DataTable：列头筛选（P014） ----------
-
-/** 列头筛选形态：文本输入 or 枚举下拉。 */
-export interface DataTableFilter {
-  type: 'text' | 'select'
-  placeholder?: string
-  options?: { value: string; label: string }[]
-}
+// ---------- DataTable：统一数据表（P014；2026-10-05 用户拍板推翻列头筛选——效果差，仅保留排序） ----------
 
 export interface DataTableColumn<T> {
   key: string
@@ -255,10 +248,6 @@ export interface DataTableColumn<T> {
   tdClassName?: string | ((row: T) => string)
   thClassName?: string
   title?: (row: T) => string | undefined
-  filter?: DataTableFilter
-  filterValue?: string
-  onFilterChange?: (value: string) => void
-  filterAriaLabel?: string
 }
 
 export interface DataTableSort {
@@ -316,7 +305,7 @@ export function DataTable<T>({
                 const SortIcon = active ? (sort!.dir === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
                 return (
                 <th key={c.key} className={`${tableCls.th} ${c.thClassName ?? ''}`}>
-                  <div className="flex flex-col gap-1">
+                  <div>
                     <span className="flex items-center gap-1 whitespace-nowrap">
                       {c.label}
                       {sortable && (
@@ -336,34 +325,6 @@ export function DataTable<T>({
                         </button>
                       )}
                     </span>
-                    {c.filter && (
-                      <div>
-                        {c.filter.type === 'text' ? (
-                          <input
-                            className="w-full min-w-24 rounded border border-input bg-card px-1.5 py-0.5 text-xs outline-none placeholder:text-muted-foreground/50 focus-visible:border-foreground/40"
-                            aria-label={c.filterAriaLabel ?? `筛选 ${c.label}`}
-                            placeholder={c.filter.placeholder ?? '筛选…'}
-                            value={c.filterValue ?? ''}
-                            onChange={(e) => c.onFilterChange?.(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        ) : (
-                          <select
-                            className="w-full rounded border border-input bg-card px-1 py-0.5 text-xs outline-none focus-visible:border-foreground/40"
-                            aria-label={c.filterAriaLabel ?? `筛选 ${c.label}`}
-                            value={c.filterValue ?? ''}
-                            onChange={(e) => c.onFilterChange?.(e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {c.filter.options?.map((o) => (
-                              <option key={o.value} value={o.value}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </th>
                 )

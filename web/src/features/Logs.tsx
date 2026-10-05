@@ -11,7 +11,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Job, type JobEvent } from '@/lib/api'
 import { Card, DataTable, PageHeader, Spinner, StatusBadge, type DataTableSort } from '@/components/ui-bits'
-import { fmtTime, selectCls } from '@/lib/ui'
+import { fmtTime, inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import Pager from '@/components/Pager'
 
@@ -159,6 +159,20 @@ export default function Logs() {
             <option value="codegraph">代码图谱</option>
             <option value="system">系统</option>
           </select>
+          <input
+            className={`${inputCls} w-44`}
+            placeholder="搜消息 / target…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <select className={selectCls} value={level} onChange={(e) => setLevel(e.target.value)}>
+            <option value="">全部级别</option>
+            {['ERROR', 'WARN', 'INFO', 'DEBUG'].map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
           <label className="flex items-center gap-1 text-sm">
             <input type="checkbox" checked={audit} onChange={(e) => setAudit(e.target.checked)} />
             仅审计
@@ -181,15 +195,6 @@ export default function Logs() {
                 label: '级别',
                 tdClassName: 'whitespace-nowrap text-xs font-medium',
                 render: (r) => <span className={LEVEL_CLS[r.level] ?? ''}>{r.level}</span>,
-                filter: {
-                  type: 'select',
-                  options: [
-                    { value: '', label: '全部级别' },
-                    ...['ERROR', 'WARN', 'INFO', 'DEBUG'].map((l) => ({ value: l, label: l })),
-                  ],
-                },
-                filterValue: level,
-                onFilterChange: setLevel,
               },
               {
                 key: 'target',
@@ -215,9 +220,6 @@ export default function Logs() {
                 key: 'message',
                 label: '消息',
                 tdClassName: 'max-w-96',
-                filter: { type: 'text', placeholder: '搜消息/target…' },
-                filterValue: q,
-                onFilterChange: setQ,
                 render: (r) => (
                   <>
                     <LongText text={r.message} />
