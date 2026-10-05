@@ -422,13 +422,13 @@ mod per_kind_tests {
         // （过滤发生在 build_per_kind_semaphores；parse 只管解析语法）
         let config = RunnerConfig {
             per_kind_concurrency: parse_per_kind_concurrency(
-                "extract_atoms:4,wiki_generate:2,organize_scenarios:8",
+                "extract_atoms:4,wiki_generate:2,maintain_memory:8",
             ),
             ..Default::default()
         };
         let sem = build_per_kind_semaphores(&config);
         assert!(
-            !sem.contains_key("extract_atoms") && !sem.contains_key("organize_scenarios"),
+            !sem.contains_key("extract_atoms") && !sem.contains_key("maintain_memory"),
             "workflow kind 不可通过 env 放松串行: {:?}",
             sem.keys().collect::<Vec<_>>()
         );

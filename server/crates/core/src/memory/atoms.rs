@@ -250,7 +250,7 @@ impl MemoryService {
         Ok(row)
     }
 
-    /// 待审复核 discard：归档（仅 needs_review=true 且 active）；归档触发场景快照收敛。
+    /// 待审复核 discard：归档（仅 needs_review=true 且 active）。
     pub async fn discard_review(&self, id: Uuid) -> Result<AtomDto, MemoryError> {
         let row = repo::review_discard(&self.pool, id).await?.ok_or_else(|| {
             MemoryError::NotFound(format!(
@@ -262,19 +262,6 @@ impl MemoryService {
             json!({ "atom_id": id.to_string(), "content": row.content }),
         )
         .await;
-        let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
-        // 有意忽略：快照刷新建队是 best-effort（原子已归档，收敛失败由下次快照自愈）
-        let _ = self
-            .queue
-            .enqueue(
-                JobTemplate::new("organize_scenarios")
-                    .with_idempotency_key(format!("snapshot-refresh-{bucket}"))
-                    .with_payload(
-                        serde_json::json!({"converge_only": true, "atom_id": id.to_string()}),
-                    )
-                    .with_due(chrono::Utc::now() + chrono::Duration::seconds(self.debounce_secs)),
-            )
-            .await;
         Ok(row)
     }
 
@@ -380,12 +367,7 @@ impl MemoryService {
         )
         .await?;
 
-        // F4 治：归档 → 受影响场景快照需要收敛重算（best-effort 异步，
-        // 30s 防抖合并批量归档；重算仅活跃成员、0 活跃则解散——organize 收敛段）。
-        // 标敏感不再触发收敛（P003-T001/决策 001：sensitive 是纯标记，不入收敛判据）。
-        if new_status == "archived" {
-            self.enqueue_converge_refresh(id).await;
-        }
+        // P015 场景层退役：归档不再触发场景快照收敛（scenarios 已 drop）。
         Ok(row)
     }
 
@@ -432,23 +414,6 @@ impl MemoryService {
     .await;
         Ok(())
     }
-    /// F4 治：仅归档触发 → 受影响场景快照收敛重算（best-effort 异步，30s 防抖合并批量归档）。
-    /// 标敏感不触发收敛（P003-T001/决策 001：sensitive 是纯标记，不入收敛判据）。
-    async fn enqueue_converge_refresh(&self, id: Uuid) {
-        let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
-        self.queue
-            .enqueue(
-                JobTemplate::new("organize_scenarios")
-                    .with_idempotency_key(format!("snapshot-refresh-{bucket}"))
-                    .with_payload(
-                        serde_json::json!({"converge_only": true, "atom_id": id.to_string()}),
-                    )
-                    .with_due(chrono::Utc::now() + chrono::Duration::seconds(self.debounce_secs)),
-            )
-            .await
-            .ok();
-    }
-
     /// 重复/近似原子检测（EN-230②）：active 原子中归一化 content 完全相同的分组。
     /// 返回 (归一化内容, 数量, 原子 id 列表)，按数量降序。
     pub async fn duplicates(&self) -> Result<Vec<(String, i64, Vec<Uuid>)>, MemoryError> {
@@ -480,18 +445,6 @@ impl MemoryService {
             json!({ "atom_id": id.to_string(), "content": row.content }),
         )
         .await;
-        let bucket = chrono::Utc::now().timestamp() / self.debounce_secs;
-        // 有意忽略：快照刷新建队是 best-effort（收敛失败由下次快照自愈）
-        let _ = self
-            .queue
-            .enqueue(
-                JobTemplate::new("organize_scenarios")
-                    .with_idempotency_key(format!("snapshot-refresh-{bucket}"))
-                    .with_payload(
-                        serde_json::json!({"converge_only": true, "atom_id": id.to_string()}),
-                    ),
-            )
-            .await;
         Ok(row)
     }
 }

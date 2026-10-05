@@ -2,7 +2,7 @@
 //!
 //! 两域各自的 score 尺度不同（memory 是 RRF 分数、wiki 是 ts_rank），
 //! 直接合并排序会偏向大尺度域。这里统一用「域内 rank 归一化」：每个域（memory 的
-//! l1/l2 各自独立、wiki）内按命中顺序赋 RRF 分数 `1/(60 + rank)`，
+//! l1、wiki）内按命中顺序赋 RRF 分数 `1/(60 + rank)`，
 //! 使跨域分数可比，融合后按分数降序截断。
 
 use engram_llm::ProviderRegistry;
@@ -82,7 +82,7 @@ impl UnifiedSearch {
         }
         metrics::counter!(
             "engram_unified_search_total",
-            "layers" => "l1,l2,wiki_doc,wiki_page,entity,todo"
+            "layers" => "l1,wiki_doc,wiki_page,entity,todo"
         )
         .increment(1);
         let per_domain = limit.clamp(5, 50);
@@ -139,7 +139,7 @@ impl UnifiedSearch {
 
         // 三域并行检索 + 实体层（各自降级：无 embedding 时退化为 FTS，不互相阻塞）
         tokio::join!(
-            mem.search(query, &["l1", "l2"], per_domain, true, None, None, None),
+            mem.search(query, &["l1"], per_domain, true, None, None, None),
             async {
                 let mut out = Vec::new();
                 for lib in &lib_ids {
@@ -179,7 +179,7 @@ impl UnifiedSearch {
 }
 
 /// 域内 rank 归一化：按 `domain:layer` 分组，组内按命中顺序赋 RRF 分数 `1/(60+rank)`。
-/// memory 的 l1/l2 各自独立 rank；wiki 各一组。
+/// memory 的 l1 独立 rank；wiki 各一组（P015 场景层退役：无 l2）。
 /// R6：LLM 精排——top 候选（title+snippet）交模型输出目标顺序（原索引数组）。
 /// 任何失败返回 Err（调用方降级原序）；只做一次 chat 调用，失败不重试（检索是热路径）。
 pub async fn rerank_hits(
@@ -390,12 +390,11 @@ mod tests {
 
     #[test]
     fn rrf_rank_normalizes_per_domain_layer() {
-        // 两域混排：memory l1/l2、wiki（文档+页）
+        // 两域混排：memory l1、wiki（文档+页）（P015：无 l2）
         let mut hits = vec![
             hit("memory", Some("l1")),
             hit("wiki", None),
             hit("wiki", None),
-            hit("memory", Some("l2")),
             hit("memory", Some("l1")),
             hit("wiki", None),
         ];

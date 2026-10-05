@@ -158,8 +158,6 @@ pub async fn count_running_extract(pool: &PgPool) -> StoreResult<i64> {
     Ok(n)
 }
 
-/// 画像全量重建撞车检测：是否存在 running 的 distill_persona（重建撞重建只提示不投递——
-/// 收录哲学线 task-10，与 count_running_extract 同模）。
 /// P015：maintain_memory 运行计数（撞车守卫）。
 pub async fn count_running_maintain(pool: &PgPool) -> StoreResult<i64> {
     sqlx::query_scalar(
@@ -168,15 +166,6 @@ pub async fn count_running_maintain(pool: &PgPool) -> StoreResult<i64> {
     .fetch_one(pool)
     .await
     .map_err(Into::into)
-}
-
-pub async fn count_running_persona(pool: &PgPool) -> StoreResult<i64> {
-    let n: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM jobs WHERE kind = 'distill_persona' AND status = 'running'",
-    )
-    .fetch_one(pool)
-    .await?;
-    Ok(n)
 }
 
 /// 按会话 id 反查蒸馏产物（source_refs 含该 session 的原子，新→旧）。
@@ -427,13 +416,12 @@ pub async fn update_atom_source_refs(
 }
 
 /// B9 命中反馈：hit_count + 1（不刷 updated_at——hit 是使用热度而非内容变化）。
-pub async fn bump_hit_counts(pool: &PgPool, table: &str, ids: &[Uuid]) -> StoreResult<()> {
-    let sql = if table == "atoms" {
-        "UPDATE atoms SET hit_count = hit_count + 1 WHERE id = ANY($1)"
-    } else {
-        "UPDATE scenarios SET hit_count = hit_count + 1 WHERE id = ANY($1)"
-    };
-    sqlx::query(sql).bind(ids).execute(pool).await?;
+/// P015 场景层退役：只有 atoms。
+pub async fn bump_hit_counts(pool: &PgPool, ids: &[Uuid]) -> StoreResult<()> {
+    sqlx::query("UPDATE atoms SET hit_count = hit_count + 1 WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

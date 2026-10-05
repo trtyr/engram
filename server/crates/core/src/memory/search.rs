@@ -77,14 +77,15 @@ impl MemoryService {
 
     /// B9 命中反馈：检索命中即异步回写 hit_count（best-effort，失败只记日志）。
     /// 不刷 updated_at——hit 是使用热度而非内容变化，避免扰动「最近更新」排序。
-    pub(super) fn fire_hit_feedback(&self, table: &'static str, ids: Vec<Uuid>) {
+    /// P015 场景层退役：只有 atoms。
+    pub(super) fn fire_hit_feedback(&self, ids: Vec<Uuid>) {
         if ids.is_empty() {
             return;
         }
         let pool = self.pool.clone();
         tokio::spawn(async move {
-            if let Err(e) = repo::bump_hit_counts(&pool, table, &ids).await {
-                tracing::warn!(error = %e, table, "hit_count 回写失败（不影响检索结果）");
+            if let Err(e) = repo::bump_hit_counts(&pool, &ids).await {
+                tracing::warn!(error = %e, "hit_count 回写失败（不影响检索结果）");
             }
         });
     }
@@ -127,7 +128,7 @@ impl MemoryService {
             .await?;
         // B9：命中反馈（异步 best-effort，不阻塞返回）；no_feedback=true 跳过（B6 污染防护）
         if !no_feedback {
-            self.fire_hit_feedback("atoms", l1.iter().map(|h| h.id).collect());
+            self.fire_hit_feedback(l1.iter().map(|h| h.id).collect());
         }
         // T020：读取生命周期——只记元数据（层命中数/体量），查询正文不落日志
         self.emit_mem_log(
@@ -429,7 +430,7 @@ impl MemoryService {
         // B9：context_pack 也是使用（AI 冷启动读路径），同样计热度；
         // no_feedback=true 供 harness 注入/测试使用——不刷热度（B6 污染防护）
         if !no_feedback {
-            self.fire_hit_feedback("atoms", out_atoms.iter().map(|a| a.id).collect());
+            self.fire_hit_feedback(out_atoms.iter().map(|a| a.id).collect());
         }
 
         // 待审代问（议题三）：队列里的低置信项带给 AI——下次对话顺口确认一句，
