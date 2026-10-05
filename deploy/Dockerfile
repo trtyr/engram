@@ -78,8 +78,10 @@ RUN http_proxy="${APT_PROXY}" https_proxy="${APT_PROXY}" \
     apt-get update -o Acquire::ForceIPv4=true \
     && apt-get install -y --no-install-recommends ca-certificates curl git npm \
     && rm -rf /var/lib/apt/lists/*
-# codegraph CLI pin 版本（D0005；升级需重新验证 JSON 输出格式）
-RUN npm config set registry https://registry.npmmirror.com && npm install -g @colbymchenry/codegraph@1.5.0 && codegraph version
+# codegraph CLI pin 版本（D0005；升级需重新验证 JSON 输出格式）。
+# 2026-10-06：npm registry 设了 npmmirror，但它不镜像 codegraph 的 per-platform 包
+# （@colbymchenry/codegraph-linux-x64）——install 显式走官方 registry。
+RUN npm config set registry https://registry.npmmirror.com && npm install -g @colbymchenry/codegraph@1.5.0 --registry=https://registry.npmjs.org && codegraph version
 WORKDIR /app
 COPY --from=builder /build/target/release/engram-server /usr/local/bin/engram-server
 
