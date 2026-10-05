@@ -1,4 +1,4 @@
-//! 记忆域行类型（raw_sessions / atoms / scenarios / persona_aspects / entities…）。
+//! 记忆域行类型（raw_sessions / atoms / persona_doc / entities…；P015 场景层退役后无 scenarios/persona_aspects）。
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;

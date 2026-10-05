@@ -1,5 +1,5 @@
-//! 记忆域仓储：raw_sessions / atoms / scenarios / persona_aspects / entities /
-//! entity_relations / atom_entities / atom_revisions / entity_revisions 读写。
+//! 记忆域仓储：raw_sessions / atoms / persona_doc / entities /
+//! entity_relations / atom_entities / atom_revisions / entity_revisions 读写（P015 场景层退役：scenarios/persona_aspects 已 drop）。
 //!
 //! 事务边界：purge_agent / purge_deep / merge_entities 整体在事务内封装。
 

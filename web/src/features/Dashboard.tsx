@@ -1,4 +1,4 @@
-/** Dashboard：管线主视觉（L0→L3）+ 资产统计 + 用量趋势 + 近期活动。 */
+/** Dashboard：管线主视觉（L0→L1，P015 场景层退役后双层）+ 资产统计 + 用量趋势 + 近期活动。 */
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
@@ -30,7 +30,7 @@ interface Stage {
   delta: number
 }
 
-/** 管线主视觉：产品灵魂（L0 会话 → L3 画像）占据 C 位；点击穿透 Memory 对应 tab。 */
+/** 管线主视觉：产品灵魂（L0 会话 → L1 原子）占据 C 位；点击穿透 Memory 对应 tab。 */
 function PipelineHero({ stages, distilling }: { stages: Stage[]; distilling: number }) {
   const nav = useNavigate()
   return (

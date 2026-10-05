@@ -1,5 +1,5 @@
 //! 蒸馏链串行保证集成测试（T016 · 决策：串行性是正确性不变量）：
-//! ① workflow 类任务（extract_atoms/organize_scenarios/distill_persona）全局单飞——
+//! ① workflow 类任务（extract_atoms/maintain_memory/reembed_memory）全局单飞——
 //!    多 kind 并发投递时任意时刻最多一条在跑（max_concurrent ≤ 1）；
 //! ② 非 workflow 任务不受 workflow 排队阻塞；
 //! ③ LLM 调用预算耗尽 → 任务 failed 且错误含「预算耗尽」。
@@ -43,7 +43,7 @@ async fn workflow_jobs_execute_serially_and_budget_gate_works() {
     );
 
     // 三个 workflow kind：各记并发峰值（跨 kind 也必须互斥）
-    for kind in ["extract_atoms", "organize_scenarios", "distill_persona"] {
+    for kind in ["extract_atoms", "maintain_memory", "reembed_memory"] {
         let cur = cur.clone();
         let max = max.clone();
         runner = runner.register(kind, move |_ctx: JobContext| {
@@ -77,8 +77,8 @@ async fn workflow_jobs_execute_serially_and_budget_gate_works() {
     let mut ids = Vec::new();
     for kind in [
         "extract_atoms",
-        "organize_scenarios",
-        "distill_persona",
+        "maintain_memory",
+        "reembed_memory",
         "plain_test_kind",
     ] {
         ids.push(queue.enqueue(JobTemplate::new(kind)).await.unwrap().id);

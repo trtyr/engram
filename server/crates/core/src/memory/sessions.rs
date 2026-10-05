@@ -239,17 +239,8 @@ impl MemoryService {
             )
             .await;
         }
-        // 与 void 同一套孤儿清扫（2026-09-08 用户：画像空了圈子里怎么还有东西）——
-        // erase 归档原子后，挂链原子全部失效的实体也要退场，否则圈子和画像口径分裂。
-        // 场景收敛一并触发（快照里可能引用被归档的成员）。
-        self.queue
-            .enqueue(
-                JobTemplate::new("organize_scenarios")
-                    .with_payload(json!({ "converge_only": true }))
-                    .with_idempotency_key(format!("erase-converge-{id}")),
-            )
-            .await
-            .ok();
+        // P015 场景层退役：不再投 organize_scenarios 快照收敛（scenarios 已 drop）。
+        // 孤儿实体退场保留（归档原子后挂链失效的实体同步退场，否则圈子口径分裂）。
         repo::archive_orphan_entities(&self.pool).await?;
         Ok(())
     }
@@ -296,17 +287,9 @@ impl MemoryService {
             )
             .await;
         }
-        // D15/D16：遗忘级联（任何 void 都触发；converge 与孤儿归档均幂等）——
-        // L2 场景收敛 + L3/实体层的孤儿回收，保证「遗忘」后各层即时干净。
+        // D15/D16：遗忘级联（任何 void 都触发；孤儿归档幂等）——
+        // 实体层的孤儿回收，保证「遗忘」后圈子口径即时干净（P015 场景层退役：不再投场景收敛）。
         // 历史遗留的孤儿实体（修复前产生）也能借此回收
-        self.queue
-            .enqueue(
-                JobTemplate::new("organize_scenarios")
-                    .with_payload(json!({ "converge_only": true }))
-                    .with_idempotency_key(format!("void-converge-{id}")),
-            )
-            .await
-            .ok();
         repo::archive_orphan_entities(&self.pool).await?;
         Ok(row)
     }
@@ -348,17 +331,7 @@ impl MemoryService {
                 .await
                 .ok();
         }
-        // 恢复的 active 原子需要场景收敛重算（幂等）
-        if restored > 0 {
-            self.queue
-                .enqueue(
-                    JobTemplate::new("organize_scenarios")
-                        .with_payload(json!({ "converge_only": true }))
-                        .with_idempotency_key(format!("unvoid-converge-{id}")),
-                )
-                .await
-                .ok();
-        }
+        // 恢复无需场景收敛（P015 场景层退役：scenarios 已 drop）
         Ok((row, restored))
     }
 

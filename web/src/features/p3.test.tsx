@@ -145,7 +145,7 @@ beforeEach(() => {
 })
 
 describe('Dashboard 概览：管线主视觉 + 用量图', () => {
-  it('L0-L3 大数字与近7天增量来自 sessions/atoms 数据', async () => {
+  it('L0-L1 大数字与近7天增量来自 sessions/atoms 数据', async () => {
     const now = new Date().toISOString()
     mockState.sessions = [
       { id: 's1', agent: 'a', content: [], distill_status: 'completed', created_at: now },
