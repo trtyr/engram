@@ -25,9 +25,12 @@
 - **study 域 needs_review 是 SRS 复习标记，不同概念，严禁误伤**（core/study.rs、mcp/study.rs、api/study_api.rs 不在删除范围）
 - JEV 级联（P011 T014）的 Review band 依赖 needs_review 落点——同链联动重新定义
 
-### 主题 B：生产 JEV 决策模型部署
+### 主题 B：生产 JEV 决策模型部署——**已作废（2026-10-04 P015 蓝图）**
 
-用户原话：「你生产时忘记了去部署 JEV 模型。」
+JEV 准入闸被新架构取代：准入判断融进抽取 prompt（v9 worth_memorizing 段级回执），
+独立决策模型不再需要。本主题全项作废（llm_providers 不加 JEV 配置行）。
+
+~~用户原话：「你生产时忘记了去部署 JEV 模型。」~~
 
 现状（2026-10-04 生产侦察）：llm_providers 只有 `New API/MiniMax-M3(chat)` + `向量模型/Qwen3-Embedding-8B(embedding)` 两行——**JEV 专用配置区块缺失**，重蒸链上 JEV 级联走了什么 fallback 待查。
 
