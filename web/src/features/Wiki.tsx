@@ -11,7 +11,7 @@ import InsightsPanel from '@/components/InsightsPanel'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { useSearchParams } from 'react-router-dom'
 import { api, type GraphDto, type LintReport, type Purpose, type WikiPage, type WikiPageMeta } from '@/lib/api'
-import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
+import { Card, DataTable, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, relTime, selectCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -887,26 +887,21 @@ function GapsPanel() {
       ) : rows.length === 0 ? (
         <Empty text="没有缺口——所有查询都有像样的命中" />
       ) : (
-        <table className={tableCls.root}>
-          <thead>
-            <tr>
-              <th>查询词</th>
-              <th>零命中</th>
-              <th>低分</th>
-              <th>最后查询</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.query}>
-                <td className="font-medium">{r.query}</td>
-                <td>{r.zero_calls}</td>
-                <td>{r.low_calls}</td>
-                <td className="text-xs text-muted-foreground">{fmtTime(r.last_queried_at)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          columns={[
+            { key: 'query', label: '查询词', tdClassName: 'font-medium', render: (r) => r.query },
+            { key: 'zero', label: '零命中', render: (r) => r.zero_calls },
+            { key: 'low', label: '低分', render: (r) => r.low_calls },
+            {
+              key: 'last',
+              label: '最后查询',
+              tdClassName: 'text-xs text-muted-foreground',
+              render: (r) => fmtTime(r.last_queried_at),
+            },
+          ]}
+          rows={rows}
+          rowKey={(r) => r.query}
+        />
       )}
     </div>
   )
@@ -1147,26 +1142,16 @@ function AgentPanel() {
         {history.length === 0 ? (
           <Empty text="还没有维护执行——上面喂一份原料试试" />
         ) : (
-          <table className={tableCls.root}>
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th>时间</th>
-                <th>产出页数</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((j) => (
-                <tr key={j.id} className="cursor-pointer" onClick={() => setRunId(j.id)}>
-                  <td>
-                    <StatusBadge status={j.status} />
-                  </td>
-                  <td className="text-xs text-muted-foreground">{fmtTime(j.created_at)}</td>
-                  <td className="text-xs">{j.progress?.pages_touched?.length ?? '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            columns={[
+              { key: 'status', label: '状态', render: (j) => <StatusBadge status={j.status} /> },
+              { key: 'time', label: '时间', tdClassName: 'text-xs text-muted-foreground', render: (j) => fmtTime(j.created_at) },
+              { key: 'pages', label: '产出页数', tdClassName: 'text-xs', render: (j) => j.progress?.pages_touched?.length ?? '-' },
+            ]}
+            rows={history}
+            rowKey={(j) => j.id}
+            onRowClick={(j) => setRunId(j.id)}
+          />
         )}
       </Card>
     </div>
@@ -1213,49 +1198,44 @@ function SourcesPane({ libSlug }: { libSlug: string }) {
         <Empty text="暂无原料" />
       ) : (
         <Card className="overflow-x-auto">
-          <table className={tableCls.root}>
-            <thead className={tableCls.thead}>
-              <tr>
-                <th className={tableCls.th}>标题</th>
-                <th className={tableCls.th}>状态</th>
-                <th className={tableCls.th} />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className={tableCls.row}>
-                  <td className={`${tableCls.td} font-medium`}>{r.title ?? '(未命名)'}</td>
-                  <td className={tableCls.td}>{r.status}</td>
-                  <td className={`${tableCls.td} text-right`}>
-                    {confirming === r.id ? (
-                      <span className="inline-flex gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          data-testid={`confirm-delete-${r.id}`}
-                          onClick={async () => {
-                            const rep = await api.del<typeof report>(withLib(`/wiki/sources/${r.id}`, libSlug))
-                            setReport(rep)
-                            setConfirming(null)
-                            load()
-                          }}
-                        >
-                          确认级联删除
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
-                          取消
-                        </Button>
-                      </span>
-                    ) : (
-                      <Button size="sm" variant="outline" onClick={() => setConfirming(r.id)}>
-                        删除
+          <DataTable
+            columns={[
+              { key: 'title', label: '标题', tdClassName: `${tableCls.td} font-medium`, render: (r) => r.title ?? '(未命名)' },
+              { key: 'status', label: '状态', render: (r) => r.status },
+              {
+                key: 'actions',
+                label: '',
+                tdClassName: `${tableCls.td} text-right`,
+                render: (r) =>
+                  confirming === r.id ? (
+                    <span className="inline-flex gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        data-testid={`confirm-delete-${r.id}`}
+                        onClick={async () => {
+                          const rep = await api.del<typeof report>(withLib(`/wiki/sources/${r.id}`, libSlug))
+                          setReport(rep)
+                          setConfirming(null)
+                          load()
+                        }}
+                      >
+                        确认级联删除
                       </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                        取消
+                      </Button>
+                    </span>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={() => setConfirming(r.id)}>
+                      删除
+                    </Button>
+                  ),
+              },
+            ]}
+            rows={rows}
+            rowKey={(r) => r.id}
+          />
         </Card>
       )}
       {report && (

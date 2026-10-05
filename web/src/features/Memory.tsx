@@ -413,6 +413,8 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
   // 翻页（前端切页：拉满后本地分页，支持页码直跳）
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
+  // 列头内容筛选（DataTable 受控，客户端过滤）
+  const [contentQ, setContentQ] = useState('')
   // 蒸馏进行中（系统状态轮询源）才有新原子产出——闲时不轮询，省请求
   const { distilling } = useSystemStatus()
   useEffect(() => {
@@ -510,143 +512,151 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
         <Empty text="暂无原子——会话蒸馏后在 L1 层沉淀记忆原子" />
       ) : (
         <>
-          <Card className="overflow-x-auto">
-            <table className={tableCls.root}>
-              <thead className={tableCls.thead}>
-                <tr>
-                  <th className={tableCls.th}>kind</th>
-                  <th className={tableCls.th}>内容</th>
-                  <th className={tableCls.th}>置信</th>
-                  <th className={tableCls.th}>状态</th>
-                  <th className={`${tableCls.th} whitespace-nowrap`}>溯源</th>
-                  <th className={`${tableCls.th} whitespace-nowrap`}>命中</th>
-                  <th className={tableCls.th} />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice((cur - 1) * pageSize, cur * pageSize).map((a) => {
-                  const refIds = (a.source_refs ?? [])
+          <DataTable
+            columns={[
+              {
+                key: 'kind',
+                label: 'kind',
+                render: (a) => (
+                  <>
+                    {/* 中英对照一行：中文为主（可读），kind 英文 mono 为数据标识 */}
+                    <span className="text-sm">{KIND_LABEL[a.kind] ?? a.kind}</span>
+                    <span className="ml-1.5 font-mono text-xs text-muted-foreground">{a.kind}</span>
+                  </>
+                ),
+              },
+              {
+                key: 'content',
+                label: '内容',
+                filter: { type: 'text', placeholder: '搜内容…' },
+                filterValue: contentQ,
+                onFilterChange: setContentQ,
+                filterAriaLabel: '搜原子内容',
+                render: (a) =>
+                  editing === a.id ? (
+                    <span className="flex items-center gap-1.5">
+                      <input
+                        data-testid={`atom-edit-${a.id}`}
+                        className={`${inputCls} w-72`}
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') {
+                            await api.patch(`/memory/atoms/${a.id}`, { content: draft })
+                            setEditing(null)
+                            setRows(await api.get<Atom[]>(`/memory/atoms?${params()}`))
+                          }
+                          if (e.key === 'Escape') setEditing(null)
+                        }}
+                      />
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
+                        取消
+                      </Button>
+                    </span>
+                  ) : (
+                    <span
+                      data-testid={`atom-content-${a.id}`}
+                      onDoubleClick={() => {
+                        setEditing(a.id)
+                        setDraft(a.content)
+                      }}
+                      title="双击编辑"
+                      className="-mx-1 cursor-text rounded-sm px-1 transition-colors hover:bg-muted/40"
+                    >
+                      {a.needs_review && (
+                        <span className="mr-1.5 rounded bg-warning/15 px-1.5 py-0.5 font-mono text-xs text-warning">待审</span>
+                      )}
+                      {a.content}
+                    </span>
+                  ),
+              },
+              {
+                key: 'confidence',
+                label: '置信',
+                tdClassName: (a) => cn(tableCls.tdMono, a.confidence < 0.6 && 'text-warning'),
+                title: () => '置信度（低于 0.60 黄色提示）',
+                render: (a) => a.confidence.toFixed(2),
+              },
+              {
+                key: 'status',
+                label: '状态',
+                render: (a) => (
+                  <>
+                    <StatusBadge status={a.status} />
+                    {a.superseded_by && (
+                      <span className="ml-1.5 font-mono text-xs text-muted-foreground">
+                        → {a.superseded_by.slice(0, 8)}
+                      </span>
+                    )}
+                  </>
+                ),
+              },
+              {
+                key: 'refs',
+                label: '溯源',
+                thClassName: 'whitespace-nowrap',
+                tdClassName: tableCls.tdMono,
+                title: (a) =>
+                  (a.source_refs ?? [])
                     .map((r) => (r.session_id ? r.session_id.slice(0, 8) + (r.erased ? '（已擦除）' : '') : ''))
                     .filter(Boolean)
-                    .join(' · ')
-                  return (
-                    <tr key={a.id} className={tableCls.row}>
-                      <td className={tableCls.td}>
-                        {/* 中英对照一行：中文为主（可读），kind 英文 mono 为数据标识 */}
-                        <span className="text-sm">{KIND_LABEL[a.kind] ?? a.kind}</span>
-                        <span className="ml-1.5 font-mono text-xs text-muted-foreground">{a.kind}</span>
-                      </td>
-                      <td className={tableCls.td}>
-                        {editing === a.id ? (
-                          <span className="flex items-center gap-1.5">
-                            <input
-                              data-testid={`atom-edit-${a.id}`}
-                              className={`${inputCls} w-72`}
-                              value={draft}
-                              onChange={(e) => setDraft(e.target.value)}
-                              onKeyDown={async (e) => {
-                                if (e.key === 'Enter') {
-                                  await api.patch(`/memory/atoms/${a.id}`, { content: draft })
-                                  setEditing(null)
-                                  setRows(await api.get<Atom[]>(`/memory/atoms?${params()}`))
-                                }
-                                if (e.key === 'Escape') setEditing(null)
-                              }}
-                            />
-                            <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
-                              取消
-                            </Button>
-                          </span>
-                        ) : (
-                          <span
-                            data-testid={`atom-content-${a.id}`}
-                            onDoubleClick={() => {
-                              setEditing(a.id)
-                              setDraft(a.content)
-                            }}
-                            title="双击编辑"
-                            className="-mx-1 cursor-text rounded-sm px-1 transition-colors hover:bg-muted/40"
-                          >
-                            {a.needs_review && (
-                              <span className="mr-1.5 rounded bg-warning/15 px-1.5 py-0.5 font-mono text-xs text-warning">
-                                待审
-                              </span>
-                            )}
-                            {a.content}
-                          </span>
-                        )}
-                      </td>
-                      <td className={cn(tableCls.tdMono, a.confidence < 0.6 && 'text-warning')} title="置信度（低于 0.60 黄色提示）">
-                        {a.confidence.toFixed(2)}
-                      </td>
-                      <td className={tableCls.td}>
-                        <StatusBadge status={a.status} />
-                        {a.superseded_by && (
-                          <span className="ml-1.5 font-mono text-xs text-muted-foreground">
-                            → {a.superseded_by.slice(0, 8)}
-                          </span>
-                        )}
-                      </td>
-                      <td className={tableCls.tdMono} title={refIds || '无溯源'}>
-                        {a.source_refs?.length ?? 0}
-                      </td>
-                      <td className={tableCls.tdMono}>{a.hit_count}</td>
-                      <td className={`${tableCls.td} whitespace-nowrap text-right`}>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className={cn('mr-1', a.sensitive && 'text-warning')}
-                          title={a.sensitive ? '敏感原子（检索/快照隐身，点击取消）' : '标记敏感（医疗/感情/财务等，检索与快照隐身）'}
-                          onClick={async () => {
-                            await api.patch(`/memory/atoms/${a.id}`, { sensitive: !a.sensitive })
-                            setRows(
-                              rows.map((r) => (r.id === a.id ? { ...r, sensitive: !a.sensitive } : r)),
-                            )
-                          }}
-                        >
-                          {a.sensitive ? '已敏感' : '敏感'}
-                        </Button>
+                    .join(' · ') || '无溯源',
+                render: (a) => a.source_refs?.length ?? 0,
+              },
+              { key: 'hits', label: '命中', thClassName: 'whitespace-nowrap', tdClassName: tableCls.tdMono, render: (a) => a.hit_count },
+              {
+                key: 'actions',
+                label: '',
+                tdClassName: 'whitespace-nowrap text-right',
+                render: (a) => (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={cn('mr-1', a.sensitive && 'text-warning')}
+                      title={a.sensitive ? '敏感原子（检索/快照隐身，点击取消）' : '标记敏感（医疗/感情/财务等，检索与快照隐身）'}
+                      onClick={async () => {
+                        await api.patch(`/memory/atoms/${a.id}`, { sensitive: !a.sensitive })
+                        setRows(rows.map((r) => (r.id === a.id ? { ...r, sensitive: !a.sensitive } : r)))
+                      }}
+                    >
+                      {a.sensitive ? '已敏感' : '敏感'}
+                    </Button>
+                    <Button variant="ghost" size="sm" className="mr-1" title="改写留痕历史" onClick={() => setHistoryAtom(a)}>
+                      历史
+                    </Button>
+                    {a.status === 'active' && (
+                      <>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="mr-1"
-                          title="改写留痕历史"
-                          onClick={() => setHistoryAtom(a)}
+                          data-testid={`atom-supersede-${a.id}`}
+                          title="用新事实取代该记忆"
+                          onClick={() => setSuperseding(a.id)}
                         >
-                          历史
+                          取代
                         </Button>
-                        {a.status === 'active' && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="mr-1"
-                              data-testid={`atom-supersede-${a.id}`}
-                              title="用新事实取代该记忆"
-                              onClick={() => setSuperseding(a.id)}
-                            >
-                              取代
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              data-testid={`atom-archive-${a.id}`}
-                              onClick={async () => {
-                                await api.patch(`/memory/atoms/${a.id}`, { status: 'archived' })
-                                setRows(rows.filter((r) => r.id !== a.id))
-                              }}
-                            >
-                              归档
-                            </Button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </Card>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          data-testid={`atom-archive-${a.id}`}
+                          onClick={async () => {
+                            await api.patch(`/memory/atoms/${a.id}`, { status: 'archived' })
+                            setRows(rows.filter((r) => r.id !== a.id))
+                          }}
+                        >
+                          归档
+                        </Button>
+                      </>
+                    )}
+                  </>
+                ),
+              },
+            ]}
+            rows={rows.filter((a) => !contentQ || a.content.includes(contentQ)).slice((cur - 1) * pageSize, cur * pageSize)}
+            rowKey={(a) => a.id}
+          />
           <Pager
             total={rows.length}
             page={cur}
@@ -1171,35 +1181,49 @@ function KvPane() {
         <Empty text="没有命中的 KV 条目" />
       ) : (
         <>
-        <Card className="overflow-x-auto">
-            <table className={tableCls.root}>
-              <thead className={tableCls.thead}>
-                <tr>
-                  <th className={tableCls.th}>key</th>
-                  <th className={tableCls.th}>value</th>
-                  <th className={tableCls.th}>context</th>
-                  <th className={tableCls.th}>source</th>
-                  <th className={tableCls.th}>更新</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice((cur - 1) * pageSize, cur * pageSize).map((r) => (
-                  <tr
-                    key={r.key}
-                    className={`${tableCls.row} cursor-pointer`}
-                    onClick={() => setOpenKey(openKey === r.key ? null : r.key)}
-                  >
-                    <td className={`${tableCls.tdMono} max-w-52 truncate font-medium`} title={r.key}>{r.key}</td>
-                    <td className={`${tableCls.tdMono} max-w-64 truncate`} title={r.value}>{r.value}</td>
-                    <td className={`${tableCls.td} max-w-72 truncate text-muted-foreground`} title={r.context}>{r.context}</td>
-                    <td className={`${tableCls.td} whitespace-nowrap text-muted-foreground`}>{r.source}</td>
-                    <td className={`${tableCls.td} whitespace-nowrap text-muted-foreground`}>{relTime(r.updated_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-        </Card>
-          <Pager
+        <DataTable
+          columns={[
+            {
+              key: 'key',
+              label: 'key',
+              tdClassName: `${tableCls.tdMono} max-w-52 truncate font-medium`,
+              title: (r) => r.key,
+              render: (r) => r.key,
+            },
+            {
+              key: 'value',
+              label: 'value',
+              tdClassName: `${tableCls.tdMono} max-w-64 truncate`,
+              title: (r) => r.value,
+              render: (r) => r.value,
+            },
+            {
+              key: 'context',
+              label: 'context',
+              tdClassName: `${tableCls.td} max-w-72 truncate text-muted-foreground`,
+              title: (r) => r.context,
+              render: (r) => r.context,
+            },
+            {
+              key: 'source',
+              label: 'source',
+              thClassName: 'whitespace-nowrap',
+              tdClassName: `${tableCls.td} whitespace-nowrap text-muted-foreground`,
+              render: (r) => r.source,
+            },
+            {
+              key: 'updated',
+              label: '更新',
+              thClassName: 'whitespace-nowrap',
+              tdClassName: `${tableCls.td} whitespace-nowrap text-muted-foreground`,
+              render: (r) => relTime(r.updated_at),
+            },
+          ]}
+          rows={rows.slice((cur - 1) * pageSize, cur * pageSize)}
+          rowKey={(r) => r.key}
+          onRowClick={(r) => setOpenKey(openKey === r.key ? null : r.key)}
+        />
+        <Pager
             total={rows.length}
             page={cur}
             pageSize={pageSize}

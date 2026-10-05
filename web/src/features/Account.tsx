@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { appConfirm } from '@/components/confirm'
 import { api, type AdminSessionDto, type ApiKey } from '@/lib/api'
-import { Card, Checkbox, Empty, ErrorBox, Spinner, Tabs } from '@/components/ui-bits'
+import { Card, Checkbox, DataTable, Empty, ErrorBox, Spinner, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, tableCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
@@ -498,6 +498,9 @@ function Keys() {
         <Empty text="无 API key" />
       ) : (
         <Card className="overflow-hidden">
+          <div className="flex items-center gap-3 border-b border-border px-3 py-2">
+            <Checkbox checked={allSelected} onChange={toggleAll} label="全选" />
+          </div>
           {selected.size > 0 && (
             <div className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-2">
               <span className="text-xs text-muted-foreground">已选 {selected.size} 把</span>
@@ -523,72 +526,77 @@ function Keys() {
               </Button>
             </div>
           )}
-          <div className="overflow-x-auto">
-            <table className={tableCls.root}>
-              <thead className={tableCls.thead}>
-                <tr>
-                  <th className={`${tableCls.th} w-10`}>
-                    <Checkbox checked={allSelected} onChange={toggleAll} label="全选" />
-                  </th>
-                  <th className={tableCls.th}>名称</th>
-                  <th className={tableCls.th}>前缀</th>
-                  <th className={tableCls.th}>scopes</th>
-                  <th className={tableCls.th}>创建</th>
-                  <th className={tableCls.th}>最近使用</th>
-                  <th className={tableCls.th}>过期</th>
-                  <th className={tableCls.th} />
-                </tr>
-              </thead>
-              <tbody>
-                {active.map((k) => (
-                  <tr key={k.id} className={tableCls.row}>
-                    <td className={tableCls.td}>
-                      <Checkbox checked={selected.has(k.id)} onChange={() => toggle(k.id)} label={`选择 ${k.name}`} />
-                    </td>
-                    <td className={`${tableCls.td} font-medium`}>{k.name}</td>
-                    <td className={`${tableCls.td} font-mono`}>{k.key_prefix}…</td>
-                    <td className={`${tableCls.td} text-xs text-muted-foreground`}>
-                      {k.scopes.map((s) => SCOPE_LABELS[s] ?? s).join('、')}
-                    </td>
-                    <td className={`${tableCls.td} text-muted-foreground`}>{fmtTime(k.created_at)}</td>
-                    <td className={`${tableCls.td} text-muted-foreground`}>
-                      {k.last_used_at ? fmtTime(k.last_used_at) : '—'}
-                    </td>
-                    <td className={`${tableCls.td} ${k.expires_at && new Date(k.expires_at) < new Date() ? 'text-destructive' : 'text-muted-foreground'}`}>
-                      {k.expires_at ? fmtTime(k.expires_at) : '—'}
-                    </td>
-                    <td className={`${tableCls.td} text-right`}>
-                      <div className="flex justify-end gap-1.5">
-                        <Button variant="outline" size="sm" onClick={() => startEdit(k)}>
-                          编辑
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={async () => {
-                            if (
-                              !(await appConfirm({
-                                title: `删除 key「${k.name}」？`,
-                                description: '使用它的 AI 将立即失权。',
-                                destructive: true,
-                                confirmLabel: '删除',
-                              }))
-                            )
-                              return
-                            await api.post(`/settings/api-keys/${k.id}/revoke`)
-                            if (editing?.id === k.id) setEditing(null)
-                            load()
-                          }}
-                        >
-                          删除
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={[
+              {
+                key: 'select',
+                label: '',
+                thClassName: 'w-10',
+                tdClassName: tableCls.td,
+                render: (k) => (
+                  <span onClick={(e) => e.stopPropagation()}>
+                    <Checkbox checked={selected.has(k.id)} onChange={() => toggle(k.id)} label={`选择 ${k.name}`} />
+                  </span>
+                ),
+              },
+              { key: 'name', label: '名称', tdClassName: `${tableCls.td} font-medium`, render: (k) => k.name },
+              { key: 'prefix', label: '前缀', tdClassName: `${tableCls.td} font-mono`, render: (k) => `${k.key_prefix}…` },
+              {
+                key: 'scopes',
+                label: 'scopes',
+                tdClassName: `${tableCls.td} text-xs text-muted-foreground`,
+                render: (k) => k.scopes.map((s) => SCOPE_LABELS[s] ?? s).join('、'),
+              },
+              { key: 'created', label: '创建', tdClassName: `${tableCls.td} text-muted-foreground`, render: (k) => fmtTime(k.created_at) },
+              {
+                key: 'last_used',
+                label: '最近使用',
+                tdClassName: `${tableCls.td} text-muted-foreground`,
+                render: (k) => (k.last_used_at ? fmtTime(k.last_used_at) : '—'),
+              },
+              {
+                key: 'expires',
+                label: '过期',
+                tdClassName: (k) =>
+                  `${tableCls.td} ${k.expires_at && new Date(k.expires_at) < new Date() ? 'text-destructive' : 'text-muted-foreground'}`,
+                render: (k) => (k.expires_at ? fmtTime(k.expires_at) : '—'),
+              },
+              {
+                key: 'actions',
+                label: '',
+                tdClassName: `${tableCls.td} text-right`,
+                render: (k) => (
+                  <div className="flex justify-end gap-1.5">
+                    <Button variant="outline" size="sm" onClick={() => startEdit(k)}>
+                      编辑
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={async () => {
+                        if (
+                          !(await appConfirm({
+                            title: `删除 key「${k.name}」？`,
+                            description: '使用它的 AI 将立即失权。',
+                            destructive: true,
+                            confirmLabel: '删除',
+                          }))
+                        )
+                          return
+                        await api.post(`/settings/api-keys/${k.id}/revoke`)
+                        if (editing?.id === k.id) setEditing(null)
+                        load()
+                      }}
+                    >
+                      删除
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+            rows={active}
+            rowKey={(k) => k.id}
+          />
         </Card>
       )}
     </div>
