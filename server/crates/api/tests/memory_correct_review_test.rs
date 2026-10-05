@@ -231,53 +231,12 @@ async fn correct_sensitive_guard() {
 }
 
 #[tokio::test]
-async fn persona_edit_pins_and_guards() {
+async fn distill_trigger_guard_and_maintain() {
     let ctx = Ctx::new().await;
 
-    // 1. persona_edit 落库：version+1 + manually_edited=true（钉住）
+    // 1. 无 running：触发成功（P015：手动触发统一投离线整理 Agent maintain_memory）
     let v = ctx
-        .mem(
-            "revise",
-            json!({ "mode": "persona", "aspect": "skills", "content": "用户在学 Rust，偏好实战项目驱动" }),
-        )
-        .await;
-    assert_eq!(v["aspect"], "skills");
-    assert_eq!(v["manually_edited"], true);
-    let v1 = v["version"].as_i64().unwrap();
-
-    // 2. 再编辑一次：version 递增
-    let v = ctx
-        .mem(
-            "revise",
-            json!({ "mode": "persona", "aspect": "skills", "content": "用户在学 Rust 与 Elixir，偏好实战项目驱动" }),
-        )
-        .await;
-    assert_eq!(v["version"].as_i64().unwrap(), v1 + 1);
-    assert_eq!(v["manually_edited"], true);
-
-    // 3. 治理：非法 aspect → 可行动报错
-    let err = ctx
-        .mem_err(
-            "revise",
-            json!({ "mode": "persona", "aspect": "mood", "content": "x" }),
-        )
-        .await;
-    assert!(err.contains("aspect"), "应报 aspect 非法：{err}");
-}
-
-#[tokio::test]
-async fn distill_trigger_guard_and_full() {
-    let ctx = Ctx::new().await;
-
-    // 1. mode=sleep 预留：报未上线
-    let err = ctx
-        .mem_err("review", json!({ "mode": "distill", "step": "sleep" }))
-        .await;
-    assert!(err.contains("尚未上线"), "应报 sleep 未上线：{err}");
-
-    // 2. 无 running：触发成功（full 含 consolidate）
-    let v = ctx
-        .mem("review", json!({ "mode": "distill", "full": true }))
+        .mem("review", json!({ "mode": "distill" }))
         .await;
     assert_eq!(v["already_running"], false);
     let kinds: Vec<&str> = v["jobs"]
@@ -286,21 +245,20 @@ async fn distill_trigger_guard_and_full() {
         .iter()
         .map(|j| j["kind"].as_str().unwrap())
         .collect();
-    assert!(kinds.contains(&"extract_atoms"), "应含 extract_atoms：{v}");
-    assert!(kinds.contains(&"consolidate"), "full 应含 consolidate：{v}");
+    assert!(kinds.contains(&"maintain_memory"), "应投 maintain_memory：{v}");
 
-    // 3. 撞车守卫：手工造一条 running extract_atoms（直连测试库）→
-    //    already_running 且无新 job 入队（任务列表不留空跑记录）
+    // 2. 撞车守卫：手工造一条 running maintain_memory（直连测试库）→
+    //    already_running 且不重复投递（任务列表不留空跑记录）
     let url = support::connection_url(&ctx._pg).await.unwrap();
     let pool = sqlx::postgres::PgPool::connect(&url).await.unwrap();
     sqlx::query(
         "INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts) \
-         VALUES ('00000000-0000-4000-8000-aaaaaaaaaaaa', 'extract_atoms', '{}', 'running', 0, 1)",
+         VALUES ('00000000-0000-4000-8000-aaaaaaaaaaaa', 'maintain_memory', '{}', 'running', 0, 1)",
     )
     .execute(&pool)
     .await
     .unwrap();
-    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'extract_atoms'")
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'maintain_memory'")
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -308,7 +266,7 @@ async fn distill_trigger_guard_and_full() {
     let v = ctx.mem("review", json!({ "mode": "distill",})).await;
     assert_eq!(v["already_running"], true);
 
-    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'extract_atoms'")
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'maintain_memory'")
         .fetch_one(&pool)
         .await
         .unwrap();

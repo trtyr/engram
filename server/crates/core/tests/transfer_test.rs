@@ -219,8 +219,6 @@ async fn transfer_roundtrip_and_idempotency() {
     };
     assert_eq!(imported(&["memory", "sessions"]), 1);
     assert_eq!(imported(&["memory", "atoms"]), 1);
-    assert_eq!(imported(&["memory", "scenarios"]), 1);
-    assert_eq!(imported(&["memory", "persona"]), 1);
     assert_eq!(imported(&["memory", "entities"]), 1);
     assert_eq!(imported(&["memory", "relations"]), 1);
     assert_eq!(imported(&["wiki", "pages"]), 1);

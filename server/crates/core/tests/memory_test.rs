@@ -1122,8 +1122,6 @@ async fn context_budget_keeps_atoms_alive() {
 }
 
 /// R7/D21：非法 distill 值响亮拒绝（此前 "sometimes"/"manaul" 静默落入 auto 语义）。
-
-/// R7/D21：非法 distill 值响亮拒绝（此前 "sometimes"/"manaul" 静默落入 auto 语义）。
 #[tokio::test]
 async fn invalid_distill_is_rejected() {
     let (_pool, svc, _pg) = setup().await;
