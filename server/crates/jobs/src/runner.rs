@@ -79,6 +79,7 @@ pub type HandlerFn = Arc<
 pub const WORKFLOW_KINDS: &[&str] = &[
     "extract_atoms",
     "maintain_memory",
+    "maintain_wiki",
     "reembed_memory",
     "deep_purge",
 ];
@@ -88,6 +89,7 @@ pub const WORKFLOW_KINDS: &[&str] = &[
 pub fn domain_for_kind(kind: &str) -> &'static str {
     match kind {
         "extract_atoms" | "maintain_memory" | "reembed_memory" | "deep_purge" => "memory",
+        "maintain_wiki" => "wiki",
         k if k.starts_with("wiki_") => "wiki",
         k if k.starts_with("cg_") => "codegraph",
         _ => "system",

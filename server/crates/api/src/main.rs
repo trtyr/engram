@@ -190,9 +190,13 @@ async fn build_runner(
     );
     // 内置节律（roadmap v3）：自续任务 handler + 启动自检补建（幂等键命中即复用，重复启动安全）
     let runner = engram_distill::rhythm::register_rhythm(runner, distill_llm);
+    let runner = engram_wiki_engine::maintain::register_patrol_rhythm(runner);
     let rhythm_queue = engram_jobs::JobQueue::new(pool.clone());
     if let Err(e) = engram_distill::rhythm::bootstrap(&rhythm_queue, pool).await {
         tracing::warn!("内置节律启动自检失败（不影响启动，下次重启重试）: {e}");
+    }
+    if let Err(e) = engram_wiki_engine::maintain::bootstrap_patrol(&rhythm_queue).await {
+        tracing::warn!("wiki 巡逻节律启动自检失败（不影响启动，下次重启重试）: {e}");
     }
     let runner_handle = runner.start();
     Ok(runner_handle)

@@ -4,11 +4,13 @@
 mod ingest;
 mod ops;
 mod pages;
+mod patrol;
 mod repair_ops;
 mod search_graph;
 pub use ingest::*;
 pub(crate) use ops::*;
 pub use pages::*;
+pub use patrol::*;
 pub use repair_ops::*;
 pub use search_graph::*;
 

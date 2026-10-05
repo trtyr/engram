@@ -346,23 +346,6 @@ describe('Wiki 文档 re-embed', () => {
   })
 })
 
-describe('Wiki 目标（purpose）', () => {
-  it('读 purpose 展示三栏，保存调 PUT', async () => {
-    mockState.purpose = { goals: ['构建知识库'], key_questions: ['什么？'], scope: ['Rust'] }
-    render(wrap(<Wiki />))
-    fireEvent.click(screen.getByRole('button', { name: '运维' }))
-    fireEvent.click(screen.getByRole('button', { name: '目标' }))
-    await screen.findByText('构建知识库')
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => {
-      expect(api.put).toHaveBeenCalledWith(
-        '/wiki/purpose',
-        expect.objectContaining({ goals: ['构建知识库'], key_questions: ['什么？'], scope: ['Rust'] }),
-      )
-    })
-  })
-})
-
 describe('Wiki 目录树', () => {
   it('按 folder 分组渲染页面，根页面 + 多级文件夹可见', async () => {
     mockState.wikiPages = [

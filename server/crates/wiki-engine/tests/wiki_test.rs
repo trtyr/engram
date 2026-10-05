@@ -1799,3 +1799,54 @@ async fn list_pages_meta_only_and_folder_filter() {
         .await;
     let _ = pool;
 }
+
+// ---------- maintain_wiki：定期巡逻（P015 后对齐 maintain_memory 模式） ----------
+
+#[tokio::test]
+async fn patrol_empty_wiki_reports_clean() {
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
+    let report = engram_wiki_engine::maintain::run_patrol(&pool, &wiki, lib)
+        .await
+        .expect("巡逻应成功");
+    assert_eq!(report.lint_issues, 0, "空库 lint 应零问题");
+    assert_eq!(report.lint_checked_pages, 0);
+    assert_eq!(report.repair_actions, 0, "空库无修复动作");
+    assert_eq!(report.duplicate_candidates, 0);
+    assert!(report.lint_deep_job.is_none(), "无 issue 不应触发 LLM 深检");
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
+
+#[tokio::test]
+async fn patrol_repairs_dead_links_and_reports() {
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
+    // 一页链向不存在的 slug → 死链；repair 应自动处置（去链接化或建 stub）
+    wiki.put_page(lib, "page-a", "A", "正文链接 [[ghost-page]]。", None, None)
+        .await
+        .unwrap();
+
+    // 巡逻前：lint 应报死链问题
+    let before = wiki.lint(lib).await.unwrap();
+    assert!(!before.issues.is_empty(), "死链应被 lint 发现");
+
+    let report = engram_wiki_engine::maintain::run_patrol(&pool, &wiki, lib)
+        .await
+        .expect("巡逻应成功");
+    assert!(report.lint_checked_pages >= 1);
+    // repair 确定性修复应有动作（去链/stub 等）——lint 后问题清零或大幅减少
+    let after = wiki.lint(lib).await.unwrap();
+    assert!(
+        after.issues.len() < before.issues.len(),
+        "巡逻后 lint 问题应减少：前 {} 后 {}",
+        before.issues.len(),
+        after.issues.len()
+    );
+    assert!(
+        report.lint_deep_job.is_some(),
+        "仍有 issue 应触发 LLM 深检入队"
+    );
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}

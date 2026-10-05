@@ -415,6 +415,7 @@ pub fn register_handlers(
     let l1 = llm.clone();
     let l2 = llm.clone();
     let l3 = llm.clone();
+    let wiki_for_maintain = wiki.clone();
     runner
         .register("wiki_analyze", move |ctx| {
             let llm = l1.clone();
@@ -443,6 +444,10 @@ pub fn register_handlers(
         .register("wiki_lint_deep", move |ctx| {
             let llm = l3.clone();
             async move { crate::lint_deep::lint_deep_job(&ctx, &llm).await }
+        })
+        .register("maintain_wiki", move |ctx| {
+            let wiki = wiki_for_maintain.clone();
+            async move { crate::maintain::patrol_job(&ctx, &wiki).await }
         })
         .register("wiki_repair", move |ctx| {
             let wiki = wiki.clone();

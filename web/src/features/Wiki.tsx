@@ -1,5 +1,5 @@
 /** Wiki 域：Obsidian 式浏览 —— 目录树（folder 层级）+ Markdown 阅读 + 图谱独立视图。
- *  洞察/Lint/原料/目标 = 运维二级入口（人审面板随人审机制移除退役）。
+ *  洞察/Lint/原料/目标 = 运维二级入口（2026-10-05 拍板：运维收敛为只读巡检报告，maintain_wiki Agent 自动化）。
  *  单库终局（2026-09-20）：库选择/建库/删库 UI 已移除，lib 固定 main，/wiki/* 请求仍带 ?lib=；
  *  POST /wiki/search 例外走 body.library（当前前端无该调用点）。
  *  2026-09-03 审计 28 项全修：布局骨架 / 状态提升与 URL / 视觉层次 / 排版 / 可访问性 / 健壮性。 */
@@ -7,12 +7,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react'
 import { ChevronRight, FileText, Folder, FolderOpen, Inbox } from 'lucide-react'
 import WikiGraph from '@/components/WikiGraph'
-import InsightsPanel from '@/components/InsightsPanel'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { useSearchParams } from 'react-router-dom'
-import { api, type GraphDto, type LintReport, type Purpose, type WikiPage, type WikiPageMeta } from '@/lib/api'
-import { Card, DataTable, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, Tabs } from '@/components/ui-bits'
-import { fmtTime, inputCls, relTime, selectCls, tableCls } from '@/lib/ui'
+import { api, type GraphDto, type WikiPage, type WikiPageMeta } from '@/lib/api'
+import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
+import { fmtTime, inputCls, relTime, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -833,522 +832,129 @@ function GraphPane({ libSlug }: { libSlug: string }) {
   )
 }
 
-// ---------- 运维二级入口 ----------
+// ---------- 巡检报告（P015 后运维收敛：节律自动巡逻，用户只看报告） ----------
 
-type OpsSection = 'agent' | 'insights' | 'gaps' | 'duplicates' | 'lint' | 'sources' | 'purpose'
-
-const OPS_SECTIONS: { value: OpsSection; label: string }[] = [
-  { value: 'agent', label: '维护 Agent' },
-  { value: 'insights', label: '洞察' },
-  { value: 'gaps', label: '知识缺口' },
-  { value: 'duplicates', label: '重复页' },
-  { value: 'lint', label: 'Lint' },
-  { value: 'sources', label: '原料' },
-  { value: 'purpose', label: '目标' },
-]
-
-interface AgentJobRow {
-  id: string
-  kind: string
-  status: string
-  progress: { rounds?: number; llm_calls?: number; pages_touched?: string[]; degraded?: boolean; summary?: string } | null
-  created_at: string
-  finished_at: string | null
+interface PatrolReport {
+  lib: string
+  lint_issues: number
+  lint_checked_pages: number
+  lint_summary: [string, number][]
+  repair_actions: number
+  repair_checked_pages: number
+  repair_detail: [string, string][]
+  embedding_backfilled: number
+  duplicate_candidates: number
+  lint_deep_job: string | null
 }
 
-/** 维护 Agent 面板：下发原料 + 内联 job 进度 + agent 报告 + 历史 run。 */
-interface QueryGapRow {
-  query: string
-  calls: number
-  zero_calls: number
-  low_calls: number
-  last_top_score: number | null
-  last_queried_at: string
+interface PatrolLatest {
+  patrol: { job_id: string; status: string; finished_at: string; report: PatrolReport | null } | null
+  next_due: string | null
 }
 
-/** 知识缺口：零命中/低分查询——内容缺口的直接信号。 */
-function GapsPanel() {
-  const [rows, setRows] = useState<QueryGapRow[] | null>(null)
-  const [err, setErr] = useState('')
-  useEffect(() => {
-    api
-      .get<{ gaps: QueryGapRow[] }>('/wiki/query-gaps')
-      .then((v) => setRows(v.gaps))
-      .catch((e) => setErr(String(e)))
-  }, [])
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        零命中=内容缺口，低分=召回存疑。复制查询词到「维护 Agent」tab 下发对应原料即可补齐。
-      </p>
-      {err && <ErrorBox msg={err} />}
-      {rows === null ? (
-        <Spinner />
-      ) : rows.length === 0 ? (
-        <Empty text="没有缺口——所有查询都有像样的命中" />
-      ) : (
-        <DataTable
-          columns={[
-            { key: 'query', label: '查询词', tdClassName: 'font-medium', render: (r) => r.query },
-            { key: 'zero', label: '零命中', render: (r) => r.zero_calls },
-            { key: 'low', label: '低分', render: (r) => r.low_calls },
-            {
-              key: 'last',
-              label: '最后查询',
-              tdClassName: 'text-xs text-muted-foreground',
-              render: (r) => fmtTime(r.last_queried_at),
-            },
-          ]}
-          rows={rows}
-          rowKey={(r) => r.query}
-        />
-      )}
-    </div>
-  )
-}
-
-interface DupCandidate {
-  norm_title: string
-  count: number
-  pages: { slug: string; title: string; page_type: string }[]
-}
-
-/** 重复页候选：同标题多页——确认后合并（primary 保留，duplicate 并入删除）。 */
-function DuplicatesPanel() {
-  const [rows, setRows] = useState<DupCandidate[] | null>(null)
-  const [busy, setBusy] = useState('')
-  const [err, setErr] = useState('')
+/** 巡检报告（只读）：maintain_wiki 节律每天自动巡逻，这里只展示最近一次结果。 */
+function PatrolPane() {
+  const [data, setData] = useState<PatrolLatest | null>(null)
+  const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
-  const load = useCallback(() => {
+  const load = () =>
     api
-      .get<{ candidates: DupCandidate[] }>('/wiki/duplicates')
-      .then((v) => setRows(v.candidates))
-      .catch((e) => setErr(String(e)))
-  }, [])
+      .get<PatrolLatest>('/wiki/patrol/latest')
+      .then(setData)
+      .catch((e) => setMsg(String(e)))
   useEffect(() => {
     load()
-  }, [load])
-
-  const merge = async (primary: string, duplicate: string) => {
-    if (!window.confirm(`把「${duplicate}」并入「${primary}」？duplicate 页会删除（内容拼接保留）。`)) return
-    setBusy(primary + duplicate)
-    setErr('')
+  }, [])
+  const trigger = async () => {
+    setBusy(true)
     setMsg('')
     try {
-      await api.post('/wiki/pages/merge', { primary, duplicate })
-      setMsg(`已合并 ${duplicate} → ${primary}`)
-      load()
+      const v = await api.post<{ already_running: boolean; hint?: string }>('/wiki/patrol', {})
+      setMsg(v.already_running ? (v.hint ?? '巡逻进行中') : '巡逻已触发——稍后刷新看报告')
+      setTimeout(load, 1500)
     } catch (e) {
-      setErr(String(e))
-    } finally {
-      setBusy('')
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      {err && <ErrorBox msg={err} />}
-      {msg && <p className="text-sm text-emerald-600 dark:text-emerald-400">{msg}</p>}
-      {rows === null ? (
-        <Spinner />
-      ) : rows.length === 0 ? (
-        <Empty text="没有同标题重复页" />
-      ) : (
-        rows.map((c) => (
-          <Card key={c.norm_title} className="p-3 space-y-2">
-            <div className="text-sm font-medium">
-              「{c.norm_title}」× {c.count}
-            </div>
-            <div className="space-y-1">
-              {c.pages.map((pg, idx) => (
-                <div key={pg.slug} className="flex items-center gap-2 text-sm">
-                  <span className="text-xs text-muted-foreground">#{idx + 1}</span>
-                  <a
-                    className="hover:underline"
-                    href={`/wiki?slug=${encodeURIComponent(pg.slug)}`}
-                  >
-                    {pg.title || pg.slug}
-                  </a>
-                  <span className="text-xs opacity-50">{pg.slug}</span>
-                  {idx > 0 && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy === c.pages[0].slug + pg.slug}
-                      onClick={() => merge(c.pages[0].slug, pg.slug)}
-                    >
-                      并入 #1
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </Card>
-        ))
-      )}
-    </div>
-  )
-}
-
-function AgentPanel() {
-  const [mode, setMode] = useState<'url' | 'text'>('url')
-  const [url, setUrl] = useState('')
-  const [text, setText] = useState('')
-  const [title, setTitle] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const [runId, setRunId] = useState<string | null>(null)
-  const [run, setRun] = useState<AgentJobRow | null>(null)
-  const [history, setHistory] = useState<AgentJobRow[]>([])
-
-  const loadHistory = useCallback(() => {
-    api
-      .get<AgentJobRow[]>(`/jobs?kind=wiki_agent&limit=10`)
-      .then(setHistory)
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    loadHistory()
-  }, [loadHistory])
-
-  // 轮询当前 run
-  useEffect(() => {
-    if (!runId) return
-    let stop = false
-    const tick = () => {
-      api
-        .get<AgentJobRow>(`/jobs/${runId}`)
-        .then((j) => {
-          if (stop) return
-          setRun(j)
-          if (j.status !== 'pending' && j.status !== 'running') loadHistory()
-        })
-        .catch(() => {})
-    }
-    tick()
-    const t = setInterval(tick, 2500)
-    return () => {
-      stop = true
-      clearInterval(t)
-    }
-  }, [runId, loadHistory])
-
-  const submit = async () => {
-    setErr('')
-    const payload =
-      mode === 'url'
-        ? { url: url.trim(), title: title.trim() || undefined }
-        : { text: text, title: title.trim() || undefined }
-    if (mode === 'url' && !payload.url) return
-    if (mode === 'text' && !text.trim()) return
-    setBusy(true)
-    try {
-      const v = await api.post<{ job_id: string }>('/wiki/ingest', payload)
-      setRunId(v.job_id)
-      setRun(null)
-      setUrl('')
-      setText('')
-      setTitle('')
-    } catch (e) {
-      setErr(String(e))
+      setMsg(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
   }
-
-  const done = run && run.status !== 'pending' && run.status !== 'running'
-  const report = run?.progress ?? null
-
+  const p = data?.patrol
+  const r = p?.report
   return (
-    <div className="space-y-4">
-      {/* 下发区 */}
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <Tabs
-            items={[
-              { value: 'url', label: 'URL' },
-              { value: 'text', label: '文本' },
-            ]}
-            value={mode}
-            onChange={(v) => setMode(v as 'url' | 'text')}
-          />
-          <input
-            className={inputCls + ' max-w-xs'}
-            placeholder="标题（可选）"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </div>
-        {mode === 'url' ? (
-          <input
-            className={inputCls}
-            placeholder="https://example.com/article ——Agent 会抓取并沉淀为知识页"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-        ) : (
-          <textarea
-            className={inputCls + ' min-h-28'}
-            placeholder="粘贴原料文本——Agent 会整理成互链知识页"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-        )}
-        {err && <ErrorBox msg={err} />}
-        <Button size="sm" disabled={busy} onClick={submit}>
-          {busy ? '下发中…' : '喂给维护 Agent'}
+    <div className="space-y-3" data-testid="patrol-pane">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          wiki 由维护 Agent 每天自动巡逻（lint 体检 → 确定性修复 → 重复页报告 → 深度检查）。
+          {data?.next_due && ` 下次：${fmtTime(data.next_due)}`}
+        </p>
+        <Button size="sm" variant="outline" disabled={busy} onClick={trigger}>
+          {busy ? '触发中…' : '立即巡逻'}
         </Button>
-      </Card>
-
-      {/* 当前 run 进度/报告 */}
-      {runId && (
-        <Card className="p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <StatusBadge status={run?.status ?? 'running'} />
-            <span className="text-xs text-muted-foreground">job {runId.slice(0, 8)}…</span>
+      </div>
+      {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+      {!p ? (
+        <Empty text="还没有巡逻记录——等节律自动跑，或点上面立即巡逻" />
+      ) : p.status !== 'succeeded' ? (
+        <Empty text={`最近一次巡逻未完成（${p.status}）——等下次自动巡逻`} />
+      ) : !r ? (
+        <Empty text="巡逻报告缺失" />
+      ) : (
+        <Card className="space-y-3 p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">
+              巡检报告 · {r.lint_checked_pages} 页体检 / {r.repair_checked_pages} 页修复扫描
+            </span>
+            <span className="text-xs text-muted-foreground">{fmtTime(p.finished_at)}</span>
           </div>
-          {!done && <Spinner />}
-          {done && report && (
-            <div className="space-y-1 text-sm">
-              {typeof report.rounds === 'number' && (
-                <div>
-                  完成：{report.rounds} 轮 · {report.llm_calls ?? '-'} 次 LLM 调用
-                  {report.degraded ? ' · ⚠️ 降级' : ''}
-                </div>
-              )}
-              {report.summary && <div className="text-muted-foreground">{report.summary}</div>}
-              {!!report.pages_touched?.length && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {report.pages_touched.map((slug) => (
-                    <a
-                      key={slug}
-                      className="rounded border px-2 py-0.5 text-xs hover:border-foreground/40"
-                      href={`/wiki?slug=${encodeURIComponent(slug)}`}
-                    >
-                      {slug}
-                    </a>
+          <div className="grid gap-2 text-sm sm:grid-cols-2">
+            <div className="rounded border border-border p-2">
+              <div className="font-medium">Lint 体检：{r.lint_issues} 项问题</div>
+              {r.lint_summary.length > 0 ? (
+                <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                  {r.lint_summary.map(([kind, n]) => (
+                    <li key={kind}>
+                      {kind} × {n}
+                    </li>
                   ))}
-                </div>
+                </ul>
+              ) : (
+                <div className="mt-1 text-xs text-muted-foreground">全部干净</div>
               )}
             </div>
+            <div className="rounded border border-border p-2">
+              <div className="font-medium">自动修复：{r.repair_actions} 项动作</div>
+              <div className="mt-1 text-xs text-muted-foreground">向量回填 {r.embedding_backfilled} 页</div>
+            </div>
+          </div>
+          {r.repair_detail.length > 0 && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground">修复明细（{r.repair_detail.length}）</summary>
+              <ul className="mt-1 space-y-0.5">
+                {r.repair_detail.map(([action, slug], i) => (
+                  <li key={i}>
+                    <span className="font-mono">{action}</span> · {slug}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {r.duplicate_candidates > 0 && (
+            <p className="text-xs text-warning">
+              重复页候选 {r.duplicate_candidates} 组——深度检查报告里给合并建议，确认后再手动合并。
+            </p>
+          )}
+          {r.lint_deep_job && (
+            <p className="text-xs text-muted-foreground">
+              LLM 深度检查已入队（任务 {r.lint_deep_job.slice(0, 8)}）——结果看任务列表。
+            </p>
           )}
         </Card>
       )}
-
-      {/* 历史 run */}
-      <Card className="p-4">
-        <div className="text-sm font-medium mb-2">最近维护执行</div>
-        {history.length === 0 ? (
-          <Empty text="还没有维护执行——上面喂一份原料试试" />
-        ) : (
-          <DataTable
-            columns={[
-              { key: 'status', label: '状态', render: (j) => <StatusBadge status={j.status} /> },
-              { key: 'time', label: '时间', tdClassName: 'text-xs text-muted-foreground', render: (j) => fmtTime(j.created_at) },
-              { key: 'pages', label: '产出页数', tdClassName: 'text-xs', render: (j) => j.progress?.pages_touched?.length ?? '-' },
-            ]}
-            rows={history}
-            rowKey={(j) => j.id}
-            onRowClick={(j) => setRunId(j.id)}
-          />
-        )}
-      </Card>
     </div>
   )
 }
 
+/** 运维入口（收敛后只剩巡检报告——lint/repair/duplicates/insights 全部 Agent 自动化）。 */
 function OpsPanel({ lib }: { lib: string }) {
-  const [section, setSection] = useState<OpsSection>('insights')
-  return (
-    <div className="space-y-4">
-      <h2 className="text-sm font-semibold">运维</h2>
-      <Tabs items={OPS_SECTIONS} value={section} onChange={setSection} />
-      {section === 'agent' && <AgentPanel />}
-      {section === 'gaps' && <GapsPanel />}
-      {section === 'duplicates' && <DuplicatesPanel />}
-      {section === 'insights' && <InsightsPanel onHighlight={() => {}} libSlug={lib} />}
-      {section === 'lint' && <LintPane libSlug={lib} />}
-      {section === 'sources' && <SourcesPane libSlug={lib} />}
-      {section === 'purpose' && <PurposePane libSlug={lib} />}
-    </div>
-  )
+  return <PatrolPane key={lib} />
 }
-
-/** 原料管理：列出来源+级联删除 */
-function SourcesPane({ libSlug }: { libSlug: string }) {
-  const [rows, setRows] = useState<{ id: string; title: string | null; status: string }[] | null>(null)
-  const [confirming, setConfirming] = useState<string | null>(null)
-  const [report, setReport] = useState<{ deleted_pages: string[]; updated_shared: string[]; cleaned_links: number } | null>(null)
-  const load = useCallback(
-    () =>
-      api
-        .get<{ id: string; title: string | null; status: string }[]>(withLib('/wiki/sources', libSlug))
-        .then(setRows)
-        .catch(() => {}),
-    [libSlug],
-  )
-  useEffect(() => {
-    load()
-  }, [load])
-  if (!rows) return <Spinner />
-  return (
-    <div className="space-y-3" data-testid="sources-pane">
-      {rows.length === 0 ? (
-        <Empty text="暂无原料" />
-      ) : (
-        <Card className="overflow-x-auto">
-          <DataTable
-            columns={[
-              { key: 'title', label: '标题', tdClassName: `${tableCls.td} font-medium`, render: (r) => r.title ?? '(未命名)' },
-              { key: 'status', label: '状态', render: (r) => r.status },
-              {
-                key: 'actions',
-                label: '',
-                tdClassName: `${tableCls.td} text-right`,
-                render: (r) =>
-                  confirming === r.id ? (
-                    <span className="inline-flex gap-1.5">
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        data-testid={`confirm-delete-${r.id}`}
-                        onClick={async () => {
-                          const rep = await api.del<typeof report>(withLib(`/wiki/sources/${r.id}`, libSlug))
-                          setReport(rep)
-                          setConfirming(null)
-                          load()
-                        }}
-                      >
-                        确认级联删除
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
-                        取消
-                      </Button>
-                    </span>
-                  ) : (
-                    <Button size="sm" variant="outline" onClick={() => setConfirming(r.id)}>
-                      删除
-                    </Button>
-                  ),
-              },
-            ]}
-            rows={rows}
-            rowKey={(r) => r.id}
-          />
-        </Card>
-      )}
-      {report && (
-        <Card className="p-3 text-xs" data-testid="cascade-report">
-          <p className="mb-1 font-medium">级联删除报告：</p>
-          <p>
-            整页删除：{report.deleted_pages.length}（{report.deleted_pages.join(', ')}）
-          </p>
-          <p>
-            共享页摘源：{report.updated_shared.length}（{report.updated_shared.join(', ')}）
-          </p>
-          <p>清理死链：{report.cleaned_links} 条</p>
-        </Card>
-      )}
-    </div>
-  )
-}
-
-function LintPane({ libSlug }: { libSlug: string }) {
-  const [r, setR] = useState<LintReport | null>(null)
-  const [err, setErr] = useState('')
-  return (
-    <div className="space-y-4">
-      <Button
-        size="sm"
-        onClick={async () => {
-          try {
-            setR(await api.post<LintReport>(withLib('/wiki/lint', libSlug)))
-          } catch (e) {
-            setErr(e instanceof Error ? e.message : 'lint 失败')
-          }
-        }}
-      >
-        运行 Lint
-      </Button>
-      {err && <ErrorBox msg={err} />}
-      {r && (
-        <div>
-          <p className="mb-2 text-sm text-muted-foreground">
-            检查 {r.checked_pages} 页，{r.issues.length} 个问题
-          </p>
-          {r.issues.map((i, idx) => (
-            <div key={idx} className="border-b border-border/50 py-2 text-sm last:border-0">
-              <span className="mr-2 rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning">{i.rule}</span>
-              <span className="font-medium">{i.slug}</span>
-              <span className="ml-2 text-muted-foreground">{i.detail}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function PurposePane({ libSlug }: { libSlug: string }) {
-  const [p, setP] = useState<Purpose | null>(null)
-  const [goals, setGoals] = useState('')
-  const [questions, setQuestions] = useState('')
-  const [scope, setScope] = useState('')
-  const [msg, setMsg] = useState('')
-  useEffect(() => {
-    api
-      .get<Purpose>(withLib('/wiki/purpose', libSlug))
-      .then((p) => {
-        setP(p)
-        setGoals(p.goals.join('\n'))
-        setQuestions(p.key_questions.join('\n'))
-        setScope(p.scope.join('\n'))
-      })
-      .catch(() => {})
-  }, [libSlug])
-  if (!p) return <Spinner />
-  const split = (s: string) =>
-    s
-      .split('\n')
-      .map((x) => x.trim())
-      .filter(Boolean)
-  return (
-    <Card className="space-y-4 p-4">
-      <div>
-        <label className="mb-1.5 block text-sm font-medium">目标（为什么建这个知识库）</label>
-        <textarea className={`${inputCls} h-24 w-full`} value={goals} onChange={(e) => setGoals(e.target.value)} />
-      </div>
-      <div>
-        <label className="mb-1.5 block text-sm font-medium">关键问题（应能回答什么）</label>
-        <textarea className={`${inputCls} h-24 w-full`} value={questions} onChange={(e) => setQuestions(e.target.value)} />
-      </div>
-      <div>
-        <label className="mb-1.5 block text-sm font-medium">范围边界</label>
-        <textarea className={`${inputCls} h-24 w-full`} value={scope} onChange={(e) => setScope(e.target.value)} />
-      </div>
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          onClick={async () => {
-            try {
-              await api.put(withLib('/wiki/purpose', libSlug), {
-                goals: split(goals),
-                key_questions: split(questions),
-                scope: split(scope),
-              })
-              setMsg('已保存')
-            } catch (ex) {
-              setMsg(ex instanceof Error ? ex.message : '保存失败')
-            }
-          }}
-        >
-          保存
-        </Button>
-        {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
-      </div>
-    </Card>
-  )
-}
-
-
