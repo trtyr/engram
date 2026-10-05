@@ -17,6 +17,7 @@ pub mod lint;
 pub mod lint_deep;
 pub mod maintain;
 pub mod markup;
+pub mod patrol_agent;
 pub mod promote;
 pub mod prompts;
 pub mod purpose;

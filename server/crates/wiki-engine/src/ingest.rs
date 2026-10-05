@@ -415,8 +415,9 @@ pub fn register_handlers(
     let l1 = llm.clone();
     let l2 = llm.clone();
     let l3 = llm.clone();
+    let l4 = llm.clone();
     let wiki_for_maintain = wiki.clone();
-    runner
+    let runner = runner
         .register("wiki_analyze", move |ctx| {
             let llm = l1.clone();
             async move {
@@ -447,7 +448,8 @@ pub fn register_handlers(
         })
         .register("maintain_wiki", move |ctx| {
             let wiki = wiki_for_maintain.clone();
-            async move { crate::maintain::patrol_job(&ctx, &wiki).await }
+            let llm = l4.clone();
+            async move { crate::maintain::patrol_job(&ctx, &wiki, &llm).await }
         })
         .register("wiki_repair", move |ctx| {
             let wiki = wiki.clone();
@@ -477,7 +479,9 @@ pub fn register_handlers(
                 .ok();
                 Ok(serde_json::to_value(&report).unwrap_or_default())
             }
-        })
+        });
+    // 节律壳：rhythm_maintain_wiki 每日桶（续明日 + 投巡逻）
+    crate::maintain::register_patrol_rhythm(runner)
 }
 
 #[cfg(test)]

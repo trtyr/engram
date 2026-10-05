@@ -29,6 +29,12 @@ pub struct WikiPatrolReport {
     pub duplicate_candidates: usize,
     /// LLM 深检任务 id（异步跑，结果看该 job 的 progress）
     pub lint_deep_job: Option<Uuid>,
+    /// 维护 Agent 纪要（语义裁决一句话总结）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_summary: Option<String>,
+    /// 建议人工处理的动作（Agent 裁决产出）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_actions: Option<Vec<String>>,
 }
 
 /// 巡逻一次：lint → repair（自动）→ duplicates → lint_deep 入队 → 报告。
@@ -77,6 +83,8 @@ pub async fn run_patrol(
         embedding_backfilled: backfilled as i64,
         duplicate_candidates: dups.len(),
         lint_deep_job,
+        agent_summary: None,
+        manual_actions: None,
     };
     Ok(report)
 }
@@ -94,12 +102,33 @@ pub async fn count_running_maintain_wiki(pool: &PgPool) -> Result<i64, sqlx::Err
 pub async fn patrol_job(
     ctx: &engram_jobs::JobContext,
     wiki: &WikiService,
+    llm: &crate::service::LlmRef,
 ) -> Result<Value, JobError> {
     let pool = ctx.pool().clone();
     let lib = crate::libraries::resolve(&pool, None)
         .await
         .map_err(job_err)?;
-    let report = run_patrol(&pool, wiki, lib).await?;
+    let mut report = run_patrol(&pool, wiki, lib).await?;
+
+    // ⑤ 维护 Agent：语义裁决 + 纪要（工具循环只读，建议不自动执行）
+    let evidence = serde_json::json!({
+        "lint_issues": report.lint_issues,
+        "lint_summary": report.lint_summary,
+        "duplicate_candidates": wiki.duplicate_candidates(lib).await.unwrap_or_default(),
+        "repair_actions_done": report.repair_detail,
+    });
+    match crate::patrol_agent::run(ctx, llm, wiki, lib, evidence).await {
+        Ok(brief) => {
+            report.agent_summary = Some(brief.summary);
+            report.manual_actions = if brief.manual_actions.is_empty() {
+                None
+            } else {
+                Some(brief.manual_actions)
+            };
+        }
+        Err(e) => tracing::warn!("维护 Agent 循环失败（不阻塞巡逻）: {e}"),
+    }
+
     ctx.emit(
         &format!(
             "巡逻完成：lint {} 项 / 修复 {} 动作 / 重复候选 {} / 深检 {}",

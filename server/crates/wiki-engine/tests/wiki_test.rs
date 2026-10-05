@@ -1850,3 +1850,102 @@ async fn patrol_repairs_dead_links_and_reports() {
         .shutdown_and_wait(std::time::Duration::from_secs(5))
         .await;
 }
+
+#[tokio::test]
+async fn patrol_rhythm_bootstrap_is_idempotent_daily_bucket() {
+    let (pool, _wiki, handle, _pg, _lib) = setup(vec![]).await;
+    let queue = engram_jobs::JobQueue::new(pool.clone());
+    // 同日两次 bootstrap → 幂等键命中 → 只有一个今天的桶
+    engram_wiki_engine::maintain::bootstrap_patrol(&queue)
+        .await
+        .expect("bootstrap 1");
+    engram_wiki_engine::maintain::bootstrap_patrol(&queue)
+        .await
+        .expect("bootstrap 2");
+    let buckets: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'rhythm_maintain_wiki'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        buckets, 1,
+        "同日 bootstrap 幂等：应只有一个节律桶，得 {buckets}"
+    );
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
+
+#[tokio::test]
+async fn patrol_rhythm_handler_enqueues_patrol_and_tomorrow_bucket() {
+    let (pool, _wiki, handle, _pg, _lib) = setup(vec![
+        // maintain_wiki 巡逻内的维护 Agent：直接 finish 交纪要
+        serde_json::json!({"tool": "finish", "args": {"summary": "空库健康", "manual_actions": []}}),
+    ])
+    .await;
+    // bootstrap 建今天的节律桶 → runner 消费 → 应产出 maintain_wiki + 明日桶
+    let queue = engram_jobs::JobQueue::new(pool.clone());
+    engram_wiki_engine::maintain::bootstrap_patrol(&queue)
+        .await
+        .expect("bootstrap");
+    // setup 内 runner 已 start——轮询等待：今天的桶被消费（succeeded）且明日桶已建
+    let mut ok = false;
+    for _ in 0..100 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let done: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM jobs WHERE kind = 'rhythm_maintain_wiki' \
+             AND status IN ('succeeded', 'running')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if done >= 1 {
+            ok = true;
+            break;
+        }
+    }
+    assert!(
+        ok,
+        "节律桶应被消费，实际状态：{:?}",
+        sqlx::query_as::<_, (String, String, Option<String>)>(
+            "SELECT kind, status::text, error FROM jobs WHERE kind LIKE '%maintain_wiki%'"
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default()
+    );
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+    let patrol_jobs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'maintain_wiki'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        patrol_jobs >= 1,
+        "节律应投递 maintain_wiki 巡逻任务，得 {patrol_jobs}"
+    );
+    let tomorrow: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'rhythm_maintain_wiki' \
+         AND status = 'pending' AND idempotency_key LIKE '%rhythm-maintain-wiki-%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(tomorrow >= 1, "应自续明日节律桶，得 {tomorrow}");
+    // 维护 Agent 纪要应进巡逻报告（objective ③⑤：工具循环 + mock finish）
+    let progress: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT progress FROM jobs WHERE kind = 'maintain_wiki' AND status = 'succeeded' \
+         ORDER BY finished_at DESC NULLS LAST LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap()
+    .flatten();
+    let progress = progress.expect("巡逻任务应有 progress 报告");
+    assert_eq!(
+        progress["agent_summary"], "空库健康",
+        "维护 Agent 纪要应进报告: {progress}"
+    );
+}

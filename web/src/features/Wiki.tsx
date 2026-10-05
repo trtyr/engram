@@ -845,6 +845,8 @@ interface PatrolReport {
   embedding_backfilled: number
   duplicate_candidates: number
   lint_deep_job: string | null
+  agent_summary?: string | null
+  manual_actions?: string[] | null
 }
 
 interface PatrolLatest {
@@ -942,6 +944,22 @@ function PatrolPane() {
             <p className="text-xs text-warning">
               重复页候选 {r.duplicate_candidates} 组——深度检查报告里给合并建议，确认后再手动合并。
             </p>
+          )}
+          {r.agent_summary && (
+            <div className="rounded border border-border p-2">
+              <div className="text-sm font-medium">维护官纪要</div>
+              <p className="mt-1 text-xs text-muted-foreground">{r.agent_summary}</p>
+            </div>
+          )}
+          {r.manual_actions && r.manual_actions.length > 0 && (
+            <div className="rounded border border-warning/40 p-2">
+              <div className="text-sm font-medium">待人工处理（{r.manual_actions.length}）</div>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {r.manual_actions.map((a, i) => (
+                  <li key={i}>{a}</li>
+                ))}
+              </ul>
+            </div>
           )}
           {r.lint_deep_job && (
             <p className="text-xs text-muted-foreground">
