@@ -95,7 +95,7 @@ pub async fn run(
         let result: Value = match tool {
             "list_docs" => {
                 let rows: Vec<(Uuid, String, Option<String>, String, i64)> = sqlx::query_as(
-                    "SELECT id, category, folder, title, length(content) \
+                    "SELECT id, category, folder, title, length(content)::bigint \
                          FROM project_docs WHERE project_id = $1 ORDER BY category, title",
                 )
                 .bind(project_id)
