@@ -74,7 +74,7 @@ impl EngramMcpServer {
             "title": doc.title,
             "status": doc.status,
             "deduped": deduped,
-            "hint": "入库成功（异步分块/嵌入）——用 document_get 看 status 进度；原文检索用 documents_search",
+            "hint": "入库成功（异步分块/嵌入）——jobs 工具按 job_id 看处理进度",
         }))
     }
 

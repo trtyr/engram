@@ -57,7 +57,7 @@ projects 域用法：项目 = 一件有明确目标、一次干不完、跨多�
 1. 开工：{\"action\":\"list\"} / {\"action\":\"get\"} 找到这件事的锚点接上上下文；没有就 {\"action\":\"create\"}；
 2. 找内容：get 默认索引模式（文档只给 id/分类/标题/字符数）；{\"action\":\"doc_search\"} 定位到哪篇哪行，
    {\"action\":\"doc_get\",\"doc_id\":\"…\",\"start_line\":…,\"end_line\":…} 区间精读——按需取用，无截断；
-3. 干活中：{\"action\":\"doc_add\"} / {\"action\":\"doc_update\"} 沉淀进展与结论；
+3. 干活中：{\"action\":\"doc_add\"} 沉淀进展与结论；批量导入现成文档用 {\"action\":\"doc_import\"}；
    小修一段用 {\"action\":\"doc_patch\"}（行级 replace/insert/delete，不必取全文重发）；
 4. 收尾：{\"action\":\"update\"} 改状态、写总结文档，下次会话从 get 接上。
 

@@ -319,7 +319,7 @@ impl EngramMcpServer {
 
     /// 项目记忆域（单一入口）：项目 = 一件有明确目标、跨会话推进的工作，
     /// 下挂多主机位置（登记制）与「分类 > 文档」树。开工 "list"/"get" 接上下文，
-    /// 干活中 "doc_add"/"doc_update" 沉淀，收尾 "update" 改状态。
+    /// 干活中 "doc_add" 沉淀（批量导入现成文档 "doc_import"），收尾 "update" 改状态。
     /// 速记：所有 doc_* 操作需先定位项目（参数 project_id 或 project_name，先 "list"）。操作全景：action="help"。
     #[tool(
         name = "projects",

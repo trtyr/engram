@@ -200,23 +200,6 @@ pub struct WikiDocumentAddParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct WikiDocumentGetParams {
-    /// 文档 id（document_add 返回的 id）
-    #[schemars(description = "文档 id（document_add 返回的 id）。status 字段即处理进度。")]
-    pub id: String,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct WikiDocumentsSearchParams {
-    /// 原文检索词（chunk 级 FTS+向量混合——搜的是原文分块不是 LLM 生成的页面）
-    #[schemars(description = "检索词（chunk 级原文 RAG——与 wiki search 的页面级检索互补）。")]
-    pub query: String,
-    /// 返回上限（默认 8）
-    #[schemars(description = "可选：返回上限。默认 8。")]
-    pub limit: Option<i64>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiArchiveParams {
     /// 归档页 slug
     #[schemars(description = "归档页 slug（仅字母/数字/-/_/·，≤80 字符）。")]

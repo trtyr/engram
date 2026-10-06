@@ -350,7 +350,7 @@ impl EngramMcpServer {
         ok_json(serde_json::json!({
             "asset_id": id,
             "saved": true,
-            "hint": "旧文已入修订史——runbook_versions 查看，错改用 runbook_restore 回滚。",
+            "hint": "旧文已入修订史——runbook_versions 查看。",
         }))
     }
 

@@ -166,17 +166,20 @@ async fn mcp_doc_patch_stale_conflicts() {
     assert!(st.is_success(), "{doc}");
     let doc_id = doc["id"].as_str().unwrap();
 
-    // 写手 A：doc_update expected_version=1 → 成功
+    // 写手 A：doc_patch expected_version=1 → 成功（doc_update 已裁，乐观锁走 patch）
     let (_, v) = mcp_rpc(
         &ctx.app,
         &key,
         mcp_call(
-            "doc_update",
-            json!({"doc_id": doc_id, "content": "第1行改\n第2行", "expected_version": 1}),
+            "doc_patch",
+            json!({
+                "doc_id": doc_id, "start_line": 1, "end_line": 1,
+                "mode": "replace", "content": "第1行改", "expected_version": 1
+            }),
         ),
     )
     .await;
-    assert!(v.get("error").is_none(), "doc_update 不应报错：{v}");
+    assert!(v.get("error").is_none(), "doc_patch 不应报错：{v}");
 
     // 写手 B（陈旧）：doc_patch 仍基于 version 1 → 版本冲突
     let (_, v) = mcp_rpc(
