@@ -386,8 +386,6 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "revise"
                 | "review"
                 | "correct"
-                | "confirm"
-                | "discard"
                 | "distill"
                 | "write_session"
                 | "append_session"

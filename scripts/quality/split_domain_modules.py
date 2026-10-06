@@ -48,11 +48,11 @@ CONFIGS = {
             ],
             "atoms": [
                 "find_atom", "list_atoms", "find_active_atom", "insert_atom", "correct_atom",
-                "review_confirm", "review_discard", "count_running_extract", "count_running_persona",
+                "count_running_extract", "count_running_persona",
                 "atoms_by_session", "AtomLiteralHit", "atoms_literal_fallback", "atom_revisions",
                 "insert_atom_revision", "update_atom_full", "count_atom", "archive_atoms_by_entity",
                 "archive_atoms_by_session", "restore_atoms_by_session", "list_atoms_all",
-                "atoms_by_ids", "recent_active_atoms", "pending_review_atoms", "list_atom_refs_like",
+                "atoms_by_ids", "recent_active_atoms", "list_atom_refs_like",
                 "update_atom_source_refs", "bump_hit_counts",
             ],
             "scenarios": ["list_scenarios", "find_scenario", "list_scenarios_all"],

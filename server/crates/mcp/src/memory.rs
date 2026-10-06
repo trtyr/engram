@@ -358,13 +358,11 @@ impl EngramMcpServer {
             "review" => match mode {
                 "" | "distill" => "distill".into(),
                 "result" => "distill_result".into(),
-                "confirm" => "confirm".into(),
-                "discard" => "discard".into(),
                 "duplicates" => "atom_duplicates".into(),
                 _ => {
                     return Err(unknown_mode(
                         "review",
-                        "distill（默认）/ result / confirm / discard / duplicates（原子重复检测）",
+                        "distill（默认）/ result / duplicates（原子重复检测）",
                     ));
                 }
             },

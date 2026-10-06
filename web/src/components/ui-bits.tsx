@@ -188,7 +188,7 @@ const STATUS_LABEL: Record<string, string> = {
   error: '错误',
   superseded: '已取代',
   archived: '已归档',
-  candidate: '待审',
+  candidate: '候选',
   version_mismatch: '版本不符',
   void: '已作废',
 }
