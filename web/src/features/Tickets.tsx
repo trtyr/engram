@@ -18,14 +18,10 @@ import {
   TICKET_STATUS_LABEL,
 } from '@/lib/todos-ui'
 
-type StatusFilter = '' | 'open' | 'confirmed' | 'in_progress' | 'resolved' | 'verified' | 'archived'
-
 export default function Tickets() {
   const [rows, setRows] = useState<Todo[] | null>(null)
-  const [status, setStatus] = useState<StatusFilter>('')
   const [severity, setSeverity] = useState('')
   const [tag, setTag] = useState('')
-  const [q, setQ] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   /** 选中的工单（右侧详情面板）；null = 未选中 */
@@ -33,12 +29,10 @@ export default function Tickets() {
 
   const query = useMemo(() => {
     const parts = [`kind=ticket`]
-    if (status) parts.push(`status=${status}`)
     if (severity) parts.push(`severity=${severity}`)
     if (tag.trim()) parts.push(`tag=${encodeURIComponent(tag.trim())}`)
-    if (q.trim()) parts.push(`q=${encodeURIComponent(q.trim())}`)
     return parts.join('&')
-  }, [status, severity, tag, q])
+  }, [severity, tag])
 
   const load = () =>
     api
@@ -145,27 +139,6 @@ export default function Tickets() {
   return (
     <div className="space-y-5">
       <PageHeader title="工单">
-        <input
-          className={`${inputCls} w-40`}
-          placeholder="搜索工单…"
-          aria-label="搜索工单"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <select
-          className={selectCls}
-          aria-label="状态筛选"
-          value={status}
-          onChange={(e) => setStatus(e.target.value as StatusFilter)}
-        >
-          <option value="">全部状态</option>
-          <option value="open">待确认</option>
-          <option value="confirmed">已确认</option>
-          <option value="in_progress">处理中</option>
-          <option value="resolved">已解决</option>
-          <option value="verified">已验证</option>
-          <option value="archived">已归档</option>
-        </select>
         <select
           className={selectCls}
           aria-label="严重度筛选"
