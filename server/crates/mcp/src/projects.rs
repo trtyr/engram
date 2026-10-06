@@ -435,6 +435,13 @@ impl EngramMcpServer {
                 )
                 .await
             }
+            "doc_import" => {
+                self.project_doc_import(
+                    ctx,
+                    Parameters(dispatch::from_args("projects", "doc_import", call.args)?),
+                )
+                .await
+            }
             "doc_get" => {
                 self.project_doc_get(
                     ctx,
@@ -446,13 +453,6 @@ impl EngramMcpServer {
                 self.project_doc_search(
                     ctx,
                     Parameters(dispatch::from_args("projects", "doc_search", call.args)?),
-                )
-                .await
-            }
-            "doc_update" => {
-                self.project_doc_update(
-                    ctx,
-                    Parameters(dispatch::from_args("projects", "doc_update", call.args)?),
                 )
                 .await
             }

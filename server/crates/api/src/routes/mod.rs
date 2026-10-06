@@ -482,6 +482,7 @@ fn projects_routes() -> Router<AppState> {
             get(project_api::get_file_version),
         )
         .route("/projects/{id}/docs", post(project_api::add_doc))
+        .route("/projects/{id}/docs/import", post(project_api::import_docs))
         .route(
             "/projects/{id}/maintain",
             post(project_api::maintain_trigger),

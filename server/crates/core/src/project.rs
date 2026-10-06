@@ -10,6 +10,7 @@ mod docs;
 mod files;
 mod model;
 mod projects;
+pub use docs::ImportDocItem;
 pub use model::*;
 
 use chrono::{DateTime, Utc};

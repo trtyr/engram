@@ -302,12 +302,12 @@ async fn project_full_journey() {
     .await;
     assert_eq!(by_name["id"], json!(project_id));
 
-    // 文档补丁式更新：只传 content，category/title 不动
+    // 文档更新（doc_update 已裁）：行级补丁 replace_text 只换目标段，其余不动
     let updated_doc = act_json(
         &app,
         &key,
-        "doc_update",
-        json!({"doc_id": doc_id, "content": "# 工具面\n\n域内操作。\n\n## 更新\n补丁式更新可用。"}),
+        "doc_patch",
+        json!({"doc_id": doc_id, "mode": "replace_text", "anchor": "项目域工具并入 /mcp。", "content": "项目域工具并入 /mcp。\n\n## 更新\n补丁式更新可用。"}),
     )
     .await;
     assert_eq!(updated_doc["title"], "MCP 工具设计", "未传 title 不应改变");
@@ -321,49 +321,24 @@ async fn project_full_journey() {
         &app,
         &key,
         "doc_get",
-        json!({"doc_id": doc_id, "start_line": 6, "end_line": 6}),
+        json!({"doc_id": doc_id, "with_line_numbers": true}),
     )
     .await;
     assert!(
         reread["content"]
             .as_str()
-            .unwrap()
+            .unwrap_or("")
             .contains("补丁式更新可用"),
         "更新应落库：{reread}"
     );
 
-    // 文档移到未登记分类 → 报错
-    let v = act_raw(
-        &app,
-        &key,
-        7,
-        "doc_update",
-        json!({"doc_id": doc_id, "category": "前端x"}),
-    )
-    .await;
-    assert!(
-        v["error"]["message"]
-            .as_str()
-            .unwrap_or("")
-            .contains("不在项目分类里"),
-        "移到未登记分类应报错：{v}"
-    );
-
-    // 位置补丁式更新：只传 path
-    let upd_loc = act_json(
-        &app,
-        &key,
-        "location_update",
-        json!({"location_id": loc_id, "path": "/new/path"}),
-    )
-    .await;
-    assert_eq!(upd_loc["path"], "/new/path");
-    assert_eq!(upd_loc["host"], "MacBook Pro", "未传 host 不应改变");
-
     // location_get：按 id 读单条位置详情（RJ-12 补齐）
     let got_loc = act_json(&app, &key, "location_get", json!({"location_id": loc_id})).await;
     assert_eq!(got_loc["id"], loc_id, "{got_loc}");
-    assert_eq!(got_loc["path"], "/new/path");
+    assert_eq!(
+        got_loc["path"],
+        "/Users/trtyr/Documents/Code/Rust/agent-memory-projectmcp"
+    );
     assert_eq!(got_loc["host"], "MacBook Pro");
 
     // 项目补丁式更新：只改状态与描述，分类保持
@@ -705,8 +680,8 @@ async fn project_tools_admin_info_and_toggle() {
     assert_eq!(project_tools.len(), 1, "projects 域应为 1 个域工具");
     assert_eq!(
         project_tools[0]["actions"].as_array().unwrap().len(),
-        24,
-        "projects 域应展示 24 个操作（含 doc_patch + file 四动作 + link/unlink/links + location_get）：{tools:?}"
+        23,
+        "projects 域应展示 23 个操作（doc_update/location_update 裁后 + doc_import 加，含 doc_patch + file 四动作 + link/unlink/links + location_get）：{tools:?}"
     );
 
     // 停用 projects.delete：目录隐身 + call 拒绝

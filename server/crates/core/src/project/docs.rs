@@ -2,6 +2,16 @@
 
 use super::*;
 
+/// 批量导入单项（doc_import 用；folder 缺省根目录）。
+#[derive(Debug, serde::Deserialize)]
+pub struct ImportDocItem {
+    pub category: String,
+    #[serde(default)]
+    pub folder: String,
+    pub title: String,
+    pub content: String,
+}
+
 impl ProjectService {
     pub(crate) fn validate_doc_folder(folder: &str) -> Result<String, ProjectError> {
         let f = folder.trim().trim_matches('/');
@@ -50,6 +60,47 @@ impl ProjectService {
             )));
         }
         self.get_doc(id).await
+    }
+
+    /// 批量导入文档（P017 后补充方式二：现成 md 文件由调用方读入后一次灌入）。
+    /// 逐篇走 add_doc 同语义；冲突/分类不存在不中断整批，收集进 skipped 报告。
+    pub async fn import_docs(
+        &self,
+        project_id: Uuid,
+        docs: Vec<ImportDocItem>,
+    ) -> Result<serde_json::Value, ProjectError> {
+        const MAX_BATCH: usize = 50;
+        if docs.is_empty() {
+            return Err(ProjectError::BadRequest("docs 为空——至少给一篇".into()));
+        }
+        if docs.len() > MAX_BATCH {
+            return Err(ProjectError::BadRequest(format!(
+                "单次最多 {MAX_BATCH} 篇（收到 {}）——分批导入",
+                docs.len()
+            )));
+        }
+        let mut imported: Vec<serde_json::Value> = Vec::new();
+        let mut skipped: Vec<serde_json::Value> = Vec::new();
+        for d in docs {
+            match self
+                .add_doc(project_id, &d.category, &d.folder, &d.title, &d.content)
+                .await
+            {
+                Ok(doc) => imported.push(serde_json::json!({
+                    "doc_id": doc.id, "title": d.title, "category": d.category,
+                })),
+                Err(e) => skipped.push(serde_json::json!({
+                    "title": d.title, "category": d.category,
+                    "reason": e.to_string(),
+                })),
+            }
+        }
+        Ok(serde_json::json!({
+            "imported": imported.len(),
+            "skipped": skipped.len(),
+            "docs": imported,
+            "skipped_detail": skipped,
+        }))
     }
 
     /// 部分更新：None 字段保持原值（并发安全——SQL 层 COALESCE，无读-改-写窗口）。

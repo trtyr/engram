@@ -67,31 +67,30 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "forget", true, "忘=遗忘。mode：void（默认，作废会话级联归档产物）/ erase（物理删除，需 erase scope）/ restore（撤销 void）/ kv（删 KV 精确值，需 original scope）" => crate::ForgetParams;
         ],
         "projects" => action_docs![
-            "types", false, "列出项目**场景**模板（dev=开发 / ops=运维 / research=调研 / study=学习 / life=生活 / create=创作，各带预设文档分类）" => crate::ProjectTypesParams;
-            "list", false, "列出项目（按创建时间倒序；可按场景 type 过滤）" => crate::ProjectListParams;
-            "get", false, "项目详情（目标/位置/文档索引；默认索引模式不带正文）" => crate::ProjectGetParams;
-            "create", false, "新建项目（type=场景，决定初始文档分类；不确定先跑 types）" => crate::ProjectCreateParams;
-            "update", false, "编辑项目（改名/状态/描述/分类；补丁式）" => crate::ProjectUpdateParams;
-            "delete", true, "删除项目（级联删除位置与文档，不可逆）" => crate::ProjectDeleteParams;
-            "batch_delete", true, "批量删除项目（不可逆）" => crate::ProjectBatchDeleteParams;
-            "location_add", false, "登记项目在主机上的位置（多主机登记制）" => crate::ProjectLocationAddParams;
-            "location_get", false, "读单个位置登记（详情：host/ip/os/path/用途/关联资产）" => crate::ProjectLocationGetParams;
-            "location_update", false, "编辑已登记的位置" => crate::ProjectLocationUpdateParams;
-            "location_delete", true, "删除一条位置登记" => crate::ProjectLocationDeleteParams;
-            "link", false, "建工作线关联（part_of 隶属 / related 相关；自环与同向同类重复被拒）" => crate::ProjectLinkAddParams;
-            "unlink", true, "解绑一条工作线关联（按 link_id）" => crate::ProjectLinkRefParams;
-            "links", false, "列某项目的关系（两向合并：隶属 / 下属 / 相关）" => crate::ProjectLinksParams;
-            "doc_add", false, "项目下新增分类文档（Markdown）" => crate::ProjectDocAddParams;
-            "doc_get", false, "读项目文档（全文或按行区间精读）" => crate::ProjectDocGetParams;
-            "doc_search", false, "grep 式跨文档按行检索（需 project_id/project_name 定位项目，先 list；定位到哪篇哪行）" => crate::ProjectDocSearchParams;
-            "doc_patch", false, "行级补丁（replace/insert/delete 一个行区间；行号定位或 anchor 锚点——原文短语按行包含匹配唯一命中才执行，串行多 patch 不漂移）" => crate::ProjectDocPatchParams;
-            "doc_update", false, "编辑项目文档（补丁式）" => crate::ProjectDocUpdateParams;
-            "doc_delete", true, "删除项目文档（不可逆）" => crate::ProjectDocDeleteParams;
-            "file_put", false, "写项目文件（架构图 HTML/配置/报告等制品；同 name 覆盖 version+1，旧版进快照）" => crate::ProjectFileUpsertParams;
-            "file_get", false, "读项目文件（当前或指定版本；支持 project_id/project_name 定位）" => crate::ProjectFileRefParams;
-            "file_list", false, "列出项目文件（name/mime/version/大小；不含内容）" => crate::ProjectFileListParams;
-            "file_delete", true, "删除项目文件（历史快照级联删，不可逆）" => crate::ProjectFileDeleteParams
-        ],
+                   "types", false, "列出项目**场景**模板（dev=开发 / ops=运维 / research=调研 / study=学习 / life=生活 / create=创作，各带预设文档分类）" => crate::ProjectTypesParams;
+                   "list", false, "列出项目（按创建时间倒序；可按场景 type 过滤）" => crate::ProjectListParams;
+                   "get", false, "项目详情（目标/位置/文档索引；默认索引模式不带正文）" => crate::ProjectGetParams;
+                   "create", false, "新建项目（type=场景，决定初始文档分类；不确定先跑 types）" => crate::ProjectCreateParams;
+                   "update", false, "编辑项目（改名/状态/描述/分类；补丁式）" => crate::ProjectUpdateParams;
+                   "delete", true, "删除项目（级联删除位置与文档，不可逆）" => crate::ProjectDeleteParams;
+                   "batch_delete", true, "批量删除项目（不可逆）" => crate::ProjectBatchDeleteParams;
+                   "location_add", false, "登记项目在主机上的位置（多主机登记制）" => crate::ProjectLocationAddParams;
+                   "location_get", false, "读单个位置登记（详情：host/ip/os/path/用途/关联资产）" => crate::ProjectLocationGetParams;
+                   "location_delete", true, "删除一条位置登记" => crate::ProjectLocationDeleteParams;
+                   "link", false, "建工作线关联（part_of 隶属 / related 相关；自环与同向同类重复被拒）" => crate::ProjectLinkAddParams;
+                   "unlink", true, "解绑一条工作线关联（按 link_id）" => crate::ProjectLinkRefParams;
+                   "links", false, "列某项目的关系（两向合并：隶属 / 下属 / 相关）" => crate::ProjectLinksParams;
+                   "doc_add", false, "项目下新增分类文档（Markdown）" => crate::ProjectDocAddParams;
+        "doc_import", true, "批量导入现成文档（≤50 篇/次）：手上已有 markdown 文件时读入后一次灌入；撞车/分类不存在不中断整批进 skipped_detail——区别 doc_add 的单篇生成式沉淀" => crate::ProjectDocImportParams;
+                   "doc_get", false, "读项目文档（全文或按行区间精读）" => crate::ProjectDocGetParams;
+                   "doc_search", false, "grep 式跨文档按行检索（需 project_id/project_name 定位项目，先 list；定位到哪篇哪行）" => crate::ProjectDocSearchParams;
+                   "doc_patch", false, "行级补丁（replace/insert/delete 一个行区间；行号定位或 anchor 锚点——原文短语按行包含匹配唯一命中才执行，串行多 patch 不漂移）" => crate::ProjectDocPatchParams;
+                   "doc_delete", true, "删除项目文档（不可逆）" => crate::ProjectDocDeleteParams;
+                   "file_put", false, "写项目文件（架构图 HTML/配置/报告等制品；同 name 覆盖 version+1，旧版进快照）" => crate::ProjectFileUpsertParams;
+                   "file_get", false, "读项目文件（当前或指定版本；支持 project_id/project_name 定位）" => crate::ProjectFileRefParams;
+                   "file_list", false, "列出项目文件（name/mime/version/大小；不含内容）" => crate::ProjectFileListParams;
+                   "file_delete", true, "删除项目文件（历史快照级联删，不可逆）" => crate::ProjectFileDeleteParams
+               ],
         "assets" => action_docs![
             "kinds", false, "列出资产类型（建档选 kind 用）：host=主机 / cloud=云实例 / domain=域名 / account=账号 / device=设备 / other=其他" => crate::AssetKindsParams;
             "list", false, "列出资产台账（可按类型过滤 / 按 名称·别名·IP 检索）" => crate::AssetListParams;
@@ -102,7 +101,6 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "runbook", false, "读资产运行手册（Markdown 全文——硬件/网络/服务/端口/变更/踩坑；看一眼即知这台机器什么情况）" => crate::AssetRunbookParams;
             "runbook_save", true, "保存运行手册（Markdown 整体替换；旧文自动入修订史——错改可回滚）" => crate::AssetRunbookSaveParams;
             "runbook_versions", false, "运行手册修订史清单（新→旧；old_runbook_md=该次保存前的正文）" => crate::AssetRunbookVersionsParams;
-            "runbook_restore", true, "回滚运行手册到某修订（回滚前正文先入史——反复横跳可逆）" => crate::AssetRunbookRestoreParams
         ],
         // EN-252：skills 域裁撤（原 action_docs 块移除；存量已迁 wiki/projects/本地 git）
         "circles" => action_docs![
@@ -114,7 +112,6 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "unrelate", true, "删关系" => crate::CirclesUnrelateParams;
             "relations", false, "实体关系清单（双向）" => crate::CirclesRelationsParams;
             "forget", true, "归档式遗忘（T021/Q004）：实体归档+挂链活跃原子级联归档，可恢复——默认安全路径" => crate::CirclesTargetParams;
-            "delete", true, "物理删除实体（Q004：档案蒸发，显式清理意图，不可恢复）" => crate::CirclesTargetParams;
             "merge", true, "实体合并（T021）：from 墓碑化，原子改挂到 into（档案延续）" => crate::CirclesMergeParams;
             "attach", false, "挂原子到实体（T021：atom_entities 边管理归 circles）" => crate::CirclesAtomLinkParams;
             "detach", true, "从实体摘原子" => crate::CirclesAtomLinkParams;
@@ -142,8 +139,6 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
                   "ingest", false, "喂原料给 wiki 维护 Agent Harness（url 或 text 二选一）——harness 自主抓取/检索/建页/互链（异步 job，返回 job_id）" => crate::wiki::WikiIngestParams;
         "document_add", false, "入库文档（text 或 url）——分块+嵌入进原文 RAG（完成后维护 Agent 自动接力）；幂等去重" => crate::wiki::WikiDocumentAddParams;
                   "document_delete", true, "删除一条入库文档及其分块/嵌入（document_add 返回的 id；documents 体系，非 delete_source）" => crate::wiki::WikiDocumentDeleteParams;
-                  "document_get", false, "文档状态（status/error 即处理进度）" => crate::wiki::WikiDocumentGetParams;
-                  "documents_search", false, "原文检索（chunk 级 FTS+向量混合——与页面级 search 互补）" => crate::wiki::WikiDocumentsSearchParams;
                   "index", false, "内容目录（按页型分组的全库目录：slug/标题/入链数/首段摘要；只读动态聚合）" => crate::wiki::WikiLibParams;
                   "archive", false, "问答/分析产物归档为 analysis 页（related 自动建双向 wikilinks——好答案不该消失在聊天记录里）" => crate::wiki::WikiArchiveParams;
                   "purpose", false, "读取库的方向意图（每库一份——写页前先读，避免写跑题）" => crate::wiki::WikiLibParams;
@@ -176,7 +171,6 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
         ],
         "codegraph" => action_docs![
             "list", false, "列出已注册代码库（注册状态/索引规模/当下可用性 usable）" => crate::CgNoParams;
-            "gc", false, "失效条目对账（路径已不存在/索引产物已丢失的条目标为 error；可重新 index 恢复）" => crate::CgNoParams;
             "register", false, "注册代码库（**只接受 git 仓库地址**，如 https://github.com/you/repo）——注册即 git clone 到默认 <数据根>/codegraph/<项目名>/（可用 dest_parent 指定父目录，须在白名单根内）并**自动入队建索引**；本地路径已不支持（本机源码改用 upload）" => crate::CgRegisterParams;
             "query", false, "代码图谱查询（search/explore大纲/node/callers/callees/impact/full_graph全图）" => crate::CgQueryParams;
             "index", false, "建索引/重建索引（异步 job）" => crate::CgNameParams;
@@ -205,8 +199,6 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "item_link", false, "知识点挂资料（wiki_slugs/doc_ids 覆盖式更新）" => crate::study::StudyItemLinkParams;
             "item_set_review", false, "SRS 复习标记：needs_review 开关+review_due_at 到期时间（缺省立即到期）" => crate::study::StudyItemSetReviewParams;
             "reviews_due", true, "复习队列：已标记且到期的知识点（review_due_at 升序）" => crate::study::StudyReviewsDueParams;
-            "journal_add", false, "进度时间线记一笔（学了什么/卡在哪/下一步）" => crate::study::StudyJournalAddParams;
-            "journal_list", true, "查 topic 最近进度时间线（新→旧）" => crate::study::StudyJournalListParams
         ],
         _ => return None,
     })
@@ -410,24 +402,20 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 | "delete"
                 | "batch_delete"
                 | "location_add"
-                | "location_update"
                 | "location_delete"
                 | "link"
                 | "unlink"
                 | "doc_add"
+                | "doc_import"
                 | "doc_patch"
-                | "doc_update"
                 | "doc_delete"
                 | "file_put"
                 | "file_delete"
         ) | ("assets", "add" | "update" | "delete")
-            | ("assets", "runbook_save" | "runbook_restore")
+            | ("assets", "runbook_save")
             | ("credentials", "put" | "delete")
             | ("circles", "create" | "update" | "relate" | "unrelate")
-            | (
-                "circles",
-                "forget" | "delete" | "merge" | "attach" | "detach"
-            )
+            | ("circles", "forget" | "merge" | "attach" | "detach")
             | (
                 "study",
                 "add"
@@ -437,7 +425,6 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                     | "unit_set"
                     | "item_link"
                     | "item_set_review"
-                    | "journal_add"
             )
             | (
                 "wiki",
@@ -463,7 +450,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
             )
             | (
                 "codegraph",
-                "register" | "index" | "sync" | "gc" | "delete" | "upload"
+                "register" | "index" | "sync" | "delete" | "upload"
             )
             | ("jobs", "revive")
     )
@@ -513,8 +500,6 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                     | "version_content"
                     | "sources"
                     | "graph"
-                    | "document_get"
-                    | "documents_search"
                     | "index"
                     | "purpose"
                     | "promotions"
@@ -525,7 +510,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
             | ("codegraph", "list" | "query")
             | ("jobs", "list" | "get" | "events")
             | ("logs", "query" | "stats")
-            | ("study", "get" | "list" | "reviews_due" | "journal_list")
+            | ("study", "get" | "list" | "reviews_due")
     )
 }
 
@@ -626,11 +611,7 @@ pub fn render_manual(domain: &str, disabled: &[String]) -> Value {
 ///（含工单后增动作：list_pages 归读、document_delete 归原料——验收③数量不减，按组可导航到每个动作）。
 fn wiki_groups_hint() -> Value {
     let groups: &[(&str, &str, &[&str])] = &[
-        (
-            "找",
-            "检索：页面级全文/向量 + 原文 chunk 级",
-            &["search", "documents_search"],
-        ),
+        ("找", "检索：页面级全文/向量 + 原文 chunk 级", &["search"]),
         (
             "读",
             "浏览：页面/内容目录/库意图",
@@ -644,7 +625,7 @@ fn wiki_groups_hint() -> Value {
         (
             "原料",
             "原料通道：喂给维护 Agent / 原文入库（ingest 走 Agent Harness，document_add 入原文 RAG）",
-            &["ingest", "document_add", "document_get", "document_delete"],
+            &["ingest", "document_add", "document_delete"],
         ),
         ("图谱", "结构：链接图/目录骨架", &["graph", "folders"]),
         (

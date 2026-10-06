@@ -361,6 +361,51 @@ pub async fn add_doc(
     Ok((StatusCode::CREATED, Json(doc)))
 }
 
+/// 批量导入现成文档（≤50 篇/次；撞车/分类不存在不中断，进 skipped_detail）。
+#[utoipa::path(post, path = "/projects/{id}/docs/import",
+    params(("id" = Uuid, Path)),
+    request_body = Object,
+    responses((status = 200, body = Object)))]
+pub async fn import_docs(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<ImportDocsRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_project(&principal)?;
+    let report = svc(&state)
+        .import_docs(
+            id,
+            req.docs
+                .into_iter()
+                .map(|d| engram_core::project::ImportDocItem {
+                    category: d.category,
+                    folder: d.folder,
+                    title: d.title,
+                    content: d.content,
+                })
+                .collect(),
+        )
+        .await
+        .map_err(pe)?;
+    Ok(Json(report))
+}
+
+/// 批量导入请求体。
+#[derive(Debug, serde::Deserialize)]
+pub struct ImportDocsRequest {
+    pub docs: Vec<ImportDocRequest>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ImportDocRequest {
+    pub category: String,
+    #[serde(default)]
+    pub folder: String,
+    pub title: String,
+    pub content: String,
+}
+
 /// 读单个文档（详情页右侧编辑用）。
 #[utoipa::path(get, path = "/projects/{id}/docs/{doc_id}",
     responses((status = 200, body = ProjectDocDto)))]

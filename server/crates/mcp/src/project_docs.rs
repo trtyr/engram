@@ -28,6 +28,39 @@ pub struct ProjectDocAddParams {
     pub content: String,
 }
 
+/// 批量导入单项。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProjectDocImportItem {
+    /// 分类名（须是项目已有分类）
+    #[schemars(description = "分类名，必须是项目已有分类。")]
+    pub category: String,
+    /// 可选：子文件夹相对路径（缺省分类根下）
+    #[schemars(description = "可选：子文件夹相对路径（/ 分隔；缺省 = 分类根下）。")]
+    pub folder: Option<String>,
+    /// 文档标题
+    #[schemars(description = "文档标题（同项目同分类同 folder 下唯一；撞车会 skip 并报告）。")]
+    pub title: String,
+    /// Markdown 正文
+    #[schemars(description = "Markdown 正文（文件读入后原样给）。")]
+    pub content: String,
+}
+
+/// doc_import 参数：批量导入现成文档（≤50 篇/次）。
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProjectDocImportParams {
+    /// 定位项目：项目 id（UUID）
+    #[schemars(description = "项目 id（UUID）。与 project_name 至少给一个。")]
+    pub project_id: Option<String>,
+    /// 定位项目：项目名
+    #[schemars(description = "项目名（唯一）。与 project_id 至少给一个。")]
+    pub project_name: Option<String>,
+    /// 文档数组（≤50 篇/次，更多分批）
+    #[schemars(
+        description = "待导入文档数组，最多 50 篇/次。逐篇走 doc_add 同语义；标题撞车或分类不存在的不中断整批，进 skipped_detail 报告。"
+    )]
+    pub docs: Vec<ProjectDocImportItem>,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ProjectDocGetParams {
     /// 文档 id（UUID）
@@ -62,34 +95,6 @@ pub struct ProjectDocSearchParams {
     /// 命中上限（默认 50）
     #[schemars(description = "命中上限，默认 50。命中含 doc_id/title/category/line/text。")]
     pub limit: Option<i64>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ProjectDocUpdateParams {
-    /// 文档 id（UUID）
-    #[schemars(description = "文档 id（UUID，来自 project_get 返回的 docs 列表）。")]
-    pub doc_id: String,
-    /// 新分类
-    #[schemars(description = "可选：移到新分类（须是项目已有分类）。不传不改。")]
-    pub category: Option<String>,
-    /// 新子文件夹
-    #[schemars(
-        description = "可选：改子文件夹相对路径（/ 分隔多级；'' = 移到分类根下）。不传不改。"
-    )]
-    pub folder: Option<String>,
-    /// 新标题
-    #[schemars(description = "可选：新标题。不传不改。")]
-    pub title: Option<String>,
-    /// 新正文（替换式；先 project_doc_get 取原文再追加修改）
-    #[schemars(
-        description = "可选：替换整个 Markdown 正文（是替换不是追加——改长文档先 project_doc_get 取原文）。不传不改。"
-    )]
-    pub content: Option<String>,
-    /// 乐观锁：基于的版本号（doc_get 返回的 version）。给出且与当前不符 → 报版本冲突
-    #[schemars(
-        description = "可选：乐观锁版本号（doc_get 返回的 version）。给出且与当前不符时报「版本冲突」——防并发覆盖。不传 = 不校验。"
-    )]
-    pub expected_version: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -177,6 +182,39 @@ impl EngramMcpServer {
         ))
     }
 
+    /// 批量导入现成文档（补充方式二）：本地 md 文件读入后一次灌入（≤50 篇/次）。
+    ///
+    /// 何时用：手上已有一批现成 markdown（如仓库 docs/ 目录、迁移存量文档），
+    /// 读文件后原样导入——不是让 agent 逐篇转写。撞车/分类不存在不中断，进 skipped_detail。
+    pub(crate) async fn project_doc_import(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        params: Parameters<ProjectDocImportParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let p = principal_of(&ctx)?;
+        require_project(&p)?;
+        let dp = params.0;
+        let id = self
+            .resolve_project(&dp.project_id, &dp.project_name)
+            .await?;
+        let docs = dp
+            .docs
+            .into_iter()
+            .map(|d| engram_core::project::ImportDocItem {
+                category: d.category,
+                folder: d.folder.unwrap_or_default(),
+                title: d.title,
+                content: d.content,
+            })
+            .collect();
+        let report = self
+            .svc_project()
+            .import_docs(id, docs)
+            .await
+            .map_err(from_project)?;
+        ok_json(report)
+    }
+
     /// 读取项目文档：全文或按行区间精读（1-based，含两端）。
     ///
     /// 何时用：project_get 索引或 project_doc_search 命中之后精确读内容。
@@ -257,38 +295,6 @@ impl EngramMcpServer {
             .await
             .map_err(from_project)?;
         ok_json(serde_json::to_value(&hits).unwrap_or(serde_json::json!([])))
-    }
-
-    /// 编辑项目文档（补丁式：只传要改的字段）。
-    ///
-    /// 何时用：追加进展、更新结论。content 是替换式——改长文档先 project_doc_get
-    /// 取原文改好再整体传回。移分类时 category 须是项目已有分类。
-    pub(crate) async fn project_doc_update(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<ProjectDocUpdateParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        require_project(&p)?;
-        let dp = params.0;
-        let id = Uuid::parse_str(&dp.doc_id)
-            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "doc_id 不是合法 UUID"))?;
-        // 部分更新直传 Option：SQL 层 COALESCE——并发各字段互不覆盖（D2 修复）
-        let doc = self
-            .svc_project()
-            .update_doc(
-                id,
-                dp.category.as_deref(),
-                dp.folder.as_deref(),
-                dp.title.as_deref(),
-                dp.content.as_deref(),
-                dp.expected_version,
-            )
-            .await
-            .map_err(from_project)?;
-        ok_json(slim_doc(
-            serde_json::to_value(&doc).unwrap_or(serde_json::json!({})),
-        ))
     }
 
     /// 行级补丁（R 报告 P1-10）：改长文档的一行/一段，不再取全文重发全文。

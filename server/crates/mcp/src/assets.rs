@@ -74,22 +74,6 @@ pub struct AssetRunbookVersionsParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct AssetRunbookRestoreParams {
-    /// 资产 id
-    #[schemars(description = "资产 id（UUID）。与 name 至少给一个。")]
-    pub asset_id: Option<String>,
-    /// 资产名或别名
-    #[schemars(description = "资产名或别名。与 asset_id 至少给一个。")]
-    pub name: Option<String>,
-    /// 回滚目标修订 id
-    #[schemars(description = "回滚目标修订 id（runbook_versions 列表里的 id）。")]
-    pub version_id: String,
-    /// 编辑人标识（可选，留痕用）
-    #[schemars(description = "编辑人标识（可选；缺省 mcp:assets）。")]
-    pub editor: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct AssetAddParams {
     /// 资产类型
     #[schemars(
@@ -249,13 +233,6 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "runbook_restore" => {
-                self.asset_runbook_restore(
-                    ctx,
-                    Parameters(dispatch::from_args("assets", "runbook_restore", call.args)?),
-                )
-                .await
-            }
             other => Err(dispatch::unknown_action("assets", other)),
         }
     }
@@ -393,29 +370,6 @@ impl EngramMcpServer {
             "asset_id": id,
             "count": versions.len(),
             "versions": serde_json::to_value(&versions).unwrap_or(serde_json::json!([])),
-        }))
-    }
-
-    /// 运行手册：回滚到某修订（回滚前正文先入史——反复横跳可逆）。
-    pub(crate) async fn asset_runbook_restore(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<AssetRunbookRestoreParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        require_assets(&p)?;
-        let rp = params.0;
-        let svc = self.svc_asset();
-        let id = Self::resolve_asset_id(&svc, rp.asset_id.as_deref(), rp.name.as_deref()).await?;
-        let vid = Uuid::parse_str(&rp.version_id)
-            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "version_id 不是合法 UUID"))?;
-        svc.restore_runbook(id, vid, rp.editor.as_deref().unwrap_or("mcp:assets"))
-            .await
-            .map_err(from_asset)?;
-        ok_json(serde_json::json!({
-            "asset_id": id,
-            "restored_to": vid,
-            "hint": "已回滚；回滚前的正文也已入史（可再滚回来）。",
         }))
     }
 

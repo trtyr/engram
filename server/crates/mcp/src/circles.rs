@@ -204,18 +204,6 @@ impl EngramMcpServer {
                     "hint": "归档式遗忘：实体与挂链活跃原子级联归档（可恢复）。显式清理走 action=\"delete\"。"
                 }))
             }
-            "delete" => {
-                // T021/Q004：物理删——档案蒸发（显式清理意图，不可恢复）
-                let p: CirclesTargetParams = dispatch::from_args("circles", "delete", call.args)?;
-                let id = uuid::Uuid::parse_str(&p.entity_id)
-                    .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "entity_id 不是合法 UUID"))?;
-                svc.delete_entity(id).await.map_err(memory_err)?;
-                ok_json(json!({
-                    "entity_id": id,
-                    "deleted": true,
-                    "hint": "物理删除完成（不可恢复）。默认安全路径用 action=\"forget\"（归档可恢复）。"
-                }))
-            }
             "merge" => {
                 // T021：实体合并——from 墓碑化，原子改挂到 into（档案延续）
                 let p: CirclesMergeParams = dispatch::from_args("circles", "merge", call.args)?;

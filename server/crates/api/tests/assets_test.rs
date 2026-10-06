@@ -484,12 +484,12 @@ async fn asset_reference_bidirectional_and_delete_guard() {
     let msg = v["error"]["message"].as_str().unwrap_or_default();
     assert!(msg.contains("引用测试项目"), "拒绝文案应列出引用方：{msg}");
 
-    // ④ 显式解绑（asset=""）→ 反查清空 → 可删
+    // ④ 显式解绑（location_delete 删位置）→ 反查清空 → 可删
     support::mcp_call_json(
         &app,
         &key,
         "projects",
-        json!({"action": "location_update", "location_id": loc_id, "asset": ""}),
+        json!({"action": "location_delete", "location_id": loc_id}),
     )
     .await;
     let after = support::mcp_call_json(

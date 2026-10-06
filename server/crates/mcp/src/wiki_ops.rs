@@ -437,24 +437,10 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "document_get" => {
-                self.wiki_document_get(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "document_get", call.args)?),
-                )
-                .await
-            }
             "document_delete" => {
                 self.wiki_document_delete(
                     ctx,
                     Parameters(dispatch::from_args("wiki", "document_delete", call.args)?),
-                )
-                .await
-            }
-            "documents_search" => {
-                self.wiki_documents_search(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "documents_search", call.args)?),
                 )
                 .await
             }

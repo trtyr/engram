@@ -120,51 +120,6 @@ impl EngramMcpServer {
             "hint": "维护 Agent 已接单（异步）——jobs 工具看进度；完成后 wiki_search 查看新页",
         }))
     }
-
-    /// 文档状态（document_get）：看处理进度（status/error）。
-    pub(crate) async fn wiki_document_get(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(dp): Parameters<wiki::WikiDocumentGetParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let id = uuid::Uuid::parse_str(dp.id.trim()).map_err(|_| {
-            rmcp::ErrorData::invalid_params(format!("id 不是合法 UUID: {}", dp.id), None)
-        })?;
-        let svc = engram_core::wiki_docs::WikiDocumentService::new(
-            self.state.pool.clone(),
-            self.state.registry(),
-            self.state.data_dir.clone(),
-        );
-        let doc = svc
-            .get_document(lib, id)
-            .await
-            .map_err(Self::from_wiki_docs)?;
-        ok_json(serde_json::to_value(&doc).unwrap_or(serde_json::json!({})))
-    }
-
-    /// 原文检索（documents_search）：chunk 级 FTS+向量混合——搜原文分块，与页面级 wiki search 互补。
-    pub(crate) async fn wiki_documents_search(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(dp): Parameters<wiki::WikiDocumentsSearchParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let svc = engram_core::wiki_docs::WikiDocumentService::new(
-            self.state.pool.clone(),
-            self.state.registry(),
-            self.state.data_dir.clone(),
-        );
-        let hits = svc
-            .search(lib, &dp.query, dp.limit.unwrap_or(8).clamp(1, 50))
-            .await
-            .map_err(Self::from_wiki_docs)?;
-        ok_json(serde_json::to_value(&hits).unwrap_or(serde_json::json!([])))
-    }
 }
 
 /// 供装配层合并（宏生成的 router 方法私有，本模块内包一层）。
