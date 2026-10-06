@@ -22,8 +22,8 @@ pub async fn import_session(pool: &PgPool, v: &Value) -> StoreResult<bool> {
 pub async fn import_atom(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     let content = str_of(v, "content", "");
     let res = sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, superseded_by, needs_review, sensitive, occurred_at, valid_until, source_refs, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO atoms (id, kind, content, confidence, status, superseded_by, sensitive, occurred_at, valid_until, source_refs, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (id) DO NOTHING",
     )
     .bind(id_of(v, "id"))
     .bind(str_of(v, "kind", "fact"))
@@ -31,7 +31,6 @@ pub async fn import_atom(pool: &PgPool, v: &Value) -> StoreResult<bool> {
     .bind(v.get("confidence").and_then(|x| x.as_f64()).unwrap_or(0.9) as f32)
     .bind(str_of(v, "status", "active"))
     .bind(id_of(v, "superseded_by"))
-    .bind(v.get("needs_review").and_then(|x| x.as_bool()).unwrap_or(false))
     .bind(v.get("sensitive").and_then(|x| x.as_bool()).unwrap_or(false))
     .bind(ts(v, "occurred_at"))
     .bind(ts(v, "valid_until"))

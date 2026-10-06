@@ -81,7 +81,6 @@ async fn t004_three_state_clearable_fields() {
         None,
         None,
         None,
-        None,
         "fact",
     )
     .await
@@ -100,7 +99,6 @@ async fn t004_three_state_clearable_fields() {
         "种子原子",
         0.9,
         "active",
-        None,
         Some(Some(some_sup)),
         Some(Some(new_oa)),
         Some(Some(new_oa)),
@@ -123,7 +121,6 @@ async fn t004_three_state_clearable_fields() {
         "种子原子",
         0.9,
         "active",
-        None,
         Some(None),
         Some(None),
         Some(None),

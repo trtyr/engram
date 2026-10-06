@@ -23,8 +23,8 @@ async fn setup() -> (PgPool, MemoryService, support::TestPg) {
 async fn insert_atom(pool: &PgPool, content: &str) -> Uuid {
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding) \
-         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, false, NULL)",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding) \
+         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, NULL)",
     )
     .bind(id)
     .bind(content)

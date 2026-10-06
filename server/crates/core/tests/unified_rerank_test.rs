@@ -61,7 +61,7 @@ fn text_hash(text: &str) -> usize {
 async fn insert_atom(pool: &PgPool, content: &str, vec_text: &str) -> uuid::Uuid {
     let id = uuid::Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, hit_count) \
          VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, false, $3::vector, 0)",
     )
     .bind(id)

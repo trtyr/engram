@@ -140,6 +140,11 @@ async fn project_types_template() {
         research["default_categories"],
         json!(["待查", "线索", "资料", "结论", "疑点", "证伪"])
     );
+    // 「学习」场景已按用户拍板移除——不再出现在类型模板
+    assert!(
+        arr.iter().all(|t| t["type"] != "study"),
+        "study 场景应已移除：{arr:?}"
+    );
 }
 
 /// 全旅程：建 → 登记 → 写文档 → 查 → 改（补丁式）→ 清理。

@@ -44,8 +44,8 @@ fn vec_text(v: &[f32]) -> String {
 async fn insert_atom(pool: &PgPool, content: &str, hit_count: i32) -> Uuid {
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
-         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, false, NULL, $3)",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, hit_count) \
+         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, NULL, $3)",
     )
     .bind(id)
     .bind(content)
@@ -60,8 +60,8 @@ async fn insert_atom(pool: &PgPool, content: &str, hit_count: i32) -> Uuid {
 async fn insert_atom_vec(pool: &PgPool, content: &str, hit_count: i32, vec_text: &str) -> Uuid {
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
-         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, false, $3::vector, $4)",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, hit_count) \
+         VALUES ($1, 'fact', $2, 0.9, 'active', '[]'::jsonb, $3::vector, $4)",
     )
     .bind(id)
     .bind(content)
@@ -81,8 +81,8 @@ async fn context_pack_l1_is_query_relevant_not_hit_count() {
     let qv = vec1024(1);
     let relevant = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
-         VALUES ($1, 'fact', '用户偏好使用 Rust 语言进行系统编程', 0.9, 'active', '[]'::jsonb, false, $2::vector, 0)",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, hit_count) \
+         VALUES ($1, 'fact', '用户偏好使用 Rust 语言进行系统编程', 0.9, 'active', '[]'::jsonb, $2::vector, 0)",
     )
     .bind(relevant)
     .bind(vec_text(&qv))
@@ -91,8 +91,8 @@ async fn context_pack_l1_is_query_relevant_not_hit_count() {
     .unwrap();
     let irrelevant = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
-         VALUES ($1, 'fact', '用户喜欢在家做中式烹饪料理', 0.9, 'active', '[]'::jsonb, false, $2::vector, 100)",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, hit_count) \
+         VALUES ($1, 'fact', '用户喜欢在家做中式烹饪料理', 0.9, 'active', '[]'::jsonb, $2::vector, 100)",
     )
     .bind(irrelevant)
     .bind(vec_text(&vec1024(2)))
@@ -133,8 +133,8 @@ async fn search_hits_bump_hit_count() {
     let vt = vec_text(&v);
     let a = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding, hit_count) \
-         VALUES ($1, 'fact', '用户偏好使用 Rust 语言进行系统编程', 0.9, 'active', '[]'::jsonb, false, $2::vector, 0)",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, hit_count) \
+         VALUES ($1, 'fact', '用户偏好使用 Rust 语言进行系统编程', 0.9, 'active', '[]'::jsonb, $2::vector, 0)",
     )
     .bind(a)
     .bind(&vt)
@@ -184,41 +184,6 @@ async fn search_hits_bump_hit_count() {
         after > before,
         "context_pack 命中应回写（{before} → {after}）"
     );
-}
-
-#[tokio::test]
-async fn update_atom_can_clear_needs_review() {
-    let (pool, svc, _container) = setup().await;
-    let id = Uuid::now_v7();
-    sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review) \
-         VALUES ($1, 'fact', '低置信事实', 0.5, 'candidate', '[]'::jsonb, true)",
-    )
-    .bind(id)
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    // 通过：清人审标记，其余不动
-    let a = svc
-        .update_atom(
-            id,
-            None,
-            None,
-            None,
-            None,
-            Some(false),
-            None,
-            None,
-            None,
-            None,
-            "test",
-        )
-        .await
-        .unwrap();
-    assert!(!a.needs_review, "人审通过应清 needs_review");
-    assert_eq!(a.status, "candidate");
-    assert_eq!(a.content, "低置信事实");
 }
 
 /// 实体透镜进 context_pack：AI 冷启动能看到用户世界里的人与事。
@@ -528,7 +493,6 @@ async fn atom_time_and_supersede_chain() {
             None,
             None,
             Some("archived"),
-            None,
             Some(Some(new.id)),
             None,
             None,
@@ -571,36 +535,17 @@ async fn create_atom_rejects_empty_and_oversize_content() {
     assert!(ok.is_ok(), "500 字应通过");
 }
 
-/// 议题三：context_pack 带人审队列（代问）；no_feedback 不刷热度。
+/// B9：no_feedback 不刷热度（读路径默认计热度）。
 #[tokio::test]
-async fn context_pack_pending_review_and_no_feedback() {
+async fn context_pack_no_feedback_skips_hit_feedback() {
     let (pool, svc, _container) = setup().await;
     let hot = insert_atom(&pool, "用户偏好深色主题", 50).await;
-
-    // 造一条待人审原子
-    let pr = svc
-        .create_atom(
-            "fact",
-            "待确认：张三生日 3 月 15 日",
-            0.3,
-            None,
-            None,
-            false,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-    assert!(pr.needs_review);
 
     let pack = svc
         .context_pack(Some("张三"), 10, 10_000, false, None)
         .await
         .unwrap();
-    assert!(
-        pack.pending_review.iter().any(|a| a.id == pr.id),
-        "人审队列应进 context_pack 供 AI 代问"
-    );
+    let _ = pack;
 
     // no_feedback=true：hit_count 不涨
     let before: i32 = sqlx::query_scalar("SELECT hit_count FROM atoms WHERE id = $1")
@@ -673,8 +618,8 @@ async fn sensitive_atoms_visible_with_flag() {
     insert_atom_vec(&pool, "用户喜欢骑行", 0, &vec_text(&vec1024(6))).await;
     let s_id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, sensitive, embedding) \
-         VALUES ($1, 'fact', '用户在服用降压药', 0.9, 'active', '[]'::jsonb, false, true, $2::vector)",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, sensitive, embedding) \
+         VALUES ($1, 'fact', '用户在服用降压药', 0.9, 'active', '[]'::jsonb, true, $2::vector)",
     )
     .bind(s_id)
     .bind(vec_text(&vec1024(5)))
@@ -691,12 +636,7 @@ async fn sensitive_atoms_visible_with_flag() {
         r.l1.iter().any(|h| h.id == s_id),
         "sensitive 原子默认可见（口径放开）"
     );
-    let s_flag =
-        r.l1.iter()
-            .find(|h| h.id == s_id)
-            .and_then(|h| h.needs_review)
-            .is_some();
-    let _ = s_flag; // sensitive 标记在 DTO 上仍可见（SearchHit 不透出 sensitive——口径即默认全见）
+    let _s_flag = true; // sensitive 标记在 DTO 上仍可见（SearchHit 不透出 sensitive——口径即默认全见）
     // 非敏感原子照常（各自向量互不干扰）
     let r2 = svc
         .search("骑行", &[], 10, true, None, None, Some(&vec1024(6)))
@@ -716,7 +656,6 @@ async fn sensitive_atoms_visible_with_flag() {
     let off = svc
         .update_atom(
             s_id,
-            None,
             None,
             None,
             None,

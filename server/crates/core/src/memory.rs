@@ -54,8 +54,6 @@ pub struct ContextPack {
     pub atoms: Vec<AtomDto>,
     /// 实体透镜：用户世界里的人/项目/主题（有 query 按相关，无 query 按密度头部）
     pub entities: Vec<EntityDto>,
-    /// 待审项（≤5 条）——AI 在对话中顺口确认后 atom-patch 回写
-    pub pending_review: Vec<AtomDto>,
     pub meta: ContextMeta,
 }
 

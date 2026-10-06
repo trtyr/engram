@@ -6,7 +6,6 @@ use super::*;
 pub struct ListAtomsParams {
     pub kind: Option<String>,
     pub status: Option<String>,
-    pub needs_review: Option<bool>,
     pub cursor: Option<chrono::DateTime<chrono::Utc>>,
     pub limit: Option<i64>,
 }
@@ -24,7 +23,6 @@ pub async fn list_atoms(
             .list_atoms(
                 p.kind.as_deref(),
                 p.status.as_deref(),
-                p.needs_review,
                 p.cursor,
                 p.limit.unwrap_or(100),
             )
@@ -96,8 +94,6 @@ pub struct UpdateAtomRequest {
     pub confidence: Option<f32>,
     /// 只允许 "archived" / "active"
     pub status: Option<String>,
-    /// 人审结论：true=转待审，false=通过（清标记）
-    pub needs_review: Option<bool>,
     /// correction 取代链：本原子被哪条新原子取代（蒸馏链自动维护，手动 correction 补链）
     /// 三态：缺省=不动 / null=清空 / 值=设置（T004）
     pub superseded_by: Option<Option<Uuid>>,
@@ -124,7 +120,7 @@ pub async fn update_atom(
     require_memory(&principal)?;
     // 编辑分权：改写语义（content/kind/confidence）仅限用户（Web 登录态）；
     // AI 走 correction：atom-add 新原子 + PATCH 旧原子 superseded_by/status。
-    // sensitive/needs_review/status/superseded_by/时间字段对 AI 开放（保护与追加语义）。
+    // sensitive/status/superseded_by/时间字段对 AI 开放（保护与追加语义）。
     let actor = actor_of(&principal);
     let rewriting = req.content.is_some() || req.kind.is_some() || req.confidence.is_some();
     if rewriting && !matches!(&*principal, Principal::Admin) {
@@ -146,7 +142,6 @@ pub async fn update_atom(
                 req.kind.as_deref(),
                 req.confidence,
                 req.status.as_deref(),
-                req.needs_review,
                 req.superseded_by,
                 req.occurred_at,
                 req.valid_until,

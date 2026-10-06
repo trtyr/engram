@@ -292,7 +292,7 @@ export default function Assets() {
       {rows.length === 0 ? (
         <Empty text="台账还是空的——上面建第一台资产，或先跑 MCP assets add" />
       ) : (
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:h-[calc(100dvh-16rem)]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:h-[calc(100dvh-11rem)]">
           {/* 左：台账列表（区域滚动，页面框架不动） */}
           <div className="min-h-0 space-y-2 lg:h-full lg:overflow-y-auto lg:pr-1">
             {rows.map((a) => (
@@ -332,7 +332,7 @@ export default function Assets() {
           </div>
 
           {/* 右：详情 + 被谁引用（区域滚动） */}
-          <div className="min-h-0 lg:max-h-full lg:overflow-y-auto lg:pl-1">
+          <div className="min-h-0 lg:h-full lg:overflow-y-auto lg:overflow-x-hidden lg:pl-1">
             {!detail ? (
               <Empty text="选左边一条看详情与引用" />
             ) : (

@@ -193,7 +193,7 @@ pub struct DecisionsResult {
 pub enum GuardOutcome {
     /// ≥ review 阈值：放行精抽。
     Pass,
-    /// 双阈之间：照常精抽但产物提级 needs_review。
+    /// 双阈之间：照常精抽落库（低置信靠检索排序自然靠后，整理 Agent 处置）。
     Review,
     /// < reject 阈值：跳过（不精抽）。
     Reject,

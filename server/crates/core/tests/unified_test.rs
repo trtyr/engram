@@ -28,8 +28,8 @@ async fn unified_search_fuses_three_domains() {
 
     // 1. memory：atom
     sqlx::query(
-        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, embedding) \
-         VALUES ($1, 'fact', '用户偏好使用 Rust 编程', 0.9, 'active', '[]'::jsonb, false, NULL)",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding) \
+         VALUES ($1, 'fact', '用户偏好使用 Rust 编程', 0.9, 'active', '[]'::jsonb, NULL)",
     )
     .bind(Uuid::now_v7())
     .execute(&pool)

@@ -744,7 +744,6 @@ async fn wiki_mcp_tools_listed() {
         "- write_page：",
         "- archive_query：",
         "- graph：",
-        "- lint：",
         "- delete_page：",
     ] {
         assert!(
@@ -781,8 +780,8 @@ async fn wiki_mcp_tools_listed() {
     assert_eq!(wiki_tools.len(), 1, "管理台应展示 1 个 wiki 域工具");
     assert_eq!(
         wiki_tools[0]["actions"].as_array().unwrap().len(),
-        26,
-        "wiki 域应展示 26 个操作（P008 人审移除：reviews/review_resolve 退役）"
+        20,
+        "wiki 域应展示 20 个操作（P016 运维 13 action 裁剪后）"
     );
 
     // instructions 应覆盖 wiki 域
@@ -909,20 +908,6 @@ async fn wiki_mcp_journey_write_read_search_archive() {
         graph["nodes"].as_array().unwrap().len(),
         2,
         "图应有两个节点"
-    );
-
-    // lint：应报出正文里的死链
-    let (_, v) = mcp_rpc(&app, &key, call(8, "wiki", "lint", json!({}))).await;
-    let out = expect_result(&v, "tools/call wiki lint");
-    let report: Value = serde_json::from_str(out["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(report["checked_pages"], 2);
-    assert!(
-        report["issues"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|i| i["rule"] == "dead_link"),
-        "lint 应报出 [[not-exist-page]] 死链：{report}"
     );
 
     // 问答存档：首次落页，同标题幂等跳过

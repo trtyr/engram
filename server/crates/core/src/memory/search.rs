@@ -306,7 +306,6 @@ impl MemoryService {
                             None => format!("[kv:{}] {}", kv.key, kv.value),
                         },
                         kind: Some("kv".into()),
-                        needs_review: None,
                     });
                 }
             }
@@ -321,7 +320,6 @@ impl MemoryService {
                         title: None,
                         snippet: h.content,
                         kind: Some(h.kind),
-                        needs_review: Some(h.needs_review),
                     });
                 }
             }
@@ -372,14 +370,12 @@ impl MemoryService {
         chars_used = used_a;
         truncated |= trunc_a;
 
-        let pending_review = self
-            .pack_feedback_and_review(&out_atoms, no_feedback)
-            .await?;
+        // 命中反馈（B9：读路径也计热度；no_feedback=true 跳过——B6 污染防护）
+        self.pack_feedback(&out_atoms, no_feedback).await?;
 
         Ok(ContextPack {
             atoms: out_atoms,
             entities: out_entities,
-            pending_review,
             meta: ContextMeta {
                 chars_used,
                 truncated,
@@ -421,22 +417,16 @@ impl MemoryService {
 
         Ok((entities, l1))
     }
-    /// 命中反馈（B9：读路径也计热度；no_feedback=true 跳过——B6 污染防护）+ 待审代问队列（不计热度）。
-    async fn pack_feedback_and_review(
+    /// 命中反馈（B9：读路径也计热度；no_feedback=true 跳过——B6 污染防护）。
+    async fn pack_feedback(
         &self,
         out_atoms: &[AtomDto],
         no_feedback: bool,
-    ) -> Result<Vec<AtomDto>, MemoryError> {
-        // B9：context_pack 也是使用（AI 冷启动读路径），同样计热度；
-        // no_feedback=true 供 harness 注入/测试使用——不刷热度（B6 污染防护）
+    ) -> Result<(), MemoryError> {
         if !no_feedback {
             self.fire_hit_feedback(out_atoms.iter().map(|a| a.id).collect());
         }
-
-        // 待审代问（议题三）：队列里的低置信项带给 AI——下次对话顺口确认一句，
-        // atom-patch 回写，待审从「翻网页」变「一句话」。不计热度。
-        let pending_review = repo::pending_review_atoms(&self.pool).await?;
-        Ok(pending_review)
+        Ok(())
     }
 }
 

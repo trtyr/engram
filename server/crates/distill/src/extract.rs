@@ -104,7 +104,6 @@ async fn run_claimed(
     let mut all_relations: Vec<(String, String, String)> = Vec::new();
     for (i, seg) in segments.iter().enumerate() {
         // 哨兵判定（一次请求两问：guard noul + 归因 choice）；失败 → 本任务起降级直通
-        let mut force_review = false;
         if let Some(client) = &jev {
             let seg_text = seg
                 .iter()
@@ -129,9 +128,8 @@ async fn run_claimed(
                     }
                     engram_llm::decisions::GuardOutcome::Review => {
                         guard_stats.1 += 1;
-                        force_review = true;
                         ctx.emit(
-                            "JEV 低置信（产物提级待审）",
+                            "JEV 低置信（照常落库，confidence 靠后）",
                             Some(serde_json::json!({ "segment": i + 1, "p": g.p })),
                         )
                         .await
@@ -155,13 +153,7 @@ async fn run_claimed(
         }
         let (atoms, rels) = extract_segment(&ctx, llm.as_ref(), seg, i + 1, total_segments).await?;
         all_relations.extend(rels);
-        let mut parsed = parse_atoms(&atoms, &turn_map, &session_sensitive);
-        if force_review {
-            for p in &mut parsed {
-                p.force_review = true;
-            }
-        }
-        pending.extend(parsed);
+        pending.extend(parse_atoms(&atoms, &turn_map, &session_sensitive));
     }
     if jev.is_some() {
         ctx.emit(
@@ -302,17 +294,15 @@ async fn persist_atoms(
     for (i, p) in pending.into_iter().enumerate() {
         let id = Uuid::now_v7();
         // P015：直落 active（无候选态/无待审）——判重与取代由离线整理负责
-        let needs_review = false;
         sqlx::query(
-            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, needs_review, occurred_at, valid_until, sensitive, embedding, strength, source_kind)
-             VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $10, $11, 'agent_inferred')",
+            "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, occurred_at, valid_until, sensitive, embedding, strength, source_kind)
+             VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $10, 'agent_inferred')",
         )
         .bind(id)
         .bind(&p.kind)
         .bind(&p.content)
         .bind(p.confidence)
         .bind(sqlx::types::Json(&p.refs))
-        .bind(needs_review)
         .bind(p.occurred_at)
         .bind(p.valid_until)
         .bind(p.sensitive)

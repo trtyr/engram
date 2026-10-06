@@ -33,7 +33,6 @@ pub struct AtomDto {
     pub confidence: f32,
     pub status: String,
     pub superseded_by: Option<Uuid>,
-    pub needs_review: bool,
     /// P3 隐私标记：医疗/感情/财务类——默认不进检索与 context_pack，reveal 才可见
     pub sensitive: bool,
     pub hit_count: i32,

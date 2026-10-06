@@ -13,7 +13,7 @@ import {
   type ProjectFileDto,
   type ProjectLocationDto,
 } from '@/lib/api'
-import { Card, ErrorBox, Spinner } from '@/components/ui-bits'
+import { Card, Empty, ErrorBox, Spinner } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls } from '@/lib/ui'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,7 @@ type Sel =
   | { kind: 'location'; loc: ProjectLocationDto }
   | { kind: 'doc'; doc: ProjectDocDto }
   | { kind: 'file'; name: string | null }
+  | { kind: 'maintain' }
 
 /** folder 树节点（category 内的子目录递归结构）。 */
 interface FolderNode {
@@ -277,12 +278,27 @@ export default function ProjectDetail() {
                     </button>
                   ))}
               </div>
+
+              {/* 🛠 运维（项目整理 Agent） */}
+              <div className="mt-1 border-t border-border pt-1">
+                <button
+                  type="button"
+                  onClick={() => setSel({ kind: 'maintain' })}
+                  className={cn(
+                    'block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted',
+                    sel.kind === 'maintain' ? 'bg-muted font-medium' : 'text-muted-foreground',
+                  )}
+                >
+                  🛠 运维
+                </button>
+              </div>
             </nav>
           </Card>
         </div>
 
         {/* 右内容（独立滚动） */}
         <div className="flex min-h-[45vh] min-w-0 flex-1 flex-col lg:min-h-0">
+          {sel.kind === 'maintain' && <ProjectMaintainPane projectId={detail.id} />}
           {sel.kind === 'overview' && (
             <OverviewPane detail={detail} onOpenLoc={(loc) => setSel({ kind: 'location', loc })} onAddLoc={() => setSel({ kind: 'location', loc: NEW_LOC })} onOpenDoc={(d) => setSel({ kind: 'doc', doc: d })} />
           )}
@@ -926,4 +942,132 @@ function mimeHintOf(name: string): string {
     json: 'JSON',
   }
   return hints[ext] ?? '纯文本'
+}
+
+
+
+// ---------- 项目整理 Agent（P017 运维入口） ----------
+
+interface MaintainListItem {
+  job_id: string
+  status: string
+  finished_at: string | null
+  summary: string | null
+  issues_noted: number
+  steps: number
+}
+
+interface MaintainDetail {
+  job_id: string
+  status: string
+  finished_at: string | null
+  report: { summary?: string; issues_noted?: number; markdown?: string } | null
+}
+
+/** 运维面板：项目整理 Agent——触发 + 历史 + Markdown 报告。 */
+function ProjectMaintainPane({ projectId }: { projectId: string }) {
+  const [list, setList] = useState<MaintainListItem[] | null>(null)
+  const [selId, setSelId] = useState<string | null>(null)
+  const [detail, setDetail] = useState<MaintainDetail | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const load = () =>
+    api
+      .get<{ items: MaintainListItem[] }>(`/projects/${projectId}/maintain/list`)
+      .then((v) => {
+        setList(v.items)
+        if (!selId && v.items.length > 0) setSelId(v.items[0].job_id)
+      })
+      .catch((e) => setMsg(String(e)))
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
+
+  useEffect(() => {
+    if (!selId) return
+    api
+      .get<MaintainDetail>(`/projects/${projectId}/maintain/${selId}`)
+      .then(setDetail)
+      .catch((e) => setMsg(String(e)))
+  }, [selId, projectId])
+
+  const trigger = async () => {
+    setBusy(true)
+    setMsg('')
+    try {
+      const v = await api.post<{ already_running: boolean; hint?: string }>(
+        `/projects/${projectId}/maintain`,
+        {},
+      )
+      setMsg(v.already_running ? (v.hint ?? '整理进行中') : '整理已触发——完成后出现在列表里')
+      setTimeout(load, 3000)
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const r = detail?.report
+  return (
+    <div className="space-y-3" data-testid="project-maintain-pane">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          整理 Agent 定期捋项目文档，发现问题以「维护注记」写进对应文档；这里看每次整理的报告。
+        </p>
+        <Button size="sm" variant="outline" disabled={busy} onClick={trigger}>
+          {busy ? '触发中…' : '立即整理'}
+        </Button>
+      </div>
+      {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+      {!list ? (
+        <Spinner />
+      ) : list.length === 0 ? (
+        <Empty text="还没有整理记录——等每日节律自动跑，或点上面立即整理" />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:h-[calc(100dvh-14rem)]">
+          <div className="min-w-0 space-y-1.5 lg:h-full lg:overflow-y-auto lg:pr-1">
+            {list.map((it) => (
+              <button
+                key={it.job_id}
+                onClick={() => setSelId(it.job_id)}
+                className={cn(
+                  'w-full rounded-md border p-2.5 text-left transition-colors',
+                  selId === it.job_id ? 'border-ring bg-muted/60' : 'border-border hover:bg-muted/40',
+                  it.status !== 'succeeded' && 'opacity-70',
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">
+                    {it.finished_at ? fmtTime(it.finished_at) : it.job_id.slice(0, 8)}
+                  </span>
+                  <span className={cn('text-xs', it.status === 'succeeded' ? 'text-muted-foreground' : 'text-warning')}>
+                    {it.status === 'succeeded' ? '完成' : it.status}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-xs text-muted-foreground">留痕 {it.issues_noted} 条 · {it.steps} 步</div>
+                {it.summary && <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{it.summary}</div>}
+              </button>
+            ))}
+          </div>
+          <div className="min-w-0 lg:h-full lg:overflow-y-auto lg:pl-1">
+            {!detail ? (
+              <Spinner />
+            ) : detail.status !== 'succeeded' ? (
+              <Empty text={`该次整理未完成（${detail.status}）`} />
+            ) : r?.markdown ? (
+              <Card className="p-5">
+                <WikiMarkdown content={r.markdown} />
+              </Card>
+            ) : (
+              <Empty text="报告缺失" />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

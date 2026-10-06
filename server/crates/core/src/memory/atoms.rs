@@ -76,7 +76,6 @@ impl MemoryService {
         &self,
         kind: Option<&str>,
         status: Option<&str>,
-        needs_review: Option<bool>,
         cursor: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<AtomDto>, MemoryError> {
@@ -85,18 +84,10 @@ impl MemoryService {
                 "limit 不能为负（收到 {limit}）"
             )));
         }
-        Ok(repo::list_atoms(
-            &self.pool,
-            kind,
-            status,
-            needs_review,
-            cursor,
-            limit.min(500),
-        )
-        .await?)
+        Ok(repo::list_atoms(&self.pool, kind, status, cursor, limit.min(500)).await?)
     }
 
-    /// 手工新增（待审补充；active 直接入库）。
+    /// 手工新增（active 直接入库）。
     #[allow(clippy::too_many_arguments)]
     pub async fn create_atom(
         &self,
@@ -144,9 +135,6 @@ impl MemoryService {
             tracing::info!(atom_id = %existing.id, "直写命中已有同内容原子，幂等返回");
             return Ok(existing);
         }
-        // A1：与蒸馏链同规则——置信 <0.55 自动进待审，不直接生效污染记忆库
-        // （此前直写硬编码 needs_review=false，文档/CLI 提示/实现三方打架）。
-        let needs_review = confidence < 0.55;
         let id = Uuid::now_v7();
         let emb = self.try_embed(&[text.to_string()]).await;
         let row = repo::insert_atom(
@@ -155,7 +143,6 @@ impl MemoryService {
             kind,
             text,
             confidence,
-            needs_review,
             sensitive,
             occurred_at,
             valid_until,
@@ -164,11 +151,11 @@ impl MemoryService {
             source_kind.unwrap_or("user_stated"),
         )
         .await?;
-        // T020：直写生命周期（kind + 体量 + 待审标记，不打正文）
+        // T020：直写生命周期（kind + 体量，不打正文）
         self.emit_mem_log(
             "atom_create",
             serde_json::json!({
-                "kind": kind, "chars": content.chars().count(), "needs_review": needs_review,
+                "kind": kind, "chars": content.chars().count(),
             }),
         )
         .await;
@@ -235,36 +222,6 @@ impl MemoryService {
         Ok(row)
     }
 
-    /// 待审复核 confirm：摘 needs_review 标记（AI 代管复核，仅 needs_review=true 可处置）。
-    pub async fn confirm_review(&self, id: Uuid) -> Result<AtomDto, MemoryError> {
-        let row = repo::review_confirm(&self.pool, id).await?.ok_or_else(|| {
-            MemoryError::NotFound(format!(
-                "原子 {id} 不存在或不在待审状态——confirm 仅可处置 needs_review=true 的条目"
-            ))
-        })?;
-        self.audit(
-            "review_confirm",
-            json!({ "atom_id": id.to_string(), "content": row.content }),
-        )
-        .await;
-        Ok(row)
-    }
-
-    /// 待审复核 discard：归档（仅 needs_review=true 且 active）。
-    pub async fn discard_review(&self, id: Uuid) -> Result<AtomDto, MemoryError> {
-        let row = repo::review_discard(&self.pool, id).await?.ok_or_else(|| {
-            MemoryError::NotFound(format!(
-                "原子 {id} 不存在或不在待审状态——discard 仅可处置 needs_review=true 的条目"
-            ))
-        })?;
-        self.audit(
-            "review_discard",
-            json!({ "atom_id": id.to_string(), "content": row.content }),
-        )
-        .await;
-        Ok(row)
-    }
-
     /// 蒸馏回执：一次会话蒸馏产出了什么（原子 id + 内容预览 + 状态）。
     pub async fn distill_result(&self, session_id: Uuid) -> Result<serde_json::Value, MemoryError> {
         let Some((distill_status, metadata)) =
@@ -288,7 +245,6 @@ impl MemoryService {
                     "strength": a.strength,
                     "source_kind": a.source_kind,
                     "status": a.status,
-                    "needs_review": a.needs_review,
                 })
             })
             .collect();
@@ -310,7 +266,6 @@ impl MemoryService {
         kind: Option<&str>,
         confidence: Option<f32>,
         status: Option<&str>,
-        needs_review: Option<bool>,
         // T004 三态：None=不动 / Some(None)=清空 / Some(Some(v))=设置（显式 null 语义）
         superseded_by: Clearable<Uuid>,
         occurred_at: Clearable<DateTime<Utc>>,
@@ -357,7 +312,6 @@ impl MemoryService {
             &new_content,
             new_conf,
             new_status,
-            needs_review,
             superseded_by,
             occurred_at,
             valid_until,

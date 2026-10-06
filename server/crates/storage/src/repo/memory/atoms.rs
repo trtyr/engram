@@ -14,20 +14,17 @@ pub async fn list_atoms(
     pool: &PgPool,
     kind: Option<&str>,
     status: Option<&str>,
-    needs_review: Option<bool>,
     cursor: Option<DateTime<Utc>>,
     limit: i64,
 ) -> StoreResult<Vec<AtomDto>> {
     Ok(sqlx::query_as::<_, AtomDto>(
         "SELECT * FROM atoms \
          WHERE ($1::text IS NULL OR kind = $1) AND ($2::text IS NULL OR status = $2) \
-           AND ($3::bool IS NULL OR needs_review = $3) \
-           AND ($4::timestamptz IS NULL OR created_at < $4) \
-         ORDER BY created_at DESC LIMIT $5",
+           AND ($3::timestamptz IS NULL OR created_at < $3) \
+         ORDER BY created_at DESC LIMIT $4",
     )
     .bind(kind)
     .bind(status)
-    .bind(needs_review)
     .bind(cursor)
     .bind(limit)
     .fetch_all(pool)
@@ -57,7 +54,6 @@ pub async fn insert_atom(
     kind: &str,
     text: &str,
     confidence: f32,
-    needs_review: bool,
     sensitive: bool,
     occurred_at: Option<DateTime<Utc>>,
     valid_until: Option<DateTime<Utc>>,
@@ -66,14 +62,13 @@ pub async fn insert_atom(
     source_kind: &str,
 ) -> StoreResult<AtomDto> {
     let row = sqlx::query_as::<_, AtomDto>(
-        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, sensitive, occurred_at, valid_until, source_refs, embedding, strength, source_kind) \
-         VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, '[]'::jsonb, $9, $10, $11) RETURNING *",
+        "INSERT INTO atoms (id, kind, content, confidence, status, sensitive, occurred_at, valid_until, source_refs, embedding, strength, source_kind) \
+         VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, '[]'::jsonb, $8, $9, $10) RETURNING *",
     )
     .bind(id)
     .bind(kind)
     .bind(text)
     .bind(confidence)
-    .bind(needs_review)
     .bind(sensitive)
     .bind(occurred_at)
     .bind(valid_until)
@@ -98,8 +93,8 @@ pub async fn correct_atom(
 ) -> StoreResult<Option<AtomDto>> {
     let mut tx = pool.begin().await?;
     let new_row = sqlx::query_as::<_, AtomDto>(
-        "INSERT INTO atoms (id, kind, content, confidence, status, needs_review, source_refs, embedding, strength, source_kind) \
-         VALUES ($1, $2, $3, 0.95, 'active', false, '[]'::jsonb, $4, 'fact', 'user_stated') RETURNING *",
+        "INSERT INTO atoms (id, kind, content, confidence, status, source_refs, embedding, strength, source_kind) \
+         VALUES ($1, $2, $3, 0.95, 'active', '[]'::jsonb, $4, 'fact', 'user_stated') RETURNING *",
     )
     .bind(new_id)
     .bind(kind)
@@ -121,30 +116,6 @@ pub async fn correct_atom(
     }
     tx.commit().await?;
     Ok(Some(new_row))
-}
-
-/// 待审 AI 复核：confirm——摘 needs_review 标记（仅 needs_review=true 且 active 可处置）。
-pub async fn review_confirm(pool: &PgPool, id: Uuid) -> StoreResult<Option<AtomDto>> {
-    let row = sqlx::query_as::<_, AtomDto>(
-        "UPDATE atoms SET needs_review = false, updated_at = now() \
-         WHERE id = $1 AND needs_review = true AND status = 'active' RETURNING *",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row)
-}
-
-/// 待审 AI 复核：discard——归档（仅 needs_review=true 且 active 可处置）。
-pub async fn review_discard(pool: &PgPool, id: Uuid) -> StoreResult<Option<AtomDto>> {
-    let row = sqlx::query_as::<_, AtomDto>(
-        "UPDATE atoms SET status = 'archived', needs_review = false, updated_at = now() \
-         WHERE id = $1 AND needs_review = true AND status = 'active' RETURNING *",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row)
 }
 
 /// distill 触发撞车检测：是否存在 running 的 extract_atoms（手动触发防重复投递——
@@ -185,7 +156,6 @@ pub struct AtomLiteralHit {
     pub id: Uuid,
     pub kind: String,
     pub content: String,
-    pub needs_review: bool,
 }
 
 pub async fn atoms_literal_fallback(
@@ -201,7 +171,7 @@ pub async fn atoms_literal_fallback(
         "NOT sensitive"
     };
     let sql = format!(
-        "SELECT id, kind, content, needs_review FROM atoms \
+        "SELECT id, kind, content FROM atoms \
          WHERE status = 'active' AND ({sens}) AND content ILIKE $2 \
          ORDER BY created_at DESC LIMIT $1"
     );
@@ -253,7 +223,6 @@ pub async fn update_atom_full(
     content: &str,
     confidence: f32,
     status: &str,
-    needs_review: Option<bool>,
     // T004 三态：None=不动 / Some(None)=清空（NULL；sensitive 因 NOT NULL 落 false）/
     // Some(Some(v))=设置——显式 null 语义，修复「单值字段传 None 永远清不掉」。
     superseded_by: Option<Option<Uuid>>,
@@ -264,19 +233,18 @@ pub async fn update_atom_full(
     kind: &str,
 ) -> StoreResult<AtomDto> {
     let row = sqlx::query_as::<_, AtomDto>(
-        "UPDATE atoms SET content = $2, confidence = $3, status = $4, kind = $11, needs_review = COALESCE($5, needs_review), \
-             superseded_by = CASE WHEN $12 THEN $6 ELSE superseded_by END, \
-             occurred_at = CASE WHEN $13 THEN $7 ELSE occurred_at END, \
-             valid_until = CASE WHEN $14 THEN $8 ELSE valid_until END, \
-             sensitive = CASE WHEN $15 THEN $9 ELSE sensitive END, \
-             embedding = COALESCE($10, embedding), updated_at = now() \
+        "UPDATE atoms SET content = $2, confidence = $3, status = $4, kind = $10, \
+             superseded_by = CASE WHEN $11 THEN $5 ELSE superseded_by END, \
+             occurred_at = CASE WHEN $12 THEN $6 ELSE occurred_at END, \
+             valid_until = CASE WHEN $13 THEN $7 ELSE valid_until END, \
+             sensitive = CASE WHEN $14 THEN $8 ELSE sensitive END, \
+             embedding = COALESCE($9, embedding), updated_at = now() \
          WHERE id = $1 RETURNING *",
     )
     .bind(id)
     .bind(content)
     .bind(confidence)
     .bind(status)
-    .bind(needs_review)
     .bind(superseded_by.flatten())
     .bind(occurred_at.flatten())
     .bind(valid_until.flatten())
@@ -374,16 +342,6 @@ pub async fn recent_active_atoms(pool: &PgPool, limit: i64) -> StoreResult<Vec<A
          ORDER BY hit_count DESC, confidence DESC, created_at DESC LIMIT $1",
     )
     .bind(limit)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows)
-}
-
-/// 待审代问（议题三）：队列里的低置信项带给 AI。
-pub async fn pending_review_atoms(pool: &PgPool) -> StoreResult<Vec<AtomDto>> {
-    let rows = sqlx::query_as(
-        "SELECT * FROM atoms WHERE needs_review AND status = 'active' ORDER BY created_at DESC LIMIT 5",
-    )
     .fetch_all(pool)
     .await?;
     Ok(rows)

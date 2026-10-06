@@ -53,8 +53,6 @@ pub struct PendingAtom {
     pub valid_until: Option<chrono::DateTime<chrono::Utc>>,
     pub sensitive: bool,
     pub strength: String,
-    /// JEV 保险级联（T014）：双阈段强制提级 needs_review（true = 精抽产物不直接生效）。
-    pub force_review: bool,
 }
 
 /// 宽容 ISO8601 解析：完整 RFC3339 或 date-only（"2026-09-02" → 当日零点 UTC）。
@@ -236,7 +234,6 @@ pub fn parse_atoms(
         // 断言强度：LLM 判定 + 白名单；缺失/非法一律落 inference（保守——不升格）
         let strength = normalize_strength(a.get("strength").and_then(|v| v.as_str()));
         pending.push(PendingAtom {
-            force_review: false,
             kind,
             content,
             confidence,

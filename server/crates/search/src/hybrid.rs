@@ -15,10 +15,8 @@ pub struct SearchHit {
     pub score: f64,
     pub title: Option<String>,
     pub snippet: String,
-    /// 额外定位信息（如 atom kind / scenario topic）
+    /// 额外定位信息（如 atom kind）
     pub kind: Option<String>,
-    /// O2：待人审标记——l1 命中携带（AI 引用前该向用户确认；其余层 None）
-    pub needs_review: Option<bool>,
 }
 
 /// 向量近邻的距离天花板（余弦距离上限）。
@@ -69,7 +67,7 @@ pub async fn search_atoms(
         "NOT sensitive"
     };
     let qvec = Vector::from(qv.to_vec());
-    let sql = "SELECT id, kind, content, needs_review, embedding <=> $1 AS dist \
+    let sql = "SELECT id, kind, content, embedding <=> $1 AS dist \
          FROM atoms \
          WHERE status = 'active' AND embedding IS NOT NULL AND ("
         .to_string()
@@ -109,7 +107,6 @@ pub async fn search_atoms(
                 title,
                 snippet: content,
                 kind: r.get("kind"),
-                needs_review: r.get("needs_review"),
             }
         })
         .collect())
@@ -151,7 +148,6 @@ pub async fn search_entities(
                 title: Some(name),
                 snippet: summary,
                 kind: Some(kind),
-                needs_review: None,
             })
         })
         .collect();

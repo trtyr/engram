@@ -63,7 +63,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "recall", false, "找=记忆检索总入口。mode：search（默认）/ context（开场装载）/ entities / kv_get / kv_search；其余参数同名平铺。T018：旧名已删不兼容" => crate::MemoryRecallParams;
             "browse", false, "翻=清单浏览。mode：atoms（默认）/ sessions / session / kv；其余参数同名平铺。T018：旧名已删不兼容" => crate::MemoryBrowseParams;
             "revise", false, "改=纠错与修订。mode：correct（默认，取代链留痕）/ archive（原子归档）；其余参数同名平铺。T018：旧名已删不兼容；实体合并按域界在 circles" => crate::MemoryReviseParams;
-            "review", false, "审=蒸馏与复核。mode：distill（默认）/ result（蒸馏回执）/ confirm / discard / duplicates（原子重复检测）；其余参数同名平铺。T018：旧名已删不兼容；实体重复检测按域界在 circles" => crate::MemoryReviewParams;
+            "review", false, "审=蒸馏与回执。mode：distill（默认）/ result（蒸馏回执）/ duplicates（原子重复检测）；其余参数同名平铺。T018：旧名已删不兼容；实体重复检测按域界在 circles" => crate::MemoryReviewParams;
             "forget", true, "忘=遗忘。mode：void（默认，作废会话级联归档产物）/ erase（物理删除，需 erase scope）/ restore（撤销 void）/ kv（删 KV 精确值，需 original scope）" => crate::ForgetParams;
         ],
         "projects" => action_docs![

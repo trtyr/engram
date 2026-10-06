@@ -135,9 +135,9 @@ async fn extract_with_retry_and_full_refs() {
         .unwrap();
     assert_eq!(st, "done");
 
-    // P015：conf<0.55 丢弃 → 只有 1 条落库；active 直落、无待审、embedding+source_refs 齐全
-    let rows: Vec<(String, String, bool, bool, serde_json::Value)> = sqlx::query_as(
-        "SELECT content, status, needs_review, embedding IS NOT NULL, source_refs \
+    // P015：conf<0.55 丢弃 → 只有 1 条落库；active 直落、embedding+source_refs 齐全
+    let rows: Vec<(String, String, bool, serde_json::Value)> = sqlx::query_as(
+        "SELECT content, status, embedding IS NOT NULL, source_refs \
          FROM atoms ORDER BY created_at",
     )
     .fetch_all(&env.pool)
@@ -146,12 +146,11 @@ async fn extract_with_retry_and_full_refs() {
     assert_eq!(rows.len(), 1, "0.5 低置信应被丢弃");
     let mac = &rows[0];
     assert_eq!(mac.1, "active");
-    assert!(!mac.2, "P015 无待审通道");
-    assert!(mac.3, "embedding 应生成");
+    assert!(mac.2, "embedding 应生成");
     assert!(
-        mac.4.to_string().contains(&sid.to_string()),
+        mac.3.to_string().contains(&sid.to_string()),
         "source_refs 指向 L0: {}",
-        mac.4
+        mac.3
     );
 
     env.handle
@@ -635,7 +634,7 @@ async fn jev_gate_degrades_to_passthrough_with_visible_event() {
 }
 
 /// T002 回归：contradicts 取代落空（旧条已 archived）时候选不得直接 active——
-/// 先 supersede 后 promote；降位失败 → 候选提级 needs_review，杜绝同主题双 active。
+/// 先 supersede 后 promote，杜绝同主题双 active。
 async fn setup_min() -> (sqlx::PgPool, support::TestPg) {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();

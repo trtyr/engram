@@ -235,7 +235,12 @@ function ToolDetail({
 
 /** 域 key → 中文标签（与侧栏资产域命名同源）。 */
 const DOMAIN_LABELS: Record<string, string> = {
+  assets: '资产',
+  circles: '圈子',
+  credentials: '凭据',
+  logs: '日志',
   memory: '用户记忆',
+  study: '学习',
   wiki: 'Wiki',
   codegraph: '代码图谱',
   projects: '项目',

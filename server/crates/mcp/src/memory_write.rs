@@ -41,16 +41,6 @@ pub struct CorrectParams {
     pub text: String,
 }
 
-/// 待审复核处置（AI 代管复核）：confirm 摘标记 / discard 归档。
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ReviewActionParams {
-    /// 待审原子 id（仅 needs_review=true 的条目可处置）
-    #[schemars(
-        description = "要处置的待审原子 id。仅 needs_review=true 的条目可处置——正常记忆对 AI 只读。"
-    )]
-    pub atom_id: String,
-}
-
 /// 手动触发整理巡逻（P015：蒸馏链手动触发统一为离线整理 Agent——判重/归档/画像维护）。
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DistillParams {
@@ -195,45 +185,6 @@ impl EngramMcpServer {
             .map_err(from_memory)?;
         let mut v = serde_json::to_value(&a).unwrap_or(serde_json::json!({}));
         v["hint"] = json!("已更正（取代链留痕）——旧原子 superseded 指向本条，检索立即生效");
-        ok_json(v)
-    }
-
-    /// 待审复核通过：摘掉 needs_review 标记（AI 代管复核）。
-    ///
-    /// 仅可处置 needs_review=true 的条目；处置留痕。批量复核场景：
-    /// 用户说「把待审的过一遍」→ list_atoms(needs_review=true) 逐条判断后 confirm。
-    pub(crate) async fn memory_confirm(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<ReviewActionParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        require_memory(&p)?;
-        let rp = params.0;
-        let id = Uuid::parse_str(&rp.atom_id)
-            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "atom_id 不是合法 UUID"))?;
-        let a = self.svc().confirm_review(id).await.map_err(from_memory)?;
-        let mut v = serde_json::to_value(&a).unwrap_or(serde_json::json!({}));
-        v["hint"] = json!("已复核通过——待审标记已摘除");
-        ok_json(v)
-    }
-
-    /// 待审复核丢弃：归档该条（AI 代管复核）。
-    ///
-    /// 仅可处置 needs_review=true 的条目。归档后检索/上下文不再返回（留痕可溯）。
-    pub(crate) async fn memory_discard(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<ReviewActionParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        require_memory(&p)?;
-        let rp = params.0;
-        let id = Uuid::parse_str(&rp.atom_id)
-            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "atom_id 不是合法 UUID"))?;
-        let a = self.svc().discard_review(id).await.map_err(from_memory)?;
-        let mut v = serde_json::to_value(&a).unwrap_or(serde_json::json!({}));
-        v["hint"] = json!("已丢弃（archived）——检索与上下文不再返回，留痕可溯");
         ok_json(v)
     }
 

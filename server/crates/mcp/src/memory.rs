@@ -111,11 +111,6 @@ pub struct ListAtomsParams {
         description = "可选：按状态过滤，默认 \"active\"（只看有效记忆）。superseded=被取代, archived=归档, candidate=候选；\"all\" = 全部状态（巡检历史时用）。"
     )]
     pub status: Option<String>,
-    /// true = 只看待审（低置信度）；false = 只看已审
-    #[schemars(
-        description = "可选：按待审标记过滤（needs_review=true 是低置信度、建议用户复核的条目）。"
-    )]
-    pub needs_review: Option<bool>,
     /// keyset 分页游标（上一页最后一条的 created_at，ISO8601）
     #[schemars(description = "可选：分页游标。传上一页最后一条的 created_at（ISO8601）取下一页。")]
     pub cursor: Option<String>,
@@ -140,8 +135,7 @@ impl EngramMcpServer {
     ///
     /// 何时用：会话开始时调用一次，冷启动装载「这个用户是谁、在忙什么、有什么偏好与约束」。
     /// 何时不用：需要回忆某个具体细节时用 memory_search（更省 token）；本工具是全景而非定向检索。
-    /// 返回：atoms（原子事实）、entities（实体）、
-    /// pending_review（待用户复核的低置信度条目，可顺带提醒用户）。
+    /// 返回：atoms（原子事实）与 entities（实体）。
     pub(crate) async fn memory_context(
         &self,
         ctx: RequestContext<RoleServer>,
@@ -221,9 +215,9 @@ impl EngramMcpServer {
         ok_json(v)
     }
 
-    /// 浏览 L1 原子事实列表（keyset 分页，可按类型/状态/待审过滤）。
+    /// 浏览 L1 原子事实列表（keyset 分页，可按类型/状态过滤）。
     ///
-    /// 何时用：需要系统性浏览用户的事实条目（而非定向检索）时；或巡检 needs_review 条目。
+    /// 何时用：需要系统性浏览用户的事实条目（而非定向检索）时。
     /// 何时不用：有明确主题的回忆用 memory_search；开场装载用 memory_context。
     pub(crate) async fn memory_list_atoms(
         &self,
@@ -250,13 +244,7 @@ impl EngramMcpServer {
         };
         let atoms = self
             .svc()
-            .list_atoms(
-                lp.kind.as_deref(),
-                status,
-                lp.needs_review,
-                cursor,
-                lp.limit.unwrap_or(100),
-            )
+            .list_atoms(lp.kind.as_deref(), status, cursor, lp.limit.unwrap_or(100))
             .await
             .map_err(from_memory)?;
         ok_json(serde_json::to_value(&atoms).unwrap_or(serde_json::json!([])))
@@ -430,20 +418,6 @@ impl EngramMcpServer {
                 self.memory_correct(
                     ctx,
                     Parameters(dispatch::from_args("memory", "correct", args)?),
-                )
-                .await
-            }
-            "confirm" => {
-                self.memory_confirm(
-                    ctx,
-                    Parameters(dispatch::from_args("memory", "confirm", args)?),
-                )
-                .await
-            }
-            "discard" => {
-                self.memory_discard(
-                    ctx,
-                    Parameters(dispatch::from_args("memory", "discard", args)?),
                 )
                 .await
             }
