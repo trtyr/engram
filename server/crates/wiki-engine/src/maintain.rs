@@ -145,7 +145,58 @@ pub async fn patrol_job(
     )
     .await
     .ok();
-    serde_json::to_value(&report).map_err(|e| JobError::Permanent(e.to_string()))
+    let mut progress =
+        serde_json::to_value(&report).map_err(|e| JobError::Permanent(e.to_string()))?;
+    // Markdown 巡逻报告（历史存档，前端详情栏直接渲染）
+    if let Some(obj) = progress.as_object_mut() {
+        obj.insert("markdown".into(), Value::String(render_markdown(&report)));
+    }
+    Ok(progress)
+}
+
+/// 巡逻报告 → Markdown 存档（人类可读，详情栏直接渲染）。
+fn render_markdown(r: &WikiPatrolReport) -> String {
+    let mut md = String::from("# Wiki 巡逻报告\n\n");
+    md.push_str(&format!(
+        "- 体检 {} 页，lint **{}** 项问题；修复扫描 {} 页，自动执行 **{}** 项动作；向量回填 {} 页\n",
+        r.lint_checked_pages, r.lint_issues, r.repair_checked_pages, r.repair_actions, r.embedding_backfilled,
+    ));
+    if !r.lint_summary.is_empty() {
+        md.push_str("\n## Lint 体检\n\n| 类型 | 数量 |\n|---|---|\n");
+        for (kind, n) in &r.lint_summary {
+            md.push_str(&format!("| {kind} | {n} |\n"));
+        }
+    } else {
+        md.push_str("\n## Lint 体检\n\n全部干净。\n");
+    }
+    if !r.repair_detail.is_empty() {
+        md.push_str("\n## 自动修复\n\n");
+        for (action, slug) in &r.repair_detail {
+            md.push_str(&format!("- `{action}` · {slug}\n"));
+        }
+    }
+    if r.duplicate_candidates > 0 {
+        md.push_str(&format!(
+            "\n## 重复页候选\n\n{} 组——只报告不自动合并，确认后手动处理。\n",
+            r.duplicate_candidates
+        ));
+    }
+    if let Some(s) = &r.agent_summary {
+        md.push_str(&format!("\n## 维护官纪要\n\n{s}\n"));
+    }
+    if let Some(actions) = r.manual_actions.as_ref().filter(|a| !a.is_empty()) {
+        md.push_str("\n## 待人工处理\n\n");
+        for a in actions {
+            md.push_str(&format!("- [ ] {a}\n"));
+        }
+    }
+    if let Some(job) = r.lint_deep_job {
+        md.push_str(&format!(
+            "\n---\n\nLLM 深度检查已入队（`{}`）——语义发现见该任务的进度。\n",
+            &job.to_string()[..8]
+        ));
+    }
+    md
 }
 
 fn job_err(e: impl std::fmt::Display) -> JobError {

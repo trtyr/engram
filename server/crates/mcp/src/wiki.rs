@@ -217,25 +217,6 @@ pub struct WikiDocumentsSearchParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct WikiMergeParams {
-    /// 保留的主页 slug（并入目标）。
-    #[schemars(description = "保留的主页 slug（并入目标）。")]
-    pub primary: String,
-    /// 被合并页 slug（内容并入 primary 后删除，留版本快照——下架不烧书）。
-    #[schemars(description = "被合并页 slug（内容并入 primary 后删除，留版本快照——下架不烧书）。")]
-    pub duplicate: String,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct WikiLintDeepParams {
-    /// 可选：限定检查的页面 slug 集合（缺省全库非系统页）——控制 LLM 成本
-    #[schemars(
-        description = "可选：限定检查的页面 slug 集合（缺省全库非系统页）——控制 LLM 成本。"
-    )]
-    pub slugs: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct WikiArchiveParams {
     /// 归档页 slug
     #[schemars(description = "归档页 slug（仅字母/数字/-/_/·，≤80 字符）。")]
@@ -386,22 +367,4 @@ pub struct WikiPurposeSetParams {
     /// 当前中心论点（可选）
     #[schemars(description = "可选：当前中心论点。")]
     pub thesis: Option<String>,
-}
-
-/// dismiss 图洞察参数（不再出现）。
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct WikiInsightDismissParams {
-    /// 洞察 key（insights 返回的 key）
-    #[schemars(description = "洞察 key（insights 返回的 key），dismiss 后不再出现。")]
-    pub key: String,
-}
-
-/// 重新嵌入文档缺失块参数（EN-32 恢复入口：embed_failed/NULL 向量块补嵌）。
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct WikiReembedParams {
-    /// 文档 id（document_add 返回的 id）
-    #[schemars(
-        description = "文档 id（document_add 返回的 id）。只补 embed_failed/缺失向量块，已嵌入块不重复计费。"
-    )]
-    pub doc_id: String,
 }

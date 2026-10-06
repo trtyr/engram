@@ -2,6 +2,20 @@
 //! P014 后运维操作面收敛——用户只看报告，巡逻由节律自动跑。
 
 use super::*;
+use serde_json::json;
+
+/// sqlx 行解构 type alias（消 clippy type_complexity）。
+type PatrolRow = (
+    uuid::Uuid,
+    String,
+    Option<serde_json::Value>,
+    Option<chrono::DateTime<chrono::Utc>>,
+);
+type PatrolDetailRow = (
+    String,
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<serde_json::Value>,
+);
 
 /// 最近一次巡逻结果（maintain_wiki 最新终态任务的 progress）+ 下次巡逻时间。
 #[utoipa::path(get, path = "/wiki/patrol/latest",
@@ -11,12 +25,7 @@ pub async fn patrol_latest(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_wiki_read(&principal)?;
-    let row: Option<(
-        uuid::Uuid,
-        String,
-        Option<serde_json::Value>,
-        chrono::DateTime<chrono::Utc>,
-    )> = sqlx::query_as(
+    let row: Option<PatrolRow> = sqlx::query_as(
         "SELECT id, status::text, progress, finished_at FROM jobs \
              WHERE kind = 'maintain_wiki' AND status IN ('succeeded', 'failed', 'dead') \
              ORDER BY finished_at DESC NULLS LAST LIMIT 1",
@@ -44,6 +53,69 @@ pub async fn patrol_latest(
     Ok(Json(serde_json::json!({
         "patrol": patrol,
         "next_due": next_due,
+    })))
+}
+
+/// 巡逻历史列表（最近 50 次）：每次巡逻一条，前端左列表用。
+#[utoipa::path(get, path = "/wiki/patrol/list",
+    responses((status = 200, body = Object)))]
+pub async fn patrol_list(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_wiki_read(&principal)?;
+    let rows: Vec<PatrolRow> = sqlx::query_as(
+        "SELECT id, status::text, progress, finished_at FROM jobs \
+             WHERE kind = 'maintain_wiki' AND status IN ('succeeded', 'failed', 'dead') \
+             ORDER BY finished_at DESC NULLS LAST LIMIT 50",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+    let items: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(id, status, progress, finished_at)| {
+            let p = progress.as_ref();
+            serde_json::json!({
+                "job_id": id,
+                "status": status,
+                "finished_at": finished_at,
+                "lint_issues": p.and_then(|v| v.get("lint_issues")).cloned().unwrap_or(json!(0)),
+                "repair_actions": p.and_then(|v| v.get("repair_actions")).cloned().unwrap_or(json!(0)),
+                "duplicate_candidates": p.and_then(|v| v.get("duplicate_candidates")).cloned().unwrap_or(json!(0)),
+                "summary": p.and_then(|v| v.get("agent_summary")).cloned().unwrap_or(json!(null)),
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "items": items })))
+}
+
+/// 单次巡逻完整报告（含 markdown 存档）。
+#[utoipa::path(get, path = "/wiki/patrol/{id}",
+    params(("id" = uuid::Uuid, Path)),
+    responses((status = 200, body = Object), (status = 404)))]
+pub async fn patrol_detail(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_wiki_read(&principal)?;
+    let row: Option<PatrolDetailRow> = sqlx::query_as(
+        "SELECT status::text, finished_at, progress FROM jobs \
+             WHERE kind = 'maintain_wiki' AND id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+    let Some((status, finished_at, progress)) = row else {
+        return Err(ApiError::NotFound(format!("巡逻任务 {id} 不存在")));
+    };
+    Ok(Json(serde_json::json!({
+        "job_id": id,
+        "status": status,
+        "finished_at": finished_at,
+        "report": progress,
     })))
 }
 

@@ -847,126 +847,147 @@ interface PatrolReport {
   lint_deep_job: string | null
   agent_summary?: string | null
   manual_actions?: string[] | null
+  markdown?: string
 }
 
-interface PatrolLatest {
-  patrol: { job_id: string; status: string; finished_at: string; report: PatrolReport | null } | null
-  next_due: string | null
+interface PatrolListItem {
+  job_id: string
+  status: string
+  finished_at: string | null
+  lint_issues: number
+  repair_actions: number
+  duplicate_candidates: number
+  summary: string | null
 }
 
-/** 巡检报告（只读）：maintain_wiki 节律每天自动巡逻，这里只展示最近一次结果。 */
+/** 巡检历史（工单式主从）：左列表（每次巡逻一条）右 Markdown 报告，两栏独立滚动。 */
 function PatrolPane() {
-  const [data, setData] = useState<PatrolLatest | null>(null)
+  const [list, setList] = useState<PatrolListItem[] | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [detail, setDetail] = useState<{ status: string; finished_at: string | null; report: PatrolReport | null } | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const load = () =>
     api
-      .get<PatrolLatest>('/wiki/patrol/latest')
-      .then(setData)
+      .get<{ items: PatrolListItem[] }>('/wiki/patrol/list')
+      .then((v) => {
+        setList(v.items)
+        if (!selectedId && v.items.length > 0) setSelectedId(v.items[0].job_id)
+      })
       .catch((e) => setMsg(String(e)))
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  useEffect(() => {
+    if (!selectedId) return
+    api
+      .get<{ status: string; finished_at: string | null; report: PatrolReport | null }>(`/wiki/patrol/${selectedId}`)
+      .then(setDetail)
+      .catch((e) => setMsg(String(e)))
+  }, [selectedId])
   const trigger = async () => {
     setBusy(true)
     setMsg('')
     try {
       const v = await api.post<{ already_running: boolean; hint?: string }>('/wiki/patrol', {})
-      setMsg(v.already_running ? (v.hint ?? '巡逻进行中') : '巡逻已触发——稍后刷新看报告')
-      setTimeout(load, 1500)
+      setMsg(v.already_running ? (v.hint ?? '巡逻进行中') : '巡逻已触发——完成后出现在列表里')
+      setTimeout(load, 3000)
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
   }
-  const p = data?.patrol
-  const r = p?.report
+  const r = detail?.report
   return (
     <div className="space-y-3" data-testid="patrol-pane">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          wiki 由维护 Agent 每天自动巡逻（lint 体检 → 确定性修复 → 重复页报告 → 深度检查）。
-          {data?.next_due && ` 下次：${fmtTime(data.next_due)}`}
+          维护 Agent 每天自动巡逻（lint 体检 → 确定性修复 → 重复页报告 → 深度检查），每次巡逻一条报告。
         </p>
         <Button size="sm" variant="outline" disabled={busy} onClick={trigger}>
           {busy ? '触发中…' : '立即巡逻'}
         </Button>
       </div>
       {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
-      {!p ? (
+      {!list ? (
+        <Spinner />
+      ) : list.length === 0 ? (
         <Empty text="还没有巡逻记录——等节律自动跑，或点上面立即巡逻" />
-      ) : p.status !== 'succeeded' ? (
-        <Empty text={`最近一次巡逻未完成（${p.status}）——等下次自动巡逻`} />
-      ) : !r ? (
-        <Empty text="巡逻报告缺失" />
       ) : (
-        <Card className="space-y-3 p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">
-              巡检报告 · {r.lint_checked_pages} 页体检 / {r.repair_checked_pages} 页修复扫描
-            </span>
-            <span className="text-xs text-muted-foreground">{fmtTime(p.finished_at)}</span>
+        <div
+          className={cn(
+            'grid grid-cols-1 gap-4',
+            'lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] lg:h-[calc(100dvh-13rem)]',
+          )}
+        >
+          {/* 左：巡逻历史列表（独立滚动） */}
+          <div className="min-w-0 space-y-1.5 lg:h-full lg:overflow-y-auto lg:pr-1">
+            {list.map((it) => (
+              <button
+                key={it.job_id}
+                onClick={() => setSelectedId(it.job_id)}
+                className={cn(
+                  'w-full rounded-md border p-2.5 text-left transition-colors',
+                  selectedId === it.job_id
+                    ? 'border-ring bg-muted/60'
+                    : 'border-border hover:bg-muted/40',
+                  it.status !== 'succeeded' && 'opacity-70',
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">
+                    {it.finished_at ? fmtTime(it.finished_at) : it.job_id.slice(0, 8)}
+                  </span>
+                  <span
+                    className={cn(
+                      'text-xs',
+                      it.status === 'succeeded' ? 'text-muted-foreground' : 'text-warning',
+                    )}
+                  >
+                    {it.status === 'succeeded' ? '完成' : it.status}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  lint {it.lint_issues} · 修复 {it.repair_actions} · 重复 {it.duplicate_candidates}
+                </div>
+                {it.summary && <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{it.summary}</div>}
+              </button>
+            ))}
           </div>
-          <div className="grid gap-2 text-sm sm:grid-cols-2">
-            <div className="rounded border border-border p-2">
-              <div className="font-medium">Lint 体检：{r.lint_issues} 项问题</div>
-              {r.lint_summary.length > 0 ? (
-                <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
-                  {r.lint_summary.map(([kind, n]) => (
-                    <li key={kind}>
-                      {kind} × {n}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="mt-1 text-xs text-muted-foreground">全部干净</div>
-              )}
-            </div>
-            <div className="rounded border border-border p-2">
-              <div className="font-medium">自动修复：{r.repair_actions} 项动作</div>
-              <div className="mt-1 text-xs text-muted-foreground">向量回填 {r.embedding_backfilled} 页</div>
-            </div>
+          {/* 右：Markdown 巡逻报告（独立滚动） */}
+          <div className="min-w-0 lg:h-full lg:overflow-y-auto lg:pl-1">
+            {!detail ? (
+              <Spinner />
+            ) : detail.status !== 'succeeded' ? (
+              <Empty text={`该次巡逻未完成（${detail.status}）`} />
+            ) : !r ? (
+              <Empty text="报告缺失" />
+            ) : r.markdown ? (
+              <Card className="p-5">
+                <WikiMarkdown content={r.markdown} />
+              </Card>
+            ) : (
+              <Card className="space-y-3 p-4">
+                <div className="text-sm font-medium">
+                  巡检报告 · {r.lint_checked_pages} 页体检 / {r.repair_checked_pages} 页修复扫描
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  lint {r.lint_issues} · 修复 {r.repair_actions} · 重复候选 {r.duplicate_candidates}
+                </div>
+                {r.agent_summary && <p className="text-xs text-muted-foreground">{r.agent_summary}</p>}
+                {r.manual_actions && r.manual_actions.length > 0 && (
+                  <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                    {r.manual_actions.map((a, i) => (
+                      <li key={i}>{a}</li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            )}
           </div>
-          {r.repair_detail.length > 0 && (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground">修复明细（{r.repair_detail.length}）</summary>
-              <ul className="mt-1 space-y-0.5">
-                {r.repair_detail.map(([action, slug], i) => (
-                  <li key={i}>
-                    <span className="font-mono">{action}</span> · {slug}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {r.duplicate_candidates > 0 && (
-            <p className="text-xs text-warning">
-              重复页候选 {r.duplicate_candidates} 组——深度检查报告里给合并建议，确认后再手动合并。
-            </p>
-          )}
-          {r.agent_summary && (
-            <div className="rounded border border-border p-2">
-              <div className="text-sm font-medium">维护官纪要</div>
-              <p className="mt-1 text-xs text-muted-foreground">{r.agent_summary}</p>
-            </div>
-          )}
-          {r.manual_actions && r.manual_actions.length > 0 && (
-            <div className="rounded border border-warning/40 p-2">
-              <div className="text-sm font-medium">待人工处理（{r.manual_actions.length}）</div>
-              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-                {r.manual_actions.map((a, i) => (
-                  <li key={i}>{a}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {r.lint_deep_job && (
-            <p className="text-xs text-muted-foreground">
-              LLM 深度检查已入队（任务 {r.lint_deep_job.slice(0, 8)}）——结果看任务列表。
-            </p>
-          )}
-        </Card>
+        </div>
       )}
     </div>
   )

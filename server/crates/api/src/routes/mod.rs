@@ -348,6 +348,8 @@ fn wiki_routes() -> Router<AppState> {
             get(wiki_api::get_purpose).put(wiki_api::set_purpose),
         )
         .route("/wiki/patrol/latest", get(wiki_api::patrol_latest))
+        .route("/wiki/patrol/list", get(wiki_api::patrol_list))
+        .route("/wiki/patrol/{id}", get(wiki_api::patrol_detail))
         .route("/wiki/patrol", post(wiki_api::patrol_trigger))
         .route("/wiki/repair", post(wiki_api::repair))
         .route("/wiki/repair/async", post(wiki_api::repair_async))

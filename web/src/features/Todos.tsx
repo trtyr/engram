@@ -312,6 +312,7 @@ export default function Todos() {
       )}
       </div>
       {selected && (
+        <div className="min-w-0 lg:self-start lg:max-h-full lg:overflow-y-auto lg:pl-1">
         <TodoDetail
           t={rows.find((r) => r.id === selected.id) ?? selected}
           busy={busy}
@@ -320,6 +321,7 @@ export default function Todos() {
           onDelete={doDelete}
           onClose={() => setSelected(null)}
         />
+        </div>
       )}
       </div>
 

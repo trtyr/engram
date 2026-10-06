@@ -284,43 +284,6 @@ impl EngramMcpServer {
         }))
     }
 
-    /// 重复候选（标题归一化相同页面组）——研判流入口。
-    ///
-    /// 何时用：lint/日常巡检发现疑似重复后，用本列表逐组研判；处置用 merge 合并（留痕）。
-    pub(crate) async fn wiki_duplicates(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(_): Parameters<wiki::WikiLibParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let candidates = wiki::svc(&self.state)
-            .duplicate_candidates(lib)
-            .await
-            .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::json!({
-            "candidates": candidates,
-            "hint": "研判后用 action=\"merge\"（primary/duplicate）合并，留版本快照",
-        }))
-    }
-
-    /// 查询缺口清单（零命中/低分查询=内容缺口）——喂原料方向与 Deep Research 的输入。
-    pub(crate) async fn wiki_query_gaps(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(_): Parameters<wiki::WikiLibParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let gaps = wiki::svc(&self.state)
-            .query_gaps(lib, 50)
-            .await
-            .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::to_value(&gaps).unwrap_or(serde_json::json!([])))
-    }
-
     /// 目录骨架（folder, 页数）——前端懒加载树先渲染结构；配合 list_pages 的 folder 过滤。
     pub(crate) async fn wiki_folders(
         &self,
@@ -335,131 +298,6 @@ impl EngramMcpServer {
             .await
             .map_err(wiki::from_wiki)?;
         ok_json(serde_json::to_value(&folders).unwrap_or(serde_json::json!([])))
-    }
-
-    /// 确定性修复（lint 修而不只报）：死链改写/去链接化/建 stub/孤页回挂/重复合并。
-    pub(crate) async fn wiki_repair(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(_): Parameters<wiki::WikiLibParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let report = wiki::svc(&self.state)
-            .repair(lib)
-            .await
-            .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::to_value(&report).unwrap_or(serde_json::json!({})))
-    }
-
-    /// 修复异步入队（大库友好）——日志页可按 job_id 查进度与历史。
-    pub(crate) async fn wiki_repair_async(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(_): Parameters<wiki::WikiLibParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let job_id = engram_wiki_engine::repair::enqueue(&self.state.pool, lib)
-            .await
-            .map_err(|e| mcp_err(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string()))?;
-        ok_json(serde_json::json!({
-            "job_id": job_id,
-            "note": "修复已入队——日志页按 job_id 筛可看进度，或 GET /jobs/{job_id}",
-        }))
-    }
-
-    /// dismiss 图洞察（key 不再出现）。
-    pub(crate) async fn wiki_insight_dismiss(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<wiki::WikiInsightDismissParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        wiki::svc(&self.state)
-            .insight_dismiss(lib, &params.0.key)
-            .await
-            .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::json!({ "ok": true, "dismissed": params.0.key }))
-    }
-
-    /// 重置全部 dismissed 洞察（重新可见）。
-    pub(crate) async fn wiki_insight_reset(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(_): Parameters<wiki::WikiLibParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        wiki::svc(&self.state)
-            .insight_reset(lib)
-            .await
-            .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::json!({ "ok": true }))
-    }
-
-    /// 存量回填：重析全部页面正文重建 wiki_links（幂等）。
-    pub(crate) async fn wiki_rebuild_links(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(_): Parameters<wiki::WikiLibParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let n = wiki::svc(&self.state)
-            .rebuild_all_links(lib)
-            .await
-            .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::json!({ "rebuilt_links": n }))
-    }
-
-    /// 存量内容页 tsv 重刷（EN-63；排除 index/log/overview 系统页；幂等）。
-    pub(crate) async fn wiki_rebuild_tsv(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        Parameters(_): Parameters<wiki::WikiLibParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let n = wiki::svc(&self.state)
-            .backfill_tsv(lib)
-            .await
-            .map_err(wiki::from_wiki)?;
-        ok_json(serde_json::json!({ "rebuilt_tsv": n }))
-    }
-
-    /// 重新嵌入文档缺失块（EN-32 恢复入口：embed_failed/NULL 向量补嵌；已嵌入块不重复计费）。
-    pub(crate) async fn wiki_reembed(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<wiki::WikiReembedParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        wiki::require_wiki(&p)?;
-        let lib = self.resolve_wiki_lib().await?;
-        let id = uuid::Uuid::parse_str(params.0.doc_id.trim()).map_err(|_| {
-            mcp_err(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                "doc_id 不是合法 UUID",
-            )
-        })?;
-        let svc = engram_core::wiki_docs::WikiDocumentService::new(
-            self.state.pool.clone(),
-            self.state.registry(),
-            self.state.data_dir.clone(),
-        );
-        svc.reembed(lib, id).await.map_err(Self::from_wiki_docs)?;
-        ok_json(serde_json::json!({
-            "queued": id,
-            "hint": "补嵌 job 已入队——document_get 看 status 进度",
-        }))
     }
 
     /// 删除 Wiki 页面（不可逆——连带清理双向 wikilinks；最后状态留版本快照可重建）。
@@ -585,27 +423,6 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "lint" => {
-                self.wiki_lint(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "lint", call.args)?),
-                )
-                .await
-            }
-            "lint_deep" => {
-                self.wiki_lint_deep(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "lint_deep", call.args)?),
-                )
-                .await
-            }
-            "merge" => {
-                self.wiki_merge(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "merge", call.args)?),
-                )
-                .await
-            }
             "ingest" => {
                 self.wiki_ingest(
                     ctx,
@@ -662,13 +479,6 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "insights" => {
-                self.wiki_insights(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "insights", call.args)?),
-                )
-                .await
-            }
             "promote" => {
                 self.wiki_promote(
                     ctx,
@@ -697,73 +507,10 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "duplicates" => {
-                self.wiki_duplicates(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "duplicates", call.args)?),
-                )
-                .await
-            }
-            "query_gaps" => {
-                self.wiki_query_gaps(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "query_gaps", call.args)?),
-                )
-                .await
-            }
             "folders" => {
                 self.wiki_folders(
                     ctx,
                     Parameters(dispatch::from_args("wiki", "folders", call.args)?),
-                )
-                .await
-            }
-            "repair" => {
-                self.wiki_repair(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "repair", call.args)?),
-                )
-                .await
-            }
-            "repair_async" => {
-                self.wiki_repair_async(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "repair_async", call.args)?),
-                )
-                .await
-            }
-            "insight_dismiss" => {
-                self.wiki_insight_dismiss(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "insight_dismiss", call.args)?),
-                )
-                .await
-            }
-            "insight_reset" => {
-                self.wiki_insight_reset(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "insight_reset", call.args)?),
-                )
-                .await
-            }
-            "rebuild_links" => {
-                self.wiki_rebuild_links(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "rebuild_links", call.args)?),
-                )
-                .await
-            }
-            "rebuild_tsv" => {
-                self.wiki_rebuild_tsv(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "rebuild_tsv", call.args)?),
-                )
-                .await
-            }
-            "reembed" => {
-                self.wiki_reembed(
-                    ctx,
-                    Parameters(dispatch::from_args("wiki", "reembed", call.args)?),
                 )
                 .await
             }
