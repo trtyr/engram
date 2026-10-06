@@ -34,10 +34,6 @@
 
 ## Done
 
-- （未开始）
-
-## Done
-
 - 2026-10-06 全量落地：distill/src/project_maintain.rs（Agent 循环 list_docs/get_doc/note_issue/finish
   + MAX_STEPS=12 + per-project 单飞 + 节律桶 rhythm-maintain-project-YYYYMMDD 幂等 + 自续明日桶
   + bootstrap + Markdown 报告 render_markdown）；不进 WORKFLOW_KINDS（全局串行会扼杀多项目并行）
