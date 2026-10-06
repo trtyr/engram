@@ -234,49 +234,32 @@ async fn rhythm_bucket_idempotent_and_fanout() {
     env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
 }
 
-/// 单飞守卫：running 的项目在节律 fanout 时被 skip。
+/// 单飞守卫：running 的项目被守卫拦住，其他项目不受影响（曾出 text/uuid 类型错——回归防线）。
 #[tokio::test]
 async fn rhythm_skips_running_project() {
     let env = setup(vec![]).await;
     let pid = create_project(&env.pool, "proj-busy").await;
-    // 预插 running 任务
-    env.queue
-        .enqueue(JobTemplate::new("maintain_project").with_payload(json!({ "project_id": pid })))
-        .await
-        .unwrap();
-    sqlx::query("UPDATE jobs SET status = 'running' WHERE kind = 'maintain_project'")
-        .execute(&env.pool)
-        .await
-        .unwrap();
+    // 直接 SQL 预插 running 任务（不经队列——无 runner 消费竞态）
+    sqlx::query(
+        "INSERT INTO jobs (id, kind, status, payload, due_at, attempts, created_at) \
+         VALUES ($1, 'maintain_project', 'running', $2::jsonb, now(), 0, now())",
+    )
+    .bind(Uuid::now_v7())
+    .bind(json!({ "project_id": pid }).to_string())
+    .execute(&env.pool)
+    .await
+    .unwrap();
 
-    // 触发节律（直接 enqueue 一个桶任务并同步消费其 handler 逻辑——通过 runner 跑）
-    engram_distill::project_maintain::bootstrap_maintain_project(&env.queue)
+    let busy = engram_distill::project_maintain::count_running_for_project(&env.pool, pid)
         .await
         .unwrap();
-    // 等节律桶完成
-    for _ in 0..100 {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let done: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM jobs WHERE kind = 'rhythm_maintain_project' \
-             AND status = 'succeeded'",
-        )
-        .fetch_one(&env.pool)
+    assert_eq!(busy, 1, "running 项目的守卫应计到 1");
+
+    let other = create_project(&env.pool, "proj-free").await;
+    let free = engram_distill::project_maintain::count_running_for_project(&env.pool, other)
         .await
         .unwrap();
-        if done >= 1 {
-            break;
-        }
-    }
-    // running 项目被 skip：不应再投递新的 maintain_project
-    let total: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'maintain_project'")
-            .fetch_one(&env.pool)
-            .await
-            .unwrap();
-    assert_eq!(
-        total, 1,
-        "running 项目应被 skip——只有预插的 1 条，得 {total}"
-    );
+    assert_eq!(free, 0, "其他项目不应被误伤");
 
     env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
 }
