@@ -1,10 +1,12 @@
-//! todos/tickets 拆域（2026-09-18）：待办域锁 kind=todo、工单域锁 kind=ticket，互不可见。
-//! todos.add 显式开工单被拒（报错指引走 tickets 域）；tickets.add/update 工单生命周期可用。
+//! todos/tickets 拆域 + 项目绑定制（0074）：
+//! tickets.add 必须绑定已有项目（解析不到拒绝、绝不自动建）；todos 无 kind 形态；
+//! 两域列表互不可见；tickets.update 工单生命周期可用。
 
 mod support;
 
 use serde_json::json;
 use support::{app, login_token, mcp_call_json, mcp_rpc, rpc};
+use tower::ServiceExt;
 
 struct Ctx {
     app: axum::Router,
@@ -22,43 +24,97 @@ impl Ctx {
 }
 
 #[tokio::test]
-async fn tickets_domain_split_locks_kinds() {
+async fn tickets_domain_project_binding() {
     let ctx = Ctx::new().await;
 
-    // 1) tickets.add 开单（参数无 kind——域锁定自动 ticket）
-    let ticket = mcp_call_json(
-        &ctx.app,
-        &ctx.token,
-        "tickets",
-        json!({"action": "add", "title": "拆域验收工单", "severity": "P2",
-               "symptom": "todos 域看不到工单", "acceptance": "两边互不可见"}),
-    )
-    .await;
-    assert_eq!(
-        ticket["kind"], "ticket",
-        "tickets.add 应固定 kind=ticket：{ticket}"
-    );
-    assert_eq!(ticket["severity"], "P2");
-    let ticket_id = ticket["id"].as_str().unwrap().to_string();
-
-    // 2) todos.add 显式 kind=ticket → 被拒且指引走 tickets 域
+    // 1) tickets.add 无 project → 拒绝（绑定不了就不进工单）
     let (_, v) = mcp_rpc(
         &ctx.app,
         &ctx.token,
         rpc(
             2,
             "tools/call",
-            json!({"name": "todos", "arguments": {"action": "add", "title": "伪装工单", "kind": "ticket"}}),
+            json!({"name": "tickets", "arguments": {"action": "add", "title": "无主工单"}}),
         ),
     )
     .await;
     let err_msg = v["error"]["message"].as_str().unwrap_or_default();
-    assert!(
-        err_msg.contains("tickets"),
-        "todos.add kind=ticket 应被拒并指引 tickets 域：{v}"
-    );
+    assert!(err_msg.contains("project"), "无 project 应被拒：{v}");
 
-    // 3) todos.add 正常待办
+    // 2) tickets.add 幽灵项目名 → 拒绝且绝不自动建
+    let (_, v) = mcp_rpc(
+        &ctx.app,
+        &ctx.token,
+        rpc(
+            2,
+            "tools/call",
+            json!({"name": "tickets", "arguments": {"action": "add", "title": "幽灵工单",
+                   "project": "不存在的项目XYZ"}}),
+        ),
+    )
+    .await;
+    let err_msg = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(err_msg.contains("不存在"), "幽灵项目名应被拒并明说：{v}");
+
+    // 3) 先建项目（HTTP），再 tickets.add 绑定之（精确项目名）
+    let created = axum::body::to_bytes(
+        ctx.app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/projects")
+                    .header("authorization", format!("Bearer {}", ctx.token))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        json!({"name": "绑定测试项目", "type": "dev", "description": ""})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .into_body(),
+        usize::MAX,
+    )
+    .await
+    .unwrap();
+    let proj: serde_json::Value = serde_json::from_slice(&created).unwrap();
+    let pid = proj["id"].as_str().unwrap().to_string();
+
+    let ticket = mcp_call_json(
+        &ctx.app,
+        &ctx.token,
+        "tickets",
+        json!({"action": "add", "title": "绑定验收工单", "project": "绑定测试项目",
+               "severity": "P2", "symptom": "项目绑定制验收", "acceptance": "建单成功"}),
+    )
+    .await;
+    assert_eq!(
+        ticket["project_id"].as_str().unwrap(),
+        pid,
+        "应解析项目名并绑定：{ticket}"
+    );
+    assert_eq!(ticket["severity"], "P2");
+    let ticket_id = ticket["id"].as_str().unwrap().to_string();
+
+    // 4) tickets.add 幽灵 project_id（UUID 不在库）→ 拒绝
+    let ghost = uuid::Uuid::now_v7();
+    let (_, v) = mcp_rpc(
+        &ctx.app,
+        &ctx.token,
+        rpc(
+            2,
+            "tools/call",
+            json!({"name": "tickets", "arguments": {"action": "add", "title": "幽灵 id 工单",
+                   "project": ghost.to_string()}}),
+        ),
+    )
+    .await;
+    let err_msg = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(err_msg.contains("不存在"), "幽灵 project id 应被拒：{v}");
+
+    // 5) 两域隔离：todos.add 正常待办；两域列表互不可见
     let todo = mcp_call_json(
         &ctx.app,
         &ctx.token,
@@ -66,11 +122,9 @@ async fn tickets_domain_split_locks_kinds() {
         json!({"action": "add", "title": "纯待办事项"}),
     )
     .await;
-    assert_eq!(todo["kind"], "todo", "todos.add 应固定 kind=todo：{todo}");
     let todo_id = todo["id"].as_str().unwrap().to_string();
     assert_ne!(todo_id, ticket_id);
 
-    // 4) 两域列表互不可见：todos.list 无工单、tickets.list 无待办
     let todos = mcp_call_json(&ctx.app, &ctx.token, "todos", json!({"action": "list"})).await;
     let todo_ids: Vec<&str> = todos["items"]
         .as_array()
@@ -94,12 +148,12 @@ async fn tickets_domain_split_locks_kinds() {
         "tickets.list 不应包含待办：{tickets}"
     );
 
-    // 5) tickets.update 状态流转（confirmed → resolved 带 resolution）
+    // 6) tickets.update 状态流转（confirmed → resolved 带 resolution）
     let upd = mcp_call_json(
         &ctx.app,
         &ctx.token,
         "tickets",
-        json!({"action": "update", "id": ticket_id, "status": "resolved", "resolution": "拆域落地，验收通过"}),
+        json!({"action": "update", "id": ticket_id, "status": "resolved", "resolution": "项目绑定制落地，验收通过"}),
     )
     .await;
     assert_eq!(upd["status"], "resolved", "工单状态流转：{upd}");

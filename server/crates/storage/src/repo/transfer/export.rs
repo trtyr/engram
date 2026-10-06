@@ -50,6 +50,16 @@ pub async fn export_todos(pool: &PgPool) -> StoreResult<Vec<Value>> {
     Ok(rows)
 }
 
+/// 工单全量（0074 独立表）。
+pub async fn export_tickets(pool: &PgPool) -> StoreResult<Vec<Value>> {
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT to_jsonb(t) FROM tickets t ORDER BY (t.status = 'open') DESC, t.updated_at DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// 资产台账全量（0058；2026-09-22 上云补齐——资产是「我拥有的东西」的唯一事实源，须随包走）。
 pub async fn export_assets(pool: &PgPool) -> StoreResult<Vec<Value>> {
     let rows: Vec<Value> = sqlx::query_scalar("SELECT to_jsonb(a) FROM assets a ORDER BY a.name")

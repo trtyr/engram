@@ -8,8 +8,8 @@ pub async fn import_todos(pool: &PgPool, items: &[Value]) -> StoreResult<(usize,
     let mut skipped = 0usize;
     for v in items {
         let res = sqlx::query(
-            "INSERT INTO todos (id, title, body, status, priority, tags, due_at, project_hint, done_at, created_at, updated_at, kind, severity, symptom, reproduce, acceptance, resolution, resolved_at) \
-             VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) ON CONFLICT (id) DO NOTHING",
+            "INSERT INTO todos (id, title, body, status, priority, tags, due_at, done_at, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10) ON CONFLICT (id) DO NOTHING",
         )
         .bind(
             v.get("id")
@@ -31,7 +31,6 @@ pub async fn import_todos(pool: &PgPool, items: &[Value]) -> StoreResult<(usize,
                 .and_then(|x| x.as_str())
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
         )
-        .bind(v.get("project_hint").and_then(|x| x.as_str()))
         .bind(
             v.get("done_at")
                 .and_then(|x| x.as_str())
@@ -47,8 +46,41 @@ pub async fn import_todos(pool: &PgPool, items: &[Value]) -> StoreResult<(usize,
                 .and_then(|x| x.as_str())
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
         )
-        // 工单结构化列（t9 往返演练补齐——缺失会令 kind 落默认 todo，ticket 状态违反 todos_status_check）
-        .bind(str_of(v, "kind", "todo"))
+        .execute(pool)
+        .await?;
+        if res.rows_affected() > 0 {
+            imported += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+    Ok((imported, skipped))
+}
+
+/// 导入工单（0074 独立表；project_id 在目标库无对应项目则跳过——FK 不允许悬空）。
+/// 返回 (imported, skipped)。
+pub async fn import_tickets(pool: &PgPool, items: &[Value]) -> StoreResult<(usize, usize)> {
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    for v in items {
+        let pid = id_of(v, "project_id");
+        let project_ok: Option<Uuid> = sqlx::query_scalar("SELECT id FROM projects WHERE id = $1")
+            .bind(pid)
+            .fetch_optional(pool)
+            .await?;
+        if project_ok.is_none() {
+            skipped += 1;
+            continue;
+        }
+        let res = sqlx::query(
+            "INSERT INTO tickets (id, project_id, title, body, status, severity, symptom, reproduce, acceptance, resolution, resolved_at, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(id_of(v, "id"))
+        .bind(pid)
+        .bind(str_of(v, "title", ""))
+        .bind(str_of(v, "body", ""))
+        .bind(str_of(v, "status", "open"))
         .bind(v.get("severity").and_then(|x| x.as_str()))
         .bind(str_of(v, "symptom", ""))
         .bind(str_of(v, "reproduce", ""))
@@ -56,6 +88,16 @@ pub async fn import_todos(pool: &PgPool, items: &[Value]) -> StoreResult<(usize,
         .bind(str_of(v, "resolution", ""))
         .bind(
             v.get("resolved_at")
+                .and_then(|x| x.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
+        )
+        .bind(
+            v.get("created_at")
+                .and_then(|x| x.as_str())
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
+        )
+        .bind(
+            v.get("updated_at")
                 .and_then(|x| x.as_str())
                 .and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))),
         )

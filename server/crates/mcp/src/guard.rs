@@ -124,6 +124,16 @@ pub(crate) fn from_todo(e: engram_core::todos::TodoError) -> rmcp::ErrorData {
     }
 }
 
+/// TicketError → MCP 错误码（0074 工单拆表）。
+pub(crate) fn from_ticket(e: engram_core::tickets::TicketError) -> rmcp::ErrorData {
+    use engram_core::tickets::TicketError;
+    match e {
+        TicketError::NotFound(m) => rmcp::ErrorData::resource_not_found(m, None),
+        TicketError::BadRequest(m) => rmcp::ErrorData::invalid_params(m, None),
+        TicketError::Storage(m) => rmcp::ErrorData::internal_error(m, None),
+    }
+}
+
 /// CgError → MCP 错误码。
 pub(crate) fn from_cg(e: engram_cg_bridge::CgError) -> rmcp::ErrorData {
     use engram_cg_bridge::CgError;

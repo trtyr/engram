@@ -16,6 +16,7 @@ pub mod project;
 pub mod promote;
 pub mod state;
 pub mod study;
+pub mod tickets;
 pub mod todos;
 pub mod transfer;
 pub mod unified;

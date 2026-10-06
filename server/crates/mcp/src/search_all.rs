@@ -114,7 +114,7 @@ impl EngramMcpServer {
                 return None;
             }
             match todo_svc(&self.state)
-                .list(None, None, None, None, Some(&q), None, None, None, max)
+                .list(None, None, None, Some(&q), None, None, max)
                 .await
             {
                 Ok(rows) => Some(json!(

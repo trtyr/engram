@@ -147,7 +147,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
                   "delete_page", true, "删除页面（连带清理双向 wikilink；最后状态留快照可重建）" => crate::wiki::WikiDeletePageParams
               ],
         "todos" => action_docs![
-            "add", false, "记一条待办（kind 固定 todo——行动项/灵感速记；开工单用 tickets 域）" => crate::TodoAddParams;
+            "add", false, "记一条待办（行动项/灵感速记，不绑定项目；开工单用 tickets 域且必须绑定项目）" => crate::TodoAddParams;
             "list", false, "待办列表（仅 kind=todo；status/priority/tag/q 过滤；默认摘要模式 brief 只回短号/标题/状态/优先级/关联计数）" => crate::TodoListParams;
             "link", false, "建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号" => crate::TodoLinkParams;
             "unlink", false, "解除关联" => crate::TodoUnlinkParams;
@@ -158,16 +158,13 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "delete", true, "删除待办（不可逆）" => crate::TodoIdParams
         ],
         "tickets" => action_docs![
-            "add", false, "开工单（kind 固定 ticket——结构化问题跟踪；建议填 severity/symptom/acceptance）" => crate::TicketAddParams;
-            "list", false, "工单列表（仅 kind=ticket；status 含 confirmed/in_progress/resolved/verified 六态；默认摘要模式 brief 只回短号/标题/状态/分级/关联计数）" => crate::TicketListParams;
-            "link", false, "建立关联：blocked_by（被阻塞）/ relates_to（相关）/ parent（父子），幂等；from/to 支持 EN-短号" => crate::TodoLinkParams;
-            "unlink", false, "解除关联" => crate::TodoUnlinkParams;
-            "links", false, "双向关联列表（含 EN-短号与方向）——「谁阻塞我」反查入口" => crate::TodoLinksParams;
-            "get", false, "详情（含 severity/symptom/acceptance/resolution）" => crate::TodoIdParams;
-            "update", false, "编辑与状态流转（confirmed/in_progress/resolved/verified/archived；工单字段 severity/symptom/acceptance/resolution）；clear=[due_at/severity/project_hint] 显式清空字段" => crate::TodoUpdateParams;
+            "add", false, "开工单（**必须绑定已有项目**——project 传项目 id 或项目名，解析不到直接拒绝，不自动建项目）" => crate::TicketAddParams;
+            "list", false, "工单列表（open 优先；status 六态 open/confirmed/in_progress/resolved/verified/archived；可按 project 过滤；默认摘要 brief）" => crate::TicketListParams;
+            "get", false, "详情（含 severity/symptom/acceptance/resolution/项目归属）" => crate::TicketIdParams;
+            "update", false, "编辑与状态流转（confirmed/in_progress/resolved/verified/archived；转 resolved/verified 必须带 resolution）" => crate::TicketUpdateParams;
             "events", false, "活动时间线（状态流转 event 自动留痕 + 评论 comment，升序）" => crate::TicketEventsParams;
             "comment", false, "工单评论（入活动时间线）" => crate::TicketCommentParams;
-            "delete", true, "删除工单（不可逆）" => crate::TodoIdParams
+            "delete", true, "删除工单（不可逆）" => crate::TicketIdParams
         ],
         "codegraph" => action_docs![
             "list", false, "列出已注册代码库（注册状态/索引规模/当下可用性 usable）" => crate::CgNoParams;
@@ -442,10 +439,7 @@ pub fn is_write_action(domain: &str, action: &str) -> bool {
                 "todos",
                 "add" | "link" | "unlink" | "done" | "update" | "delete"
             )
-            | (
-                "tickets",
-                "add" | "link" | "unlink" | "update" | "delete" | "comment"
-            )
+            | ("tickets", "add" | "update" | "delete" | "comment")
             | (
                 "codegraph",
                 "register" | "index" | "sync" | "delete" | "upload"
@@ -504,7 +498,7 @@ pub fn is_read_action(domain: &str, action: &str) -> bool {
                     | "folders"
             )
             | ("todos", "list" | "links" | "get")
-            | ("tickets", "list" | "links" | "get" | "events")
+            | ("tickets", "list" | "get" | "events")
             | ("codegraph", "list" | "query")
             | ("jobs", "list" | "get" | "events")
             | ("logs", "query" | "stats")

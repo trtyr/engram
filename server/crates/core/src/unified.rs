@@ -164,15 +164,28 @@ impl UnifiedSearch {
                     .map_err(engram_storage::StoreError::from)
             },
             async move {
-                engram_storage::repo::todos::search_open(&self.pool, query, per_domain)
-                    .await
-                    .map(|rows| {
-                        rows.into_iter()
-                            .map(|(id, kind, title, body, priority)| {
-                                (id, format!("{kind}:{title}"), body, priority)
-                            })
-                            .collect::<Vec<_>>()
-                    })
+                // 待办 + 工单两表合流（0074 拆表后；title 前缀区分形态，merge 时按前缀定域）
+                let mut out: Vec<(Uuid, String, String, String)> = Vec::new();
+                if let Ok(rows) =
+                    engram_storage::repo::todos::search_open(&self.pool, query, per_domain).await
+                {
+                    for (id, title, body, priority) in rows {
+                        out.push((id, format!("todo:{title}"), body, priority));
+                    }
+                }
+                if let Ok(rows) =
+                    engram_storage::repo::tickets::search_open(&self.pool, query, per_domain).await
+                {
+                    for (id, _project_id, title, body, severity) in rows {
+                        out.push((
+                            id,
+                            format!("ticket:{title}"),
+                            body,
+                            severity.unwrap_or_else(|| "ticket".into()),
+                        ));
+                    }
+                }
+                Ok(out)
             },
         )
     }
@@ -339,13 +352,20 @@ fn merge_secondary_hits(
         tracing::warn!("统一检索：entity 域失败，跳过");
     }
 
-    // 待办域：open 待办的标题/正文 ILIKE 匹配
+    // 待办/工单域：open 项的标题/正文匹配（title 前缀定形态域）
     if let Ok(hits) = todo_res {
         for t in hits {
+            let (domain, title) = if let Some(rest) = t.1.strip_prefix("ticket:") {
+                ("ticket", rest.to_string())
+            } else if let Some(rest) = t.1.strip_prefix("todo:") {
+                ("todo", rest.to_string())
+            } else {
+                ("todo", t.1.clone())
+            };
             merged.push(UnifiedHit {
-                domain: "todo".into(),
+                domain: domain.into(),
                 id: t.0,
-                title: Some(t.1),
+                title: Some(title),
                 snippet: t.2.chars().take(200).collect(),
                 score: 0.0,
                 extra: serde_json::json!({ "priority": t.3 }),

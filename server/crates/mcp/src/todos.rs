@@ -27,44 +27,16 @@ pub struct TodoAddParams {
     /// 截止时间（ISO8601，可选）
     #[schemars(description = "可选截止时间（ISO8601）。")]
     pub due_at: Option<String>,
-    /// 相关项目名提示（纯文本备注，不绑定）
-    #[schemars(description = "可选：相关项目名提示（纯文本备注，不绑定项目）。")]
-    pub project_hint: Option<String>,
-    /// 形态：todo（行动项，默认）/ ticket（工单）
-    #[schemars(
-        description = "可选形态：todo（行动项，默认）/ ticket（工单——结构化问题跟踪，建议填 severity/symptom/acceptance）。"
-    )]
-    pub kind: Option<String>,
-    /// 工单严重度 P0-P3（仅 kind=ticket）
-    #[schemars(description = "可选：工单严重度 P0/P1/P2/P3（仅 kind=ticket）。")]
-    pub severity: Option<String>,
-    /// 工单症状（仅 kind=ticket）
-    #[schemars(description = "工单症状/现象描述（仅 kind=ticket）。")]
-    pub symptom: Option<String>,
-    /// 工单复现路径（仅 kind=ticket）
-    #[schemars(description = "工单复现路径（仅 kind=ticket）。")]
-    pub reproduce: Option<String>,
-    /// 工单验收标准（仅 kind=ticket）
-    #[schemars(description = "工单验收标准（仅 kind=ticket）。")]
-    pub acceptance: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct TodoListParams {
-    /// 状态过滤，按 kind 校验：todo 态 open/done/archived；ticket 态 open/confirmed/in_progress/resolved/verified/archived（缺省全部，open 优先展示）
-    #[schemars(
-        description = "可选状态过滤（按 kind 校验）：todo 态 open/done/archived；ticket 态 open/confirmed/in_progress/resolved/verified/archived。缺省全部（open 优先）。"
-    )]
+    /// 状态过滤，todo 态 open/done/archived
+    #[schemars(description = "可选状态过滤：open/done/archived。缺省全部（open 优先）。")]
     pub status: Option<String>,
-    /// 可选：todo / ticket
-    #[schemars(description = "可选形态过滤：todo / ticket。")]
-    pub kind: Option<String>,
     /// low | normal | high
     #[schemars(description = "可选优先级过滤。")]
     pub priority: Option<String>,
-    /// 工单严重度 P0-P3（仅命中 kind=ticket 的行）
-    #[schemars(description = "可选：工单严重度 P0-P3（仅命中 kind=ticket 的行）。")]
-    pub severity: Option<String>,
     /// 逾期/今日过滤
     #[schemars(
         description = "可选 due 过滤：overdue=未完成且已过期（按到期升序）；today=今天到期。"
@@ -104,9 +76,6 @@ pub struct TodoUpdateParams {
     /// 待办 id（todo_list 返回）
     #[schemars(description = "待办 id（todo_list 返回）。")]
     pub id: String,
-    /// 可选：形态转换 todo ↔ ticket
-    #[schemars(description = "可选：形态转换 todo ↔ ticket（转换后工单字段生效）。")]
-    pub kind: Option<String>,
     /// 新标题（可选）
     #[schemars(description = "可选新标题。")]
     pub title: Option<String>,
@@ -116,35 +85,18 @@ pub struct TodoUpdateParams {
     /// low | normal | high
     #[schemars(description = "可选优先级：low/normal/high。")]
     pub priority: Option<String>,
-    /// todo: open/done/archived；ticket: open/confirmed/in_progress/resolved/verified/archived
-    #[schemars(
-        description = "可选状态——todo: open/done/archived；ticket（工单）: open/confirmed/in_progress/resolved/verified/archived。"
-    )]
+    /// open | done | archived
+    #[schemars(description = "可选状态：open/done/archived。")]
     pub status: Option<String>,
-    /// 工单严重度 P0-P3（仅 kind=ticket）
-    #[schemars(description = "可选：工单严重度 P0/P1/P2/P3（仅 kind=ticket）。")]
-    pub severity: Option<String>,
-    /// 工单症状（仅 kind=ticket）
-    #[schemars(description = "工单症状/现象描述（仅 kind=ticket）。")]
-    pub symptom: Option<String>,
-    /// 工单复现路径（仅 kind=ticket）
-    #[schemars(description = "工单复现路径（仅 kind=ticket）。")]
-    pub reproduce: Option<String>,
-    /// 工单验收标准（仅 kind=ticket）
-    #[schemars(description = "工单验收标准（仅 kind=ticket）。")]
-    pub acceptance: Option<String>,
-    /// 工单解决记录（resolved 前必填）
-    #[schemars(description = "工单解决记录——状态转 resolved 前必填（写了什么方案/修了什么）。")]
-    pub resolution: Option<String>,
     /// 可选：标签整体替换（传即替换全量；不传不动——EN-237②）
     #[schemars(description = "可选：自由标签整体替换（传了就全量替换；不传保持不变）。")]
     pub tags: Option<Vec<String>>,
     /// 截止时间（ISO8601，可选）
     #[schemars(description = "可选截止时间（ISO8601）。")]
     pub due_at: Option<String>,
-    /// 显式清除字段（白名单 due_at/severity/project_hint）
+    /// 显式清除字段（白名单 due_at）
     #[schemars(
-        description = "可选：显式清除字段清单（白名单 due_at/severity/project_hint，如 [\"due_at\"]）——清空该字段而非置之不理。"
+        description = "可选：显式清除字段清单（白名单 due_at，如 [\"due_at\"]）——清空该字段而非置之不理。"
     )]
     pub clear: Option<Vec<String>>,
 }
@@ -167,34 +119,12 @@ impl EngramMcpServer {
         let p = principal_of(&ctx)?;
         require_todos(&p)?;
         let tp = params.0;
-        // 域边界（todos/tickets 拆域 2026-09-18）：待办域不开工单——显式 kind=ticket 指引用户走 tickets 域
-        if tp.kind.as_deref() == Some("ticket") {
-            return Err(mcp_err(
-                ErrorCode::INVALID_PARAMS,
-                "todos 域只管待办（kind=todo）。开工单请用 tickets 域：{\"tool\":\"tickets\",\"action\":\"add\",…}。",
-            ));
-        }
+        // 工单在 tickets 域（0074 项目绑定制）——本域只管行动项
         let dto = todo_svc(&self.state)
             .create(
                 &tp.title,
                 tp.body.as_deref().unwrap_or(""),
-                tp.kind.as_deref().unwrap_or("todo"),
-                // 分级合并：显式 priority 原样透传（ticket 传非空 → core 400 用 severity）；
-                // 缺省按 kind 填（ticket→空串=缺省 normal；todo→normal）
-                match tp.priority.as_deref() {
-                    Some(p) => p,
-                    None => {
-                        if tp.kind.as_deref() == Some("ticket") {
-                            ""
-                        } else {
-                            "normal"
-                        }
-                    }
-                },
-                tp.severity.as_deref(),
-                tp.symptom.as_deref().unwrap_or(""),
-                tp.reproduce.as_deref().unwrap_or(""),
-                tp.acceptance.as_deref().unwrap_or(""),
+                tp.priority.as_deref().unwrap_or("normal"),
                 tp.tags.as_deref().unwrap_or(&[]),
                 match tp.due_at.as_deref() {
                     // D18：显式传了 due_at 就必须可解析（此前垃圾值被静默吞成 None，
@@ -202,7 +132,6 @@ impl EngramMcpServer {
                     Some(s) => Some(parse_flex_datetime(s)?),
                     None => None,
                 },
-                tp.project_hint.as_deref(),
             )
             .await
             .map_err(from_todo)?;
@@ -223,11 +152,9 @@ impl EngramMcpServer {
         let rows = todo_svc(&self.state)
             .list(
                 lp.status.as_deref(),
-                Some("todo"), // 拆域锁定：todos.list 只回待办（工单走 tickets.list）
                 lp.priority.as_deref(),
                 lp.tag.as_deref(),
                 lp.q.as_deref(),
-                lp.severity.as_deref(),
                 lp.due.as_deref(),
                 lp.cursor.as_deref(),
                 lp.limit.unwrap_or(50),
@@ -248,9 +175,7 @@ impl EngramMcpServer {
                         "short_no": t.short_no,
                         "ref": format!("EN-{}", t.short_no),
                         "title": t.title,
-                        "kind": t.kind,
                         "status": t.status,
-                        "severity": t.severity,
                         "priority": t.priority,
                         "tags": t.tags,
                         "links": counts.get(&t.id).copied().unwrap_or(0),
@@ -262,7 +187,7 @@ impl EngramMcpServer {
                 "brief": true,
                 "count": brief.len(),
                 "total": todo_svc(&self.state)
-                    .count(lp.status.as_deref(), Some("todo"), lp.priority.as_deref(), lp.tag.as_deref(), lp.q.as_deref(), lp.severity.as_deref())
+                    .count(lp.status.as_deref(), lp.priority.as_deref(), lp.tag.as_deref(), lp.q.as_deref())
                     .await
                     .unwrap_or(-1),
                 "items": brief,
@@ -303,23 +228,7 @@ impl EngramMcpServer {
         require_todos(&p)?;
         let id = self.todo_ref_id(&params.0.id).await?;
         let dto = todo_svc(&self.state)
-            .update(
-                id,
-                None,
-                None,
-                None,
-                None,
-                Some("done"),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                "mcp:todos",
-            )
+            .update(id, None, None, None, Some("done"), None, None)
             .await
             .map_err(from_todo)?;
         ok_json(slim_todo(
@@ -339,32 +248,16 @@ impl EngramMcpServer {
         let dto = todo_svc(&self.state)
             .update(
                 id,
-                params.0.kind.as_deref(),
                 params.0.title.as_deref(),
                 params.0.body.as_deref(),
                 params.0.priority.as_deref(),
                 params.0.status.as_deref(),
-                match params.0.severity.as_ref().map(|o| Some(o.as_str())) {
-                    Some(s) => Some(s),
-                    None if clears("severity", &params.0.clear) => Some(None),
-                    None => None,
-                },
-                params.0.symptom.as_deref(),
-                params.0.reproduce.as_deref(),
-                params.0.acceptance.as_deref(),
-                params.0.resolution.as_deref(),
                 match params.0.due_at.as_deref() {
                     Some(s) => Some(Some(parse_flex_datetime(s)?)),
                     None if clears("due_at", &params.0.clear) => Some(None),
                     None => None,
                 },
-                if clears("project_hint", &params.0.clear) {
-                    Some(None)
-                } else {
-                    None
-                },
                 params.0.tags.as_deref(),
-                "mcp:todos",
             )
             .await
             .map_err(from_todo)?;

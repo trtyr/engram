@@ -1,16 +1,12 @@
-//! 待办域服务：0041 起双形态——
-//! **todo**（微软式行动项：速记→做完勾掉，轻量两态）与
-//! **ticket**（工单：结构化问题跟踪，severity/症状/复现/验收 + 五态状态机）。
-//! 场景靠 tags + priority + due_at + project_hint（纯文本提示，不做 FK 绑定）表达。
+//! 待办域服务（0074 工单拆表后回归轻量定位）：
+//! todo = 微软式行动项——速记→做完勾掉，tags + priority + due_at 表达场景。
+//! 工单在 core::tickets（项目绑定制，独立生命周期）。
 
 use chrono::{DateTime, Utc};
-
-mod validate;
+use engram_storage::StoreError;
 use engram_storage::repo::todos as repo;
-use engram_storage::{PgPool, StoreError};
 use serde::Serialize;
 use uuid::Uuid;
-use validate::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TodoError {
@@ -25,6 +21,41 @@ pub enum TodoError {
 impl From<StoreError> for TodoError {
     fn from(e: StoreError) -> Self {
         TodoError::Storage(e.to_string())
+    }
+}
+
+pub const STATUSES: &[&str] = &["open", "done", "archived"];
+pub const PRIORITIES: &[&str] = &["low", "normal", "high"];
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct TodoDto {
+    pub id: Uuid,
+    pub title: String,
+    pub body: String,
+    pub status: String,
+    pub priority: String,
+    pub tags: Vec<String>,
+    pub due_at: Option<DateTime<Utc>>,
+    pub done_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    /// 全局单调短号（显示为 EN-<n>；人类可读引用）
+    pub short_no: i32,
+}
+
+fn to_dto(t: repo::TodoRow) -> TodoDto {
+    TodoDto {
+        id: t.id,
+        title: t.title,
+        body: t.body,
+        status: t.status,
+        priority: t.priority,
+        tags: t.tags,
+        due_at: t.due_at,
+        done_at: t.done_at,
+        created_at: t.created_at,
+        updated_at: t.updated_at,
+        short_no: t.short_no,
     }
 }
 
@@ -57,134 +88,12 @@ fn parse_todo_cursor(raw: Option<&str>) -> Result<Option<(i32, DateTime<Utc>, Uu
     Ok(cursor)
 }
 
-/// 列表过滤参数校验（status/severity/priority 白名单；ticket 状态集另计）。
-fn validate_todo_list_filters(
-    status: Option<&str>,
-    kind: Option<&str>,
-    severity: Option<&str>,
-    priority: Option<&str>,
-) -> Result<(), TodoError> {
-    if let Some(s) = status
-        && !valid_status(kind.unwrap_or("todo"), s)
-        && !(kind.is_none() && TICKET_STATUSES.contains(&s))
-    {
-        let allowed = match kind {
-            Some("ticket") => TICKET_STATUSES.join("/"),
-            _ => format!(
-                "{}/{}",
-                STATUSES.join("/"),
-                "confirmed/in_progress/resolved/verified"
-            ),
-        };
-        return Err(TodoError::BadRequest(format!(
-            "status 仅接受 {}（收到 {s}）",
-            allowed
-        )));
-    }
-    if let Some(sv) = severity
-        && !SEVERITIES.contains(&sv)
-    {
-        return Err(TodoError::BadRequest(format!(
-            "severity 仅接受 {}（收到 {sv}）",
-            SEVERITIES.join("/")
-        )));
-    }
-    if let Some(p) = priority
-        && !PRIORITIES.contains(&p)
-    {
-        return Err(TodoError::BadRequest(format!(
-            "priority 仅接受 {}（收到 {p}）",
-            PRIORITIES.join("/")
-        )));
-    }
-    Ok(())
-}
-
-pub const STATUSES: &[&str] = &["open", "done", "archived"];
-pub const TICKET_STATUSES: &[&str] = &[
-    "open",
-    "confirmed",
-    "in_progress",
-    "resolved",
-    "verified",
-    "archived",
-];
-pub const SEVERITIES: &[&str] = &["P0", "P1", "P2", "P3"];
-pub const PRIORITIES: &[&str] = &["low", "normal", "high"];
-
-/// kind + status 组合合法性（与 0041 联合 CHECK 同构——应用层先友好报错）。
-pub fn valid_status(kind: &str, status: &str) -> bool {
-    match kind {
-        "todo" => STATUSES.contains(&status),
-        "ticket" => TICKET_STATUSES.contains(&status),
-        _ => false,
-    }
-}
-
-fn status_error(kind: &str, status: &str) -> TodoError {
-    let allowed = match kind {
-        "ticket" => TICKET_STATUSES.join("/"),
-        _ => STATUSES.join("/"),
-    };
-    TodoError::BadRequest(format!(
-        "kind={kind} 的 status 仅接受 {allowed}（收到 {status}）"
-    ))
-}
-
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
-pub struct TodoDto {
-    pub id: Uuid,
-    pub title: String,
-    pub body: String,
-    pub kind: String,
-    pub status: String,
-    pub priority: String,
-    pub severity: Option<String>,
-    pub symptom: String,
-    pub reproduce: String,
-    pub acceptance: String,
-    pub resolution: String,
-    pub tags: Vec<String>,
-    pub due_at: Option<DateTime<Utc>>,
-    pub project_hint: Option<String>,
-    pub done_at: Option<DateTime<Utc>>,
-    pub resolved_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    /// 全局单调短号（显示为 EN-<n>；人类可读引用）
-    pub short_no: i32,
-}
-
-fn to_dto(t: repo::TodoRow) -> TodoDto {
-    TodoDto {
-        id: t.id,
-        title: t.title,
-        body: t.body,
-        kind: t.kind,
-        status: t.status,
-        priority: t.priority,
-        severity: t.severity,
-        symptom: t.symptom,
-        reproduce: t.reproduce,
-        acceptance: t.acceptance,
-        resolution: t.resolution,
-        tags: t.tags,
-        due_at: t.due_at,
-        project_hint: t.project_hint,
-        done_at: t.done_at,
-        resolved_at: t.resolved_at,
-        created_at: t.created_at,
-        updated_at: t.updated_at,
-        short_no: t.short_no,
-    }
-}
-
 pub struct TodoService {
-    pool: PgPool,
+    pool: engram_storage::PgPool,
 }
 
 impl TodoService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: engram_storage::PgPool) -> Self {
         Self { pool }
     }
 
@@ -217,8 +126,6 @@ impl TodoService {
             .collect()
     }
 
-    /// 新建待办/工单（kind 决定形态：todo=行动项 / ticket=工单）。
-    #[allow(clippy::too_many_arguments)]
     /// 按引用取 todo：支持完整 UUID 或短号形式「EN-<n>」。
     pub async fn find_by_ref(&self, r: &str) -> Result<Option<TodoDto>, TodoError> {
         let r = r.trim();
@@ -272,20 +179,14 @@ impl TodoService {
             .map_err(|e| TodoError::Storage(format!("存储暂时不可用: {e}")))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// 新建行动项。
     pub async fn create(
         &self,
         title: &str,
         body: &str,
-        kind: &str,
         priority: &str,
-        severity: Option<&str>,
-        symptom: &str,
-        reproduce: &str,
-        acceptance: &str,
         tags: &[String],
         due_at: Option<DateTime<Utc>>,
-        project_hint: Option<&str>,
     ) -> Result<TodoDto, TodoError> {
         let title = title.trim();
         if title.is_empty() {
@@ -296,63 +197,37 @@ impl TodoService {
         }
         Self::reject_nul("title", title)?;
         Self::reject_nul("body", body)?;
-        if kind != "todo" && kind != "ticket" {
-            return Err(TodoError::BadRequest(
-                "kind 仅接受 todo（行动项）/ ticket（工单）".into(),
-            ));
-        }
-        let tags = prepare_todo_create(kind, severity, tags)?;
-        // 分级合并（工单模型细化）：ticket 分级用 severity，priority 退役——
-        // 显式传非空 priority 才 400；缺省（空串）静默落 normal（列 NOT NULL 兼容）
-        // 分级合并：ticket 分级用 severity——显式传非空 priority 400；
-        // 缺省（空串）静默落 normal（列 NOT NULL+CHECK 兼容），语义退役
-        let priority: &str = if kind == "ticket" {
-            if !priority.trim().is_empty() {
-                return Err(TodoError::BadRequest(
-                    "工单分级用 severity（P0-P3）——priority 已对 ticket 退役".into(),
-                ));
-            }
-            "normal"
-        } else {
-            priority
-        };
         Self::validate_priority(priority)?;
+        let tags = Self::normalize_tags(tags);
+        for t in &tags {
+            Self::reject_nul("tags", t)?;
+        }
         let id = Uuid::now_v7();
         repo::insert(
             &self.pool,
-            &engram_storage::repo::todos::NewTodo {
+            &repo::NewTodo {
                 id,
                 title,
                 body: body.trim(),
-                kind,
                 priority,
-                severity,
-                symptom: symptom.trim(),
-                reproduce: reproduce.trim(),
-                acceptance: acceptance.trim(),
                 tags: &tags,
                 due_at,
-                project_hint: project_hint.map(str::trim).filter(|s| !s.is_empty()),
             },
         )
         .await?;
         self.get(id).await
     }
 
-    /// 列表：open 优先；status/priority/tag/q/severity 过滤。
-    /// status 合法集按 kind 取：给了 kind=ticket → 工单六态；给了 kind=todo 或未给 kind →
-    /// todo 三态 ∪ 工单态（未给 kind 时两形态都可能命中，取并集不误拒）。
+    /// 列表：open 优先；status/priority/tag/q/due 过滤。
     /// cursor（D29 keyset 分页，单页上限 500）：上一页最后一条的
     /// `{1|0}|{updated_at ISO8601}|{id}`——1 表示该条 status=open。首查不传。
     #[allow(clippy::too_many_arguments)]
     pub async fn list(
         &self,
         status: Option<&str>,
-        kind: Option<&str>,
         priority: Option<&str>,
         tag: Option<&str>,
         q: Option<&str>,
-        severity: Option<&str>,
         due: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
@@ -362,21 +237,34 @@ impl TodoService {
                 "limit 不能为负（收到 {limit}）"
             )));
         }
+        if let Some(s) = status
+            && !STATUSES.contains(&s)
+        {
+            return Err(TodoError::BadRequest(format!(
+                "status 仅接受 {}（收到 {s}）",
+                STATUSES.join("/")
+            )));
+        }
         if let Some(d) = due.filter(|d| *d != "overdue" && *d != "today") {
             return Err(TodoError::BadRequest(format!(
                 "due 仅接受 overdue/today（收到 {d}）"
             )));
         }
+        if let Some(p) = priority
+            && !PRIORITIES.contains(&p)
+        {
+            return Err(TodoError::BadRequest(format!(
+                "priority 仅接受 {}（收到 {p}）",
+                PRIORITIES.join("/")
+            )));
+        }
         let cursor = parse_todo_cursor(cursor)?;
-        validate_todo_list_filters(status, kind, severity, priority)?;
         Ok(repo::list(
             &self.pool,
             status,
-            kind,
             priority,
             tag,
             q,
-            severity,
             due,
             cursor,
             limit.min(500),
@@ -394,112 +282,65 @@ impl TodoService {
             .ok_or_else(|| TodoError::NotFound(format!("待办 {id} 不存在")))
     }
 
-    /// 更新（部分字段，None 不动）。status 合法性按该条的 kind 校验
-    /// （todo 拒工单态 / ticket 拒 done——0041 联合 CHECK 的应用层友好版）。
+    /// 更新（部分字段，None 不动）。done 语义：open→done 盖 done_at、回 open 清空。
     #[allow(clippy::too_many_arguments)]
     pub async fn update(
         &self,
         id: Uuid,
-        kind: Option<&str>,
         title: Option<&str>,
         body: Option<&str>,
         priority: Option<&str>,
         status: Option<&str>,
-        severity: Option<Option<&str>>,
-        symptom: Option<&str>,
-        reproduce: Option<&str>,
-        acceptance: Option<&str>,
-        resolution: Option<&str>,
         due_at: Option<Option<DateTime<Utc>>>,
-        project_hint: Option<Option<&str>>,
         tags: Option<&[String]>,
-        actor: &str,
     ) -> Result<TodoDto, TodoError> {
-        let existing = repo::get(&self.pool, id)
+        repo::get(&self.pool, id)
             .await?
             .ok_or_else(|| TodoError::NotFound(format!("待办 {id} 不存在")))?;
-        let kind = kind.unwrap_or(existing.kind.as_str()).to_string();
-        if kind != "todo" && kind != "ticket" {
-            return Err(TodoError::BadRequest(
-                "kind 仅接受 todo（行动项）/ ticket（工单）".into(),
-            ));
+        if let Some(t) = title {
+            let t = t.trim();
+            if t.is_empty() {
+                return Err(TodoError::BadRequest("title 不能为空".into()));
+            }
+            Self::reject_nul("title", t)?;
         }
-        validate_todo_update_basic(&kind, title, body, tags)?;
-        validate_todo_update_priority(&kind, priority)?;
-        validate_todo_update_status(
-            &kind,
-            status,
-            severity,
-            resolution,
-            existing.resolution.as_str(),
-        )?;
+        if let Some(b) = body {
+            Self::reject_nul("body", b)?;
+        }
+        if let Some(p) = priority {
+            Self::validate_priority(p)?;
+        }
+        if let Some(s) = status
+            && !STATUSES.contains(&s)
+        {
+            return Err(TodoError::BadRequest(format!(
+                "status 仅接受 {}（收到 {s}）",
+                STATUSES.join("/")
+            )));
+        }
+        let tags = tags.map(Self::normalize_tags);
+        if let Some(ts) = &tags {
+            for t in ts {
+                Self::reject_nul("tags", t)?;
+            }
+        }
         let n = repo::update(
             &self.pool,
             id,
-            &engram_storage::repo::todos::TodoPatch {
-                kind: Some(&kind),
+            &repo::TodoPatch {
                 title,
                 body,
                 priority,
                 status,
-                severity,
-                symptom,
-                reproduce,
-                acceptance,
-                resolution,
                 due_at,
-                project_hint,
-                tags,
+                tags: tags.as_deref(),
             },
         )
         .await?;
         if n == 0 {
             return Err(TodoError::NotFound(format!("待办 {id} 不存在")));
         }
-        // 状态流转自动留痕（ticket_events kind=event）：状态真的变了才记
-        let new_status = status.unwrap_or(existing.status.as_str());
-        if new_status != existing.status {
-            repo::event_insert(
-                &self.pool,
-                id,
-                "event",
-                &serde_json::json!({ "from": existing.status, "to": new_status }),
-                actor,
-            )
-            .await?;
-        }
         self.get(id).await
-    }
-
-    /// 工单评论（ticket_events kind=comment）
-    pub async fn comment(&self, id: Uuid, text: &str, actor: &str) -> Result<(), TodoError> {
-        let text = text.trim();
-        if text.is_empty() {
-            return Err(TodoError::BadRequest("评论不能为空".into()));
-        }
-        repo::get(&self.pool, id)
-            .await?
-            .ok_or_else(|| TodoError::NotFound(format!("待办 {id} 不存在")))?;
-        repo::event_insert(
-            &self.pool,
-            id,
-            "comment",
-            &serde_json::json!({ "text": text }),
-            actor,
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// 活动时间线（升序；存在性校验后回列表）
-    pub async fn events(
-        &self,
-        id: Uuid,
-    ) -> Result<Vec<engram_storage::repo::todos::TicketEventRow>, TodoError> {
-        repo::get(&self.pool, id)
-            .await?
-            .ok_or_else(|| TodoError::NotFound(format!("待办 {id} 不存在")))?;
-        Ok(repo::events_for(&self.pool, id).await?)
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<(), TodoError> {
@@ -519,17 +360,16 @@ impl TodoService {
             .collect())
     }
 
-    /// 总数（同 list 过滤，不含分页）——EN-237③：tickets/todos list 返回 total。
+    /// 总数（同 list 过滤，不含分页）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn count(
         &self,
         status: Option<&str>,
-        kind: Option<&str>,
         priority: Option<&str>,
         tag: Option<&str>,
         q: Option<&str>,
-        severity: Option<&str>,
     ) -> Result<i64, TodoError> {
-        let n = repo::count(&self.pool, status, kind, priority, tag, q, severity).await?;
+        let n = repo::count(&self.pool, status, priority, tag, q).await?;
         Ok(n)
     }
 }

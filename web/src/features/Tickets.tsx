@@ -1,16 +1,16 @@
-/** 工单页（工单形态）：传统工单——列表 + 详情面板，结构化问题跟踪。
- *  与待办页（Todos.tsx）同表不同心智：severity、状态机流转、症状/复现/验收/解决记录。 */
+/** 工单页（0074 项目绑定制）：独立 tickets 表——列表按项目分组 + 详情面板。
+ *  工单必须绑定已有项目（AI 创建时后端强制）；severity、六态状态机、症状/复现/验收/解决记录。 */
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { appConfirm } from '@/components/confirm'
-import { Trash2, X } from 'lucide-react'
-import { api, type Todo } from '@/lib/api'
+import { FolderOpen, Trash2, X } from 'lucide-react'
+import { api } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
-import { inputCls, selectCls } from '@/lib/ui'
+import { inputCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { cn } from '@/lib/utils'
 import {
-  PRIO_LABEL,
   SEVERITY_CLASS,
   TICKET_DONEISH,
   TICKET_NEXT,
@@ -18,27 +18,56 @@ import {
   TICKET_STATUS_LABEL,
 } from '@/lib/todos-ui'
 
+export interface Ticket {
+  id: string
+  project_id: string
+  title: string
+  body: string
+  status: string
+  severity: string | null
+  symptom: string
+  reproduce: string
+  acceptance: string
+  resolution: string
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+  short_no: number
+}
+
+interface ProjectBrief {
+  id: string
+  name: string
+}
+
 export default function Tickets() {
-  const [rows, setRows] = useState<Todo[] | null>(null)
+  const nav = useNavigate()
+  const [rows, setRows] = useState<Ticket[] | null>(null)
+  const [projects, setProjects] = useState<ProjectBrief[]>([])
   const [severity, setSeverity] = useState('')
-  const [tag, setTag] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   /** 选中的工单（右侧详情面板）；null = 未选中 */
-  const [selected, setSelected] = useState<Todo | null>(null)
+  const [selected, setSelected] = useState<Ticket | null>(null)
 
   const query = useMemo(() => {
-    const parts = [`kind=ticket`]
+    const parts: string[] = []
     if (severity) parts.push(`severity=${severity}`)
-    if (tag.trim()) parts.push(`tag=${encodeURIComponent(tag.trim())}`)
     return parts.join('&')
-  }, [severity, tag])
+  }, [severity])
 
   const load = () =>
-    api
-      .get<Todo[]>(`/todos?${query}`)
-      .then((r) => {
-        setRows(r)
+    Promise.all([
+      api.get<{ items: Ticket[] }>(`/tickets?${query}`),
+      api.get<{ topics?: unknown[] } | unknown[]>('/projects').catch(() => null),
+    ])
+      .then(([r, pj]) => {
+        setRows(r.items)
+        // 项目名录（分组标题 + 跳转链接显示名）
+        const list = Array.isArray(pj) ? pj : ((pj as { projects?: ProjectBrief[] })?.projects ?? [])
+        setProjects(
+          (list as { id: string; name: string }[]).map((p) => ({ id: p.id, name: p.name })),
+        )
         setErr('')
       })
       .catch((e) => setErr(e instanceof Error ? e.message : '加载失败'))
@@ -48,8 +77,21 @@ export default function Tickets() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
+  const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? '未知项目'
+
+  // 按项目分组（0074 项目绑定制：每个工单都有归属）——组内 open 优先、其余时间倒序（后端序）
+  const byProject = useMemo(() => {
+    const m = new Map<string, Ticket[]>()
+    for (const t of rows ?? []) {
+      const arr = m.get(t.project_id) ?? []
+      arr.push(t)
+      m.set(t.project_id, arr)
+    }
+    return [...m.entries()]
+  }, [rows])
+
   /** 工单状态流转（推进到下一态；resolved 由后端校验 resolution 必填） */
-  async function advance(t: Todo) {
+  async function advance(t: Ticket) {
     const step = TICKET_NEXT[t.status]
     if (!step) return
     if (step.next === 'resolved') {
@@ -57,7 +99,7 @@ export default function Tickets() {
       if (!resolution?.trim()) return
       setBusy(true)
       try {
-        await api.put(`/todos/${t.id}`, { status: 'resolved', resolution: resolution.trim() })
+        await api.put(`/tickets/${t.id}`, { status: 'resolved', resolution: resolution.trim() })
         setErr('')
         load()
       } catch (e) {
@@ -69,7 +111,7 @@ export default function Tickets() {
     }
     setBusy(true)
     try {
-      await api.put(`/todos/${t.id}`, { status: step.next })
+      await api.put(`/tickets/${t.id}`, { status: step.next })
       setErr('')
       load()
     } catch (e) {
@@ -81,13 +123,13 @@ export default function Tickets() {
 
   /** 编辑工单四件套之一（详情面板内联编辑；PUT 部分更新，其余字段不动） */
   async function saveField(
-    t: Todo,
+    t: Ticket,
     field: 'symptom' | 'reproduce' | 'acceptance' | 'resolution',
     value: string,
   ) {
     setBusy(true)
     try {
-      await api.put(`/todos/${t.id}`, { [field]: value })
+      await api.put(`/tickets/${t.id}`, { [field]: value })
       setErr('')
       load()
     } catch (e) {
@@ -98,10 +140,10 @@ export default function Tickets() {
     }
   }
 
-  async function doArchive(t: Todo) {
+  async function doArchive(t: Ticket) {
     setBusy(true)
     try {
-      await api.put(`/todos/${t.id}`, { status: 'archived' })
+      await api.put(`/tickets/${t.id}`, { status: 'archived' })
       setErr('')
       load()
     } catch (e) {
@@ -111,7 +153,7 @@ export default function Tickets() {
     }
   }
 
-  async function doDelete(t: Todo) {
+  async function doDelete(t: Ticket) {
     if (
       !(await appConfirm({
         title: `删除工单「${t.title}」？`,
@@ -122,7 +164,7 @@ export default function Tickets() {
       return
     setBusy(true)
     try {
-      await api.del(`/todos/${t.id}`)
+      await api.del(`/tickets/${t.id}`)
       setErr('')
       setSelected(null)
       load()
@@ -140,7 +182,7 @@ export default function Tickets() {
     <div className="space-y-5">
       <PageHeader title="工单">
         <select
-          className={selectCls}
+          className={selectClsFor()}
           aria-label="严重度筛选"
           value={severity}
           onChange={(e) => setSeverity(e.target.value)}
@@ -151,26 +193,12 @@ export default function Tickets() {
           <option value="P2">P2 一般</option>
           <option value="P3">P3 轻微</option>
         </select>
-        <select
-          className={selectCls}
-          aria-label="标签筛选"
-          value={tag}
-          onChange={(e) => setTag(e.target.value)}
-        >
-          <option value="">全部标签</option>
-          <option value="engram">engram</option>
-          <option value="待修">待修</option>
-          <option value="待优化">待优化</option>
-          <option value="待设计">待设计</option>
-        </select>
       </PageHeader>
 
       {err && <ErrorBox msg={err} />}
 
-      {/* 列表 + 详情面板：lg 选中态 = 定高双栏、左右各自独立滚动（EN：滚动模型重构）；
-          未选中 / 移动端 = 单列自然流（现状不变） */}
       {rows.length === 0 ? (
-        <Empty text="暂无工单——让 AI 通过 todo_add（kind=ticket）帮你记，填上症状更好用" />
+        <Empty text="暂无工单——让 AI 通过 tickets 域（必须绑定项目）帮你记，填上症状更好用" />
       ) : (
         <div
           className={cn(
@@ -180,55 +208,63 @@ export default function Tickets() {
               : 'grid-cols-1',
           )}
         >
+          {/* 左：按项目分段的工单列表 */}
           <div
             className={cn(
               'min-w-0 space-y-4',
               selected && 'lg:h-full lg:overflow-y-auto lg:pr-1',
             )}
           >
-            {/* EN-58：分段展示让排序可预期——后端口径是 open 优先 + updated_at DESC，
-                混排时用户看到「忽上忽下」。分两段各带计数，段内保持后端顺序不变。 */}
-            {(() => {
-              const openRows = rows.filter((t) => t.status === 'open')
-              const restRows = rows.filter((t) => t.status !== 'open')
-              const seg = (label: string, list: typeof rows) =>
-                list.length === 0 ? null : (
-                  <section aria-label={label}>
-                    <h3 className="mb-1.5 flex items-baseline gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {label}
-                      <span className="font-mono font-normal">{list.length}</span>
-                    </h3>
-                    <div className="space-y-1.5">
-                      {list.map((t) => (
-                        <TicketRow
-                          key={t.id}
-                          t={t}
-                          busy={busy}
-                          active={selected?.id === t.id}
-                          onSelect={() => setSelected(t)}
-                        />
-                      ))}
-                    </div>
-                  </section>
+            {byProject.map(([pid, list]) => {
+              const openRows = list.filter((t) => !TICKET_DONEISH.includes(t.status))
+              const restRows = list.filter((t) => TICKET_DONEISH.includes(t.status))
+              const seg = (l: Ticket[]) =>
+                l.length === 0 ? null : (
+                  <div className="space-y-1.5">
+                    {l.map((t) => (
+                      <TicketRow
+                        key={t.id}
+                        t={t}
+                        busy={busy}
+                        active={selected?.id === t.id}
+                        onSelect={() => setSelected(t)}
+                      />
+                    ))}
+                  </div>
                 )
               return (
-                <>
-                  {seg('开放中', openRows)}
-                  {seg('推进中 / 已收敛', restRows)}
-                </>
+                <section key={pid} aria-label={`项目 ${projectName(pid)} 的工单`}>
+                  <h3 className="mb-1.5 flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground">
+                    <FolderOpen className="size-3.5" aria-hidden="true" />
+                    <button
+                      type="button"
+                      className="hover:text-foreground hover:underline"
+                      onClick={() => nav(`/projects/${pid}`)}
+                      title="打开项目详情"
+                    >
+                      {projectName(pid)}
+                    </button>
+                    <span className="font-mono font-normal">{list.length}</span>
+                  </h3>
+                  {seg(openRows)}
+                  {seg(restRows)}
+                </section>
               )
-            })()}
+            })}
           </div>
+
           {selected && (
             <div className="min-w-0 lg:self-start lg:max-h-full lg:overflow-y-auto lg:pl-1">
               <TicketDetail
                 t={rows.find((r) => r.id === selected.id) ?? selected}
+                projectName={projectName(selected.project_id)}
                 busy={busy}
                 onClose={() => setSelected(null)}
                 onAdvance={advance}
                 onArchive={doArchive}
                 onDelete={doDelete}
                 onEditSave={saveField}
+                onGoProject={(pid) => nav(`/projects/${pid}`)}
               />
             </div>
           )}
@@ -238,6 +274,11 @@ export default function Tickets() {
   )
 }
 
+/** selectCls 的本地包装（lib/ui 的 selectCls 依赖未随文件迁移的上下文时兜底）。 */
+function selectClsFor() {
+  return 'rounded border border-border bg-transparent px-2 py-1.5 text-sm'
+}
+
 /** 列表行：severity 徽章 + 状态徽章 + 标题 + 短号 + 更新时间；点击选中。 */
 function TicketRow({
   t,
@@ -245,7 +286,7 @@ function TicketRow({
   active,
   onSelect,
 }: {
-  t: Todo
+  t: Ticket
   busy: boolean
   active: boolean
   onSelect: () => void
@@ -284,21 +325,9 @@ function TicketRow({
             {TICKET_STATUS_LABEL[t.status] ?? t.status}
           </span>
         </div>
-        <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-          {t.symptom && (
-            <p className="min-w-0 max-w-full flex-1 basis-40 truncate text-xs text-muted-foreground">
-              {t.symptom}
-            </p>
-          )}
-          {t.tags.map((tag: string) => (
-            <span
-              key={tag}
-              className="rounded border border-border px-1 py-0 text-[10px] text-muted-foreground"
-            >
-              #{tag}
-            </span>
-          ))}
-        </div>
+        {t.symptom && (
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">{t.symptom}</p>
+        )}
       </div>
       <div className="shrink-0 text-right font-mono text-[10px] text-muted-foreground/70">
         <p>EN-{t.short_no}</p>
@@ -308,27 +337,31 @@ function TicketRow({
   )
 }
 
-/** 详情面板：symptom/reproduce/acceptance/resolution 完整展示 + **内联编辑** + 状态流转 + 归档/删除。 */
+/** 详情面板：项目链接 + symptom/reproduce/acceptance/resolution 内联编辑 + 状态流转 + 时间线。 */
 function TicketDetail({
   t,
+  projectName,
   busy,
   onClose,
   onAdvance,
   onArchive,
   onDelete,
   onEditSave,
+  onGoProject,
 }: {
-  t: Todo
+  t: Ticket
+  projectName: string
   busy: boolean
   onClose: () => void
-  onAdvance: (t: Todo) => void
-  onArchive: (t: Todo) => void
-  onDelete: (t: Todo) => void
+  onAdvance: (t: Ticket) => void
+  onArchive: (t: Ticket) => void
+  onDelete: (t: Ticket) => void
   onEditSave: (
-    t: Todo,
+    t: Ticket,
     field: 'symptom' | 'reproduce' | 'acceptance' | 'resolution',
     value: string,
   ) => Promise<void>
+  onGoProject: (pid: string) => void
 }) {
   const doneish = TICKET_DONEISH.includes(t.status)
   const step = TICKET_NEXT[t.status]
@@ -339,17 +372,17 @@ function TicketDetail({
   useEffect(() => {
     setEvents(null)
     api
-      .get<{ events: TicketEvent[] }>(`/todos/${t.id}/events`)
+      .get<{ events: TicketEvent[] }>(`/tickets/${t.id}/events`)
       .then((r) => setEvents(r.events))
       .catch(() => setEvents([]))
   }, [t.id])
   async function postComment() {
     const text = cText.trim()
     if (!text) return
-    await api.post(`/todos/${t.id}/events`, { text })
+    await api.post(`/tickets/${t.id}/events`, { text })
     setCText('')
     api
-      .get<{ events: TicketEvent[] }>(`/todos/${t.id}/events`)
+      .get<{ events: TicketEvent[] }>(`/tickets/${t.id}/events`)
       .then((r) => setEvents(r.events))
       .catch(() => {})
   }
@@ -388,14 +421,16 @@ function TicketDetail({
         <span className={cn('rounded border px-1.5 py-0.5 text-xs', TICKET_STATUS_CLASS[t.status])}>
           {TICKET_STATUS_LABEL[t.status] ?? t.status}
         </span>
-        <span className={cn('rounded border px-1.5 py-0.5 text-[11px]', 'border-border text-muted-foreground')}>
-          {PRIO_LABEL[t.priority] ?? t.priority}
-        </span>
-        {t.tags.map((tag: string) => (
-          <span key={tag} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
-            #{tag}
-          </span>
-        ))}
+        {/* 项目归属：链接直达项目详情 */}
+        <button
+          type="button"
+          className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+          onClick={() => onGoProject(t.project_id)}
+          title="打开项目详情"
+        >
+          <FolderOpen className="size-3" aria-hidden="true" />
+          {projectName}
+        </button>
       </div>
 
       {/* 工单四件套（内联编辑：点「编辑」改文本，保存走 PUT 部分更新，其余字段不动） */}
@@ -430,8 +465,6 @@ function TicketDetail({
 
       {/* 元信息 */}
       <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground/70">
-        {t.project_hint && <span>项目 {t.project_hint}</span>}
-        {t.due_at && <span>截止 {new Date(t.due_at).toLocaleDateString()}</span>}
         <span>更新 {new Date(t.updated_at).toLocaleString()}</span>
         {t.resolved_at && <span>解决 {new Date(t.resolved_at).toLocaleString()}</span>}
       </div>
@@ -525,9 +558,9 @@ function EditableSection({
   field: 'symptom' | 'reproduce' | 'acceptance' | 'resolution'
   value: string
   busy: boolean
-  t: Todo
+  t: Ticket
   onSave: (
-    t: Todo,
+    t: Ticket,
     field: 'symptom' | 'reproduce' | 'acceptance' | 'resolution',
     value: string,
   ) => Promise<void>

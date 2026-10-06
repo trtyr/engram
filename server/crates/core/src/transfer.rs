@@ -57,6 +57,7 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
     let wiki_review_items = repo::export_wiki_review_items(pool).await?;
     let wiki_links = repo::export_wiki_links(pool).await?;
     let todos = repo::export_todos(pool).await?;
+    let tickets = repo::export_tickets(pool).await?;
     let kv_entries = repo::export_kv_entries(pool).await?;
     let wiki_promotions = repo::export_wiki_promotions(pool).await?;
 
@@ -77,7 +78,7 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
             "todo_links": todo_links.len(), "wiki_documents": wiki_documents.len(),
             "wiki_chunks": wiki_chunks.len(), "wiki_sources": wiki_sources.len(),
             "wiki_review_items": wiki_review_items.len(), "wiki_links": wiki_links.len(),
-            "todos": todos.len(), "kv_entries": kv_entries.len(),
+            "todos": todos.len(), "tickets": tickets.len(), "kv_entries": kv_entries.len(),
             "wiki_promotions": wiki_promotions.len(),
         },
         "memory": {
@@ -97,6 +98,7 @@ pub async fn export_bundle(pool: &PgPool) -> Result<Value> {
         "assets": assets,
         "project_links": project_links,
         "todos": todos,
+        "tickets": tickets,
         "todo_links": todo_links,
         "kv_entries": kv_entries,
         "wiki_promotions": wiki_promotions,

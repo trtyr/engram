@@ -13,6 +13,7 @@ pub mod migrate_api;
 pub mod project_api;
 pub mod search_api;
 pub mod study_api;
+pub mod tickets_api;
 pub mod todos_api;
 pub mod wiki_api;
 pub mod wiki_docs_api;
@@ -88,6 +89,9 @@ use utoipa::OpenApi;
     migrate_api::migrate_sync,
         todos_api::list_todos, todos_api::create_todo, todos_api::get_todo,
         todos_api::update_todo, todos_api::delete_todo, todos_api::todo_links, todos_api::export_todos,
+        tickets_api::list_tickets, tickets_api::create_ticket, tickets_api::get_ticket,
+        tickets_api::update_ticket, tickets_api::delete_ticket, tickets_api::ticket_events,
+        tickets_api::ticket_comment, tickets_api::export_tickets,
         project_api::list_types, project_api::create_project, project_api::list_projects,
         project_api::graph,
         project_api::get_project, project_api::update_project, project_api::delete_project,
@@ -121,6 +125,7 @@ pub fn router(state: AppState) -> Router {
         .merge(assets_routes())
         .merge(credentials_routes())
         .merge(todos_routes())
+        .merge(tickets_routes())
         .merge(migrate_routes());
 
     Router::new()
@@ -562,11 +567,27 @@ fn todos_routes() -> Router<AppState> {
                 .delete(todos_api::delete_todo),
         )
         .route("/todos/{id}/links", get(todos_api::todo_links))
-        .route(
-            "/todos/{id}/events",
-            get(todos_api::todo_events).post(todos_api::todo_comment),
-        )
         .route("/todos/export", get(todos_api::export_todos))
+}
+
+/// `/tickets` 域路由组（0074 工单拆表：项目绑定制）。
+fn tickets_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/tickets",
+            get(tickets_api::list_tickets).post(tickets_api::create_ticket),
+        )
+        .route(
+            "/tickets/{id}",
+            get(tickets_api::get_ticket)
+                .put(tickets_api::update_ticket)
+                .delete(tickets_api::delete_ticket),
+        )
+        .route(
+            "/tickets/{id}/events",
+            get(tickets_api::ticket_events).post(tickets_api::ticket_comment),
+        )
+        .route("/tickets/export", get(tickets_api::export_tickets))
 }
 
 /// `/migrate` 域路由组（自 `router()` 按域拆出，纯搬移，零行为变化）。

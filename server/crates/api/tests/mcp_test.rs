@@ -1128,12 +1128,36 @@ async fn wiki_mcp_tool_toggle_hides_and_rejects() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
-/// 工单模型细化（migration 0043）MCP 功能级四项：
-/// 短号往返 / link-unlink-links 双向 / list brief 摘要 / ticket priority 400。
+/// 工单模型细化（0074 拆表后）MCP 功能级：项目绑定制建单 / EN 短号往返 /
+/// list brief 摘要 / priority 被忽略而 severity 生效 / delete。
 #[tokio::test]
 async fn todos_model_refinement_mcp_end_to_end() {
     let (app, _pg) = app().await;
-    let key = create_key(&app, &login_token(&app).await, &["todos"]).await;
+    let admin = login_token(&app).await;
+    let key = create_key(&app, &admin, &["todos"]).await;
+    // FK 目标：先建项目（admin 走 HTTP）
+    let created = axum::body::to_bytes(
+        app.clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/projects")
+                    .header("authorization", format!("Bearer {admin}"))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        json!({"name":"短号测试项目","type":"dev","description":""}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .into_body(),
+        usize::MAX,
+    )
+    .await
+    .unwrap();
+    let proj: Value = serde_json::from_slice(&created).unwrap();
+    assert_eq!(proj["name"], "短号测试项目");
     let mut seq: i64 = 0;
     let mut call = |action: &str, mut args: serde_json::Value| {
         seq += 1;
@@ -1151,14 +1175,14 @@ async fn todos_model_refinement_mcp_end_to_end() {
         serde_json::from_str(txt).unwrap()
     };
 
-    // ① add ticket（不传 priority）→ 返回 short_no；get by EN-n 等价
+    // ① add ticket（绑定项目名）→ short_no；get by EN-n 等价 UUID
     let (_, v) = mcp_rpc(
         &app,
         &key,
         call(
             "add",
             json!({
-                "title":"短号往返工单", "severity":"P2"
+                "title":"短号往返工单", "severity":"P2", "project":"短号测试项目"
             }),
         ),
     )
@@ -1166,6 +1190,7 @@ async fn todos_model_refinement_mcp_end_to_end() {
     let added = parse_text(&v);
     let short_no = added["short_no"].as_i64().expect("short_no");
     assert!(short_no >= 1);
+    assert_eq!(added["project_id"], proj["id"], "应绑定到项目");
     let (_, v) = mcp_rpc(
         &app,
         &key,
@@ -1175,50 +1200,26 @@ async fn todos_model_refinement_mcp_end_to_end() {
     let got = parse_text(&v);
     assert_eq!(got["id"], added["id"], "EN-n 直达应等价 UUID");
 
-    // ② link 双向 + 幂等 + links 反查
+    // ② add 无 project / 幽灵项目名 → 明确报错
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call("add", json!({"title":"根因票","severity":"P1"})),
+        call("add", json!({"title":"无主工单"})),
     )
     .await;
-    let root = parse_text(&v);
-    let root_no = root["short_no"].as_i64().unwrap();
+    assert!(
+        v["error"].is_object(),
+        "无 project 应报错：{v}"
+    );
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call(
-            "link",
-            json!({
-                "from": format!("EN-{short_no}"), "to": format!("EN-{root_no}"), "kind":"blocked_by"
-            }),
-        ),
+        call("add", json!({"title":"幽灵工单", "project":"幽灵项目"})),
     )
     .await;
-    assert_eq!(parse_text(&v)["created"], json!(true));
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        call(
-            "link",
-            json!({
-                "from": format!("EN-{short_no}"), "to": format!("EN-{root_no}"), "kind":"blocked_by"
-            }),
-        ),
-    )
-    .await;
-    assert_eq!(parse_text(&v)["created"], json!(false), "重复 link 幂等");
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        call("links", json!({"id": format!("EN-{short_no}")})),
-    )
-    .await;
-    let links = parse_text(&v);
-    assert_eq!(links["count"], json!(1));
-    assert_eq!(
-        links["links"][0]["from_ref"],
-        json!(format!("EN-{short_no}"))
+    assert!(
+        v["error"]["message"].as_str().unwrap_or_default().contains("不存在"),
+        "幽灵项目应报不存在：{v}"
     );
 
     // ③ list 默认 brief：无 body/symptom，body_omitted=true
@@ -1232,21 +1233,36 @@ async fn todos_model_refinement_mcp_end_to_end() {
     );
     assert_eq!(first["body_omitted"], json!(true));
 
-    // ④ ticket add 显式 priority → 400 用 severity
+    // ④ ticket add 显式 priority → serde 忽略，分级走 severity
     let (_, v) = mcp_rpc(
         &app,
         &key,
         call(
             "add",
             json!({
-                "title":"分级合并验证", "priority":"high", "severity":"P1"
+                "title":"分级合并验证", "priority":"high", "severity":"P1", "project":"短号测试项目"
             }),
         ),
     )
     .await;
-    // 拆域后 tickets.add 参数层面无 priority 字段（传入被 serde 忽略）——分级走 severity
     let added4 = parse_text(&v);
     assert_eq!(added4["severity"], "P1", "工单分级应用 severity：{added4}");
+
+    // ⑤ delete（物理删）后 get 不再可达
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call("delete", json!({"id": format!("EN-{}", added4["short_no"].as_i64().unwrap())})),
+    )
+    .await;
+    assert_eq!(parse_text(&v)["deleted"], added4["id"], "删除应确认短号");
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        call("get", json!({"id": added4["id"]})),
+    )
+    .await;
+    assert!(v["error"].is_object(), "删除后 get 应报不存在：{v}");
 }
 
 // ---------- Study 域（P007-T004） ----------

@@ -71,6 +71,8 @@ pub(super) async fn run_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
     let (c_pfile, c_pver) = import_project_files_domain(pool, data).await?;
     // 工作线关联：两端项目须已在库（外键 → projects）
     let c_link = import_project_links(pool, data).await?;
+    // 工单（0074 独立表）：project_id 须已在库——projects 之后导入
+    let (tk_imp, tk_skip) = import_tickets_domain(pool, data).await?;
     let (t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip) = import_tail_domains(pool, data).await?;
     // 工单/待办关联须在 todos 之后（两端 id 都要在库）
     let c_todo_link = import_todo_links_domain(pool, data).await?;
@@ -98,12 +100,23 @@ pub(super) async fn run_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
         "assets": c_asset.to_json(),
         "project_links": c_link.to_json(),
         "todos": { "imported": t_imp, "skipped": t_skip },
+        "tickets": { "imported": tk_imp, "skipped": tk_skip },
         "todo_links": c_todo_link.to_json(),
         "kv_entries": { "imported": kv_imp, "skipped": kv_skip },
         "wiki_promotions": { "imported": p_imp, "skipped": p_skip },
         "note": "冲突（id/slug/name 已存在）按跳过处理；embedding 未迁移——\
                  memory 用 POST /memory/reembed、wiki 用文档域 re-embed 补齐",
     }))
+}
+
+/// 工单域导入（0074）：project_id 无对应项目则跳过（FK 不允许悬空）。
+async fn import_tickets_domain(pool: &PgPool, data: &Value) -> Result<(usize, usize)> {
+    let items = data
+        .get("tickets")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    repo::import_tickets(pool, &items).await.map_err(Into::into)
 }
 
 /// memory 域导入：sessions → atoms（自引用 FK 后置回填）→ entities → relations。

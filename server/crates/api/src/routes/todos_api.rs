@@ -1,4 +1,5 @@
 //! 待办域端点：不绑定项目的临时任务/灵感速记。
+//! 工单已拆 /tickets（0074）——ticket 参数在本域直接 400（不带旧兼容）。
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -34,14 +35,11 @@ fn svc(state: &AppState) -> TodoService {
 
 #[derive(Deserialize, utoipa::IntoParams)]
 pub struct ListTodosParams {
+    /// open | done | archived
     pub status: Option<String>,
-    /// 可选：todo / ticket
-    pub kind: Option<String>,
     pub priority: Option<String>,
     pub tag: Option<String>,
     pub q: Option<String>,
-    /// 可选：工单严重度 P0-P3（仅命中 kind=ticket 的行）
-    pub severity: Option<String>,
     /// 可选 due 过滤：overdue=未完成且已过期；today=今天到期
     pub due: Option<String>,
     /// keyset 分页游标：{1|0}|{updated_at ISO8601}|{id}（1=该条 status=open）
@@ -54,26 +52,11 @@ pub struct CreateTodoRequest {
     pub title: String,
     #[serde(default)]
     pub body: String,
-    /// 可选：todo（行动项，默认）/ ticket（工单）
-    #[serde(default)]
-    pub kind: Option<String>,
-    /// 缺省按 kind：todo=normal / ticket=空串（severity 才是工单分级）
     #[serde(default)]
     pub priority: Option<String>,
-    /// 可选：工单严重度 P0-P3（仅 kind=ticket）
-    #[serde(default)]
-    pub severity: Option<String>,
-    #[serde(default)]
-    pub symptom: String,
-    #[serde(default)]
-    pub reproduce: String,
-    #[serde(default)]
-    pub acceptance: String,
     #[serde(default)]
     pub tags: Vec<String>,
     pub due_at: Option<DateTime<Utc>>,
-    /// 可选：相关项目名提示（纯文本，不做绑定）
-    pub project_hint: Option<String>,
 }
 
 /// serde 双层 Option：字段缺失→None（不动）；字段=null→Some(None)（显式清除）；字段=值→Some(Some(v))。
@@ -88,26 +71,14 @@ where
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateTodoRequest {
-    /// 可选：形态转换 todo ↔ ticket
-    pub kind: Option<String>,
     pub title: Option<String>,
     pub body: Option<String>,
     pub priority: Option<String>,
-    /// todo: open | done | archived；ticket: open | confirmed | in_progress | resolved | verified | archived
+    /// open | done | archived
     pub status: Option<String>,
-    /// 可选：工单严重度 P0-P3（仅 kind=ticket）；null=显式清除（回到未定级）
-    #[serde(default, deserialize_with = "double_option")]
-    pub severity: Option<Option<String>>,
-    pub symptom: Option<String>,
-    pub reproduce: Option<String>,
-    pub acceptance: Option<String>,
-    pub resolution: Option<String>,
     /// null=显式清除截止时间
     #[serde(default, deserialize_with = "double_option")]
     pub due_at: Option<Option<DateTime<Utc>>>,
-    /// null=显式清除项目提示
-    #[serde(default, deserialize_with = "double_option")]
-    pub project_hint: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
 }
 
@@ -124,11 +95,9 @@ pub async fn list_todos(
         svc(&state)
             .list(
                 p.status.as_deref(),
-                p.kind.as_deref(),
                 p.priority.as_deref(),
                 p.tag.as_deref(),
                 p.q.as_deref(),
-                p.severity.as_deref(),
                 p.due.as_deref(),
                 p.cursor.as_deref(),
                 p.limit.unwrap_or(200),
@@ -151,24 +120,9 @@ pub async fn create_todo(
         .create(
             &req.title,
             &req.body,
-            req.kind.as_deref().unwrap_or("todo"),
-            match req.priority.as_deref() {
-                Some(p) => p,
-                None => {
-                    if req.kind.as_deref() == Some("ticket") {
-                        ""
-                    } else {
-                        "normal"
-                    }
-                }
-            },
-            req.severity.as_deref(),
-            &req.symptom,
-            &req.reproduce,
-            &req.acceptance,
+            req.priority.as_deref().unwrap_or("normal"),
             &req.tags,
             req.due_at,
-            req.project_hint.as_deref(),
         )
         .await
         .map_err(te)?;
@@ -208,43 +162,6 @@ pub async fn todo_links(
     Ok(Json(items))
 }
 
-/// 活动时间线（状态流转 event + 评论 comment，升序）。
-#[utoipa::path(get, path = "/todos/{id}/events", responses((status = 200)))]
-pub async fn todo_events(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    require_todos_read(&principal)?;
-    let rows = svc(&state).events(id).await.map_err(te)?;
-    Ok(Json(serde_json::json!({ "events": rows })))
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct TicketCommentRequest {
-    pub text: String,
-}
-
-/// 工单评论（入活动时间线）。
-#[utoipa::path(post, path = "/todos/{id}/events", request_body = TicketCommentRequest,
-    responses((status = 201)))]
-pub async fn todo_comment(
-    principal: axum::Extension<Principal>,
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-    axum::Json(req): axum::Json<TicketCommentRequest>,
-) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
-    require_todos(&principal)?;
-    svc(&state)
-        .comment(id, &req.text, "console")
-        .await
-        .map_err(te)?;
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::json!({ "commented": true })),
-    ))
-}
-
 /// 更新待办（部分字段，None 不动；status=done 自动记 done_at）。
 #[utoipa::path(put, path = "/todos/{id}", request_body = UpdateTodoRequest,
     responses((status = 200, body = TodoDto), (status = 404, body = crate::error::ErrorEnvelope)))]
@@ -259,20 +176,12 @@ pub async fn update_todo(
         svc(&state)
             .update(
                 id,
-                req.kind.as_deref(),
                 req.title.as_deref(),
                 req.body.as_deref(),
                 req.priority.as_deref(),
                 req.status.as_deref(),
-                req.severity.as_ref().map(|o| o.as_deref()),
-                req.symptom.as_deref(),
-                req.reproduce.as_deref(),
-                req.acceptance.as_deref(),
-                req.resolution.as_deref(),
                 req.due_at,
-                req.project_hint.as_ref().map(|o| o.as_deref()),
                 req.tags.as_deref(),
-                "console",
             )
             .await
             .map_err(te)?,

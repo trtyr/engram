@@ -1,4 +1,5 @@
-//! 工单活动时间线 HTTP 旅程（task-4）：建工单 → 状态流转自动留痕 → 评论入流 → 时间线升序时序正确。
+//! 工单活动时间线 HTTP 旅程（0074 拆表后 /tickets 直连）：
+//! 建项目 → 建工单 → 状态流转自动留痕 → 评论入流 → 时间线升序时序正确。
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -36,13 +37,25 @@ async fn ticket_timeline_http_journey() {
     let (app, _pg) = support::app().await;
     let tok = support::login_token(&app).await;
 
-    // ① 建工单
+    // ⓪ FK 目标：建项目
     let (st, v) = req(
         &app,
         &tok,
         "POST",
-        "/todos",
-        Some(json!({ "title": "T 时间线", "kind": "ticket", "severity": "P2" })),
+        "/projects",
+        Some(json!({ "name": "时间线项目", "type": "dev", "description": "" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{v}");
+    let pid = v["id"].as_str().unwrap().to_string();
+
+    // ① 建工单（/tickets，project_id 必填）
+    let (st, v) = req(
+        &app,
+        &tok,
+        "POST",
+        "/tickets",
+        Some(json!({ "project_id": pid, "title": "T 时间线", "severity": "P2" })),
     )
     .await;
     assert_eq!(st, StatusCode::CREATED, "{v}");
@@ -53,7 +66,7 @@ async fn ticket_timeline_http_journey() {
         &app,
         &tok,
         "PUT",
-        &format!("/todos/{id}"),
+        &format!("/tickets/{id}"),
         Some(json!({ "status": "confirmed" })),
     )
     .await;
@@ -64,23 +77,59 @@ async fn ticket_timeline_http_journey() {
         &app,
         &tok,
         "POST",
-        &format!("/todos/{id}/events"),
+        &format!("/tickets/{id}/events"),
         Some(json!({ "text": "控制台评论" })),
     )
     .await;
     assert_eq!(st, StatusCode::CREATED, "{v}");
 
     // ④ 时间线：event(open→confirmed) + comment，升序、payload 正确
-    let (st, v) = req(&app, &tok, "GET", &format!("/todos/{id}/events"), None).await;
+    let (st, v) = req(&app, &tok, "GET", &format!("/tickets/{id}/events"), None).await;
     assert_eq!(st, StatusCode::OK, "{v}");
     let ev = v["events"].as_array().unwrap();
     assert_eq!(ev.len(), 2, "{v}");
     assert_eq!(ev[0]["kind"], "event");
     assert_eq!(ev[0]["payload"]["from"], "open");
     assert_eq!(ev[0]["payload"]["to"], "confirmed");
-    assert_eq!(ev[0]["actor"], "console");
     assert_eq!(ev[1]["kind"], "comment");
     assert_eq!(ev[1]["payload"]["text"], "控制台评论");
+}
+
+/// 项目绑定制硬闸门：无 project_id / 幽灵 project_id 都拒。
+#[tokio::test]
+async fn ticket_requires_existing_project() {
+    let (app, _pg) = support::app().await;
+    let tok = support::login_token(&app).await;
+
+    // 无 project_id → 反序列化失败 4xx
+    let (st, _) = req(
+        &app,
+        &tok,
+        "POST",
+        "/tickets",
+        Some(json!({ "title": "无主工单" })),
+    )
+    .await;
+    assert!(st.is_client_error(), "缺 project_id 应 4xx（收到 {st}）");
+
+    // 幽灵 project_id → 服务层 400
+    let ghost = uuid::Uuid::now_v7();
+    let (st, v) = req(
+        &app,
+        &tok,
+        "POST",
+        "/tickets",
+        Some(json!({ "project_id": ghost, "title": "幽灵工单" })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("不存在"),
+        "应明确报项目不存在：{v}"
+    );
 }
 
 #[tokio::test]
@@ -99,14 +148,7 @@ async fn http_null_clears_due_at() {
     .await;
     assert_eq!(st, StatusCode::CREATED, "{v}");
     let id = v["id"].as_str().unwrap().to_string();
-    let (st, v) = req(
-        &app,
-        &tok,
-        "GET",
-        "/todos?kind=todo&status=open&due=overdue",
-        None,
-    )
-    .await;
+    let (st, v) = req(&app, &tok, "GET", "/todos?status=open&due=overdue", None).await;
     assert_eq!(st, StatusCode::OK);
     assert!(
         v.as_array().unwrap().iter().any(|t| t["id"] == id),
@@ -126,14 +168,7 @@ async fn http_null_clears_due_at() {
     assert!(v["due_at"].is_null(), "due_at 应已被清除: {v}");
 
     // overdue 不再命中
-    let (st, v) = req(
-        &app,
-        &tok,
-        "GET",
-        "/todos?kind=todo&status=open&due=overdue",
-        None,
-    )
-    .await;
+    let (st, v) = req(&app, &tok, "GET", "/todos?status=open&due=overdue", None).await;
     assert_eq!(st, StatusCode::OK);
     assert!(
         !v.as_array().unwrap().iter().any(|t| t["id"] == id),
