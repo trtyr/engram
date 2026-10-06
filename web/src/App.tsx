@@ -47,6 +47,7 @@ const Todos = lazy(() => import('@/features/Todos'))
 const Tickets = lazy(() => import('@/features/Tickets'))
 const Logs = lazy(() => import('@/features/Logs'))
 const Study = lazy(() => import('@/features/Study'))
+const StudyWorkspace = lazy(() => import('@/features/StudyWorkspace'))
 const Settings = lazy(() => import('@/features/Settings'))
 const Account = lazy(() => import('@/features/Account'))
 const Mcp = lazy(() => import('@/features/Mcp'))
@@ -340,6 +341,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/tickets" element={<Tickets />} />
               <Route path="/logs" element={<Logs />} />
               <Route path="/study" element={<Study />} />
+ <Route path="/study/:id" element={<StudyWorkspace />} />
               <Route path="/mcp" element={<Mcp />} />
               <Route path="/account" element={<Account />} />
         <Route path="/settings" element={<Settings />} />

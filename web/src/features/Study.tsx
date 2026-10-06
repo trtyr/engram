@@ -1,25 +1,43 @@
-/** Study 学习路线图（P007）：领域 track→知识点状态机→挂 wiki。过程视图；知识本体在 wiki。 */
-import { useEffect, useState } from 'react'
+/**
+ * 学习驾驶舱 · 总览（2026-10-06 重设计，参考 roadmap.sh / FSRS / GitHub 热力图）：
+ * 所有领域的仪表盘——进度环、全局活动热力图、连击、跨领域今日到期复习。
+ * 点领域卡 → /study/:id 领域工作台（独立路由，那才是主界面）。
+ */
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
 import { fmtTime, inputCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 
-interface StudyItem {
+// ---------- 类型（与领域工作台共享） ----------
+export interface StudyItem {
   id: string
+  track_id: string
   name: string
   status: string // not_started | learning | learned
   position: number
   wiki_slugs: string[]
   doc_ids: string[]
   learned_at: string | null
+  needs_review: boolean
+  review_due_at: string | null
+  updated_at: string
 }
 
-interface TopicFull {
+export interface StudyJournalRow {
+  id: string
+  track_id: string
+  note: string
+  created_at: string
+}
+
+export interface TopicFull {
   id: string
   name: string
   goal: string
   status: string
+  updated_at: string
   items: StudyItem[]
   progress: { total: number; learned: number }
   next_up: StudyItem[]
@@ -27,14 +45,7 @@ interface TopicFull {
   recent_journal: StudyJournalRow[]
 }
 
-interface StudyJournalRow {
-  id: string
-  track_id: string
-  note: string
-  created_at: string
-}
-
-interface TopicBrief {
+export interface TopicBrief {
   id: string
   name: string
   goal: string
@@ -42,130 +53,279 @@ interface TopicBrief {
   updated_at: string
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  not_started: '待学',
-  learning: '进行中',
-  learned: '已学',
+// ---------- Leitner 复习阶梯（FSRS 的极简替身：记得升档，忘了回 1 天） ----------
+export const LADDER = [1, 3, 7, 14, 30, 60]
+
+export function currentIntervalDays(dueAt: string | null, updatedAt: string): number {
+  if (!dueAt) return 0
+  const d = (new Date(dueAt).getTime() - new Date(updatedAt).getTime()) / 86400_000
+  return Math.max(1, Math.round(d))
 }
 
-function statusChip(status: string) {
-  const cls =
-    status === 'learned'
-      ? 'text-emerald-600 dark:text-emerald-400'
-      : status === 'learning'
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-muted-foreground'
-  return <span className={`text-xs font-medium ${cls}`}>{STATUS_LABEL[status] ?? status}</span>
+/** 「记得」→ 阶梯升一档（封顶 60 天） */
+export function nextLadderDays(dueAt: string | null, updatedAt: string): number {
+  const cur = currentIntervalDays(dueAt, updatedAt)
+  const idx = LADDER.findIndex((x) => x >= cur)
+  return LADDER[Math.min((idx < 0 ? LADDER.length - 1 : idx) + 1, LADDER.length - 1)]
 }
 
+export function dueIn(days: number): string {
+  return new Date(Date.now() + days * 86400_000).toISOString()
+}
+
+// ---------- 进度环 ----------
+export function ProgressRing({ pct, size = 52 }: { pct: number; size?: number }) {
+  const r = (size - 6) / 2
+  const c = 2 * Math.PI * r
+  return (
+    <svg width={size} height={size} className="-rotate-90" aria-label={`进度 ${pct}%`}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={5} className="stroke-muted" />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        strokeWidth={5}
+        strokeLinecap="round"
+        className="stroke-emerald-500 transition-all"
+        strokeDasharray={`${(c * pct) / 100} ${c}`}
+      />
+    </svg>
+  )
+}
+
+// ---------- 活动热力图（近 12 周）+ 连击 ----------
+export const DAY = 86400_000
+
+export function dayKey(ts: number | string): string {
+  return new Date(ts).toISOString().slice(0, 10)
+}
+
+export function buildHeatmap(dates: string[]): { cells: { key: string; count: number }[]; streak: number } {
+  const counts = new Map<string, number>()
+  for (const d of dates) {
+    const k = dayKey(d)
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  const today = new Date()
+  today.setHours(12, 0, 0, 0) // 正午锚定，免夏令时偏移
+  const cells: { key: string; count: number }[] = []
+  for (let i = 83; i >= 0; i--) {
+    const t = today.getTime() - i * DAY
+    cells.push({ key: dayKey(t), count: counts.get(dayKey(t)) ?? 0 })
+  }
+  // 连击：从今天往回数；今天还没学则从昨天起算（连击不断）
+  let streak = 0
+  let start = counts.has(dayKey(today.getTime())) ? 0 : 1
+  for (let i = start; i < 400; i++) {
+    const k = dayKey(today.getTime() - i * DAY)
+    if ((counts.get(k) ?? 0) > 0) streak++
+    else break
+  }
+  return { cells, streak }
+}
+
+export function Heatmap({ cells }: { cells: { key: string; count: number }[] }) {
+  const weeks: { key: string; count: number }[][] = []
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
+  const cls = (n: number) =>
+    n === 0 ? 'bg-muted' : n === 1 ? 'bg-emerald-500/30' : n <= 3 ? 'bg-emerald-500/55' : 'bg-emerald-500'
+  return (
+    <div className="flex gap-[3px]" aria-label="近 12 周学习活动热力图">
+      {weeks.map((w, wi) => (
+        <div key={wi} className="flex flex-col gap-[3px]">
+          {w.map((d) => (
+            <div
+              key={d.key}
+              title={`${d.key} · ${d.count} 次`}
+              className={`h-[10px] w-[10px] rounded-[2px] ${cls(d.count)}`}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---------- 总览页 ----------
 export default function Study() {
+  const nav = useNavigate()
   const [topics, setTopics] = useState<TopicBrief[] | null>(null)
-  const [dueCount, setDueCount] = useState(0)
+  const [fulls, setFulls] = useState<TopicFull[]>([])
+  const [due, setDue] = useState<StudyItem[]>([])
+  const [journalDates, setJournalDates] = useState<string[]>([])
   const [err, setErr] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const [full, setFull] = useState<TopicFull | null>(null)
-  const [fullLoading, setFullLoading] = useState(false)
   const [newName, setNewName] = useState('')
   const [newGoal, setNewGoal] = useState('')
-  const [itemName, setItemName] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  const loadTopics = () =>
+  const load = () =>
     api
       .get<{ topics: TopicBrief[] }>('/study/topics')
-      .then((v) => setTopics(v.topics))
+      .then(async (v) => {
+        setTopics(v.topics)
+        // 每领域全量（进度环/已学日期）+ 日志（热力图数据源）——领域数少，N 个请求可接受
+        const [fs, js] = await Promise.all([
+          Promise.all(v.topics.map((t) => api.get<TopicFull>(`/study/topics/${t.id}`).catch(() => null))),
+          Promise.all(
+            v.topics.map((t) =>
+              api
+                .get<{ journal: StudyJournalRow[] }>(`/study/topics/${t.id}/journal`)
+                .catch(() => null),
+            ),
+          ),
+        ])
+        setFulls(fs.filter((x): x is TopicFull => x !== null))
+        setJournalDates(
+          js.flatMap((j, i) => (j ? j.journal.map((r) => r.created_at) : fs[i]?.items.map((it) => it.learned_at ?? '') ?? [])),
+        )
+      })
       .catch((e) => setErr(String(e)))
 
   useEffect(() => {
-    loadTopics()
+    load()
     api
-      .get<{ count: number }>('/study/reviews')
-      .then((v) => setDueCount(v.count))
+      .get<{ reviews: StudyItem[] }>('/study/reviews')
+      .then((v) => setDue(v.reviews))
       .catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const expand = (id: string) => {
-    if (expanded === id) {
-      setExpanded(null)
-      setFull(null)
-      return
+  const { cells, streak } = useMemo(() => buildHeatmap(journalDates), [journalDates])
+  const totalLearned = fulls.reduce((a, f) => a + f.progress.learned, 0)
+  const totalNodes = fulls.reduce((a, f) => a + f.progress.total, 0)
+  const overall = totalNodes ? Math.round((totalLearned / totalNodes) * 100) : 0
+  // 到期复习按领域分组
+  const dueByTrack = useMemo(() => {
+    const m = new Map<string, StudyItem[]>()
+    for (const it of due) {
+      const arr = m.get(it.track_id) ?? []
+      arr.push(it)
+      m.set(it.track_id, arr)
     }
-    setExpanded(id)
-    setFull(null)
-    setFullLoading(true)
-    api
-      .get<TopicFull>(`/study/topics/${id}`)
-      .then((v) => setFull(v))
-      .catch((e) => setErr(String(e)))
-      .finally(() => setFullLoading(false))
-  }
+    return m
+  }, [due])
 
   const addTopic = async () => {
     if (!newName.trim()) return
+    setBusy(true)
     setErr('')
     try {
       await api.post('/study/topics', { name: newName.trim(), goal: newGoal.trim() })
       setNewName('')
       setNewGoal('')
-      loadTopics()
+      load()
     } catch (e) {
       setErr(String(e))
-    }
-  }
-
-  const addItem = async (topicId: string) => {
-    if (!itemName.trim()) return
-    setErr('')
-    try {
-      await api.post(`/study/topics/${topicId}/items`, { name: itemName.trim() })
-      setItemName('')
-      expand(topicId) // 重新拉全量
-      if (expanded === topicId) loadTopics()
-    } catch (e) {
-      setErr(String(e))
-    }
-  }
-
-  const setItemStatus = async (topicId: string, itemId: string, status: string) => {
-    setErr('')
-    try {
-      await api.patch(`/study/items/${itemId}`, { status })
-      expand(topicId)
-    } catch (e) {
-      setErr(String(e))
-    }
-  }
-
-  const setTopicStatus = async (topicId: string, status: string) => {
-    setErr('')
-    try {
-      await api.patch(`/study/topics/${topicId}`, { status })
-      loadTopics()
-      if (expanded === topicId) expand(topicId)
-    } catch (e) {
-      setErr(String(e))
+    } finally {
+      setBusy(false)
     }
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="学习" />
+    <div className="space-y-4">
+      <PageHeader title="学习驾驶舱" />
 
-      {dueCount > 0 && (
-        <Card className="p-3 text-sm">
-          📚 有 <span className="font-semibold text-amber-600 dark:text-amber-400">{dueCount}</span>{' '}
-          个知识点到复习期了（learned 后的记忆保持）
-        </Card>
-      )}
+      {/* 顶条：连击 + 热力图 + 总进度 */}
+      <Card className="flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-4">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">🔥</span>
+          <div>
+            <div className="text-xl font-semibold leading-none">{streak}</div>
+            <div className="text-xs text-muted-foreground">连续学习天数</div>
+          </div>
+        </div>
+        <Heatmap cells={cells} />
+        <div className="ml-auto flex items-center gap-3">
+          <div className="text-right">
+            <div className="text-xl font-semibold leading-none">{overall}%</div>
+            <div className="text-xs text-muted-foreground">
+              总进度 · {totalLearned}/{totalNodes} 节点
+            </div>
+          </div>
+          <ProgressRing pct={overall} />
+        </div>
+      </Card>
 
       {err && <ErrorBox msg={err} />}
 
-      {/* 新建领域 */}
+      {/* 今日到期复习（跨领域汇总） */}
+      {due.length > 0 && (
+        <Card className="p-4">
+          <div className="mb-2 text-sm font-medium">
+            📅 今日复习
+            <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-600 dark:text-amber-400">
+              {due.length}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[...dueByTrack.entries()].map(([tid, items]) => {
+              const t = topics?.find((x) => x.id === tid)
+              return (
+                <button
+                  key={tid}
+                  className="rounded-lg border border-border px-3 py-1.5 text-left text-sm hover:bg-muted/40"
+                  onClick={() => nav(`/study/${tid}`)}
+                >
+                  <span className="font-medium">{t?.name ?? '未知领域'}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{items.length} 个到期 →</span>
+                </button>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* 领域卡片 */}
+      {topics === null ? (
+        <Spinner />
+      ) : topics.length === 0 ? (
+        <Empty text="还没有学习领域——开个题，路线图从这里长出来" />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {topics.map((t) => {
+            const f = fulls.find((x) => x.id === t.id)
+            const pct = f && f.progress.total ? Math.round((f.progress.learned / f.progress.total) * 100) : 0
+            const dueN = dueByTrack.get(t.id)?.length ?? 0
+            return (
+              <button
+                key={t.id}
+                className="rounded-lg border border-border p-4 text-left transition-colors hover:bg-muted/40"
+                onClick={() => nav(`/study/${t.id}`)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-medium">{t.name}</span>
+                      <StatusBadge status={t.status} />
+                    </div>
+                    {t.goal && <div className="mt-0.5 truncate text-xs text-muted-foreground">{t.goal}</div>}
+                    <div className="mt-1.5 text-xs text-muted-foreground">
+                      {f ? `${f.progress.learned}/${f.progress.total} 节点` : '…'}
+                      {dueN > 0 && <span className="ml-2 text-amber-600 dark:text-amber-400">{dueN} 个待复习</span>}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">更新于 {fmtTime(t.updated_at)}</div>
+                  </div>
+                  <div className="relative shrink-0">
+                    <ProgressRing pct={pct} />
+                    <span className="absolute inset-0 flex items-center justify-center text-xs font-medium">
+                      {pct}%
+                    </span>
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* 开题 */}
       <Card className="p-4">
+        <div className="mb-2 text-xs font-medium text-muted-foreground">开新题</div>
         <div className="flex flex-wrap items-center gap-2">
           <input
             className={inputCls + ' max-w-xs'}
-            placeholder="新领域名（如：RAG 入门）"
+            placeholder="领域名（如：Rust 所有权）"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
           />
@@ -175,171 +335,11 @@ export default function Study() {
             value={newGoal}
             onChange={(e) => setNewGoal(e.target.value)}
           />
-          <Button size="sm" disabled={!newName.trim()} onClick={addTopic}>
+          <Button size="sm" disabled={busy || !newName.trim()} onClick={addTopic}>
             开题
           </Button>
         </div>
       </Card>
-
-      {/* 领域列表 */}
-      {topics === null ? (
-        <Spinner />
-      ) : topics.length === 0 ? (
-        <Empty text="还没有学习领域——上面的表单开个题吧" />
-      ) : (
-        <div className="space-y-3">
-          {topics.map((t) => {
-            const isOpen = expanded === t.id
-            return (
-              <Card key={t.id} className="p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <button
-                    className="text-left font-medium hover:underline"
-                    onClick={() => expand(t.id)}
-                  >
-                    {t.name}
-                  </button>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={t.status} />
-                    {t.status === 'active' && (
-                      <Button size="sm" variant="outline" onClick={() => setTopicStatus(t.id, 'paused')}>
-                        暂停
-                      </Button>
-                    )}
-                    {t.status !== 'done' && (
-                      <Button size="sm" variant="outline" onClick={() => setTopicStatus(t.id, 'done')}>
-                        归档
-                      </Button>
-                    )}
-                    {t.status === 'paused' && (
-                      <Button size="sm" variant="outline" onClick={() => setTopicStatus(t.id, 'active')}>
-                        恢复
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                {t.goal && <div className="text-sm text-muted-foreground">目标：{t.goal}</div>}
-                <div className="text-xs text-muted-foreground">更新于 {fmtTime(t.updated_at)}</div>
-
-                {isOpen && (
-                  <div className="border-t pt-3 space-y-3">
-                    {fullLoading ? (
-                      <Spinner />
-                    ) : full && full.id === t.id ? (
-                      <>
-                        {/* 进度条 */}
-                        <div className="flex items-center gap-3">
-                          <div className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full bg-emerald-500 transition-all"
-                              style={{
-                                width: full.progress.total
-                                  ? `${Math.round((full.progress.learned / full.progress.total) * 100)}%`
-                                  : '0%',
-                              }}
-                            />
-                          </div>
-                          <span className="text-xs text-muted-foreground">
-                            {full.progress.learned}/{full.progress.total} 已学
-                          </span>
-                        </div>
-
-                        {/* 知识点列表 */}
-                        {full.items.length === 0 ? (
-                          <Empty text="还没有知识点——下面加一个" />
-                        ) : (
-                          <div className="space-y-1">
-                            {full.items.map((it) => (
-                              <div
-                                key={it.id}
-                                className="flex flex-wrap items-center gap-2 rounded border px-3 py-2"
-                              >
-                                {statusChip(it.status)}
-                                <span className={it.status === 'learned' ? 'line-through opacity-70' : ''}>
-                                  {it.name}
-                                </span>
-                                {it.learned_at && (
-                                  <span className="text-xs text-muted-foreground">
-                                    {fmtTime(it.learned_at)}
-                                  </span>
-                                )}
-                                <div className="ml-auto flex items-center gap-1">
-                                  {(['not_started', 'learning', 'learned'] as const).map((s) => (
-                                    <button
-                                      key={s}
-                                      className={`rounded px-2 py-0.5 text-xs border ${
-                                        it.status === s
-                                          ? 'border-foreground/60 bg-muted font-medium'
-                                          : 'border-border text-muted-foreground hover:border-foreground/40'
-                                      }`}
-                                      onClick={() => setItemStatus(t.id, it.id, s)}
-                                    >
-                                      {STATUS_LABEL[s]}
-                                    </button>
-                                  ))}
-                                  {it.wiki_slugs.map((slug) => (
-                                    <a
-                                      key={slug}
-                                      href={`/wiki?slug=${encodeURIComponent(slug)}`}
-                                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                                      title={`wiki: ${slug}`}
-                                    >
-                                      [[{slug}]]
-                                    </a>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* 加知识点 */}
-                        <div className="flex items-center gap-2">
-                          <input
-                            className={inputCls + ' max-w-xs'}
-                            placeholder="新知识点名"
-                            value={itemName}
-                            onChange={(e) => setItemName(e.target.value)}
-                          />
-                          <Button size="sm" disabled={!itemName.trim()} onClick={() => addItem(t.id)}>
-                            加知识点
-                          </Button>
-                        </div>
-
-                        {/* 下一步提示 */}
-                        {full.next_up.length > 0 && (
-                          <div className="text-xs text-muted-foreground">
-                            下一步：
-                            {full.next_up.map((n) => n.name).join(' → ')}
-                          </div>
-                        )}
-
-                        {/* 进度时间线 */}
-                        {full.recent_journal && full.recent_journal.length > 0 && (
-                          <div className="border-t pt-2">
-                            <div className="text-xs font-medium text-muted-foreground mb-1">
-                              进度时间线
-                            </div>
-                            <div className="space-y-0.5">
-                              {full.recent_journal.map((j) => (
-                                <div key={j.id} className="text-xs text-muted-foreground">
-                                  <span className="opacity-70">{fmtTime(j.created_at)}</span>
-                                  {' — '}
-                                  {j.note}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    ) : null}
-                  </div>
-                )}
-              </Card>
-            )
-          })}
-        </div>
-      )}
     </div>
   )
 }
