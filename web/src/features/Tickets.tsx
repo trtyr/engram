@@ -304,7 +304,7 @@ function TicketRow({
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className={cn('truncate text-sm font-medium', doneish && 'text-muted-foreground')}>{t.title}</p>
+          <p className={cn('min-w-0 flex-1 truncate text-sm font-medium', doneish && 'text-muted-foreground')}>{t.title}</p>
           <span
             className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[11px]', TICKET_STATUS_CLASS[t.status])}
           >

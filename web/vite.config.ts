@@ -29,8 +29,11 @@ export default defineConfig({
   // 开发时后端在 :8080（compose 或 cargo run）；实际端口用 VITE_PROXY_TARGET 覆盖
   server: {
     proxy: Object.fromEntries(
-      ['/api', '/auth', '/jobs', '/memory', '/mcp', '/wiki', '/codegraph', '/settings', '/llm', '/credentials', '/projects', '/assets', '/search', '/todos', '/tickets', '/todos/export'].map(
-        (p) => [p, process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080'],
+      ['/api', '/auth', '/jobs', '/memory', '/mcp', '/wiki', '/codegraph', '/settings', '/llm', '/credentials', '/projects', '/assets', '/search', '/todos', '/tickets', '/todos/export', '/study', '/logs'].map(
+        (p) => [
+          p,
+          { target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:8080', changeOrigin: true },
+        ],
       ),
     ),
   },

@@ -43,7 +43,6 @@ export default function Galaxy({
   const [selected, setSelected] = useState<string | null>(initialEntity ?? null)
   const [q, setQ] = useState('')
   const [kind, setKind] = useState('')
-  const [creating, setCreating] = useState(false)
   const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<'graph' | 'timeline'>('graph')
@@ -216,21 +215,10 @@ export default function Galaxy({
               {label}
             </button>
           ))}
-          <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-xs" onClick={() => setCreating((v) => !v)}>
-            {creating ? '收起' : '＋ 新建'}
-          </Button>
         </div>
-        {creating && (
-          <CreateEntityForm
-            onDone={() => {
-              setCreating(false)
-              load()
-            }}
-          />
-        )}
         {visible.length === 0 ? (
           <div className="p-4">
-            <Empty text={graph.nodes.length === 0 ? '暂无实体——蒸馏自动抽取，或手动新建' : '无匹配实体'} />
+            <Empty text={graph.nodes.length === 0 ? '暂无实体——蒸馏会自动把对话里的人和事抽进来' : '无匹配实体'} />
           </div>
         ) : (
           <ul className="min-h-0 flex-1 divide-y divide-border/60 overflow-y-auto">
@@ -291,7 +279,7 @@ export default function Galaxy({
           />
         ) : visible.length === 0 && graph.nodes.length === 0 ? (
           <Card className="p-4">
-            <Empty text="圈子是你的记忆世界：人物 / 项目 / 主题 / 群组 / 地点。蒸馏会自动把对话里的人和事挂进来，也可以先手动新建" />
+            <Empty text="圈子是你的记忆世界：人物 / 项目 / 主题 / 群组 / 地点。蒸馏会自动把对话里的人和事挂进来" />
           </Card>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -347,45 +335,6 @@ export default function Galaxy({
         )}
       </div>
     </div>
-  )
-}
-
-function CreateEntityForm({ onDone }: { onDone: () => void }) {
-  const [name, setName] = useState('')
-  const [kind, setKind] = useState('person')
-  const [summary, setSummary] = useState('')
-  const [err, setErr] = useState('')
-  return (
-    <form
-      className="space-y-2 border-b border-border bg-muted/30 px-3 py-3"
-      onSubmit={async (e) => {
-        e.preventDefault()
-        try {
-          await api.post('/memory/entities', { name, kind, summary })
-          onDone()
-        } catch (ex) {
-          setErr(ex instanceof Error ? ex.message : '创建失败')
-        }
-      }}
-    >
-      <div className="flex gap-2">
-        <input className={`${inputCls} flex-1`} placeholder="实体名（如：张三）" value={name} onChange={(e) => setName(e.target.value)} />
-        <select className={`${selectCls} w-24`} value={kind} onChange={(e) => setKind(e.target.value)}>
-          {Object.entries(KIND_LABEL).map(([k, label]) => (
-            <option key={k} value={k}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <input className={`${inputCls} w-full`} placeholder="画像摘要（可选，如：同事，负责后端）" value={summary} onChange={(e) => setSummary(e.target.value)} />
-      {err && <p className="text-xs text-destructive">{err}</p>}
-      <div className="flex justify-end">
-        <Button size="sm" type="submit" disabled={!name.trim()}>
-          创建
-        </Button>
-      </div>
-    </form>
   )
 }
 

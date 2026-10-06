@@ -7,8 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
-import { fmtTime, inputCls } from '@/lib/ui'
-import { Button } from '@/components/ui/button'
+import { fmtTime } from '@/lib/ui'
 
 // ---------- 类型（与领域工作台共享） ----------
 export interface StudyItem {
@@ -155,9 +154,6 @@ export default function Study() {
   const [due, setDue] = useState<StudyItem[]>([])
   const [journalDates, setJournalDates] = useState<string[]>([])
   const [err, setErr] = useState('')
-  const [newName, setNewName] = useState('')
-  const [newGoal, setNewGoal] = useState('')
-  const [busy, setBusy] = useState(false)
 
   const load = () =>
     api
@@ -205,22 +201,6 @@ export default function Study() {
     }
     return m
   }, [due])
-
-  const addTopic = async () => {
-    if (!newName.trim()) return
-    setBusy(true)
-    setErr('')
-    try {
-      await api.post('/study/topics', { name: newName.trim(), goal: newGoal.trim() })
-      setNewName('')
-      setNewGoal('')
-      load()
-    } catch (e) {
-      setErr(String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <div className="space-y-4">
@@ -318,28 +298,6 @@ export default function Study() {
           })}
         </div>
       )}
-
-      {/* 开题 */}
-      <Card className="p-4">
-        <div className="mb-2 text-xs font-medium text-muted-foreground">开新题</div>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            className={inputCls + ' max-w-xs'}
-            placeholder="领域名（如：Rust 所有权）"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <input
-            className={inputCls + ' max-w-md'}
-            placeholder="目标（学到什么程度算完，可选）"
-            value={newGoal}
-            onChange={(e) => setNewGoal(e.target.value)}
-          />
-          <Button size="sm" disabled={busy || !newName.trim()} onClick={addTopic}>
-            开题
-          </Button>
-        </div>
-      </Card>
     </div>
   )
 }

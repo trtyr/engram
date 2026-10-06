@@ -38,12 +38,6 @@ const STATUS_LABEL: Record<string, string> = {
   learned: '已学',
 }
 
-const STATUS_DOT: Record<string, string> = {
-  not_started: 'border-2 border-muted-foreground/50 bg-transparent',
-  learning: 'border-2 border-amber-500 bg-amber-500/40 animate-pulse',
-  learned: 'border-2 border-emerald-500 bg-emerald-500',
-}
-
 export default function StudyWorkspace() {
   const { id } = useParams<{ id: string }>()
   const nav = useNavigate()
@@ -52,7 +46,6 @@ export default function StudyWorkspace() {
   const [reviews, setReviews] = useState<StudyItem[]>([])
   const [err, setErr] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [newItem, setNewItem] = useState('')
   const [journalNote, setJournalNote] = useState('')
   const [editing, setEditing] = useState(false)
   const [eName, setEName] = useState('')
@@ -145,18 +138,6 @@ export default function StudyWorkspace() {
     }
   }
 
-  async function addItem() {
-    if (!newItem.trim()) return
-    setErr('')
-    try {
-      await api.post(`/study/topics/${id}/items`, { name: newItem.trim() })
-      setNewItem('')
-      await load()
-    } catch (e) {
-      setErr(String(e))
-    }
-  }
-
   async function delItem(itemId: string) {
     setErr('')
     try {
@@ -186,48 +167,43 @@ export default function StudyWorkspace() {
     const overdue =
       it.needs_review && it.review_due_at && new Date(it.review_due_at) < new Date()
     return (
-      <div className="relative pl-7">
-        {/* 路径连线 + 状态点 */}
-        <span
-          className={cn(
-            'absolute top-4 left-[7px] h-1.5 w-1.5 rounded-full',
-            STATUS_DOT[it.status]?.replace('animate-pulse', '') ?? '',
-          )}
-        />
-        {index > 0 && <span className="absolute top-0 left-[13px] h-4 w-px bg-border" />}
+      <div>
         <div
           className={cn(
-            'rounded-lg border p-3 transition-colors',
+            'rounded-lg border transition-colors',
             isOpen ? 'border-primary/60 bg-primary/5' : 'border-border hover:bg-muted/40',
           )}
         >
+          {/* 表格式五列：序号 / 学习任务 / 状态 / 链接 / 展开——列宽固定保证对齐 */}
           <button
-            className="flex w-full items-center gap-2 text-left"
+            className="grid w-full grid-cols-[2.5rem_minmax(0,1fr)_auto_auto_3.5rem] items-center gap-3 px-3 py-2.5 text-left"
             onClick={() => setExpanded(isOpen ? null : it.id)}
           >
-            <span className="text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
-            <span className="font-medium">{it.name}</span>
-            <span
-              className={cn(
-                'rounded px-1.5 py-0.5 text-xs',
-                it.status === 'learned'
-                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                  : it.status === 'learning'
-                    ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                    : 'bg-muted text-muted-foreground',
-              )}
-            >
-              {STATUS_LABEL[it.status] ?? it.status}
-            </span>
-            {overdue && (
-              <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-xs text-red-400">
-                复习逾期 {relTime(it.review_due_at!)}
+            <span className="font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
+            <span className="min-w-0 truncate font-medium">{it.name}</span>
+            <span className="flex items-center gap-1.5 whitespace-nowrap">
+              <span
+                className={cn(
+                  'rounded px-1.5 py-0.5 text-xs',
+                  it.status === 'learned'
+                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                    : it.status === 'learning'
+                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                      : 'bg-muted text-muted-foreground',
+                )}
+              >
+                {STATUS_LABEL[it.status] ?? it.status}
               </span>
-            )}
-            {it.wiki_slugs?.length > 0 && (
-              <span className="text-xs text-muted-foreground">🔗 {it.wiki_slugs.length}</span>
-            )}
-            <span className="ml-auto text-xs text-muted-foreground">{isOpen ? '收起 ▲' : '展开 ▼'}</span>
+              {overdue && (
+                <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-xs text-red-400">复习逾期</span>
+              )}
+            </span>
+            <span className="whitespace-nowrap text-xs text-muted-foreground">
+              {it.wiki_slugs?.length > 0 ? `🔗 ${it.wiki_slugs.length}` : '—'}
+            </span>
+            <span className="whitespace-nowrap text-right text-xs text-muted-foreground">
+              {isOpen ? '收起 ▲' : '展开 ▼'}
+            </span>
           </button>
 
           {/* 节点详情面板 */}
@@ -410,24 +386,10 @@ export default function StudyWorkspace() {
         {/* 路线图画布 */}
         <div className="min-w-0 space-y-1 lg:h-full lg:overflow-y-auto lg:pr-1">
           {items.length === 0 ? (
-            <Empty text="路线图还是空的——加第一个知识点" />
+            <Empty text="路线图还是空的——开题时由 AI 排进来" />
           ) : (
             items.map((it, i) => <NodeCard key={it.id} it={it} index={i} />)
           )}
-          <div className="pl-7 pt-2">
-            <div className="flex items-center gap-2">
-              <input
-                className={inputCls + ' w-72'}
-                placeholder="加知识点（如：生命周期标注）"
-                value={newItem}
-                onChange={(e) => setNewItem(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && addItem()}
-              />
-              <Button size="sm" variant="outline" disabled={!newItem.trim()} onClick={addItem}>
-                ＋ 加节点
-              </Button>
-            </div>
-          </div>
         </div>
 
         {/* 领域侧栏 */}
