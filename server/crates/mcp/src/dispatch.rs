@@ -67,7 +67,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "forget", true, "忘=遗忘。mode：void（默认，作废会话级联归档产物）/ erase（物理删除，需 erase scope）/ restore（撤销 void）/ kv（删 KV 精确值，需 original scope）" => crate::ForgetParams;
         ],
         "projects" => action_docs![
-                   "types", false, "列出项目**场景**模板（dev=开发 / ops=运维 / research=调研 / study=学习 / life=生活 / create=创作，各带预设文档分类）" => crate::ProjectTypesParams;
+                   "types", false, "列出项目**场景**模板（dev=开发 / ops=运维 / research=调研 / life=生活 / create=创作，各带预设文档分类）" => crate::ProjectTypesParams;
                    "list", false, "列出项目（按创建时间倒序；可按场景 type 过滤）" => crate::ProjectListParams;
                    "get", false, "项目详情（目标/位置/文档索引；默认索引模式不带正文）" => crate::ProjectGetParams;
                    "create", false, "新建项目（type=场景，决定初始文档分类；不确定先跑 types）" => crate::ProjectCreateParams;

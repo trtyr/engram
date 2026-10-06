@@ -159,7 +159,6 @@ export interface Atom {
   confidence: number
   status: string
   superseded_by: string | null
-  needs_review: boolean
   sensitive?: boolean
   hit_count: number
   source_refs: { session_id?: string; erased?: boolean }[]
@@ -224,7 +223,6 @@ export interface SearchHit {
   title?: string | null
   snippet: string
   kind?: string | null
-  needs_review?: boolean | null
 }
 export interface EntityNode {
   id: string

@@ -710,7 +710,7 @@ function JevPane() {
             />
           </label>
           <label className="text-xs text-muted-foreground">
-            待审阈值
+            低置信阈值
             <input
               type="number"
               step="0.05"

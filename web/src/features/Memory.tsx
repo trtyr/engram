@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { appConfirm, type ConfirmOptions } from '@/components/confirm'
 
-type Tab = 'sessions' | 'atoms' | 'review' | 'persona' | 'search' | 'kv'
+type Tab = 'sessions' | 'atoms' | 'persona' | 'search' | 'kv'
 
 /** 原子 kind 枚举（迁移 0005 CHECK）——筛选器与表格共用。 */
 const ATOM_KINDS = ['preference', 'fact', 'decision', 'event', 'insight', 'correction', 'failure', 'convention']
@@ -54,15 +54,14 @@ function MemoryPage() {
   const [tab, setTab] = useState<Tab>(() => {
     // 支持 ?tab= 深链（Dashboard 管线主视觉点击穿透 / palette 实体直达）：仅首次挂载读一次
     const t = new URLSearchParams(window.location.search).get('tab')
-    const valid: readonly string[] = ['sessions', 'atoms', 'review', 'search', 'kv']
+    const valid: readonly string[] = ['sessions', 'atoms', 'search', 'kv']
     return valid.includes(t ?? '') ? (t as Tab) : 'sessions'
   })
   // 原子筛选状态提升——筛选器挂在 tab 行右侧（与蒸馏条同款布局，省一整行）
   const [atomKind, setAtomKind] = useState('')
   const [atomStatus, setAtomStatus] = useState('active')
-  const [atomReview, setAtomReview] = useState(false)
   // tab 计数（原管线条带的职责）：挂载时取一次；蒸馏脉冲只表「正在炼」（processing）
-  const [counts, setCounts] = useState<{ l0: number; l1: number; review: number; kv: number } | null>(null)
+  const [counts, setCounts] = useState<{ l0: number; l1: number; kv: number } | null>(null)
   useEffect(() => {
     Promise.all([
       api.get<Session[]>('/memory/sessions?limit=500').catch(() => []),
@@ -72,7 +71,6 @@ function MemoryPage() {
       setCounts({
         l0: s.length,
         l1: a.filter((x) => x.status === 'active' || x.status === 'candidate').length,
-        review: a.filter((x) => x.needs_review).length,
         kv: kv.length,
       })
     })
@@ -82,7 +80,6 @@ function MemoryPage() {
   const tabs = [
     { value: 'sessions' as Tab, label: '会话', count: counts?.l0, pulse: distilling > 0 },
     { value: 'atoms' as Tab, label: '原子', count: counts?.l1 },
-    { value: 'review' as Tab, label: '待审', count: counts?.review },
     { value: 'persona' as Tab, label: '画像' },
     { value: 'kv' as Tab, label: 'KV', count: counts?.kv },
   ]
@@ -121,17 +118,13 @@ function MemoryPage() {
                   </option>
                 ))}
               </select>
-              <Checkbox checked={atomReview} onChange={setAtomReview}>
-                仅待审
-              </Checkbox>
             </>
           )}
         </div>
       </div>
       {tab === 'sessions' && <Sessions />}
-      {tab === 'atoms' && <Atoms kind={atomKind} review={atomReview} status={atomStatus} />}
+      {tab === 'atoms' && <Atoms kind={atomKind} status={atomStatus} />}
 
-      {tab === 'review' && <ReviewQueue onGoAtoms={() => setTab('atoms')} />}
       {tab === 'persona' && <PersonaDocPane />}
       {tab === 'kv' && <KvPane />}
       {tab === 'search' && (
@@ -400,7 +393,7 @@ function DistillBar() {
   )
 }
 
-function Atoms({ kind, review, status }: { kind: string; review: boolean; status: string }) {
+function Atoms({ kind, status }: { kind: string; status: string }) {
   const [rows, setRows] = useState<Atom[] | null>(null)
   const [err, setErr] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
@@ -425,7 +418,6 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
     const p = new URLSearchParams({ limit: '200' })
     if (status && status !== 'all') p.set('status', status)
     if (kind) p.set('kind', kind)
-    if (review) p.set('needs_review', 'true')
     return p
   }
   const load = () => {
@@ -435,13 +427,13 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
     load()
     setPage(1) // 筛选变化回到第一页
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, review, status])
+  }, [kind, status])
   useEffect(() => {
     if (!distilling) return
     const t = setInterval(load, 5000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [distilling, kind, review])
+  }, [distilling, kind, status])
   if (err) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
 
@@ -557,9 +549,6 @@ function Atoms({ kind, review, status }: { kind: string; review: boolean; status
                       title="双击编辑"
                       className="-mx-1 cursor-text rounded-sm px-1 transition-colors hover:bg-muted/40"
                     >
-                      {a.needs_review && (
-                        <span className="mr-1.5 rounded bg-warning/15 px-1.5 py-0.5 font-mono text-xs text-warning">待审</span>
-                      )}
                       {a.content}
                     </span>
                   ),
@@ -680,185 +669,6 @@ interface EntityHit {
   kind: string | null
 }
 
-/** 待审队列：低置信原子（needs_review）集中复核——通过 / 取代 / 丢弃，支持批量。 */
-function ReviewQueue({ onGoAtoms }: { onGoAtoms: () => void }) {
-  const [rows, setRows] = useState<Atom[] | null>(null)
-  const [picked, setPicked] = useState<Set<string>>(new Set())
-  const [superseding, setSuperseding] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
-  const [err, setErr] = useState('')
-  /** AI 处置留痕（jobs 表 review_confirm/review_discard）——透明窗：谁处置的、处置了什么 */
-  const [disposals, setDisposals] = useState<
-    Array<{ kind: string; payload: { atom_id?: string; content?: string }; created_at: string }>
-  >([])
-
-  const load = () =>
-    api
-      .get<Atom[]>('/memory/atoms?needs_review=true&limit=200')
-      .then(setRows)
-      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
-  useEffect(() => {
-    load()
-    api
-      .get<
-        Array<{ kind: string; payload: { atom_id?: string; content?: string }; created_at: string }>
-      >('/jobs?limit=100')
-      .then((js) =>
-        setDisposals(
-          (js ?? [])
-            .filter((j) => j.kind === 'review_confirm' || j.kind === 'review_discard')
-            .slice(0, 10),
-        ),
-      )
-      .catch(() => {})
-  }, [])
-
-  const act = async (id: string, patch: Record<string, unknown>) => {
-    await api.patch(`/memory/atoms/${id}`, patch)
-    setRows((r) => (r ? r.filter((a) => a.id !== id) : r))
-    setPicked((s) => {
-      const n = new Set(s)
-      n.delete(id)
-      return n
-    })
-  }
-
-  const bulk = async (patch: Record<string, unknown>) => {
-    await Promise.all([...picked].map((id) => api.patch(`/memory/atoms/${id}`, patch)))
-    setRows((r) => (r ? r.filter((a) => !picked.has(a.id)) : r))
-    setPicked(new Set())
-  }
-
-  if (err) return <ErrorBox msg={err} />
-  if (!rows) return <Spinner />
-
-  const target = rows.find((r) => r.id === superseding)
-
-  return (
-    <div className="space-y-4">
-      {rows.length === 0 ? (
-        <Empty text="没有待审原子——蒸馏低置信产出（confidence < 0.55）会进这里等人判定" />
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs text-muted-foreground">{rows.length} 待审</span>
-            {picked.size > 0 && (
-              <>
-                <span className="text-xs text-muted-foreground">已选 {picked.size}</span>
-                <Button size="sm" variant="outline" onClick={() => bulk({ needs_review: false })}>
-                  批量通过
-                </Button>
-                <Button size="sm" variant="ghost" className="hover:bg-destructive/10 hover:text-destructive" onClick={() => bulk({ status: 'archived' })}>
-                  批量丢弃
-                </Button>
-              </>
-            )}
-            <Button size="sm" variant="ghost" className="ml-auto" onClick={onGoAtoms}>
-              去原子表 →
-            </Button>
-          </div>
-
-          {superseding && target && (
-            <Card className="border-warning/40 bg-warning/10 p-4" data-testid="review-supersede-panel">
-              <p className="mb-2 text-sm font-medium">取代「{target.content.slice(0, 24)}…」：输入新事实</p>
-              <form
-                className="flex gap-2"
-                onSubmit={async (e) => {
-                  e.preventDefault()
-                  await api.post('/memory/atoms', { kind: target.kind, content: draft, confidence: 0.95 })
-                  await api.patch(`/memory/atoms/${superseding}`, { status: 'archived' })
-                  setRows((r) => (r ? r.filter((a) => a.id !== superseding) : r))
-                  setSuperseding(null)
-                  setDraft('')
-                }}
-              >
-                <input
-                  className={`${inputCls} flex-1`}
-                  placeholder="新事实（取代旧条目）"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                />
-                <Button size="sm" type="submit">
-                  取代
-                </Button>
-                <Button size="sm" variant="ghost" type="button" onClick={() => setSuperseding(null)}>
-                  取消
-                </Button>
-              </form>
-            </Card>
-          )}
-
-          <Card className="divide-y divide-border/60">
-            {rows.map((a) => (
-              <div key={a.id} className="flex items-start gap-3 px-4 py-3">
-                <Checkbox
-                  className="mt-1"
-                  label={`选中 ${a.content.slice(0, 12)}`}
-                  checked={picked.has(a.id)}
-                  onChange={(v) =>
-                    setPicked((s) => {
-                      const n = new Set(s)
-                      if (v) n.add(a.id)
-                      else n.delete(a.id)
-                      return n
-                    })
-                  }
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm">{a.content}</p>
-                  <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                    {KIND_LABEL[a.kind] ?? a.kind} · 置信 {a.confidence.toFixed(2)} · {relTime(a.created_at)}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button variant="ghost" size="sm" onClick={() => act(a.id, { needs_review: false })}>
-                    通过
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => { setSuperseding(a.id); setDraft('') }}>
-                    取代
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => act(a.id, { status: 'archived' })}
-                  >
-                    丢弃
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </Card>
-        </>
-      )}
-
-      {disposals.length > 0 && (
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">
-            AI 处置记录（最近 {disposals.length} 条）
-          </p>
-          <div className="space-y-1">
-            {disposals.map((d, i) => (
-              <p key={i} className="text-xs text-muted-foreground">
-                <span
-                  className={
-                    d.kind === 'review_confirm' ? 'text-success' : 'text-destructive'
-                  }
-                >
-                  {d.kind === 'review_confirm' ? '通过' : '丢弃'}
-                </span>
-                {' · '}
-                {d.payload?.content ?? d.payload?.atom_id}
-                {' · '}
-                {new Date(d.created_at).toLocaleString()}
-              </p>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 function SearchPane({
   onGoAtoms,

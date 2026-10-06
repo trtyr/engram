@@ -61,8 +61,7 @@ interface AtomLike {
   confidence: number
   status: string
   superseded_by: string | null
-  needs_review: boolean
-  hit_count: number
+   hit_count: number
   source_refs: unknown[]
   created_at: string
 }
@@ -104,8 +103,8 @@ beforeEach(() => {
 describe('Atoms 表格操作', () => {
   it('归档 active 原子后从列表消失（PATCH + 重取）', async () => {
     mockState.atoms = [
-      { id: 'a1', kind: 'preference', content: '用户偏好简洁', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 2, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
-      { id: 'a2', kind: 'fact', content: '用户住上海', confidence: 0.85, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, source_refs: [], created_at: '2026-08-20T00:01:00Z' },
+      { id: 'a1', kind: 'preference', content: '用户偏好简洁', confidence: 0.9, status: 'active', superseded_by: null, hit_count: 2, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
+      { id: 'a2', kind: 'fact', content: '用户住上海', confidence: 0.85, status: 'active', superseded_by: null, hit_count: 0, source_refs: [], created_at: '2026-08-20T00:01:00Z' },
     ]
     render(wrap(<Memory />))
     fireEvent.click(screen.getByRole('button', { name: '原子' }))
@@ -121,7 +120,7 @@ describe('Atoms 表格操作', () => {
 
   it('双击进入行内编辑，Enter 保存 PATCH 新内容', async () => {
     mockState.atoms = [
-      { id: 'a1', kind: 'fact', content: '旧内容', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
+      { id: 'a1', kind: 'fact', content: '旧内容', confidence: 0.9, status: 'active', superseded_by: null, hit_count: 0, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
     ]
     render(wrap(<Memory />))
     fireEvent.click(screen.getByRole('button', { name: '原子' }))
@@ -137,7 +136,7 @@ describe('Atoms 表格操作', () => {
 
   it('supersede 面板：新增新事实 + 归档旧条', async () => {
     mockState.atoms = [
-      { id: 'old', kind: 'fact', content: '用户住在上海', confidence: 0.9, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
+      { id: 'old', kind: 'fact', content: '用户住在上海', confidence: 0.9, status: 'active', superseded_by: null, hit_count: 0, source_refs: [], created_at: '2026-08-20T00:00:00Z' },
     ]
     render(wrap(<Memory />))
     fireEvent.click(screen.getByRole('button', { name: '原子' }))

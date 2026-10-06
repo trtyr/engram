@@ -52,7 +52,7 @@ vi.mock('@/lib/api', () => {
     wikiPages: [] as WikiPageM[],
     reencryptResult: 0 as number,
     sessions: [] as { id: string; agent: string; content: { speaker: string; text: string; ts?: string }[]; distill_status: string; created_at: string }[],
-    atoms: [] as { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; needs_review: boolean; hit_count: number; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[],
+    atoms: [] as { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; hit_count: number; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[],
     usage: [] as { id: number; provider: string; model: string; purpose: string; input_tokens: number; output_tokens: number; latency_ms: number; job_id: number | null; ts: string }[],
     memorySearch: null as { entities: { id: string; title: string | null; snippet: string; score: number; kind: string | null }[]; l1: { id: string; snippet: string; score: number }[]; l2: { id: string; title: string | null; snippet: string }[]; l3: unknown[] } | null,
   }
@@ -113,7 +113,7 @@ interface MockState {
   wikiPages: WikiPageM[]
   reencryptResult: number
   sessions: { id: string; agent: string; content: { speaker: string; text: string; ts?: string }[]; distill_status: string; created_at: string }[]
-  atoms: { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; needs_review: boolean; hit_count: number; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[]
+  atoms: { id: string; kind: string; content: string; confidence: number; status: string; superseded_by: string | null; hit_count: number; source_refs: { session_id?: string; erased?: boolean }[]; created_at: string }[]
   usage: { id: number; provider: string; model: string; purpose: string; input_tokens: number; output_tokens: number; latency_ms: number; job_id: number | null; ts: string }[]
   memorySearch: { entities: { id: string; title: string | null; snippet: string; score: number; kind: string | null }[]; l1: { id: string; snippet: string; score: number }[]; l2: { id: string; title: string | null; snippet: string }[]; l3: unknown[] } | null
 }
@@ -153,8 +153,8 @@ describe('Dashboard 概览：管线主视觉 + 用量图', () => {
       { id: 's3', agent: 'a', content: [], distill_status: 'completed', created_at: '2026-01-01T00:00:00Z' },
     ]
     mockState.atoms = [
-      { id: 'a1', kind: 'preference', content: 'x', confidence: 1, status: 'active', superseded_by: null, needs_review: false, hit_count: 0, source_refs: [], created_at: now },
-      { id: 'a2', kind: 'preference', content: 'x', confidence: 1, status: 'superseded', superseded_by: 'a1', needs_review: false, hit_count: 0, source_refs: [], created_at: '2026-01-01T00:00:00Z' },
+      { id: 'a1', kind: 'preference', content: 'x', confidence: 1, status: 'active', superseded_by: null, hit_count: 0, source_refs: [], created_at: now },
+      { id: 'a2', kind: 'preference', content: 'x', confidence: 1, status: 'superseded', superseded_by: 'a1', hit_count: 0, source_refs: [], created_at: '2026-01-01T00:00:00Z' },
     ]
     render(wrap(<Dashboard />))
     await waitFor(() => {
@@ -231,30 +231,6 @@ describe('Memory 检索面板（?tab=search 深链直达，tab 条已收敛入�
     fireEvent.click(screen.getByText('查看'))
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '原子' }).getAttribute('aria-pressed')).toBe('true')
-    })
-  })
-})
-
-describe('待审队列', () => {
-  it('通过清 needs_review 后行消失；批量通过逐条 PATCH', async () => {
-    mockState.atoms = [
-      { id: 'r1', kind: 'fact', content: '低置信事实甲', confidence: 0.5, status: 'candidate', superseded_by: null, needs_review: true, hit_count: 0, source_refs: [], created_at: new Date().toISOString() },
-      { id: 'r2', kind: 'fact', content: '低置信事实乙', confidence: 0.52, status: 'candidate', superseded_by: null, needs_review: true, hit_count: 0, source_refs: [], created_at: new Date().toISOString() },
-    ]
-    render(wrap(<Memory />))
-    fireEvent.click(screen.getByRole('button', { name: '待审' }))
-    await screen.findByText('2 待审')
-    // 单条通过
-    fireEvent.click(screen.getAllByRole('button', { name: '通过' })[0])
-    await waitFor(() => {
-      expect(api.patch).toHaveBeenCalledWith('/memory/atoms/r1', { needs_review: false })
-      expect(screen.getByText('1 待审')).toBeInTheDocument()
-    })
-    // 勾选剩余一条 → 批量通过
-    fireEvent.click(screen.getByRole('checkbox', { name: /选中 低置信事实乙/ }))
-    fireEvent.click(screen.getByRole('button', { name: '批量通过' }))
-    await waitFor(() => {
-      expect(api.patch).toHaveBeenCalledWith('/memory/atoms/r2', { needs_review: false })
     })
   })
 })

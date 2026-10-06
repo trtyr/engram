@@ -144,16 +144,23 @@ async fn project_type_template_and_filter() {
     let (app, _pg) = app().await;
     let admin = login_token(&app).await;
 
-    // 场景模板：6 场景，各带预设分类（2026-09-21 扩类——原只有 dev/research，实际什么项目都塞 dev）
+    // 场景模板：5 场景，各带预设分类（P019 t4：study=学习场景退役）
     let (st, v) = send(&app, "GET", "/projects/types", &admin, None).await;
     assert_eq!(st, StatusCode::OK);
     let types = v.as_array().unwrap();
-    assert_eq!(types.len(), 6, "六场景：dev/ops/research/study/life/create");
+    assert_eq!(
+        types.len(),
+        5,
+        "五场景：dev/ops/research/life/create；study 已退役"
+    );
+    assert!(
+        types.iter().all(|t| t["type"] != "study"),
+        "study 场景不应在模板里"
+    );
     for (t, label, n) in [
         ("dev", "开发", 5),
         ("ops", "运维", 6),
         ("research", "调研", 6),
-        ("study", "学习", 5),
         ("life", "生活", 5),
         ("create", "创作", 5),
     ] {
