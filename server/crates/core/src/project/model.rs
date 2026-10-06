@@ -18,7 +18,7 @@ pub const PROJECT_TYPES: &[(&str, &[&str])] = &[
     ("create", &["选题", "草稿", "素材", "成稿", "发布"]),
 ];
 
-/// 支持的类型（场景）值域文案，如 `dev/ops/research/study/life/create`——错误文案共用同一事实源。
+/// 支持的类型（场景）值域文案，如 `dev/ops/research/life/create`——错误文案共用同一事实源。
 pub fn supported_types() -> String {
     PROJECT_TYPES
         .iter()
