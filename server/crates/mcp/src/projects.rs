@@ -399,17 +399,6 @@ impl EngramMcpServer {
                 )
                 .await
             }
-            "location_update" => {
-                self.project_location_update(
-                    ctx,
-                    Parameters(dispatch::from_args(
-                        "projects",
-                        "location_update",
-                        call.args,
-                    )?),
-                )
-                .await
-            }
             "location_get" => {
                 self.project_location_get(
                     ctx,

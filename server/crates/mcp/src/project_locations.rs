@@ -39,33 +39,6 @@ pub struct ProjectLocationAddParams {
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ProjectLocationUpdateParams {
-    /// 位置 id（UUID，来自 project_get 的 locations 列表）
-    #[schemars(description = "位置 id（UUID，来自 project_get 返回的 locations 列表）。")]
-    pub location_id: String,
-    /// 新 IP
-    #[schemars(description = "可选：新 IP。不传不改。")]
-    pub ip: Option<String>,
-    /// 新主机名
-    #[schemars(description = "可选：新主机名。不传不改。")]
-    pub host: Option<String>,
-    /// 新操作系统
-    #[schemars(description = "可选：新操作系统。不传不改。")]
-    pub os: Option<String>,
-    /// 新路径
-    #[schemars(description = "可选：新路径。不传不改。")]
-    pub path: Option<String>,
-    /// 新用途
-    #[schemars(description = "可选：新用途。不传不改。")]
-    pub purpose: Option<String>,
-    /// 改关联资产
-    #[schemars(
-        description = "可选：改关联资产（资产 id / 台账名 / 别名；传空字符串 `\"\"` = 显式解绑为纯文本位置）。不传则不动现有引用。"
-    )]
-    pub asset: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ProjectLocationGetParams {
     /// 位置 id（UUID）
     #[schemars(description = "位置 id（UUID，来自 project_get 返回的 locations 列表）。")]
@@ -113,50 +86,6 @@ impl EngramMcpServer {
                 &os,
                 &lp.path,
                 lp.purpose.as_deref(),
-                asset_id,
-            )
-            .await
-            .map_err(from_project)?;
-        ok_json(serde_json::to_value(&loc).unwrap_or(serde_json::json!({})))
-    }
-
-    /// 编辑项目位置（补丁式，不传不改）。
-    ///
-    /// 何时用：代码挪了目录、换了机器，更新已登记的位置。
-    pub(crate) async fn project_location_update(
-        &self,
-        ctx: RequestContext<RoleServer>,
-        params: Parameters<ProjectLocationUpdateParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let p = principal_of(&ctx)?;
-        require_project(&p)?;
-        let lp = params.0;
-        let id = Uuid::parse_str(&lp.location_id)
-            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "location_id 不是合法 UUID"))?;
-        let current = self
-            .svc_project()
-            .get_location(id)
-            .await
-            .map_err(from_project)?;
-        // asset 三态：给值 = 改引用；空串 = 显式解绑；不传 = 不动现有引用
-        let asset_id = match lp.asset.as_deref() {
-            Some("") => None,
-            Some(k) => {
-                self.resolve_location_asset(Some(k), None, None, None)
-                    .await?
-                    .0
-            }
-            None => current.asset_id,
-        };
-        let loc = self
-            .svc_project()
-            .update_location(
-                id,
-                &lp.ip.unwrap_or(current.ip),
-                &lp.host.unwrap_or(current.host),
-                &lp.os.unwrap_or(current.os),
-                &lp.path.unwrap_or(current.path),
-                lp.purpose.or(current.purpose).as_deref(),
                 asset_id,
             )
             .await
