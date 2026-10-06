@@ -35,3 +35,13 @@
 ## Done
 
 - （未开始）
+
+## Done
+
+- 2026-10-06 全量落地：distill/src/project_maintain.rs（Agent 循环 list_docs/get_doc/note_issue/finish
+  + MAX_STEPS=12 + per-project 单飞 + 节律桶 rhythm-maintain-project-YYYYMMDD 幂等 + 自续明日桶
+  + bootstrap + Markdown 报告 render_markdown）；不进 WORKFLOW_KINDS（全局串行会扼杀多项目并行）
+- API：POST /projects/{id}/maintain（单飞守卫）+ GET list/detail（Markdown 存档）
+- 测试 3/3：Agent mock note_issue 落文档 + 报告 progress 断言；节律幂等+fanout；running 项目 skip
+- 门禁：fmt 0 / clippy distill+api 0 / distill 全测绿（19+14+3）
+- 坑：payload->>'project_id' = $1 绑 Uuid 触发 text/uuid 类型错（Err 被吞成 skip 2）——bind 用 to_string()

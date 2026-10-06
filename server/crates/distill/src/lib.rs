@@ -9,6 +9,7 @@ pub mod extract;
 pub mod extract_model;
 pub mod llm_port;
 pub mod maintain_agent;
+pub mod project_maintain;
 pub mod prompts;
 pub mod reembed;
 pub mod rhythm;

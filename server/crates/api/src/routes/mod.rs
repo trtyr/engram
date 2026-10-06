@@ -483,6 +483,18 @@ fn projects_routes() -> Router<AppState> {
         )
         .route("/projects/{id}/docs", post(project_api::add_doc))
         .route(
+            "/projects/{id}/maintain",
+            post(project_api::maintain_trigger),
+        )
+        .route(
+            "/projects/{id}/maintain/list",
+            get(project_api::maintain_list),
+        )
+        .route(
+            "/projects/{id}/maintain/{job_id}",
+            get(project_api::maintain_detail),
+        )
+        .route(
             "/projects/{id}/docs/{doc_id}",
             get(project_api::get_doc)
                 .put(project_api::update_doc)

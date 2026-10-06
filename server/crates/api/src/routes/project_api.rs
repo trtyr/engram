@@ -10,6 +10,7 @@ use engram_core::project::{
     ProjectLinkDto, ProjectLocationDto, ProjectService, ProjectTypeDto,
 };
 use serde::Deserialize;
+use serde_json::json;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
@@ -591,4 +592,115 @@ pub async fn delete_link(
     }
     s.remove_link(link_id).await.map_err(pe)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------- 项目整理 Agent（P017）----------
+
+/// 手动触发单项目整理（per-project 单飞守卫）。
+#[utoipa::path(post, path = "/projects/{id}/maintain",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = Object)))]
+pub async fn maintain_trigger(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_project(&principal)?;
+    // 项目存在性（404 语义）
+    svc(&state).get_project(id).await.map_err(pe)?;
+    if engram_distill::project_maintain::count_running_for_project(&state.pool, id)
+        .await
+        .map_err(|e| ApiError::Unavailable(e.to_string()))?
+        > 0
+    {
+        return Ok(Json(serde_json::json!({
+            "already_running": true,
+            "hint": "该项目整理进行中——等它完成看报告",
+        })));
+    }
+    let job_id = engram_distill::project_maintain::enqueue_maintain_project(&state.pool, id)
+        .await
+        .map_err(ApiError::Unavailable)?;
+    Ok(Json(serde_json::json!({
+        "already_running": false,
+        "job_id": job_id,
+    })))
+}
+
+/// 整理历史列表（最近 50 次）：每次巡逻一条。
+#[utoipa::path(get, path = "/projects/{id}/maintain/list",
+    params(("id" = Uuid, Path)),
+    responses((status = 200, body = Object)))]
+pub async fn maintain_list(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_project_read(&principal)?;
+    /// sqlx 行解构（消 clippy type_complexity）。
+    type MaintainRow = (
+        uuid::Uuid,
+        String,
+        Option<serde_json::Value>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    );
+    let rows: Vec<MaintainRow> = sqlx::query_as(
+        "SELECT id, status::text, progress, finished_at FROM jobs \
+             WHERE kind = 'maintain_project' AND payload->>'project_id' = $1 \
+               AND status IN ('succeeded', 'failed', 'dead') \
+             ORDER BY finished_at DESC NULLS LAST LIMIT 50",
+    )
+    .bind(id.to_string())
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+    let items: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(job_id, status, progress, finished_at)| {
+            let p = progress.as_ref();
+            serde_json::json!({
+                "job_id": job_id,
+                "status": status,
+                "finished_at": finished_at,
+                "summary": p.and_then(|v| v.get("summary")).cloned().unwrap_or(json!(null)),
+                "issues_noted": p.and_then(|v| v.get("issues_noted")).cloned().unwrap_or(json!(0)),
+                "steps": p.and_then(|v| v.get("steps")).cloned().unwrap_or(json!(0)),
+            })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "items": items })))
+}
+
+/// 单次整理完整报告（含 markdown 存档）。
+#[utoipa::path(get, path = "/projects/{id}/maintain/{job_id}",
+    params(("id" = Uuid, Path), ("job_id" = Uuid, Path)),
+    responses((status = 200, body = Object), (status = 404)))]
+pub async fn maintain_detail(
+    principal: axum::Extension<Principal>,
+    State(state): State<AppState>,
+    Path((id, job_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_project_read(&principal)?;
+    let row: Option<(
+        String,
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<serde_json::Value>,
+    )> = sqlx::query_as(
+        "SELECT status::text, finished_at, progress FROM jobs \
+             WHERE kind = 'maintain_project' AND payload->>'project_id' = $1 AND id = $2",
+    )
+    .bind(id.to_string())
+    .bind(job_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+    let Some((status, finished_at, progress)) = row else {
+        return Err(ApiError::NotFound(format!("整理任务 {job_id} 不存在")));
+    };
+    Ok(Json(serde_json::json!({
+        "job_id": job_id,
+        "status": status,
+        "finished_at": finished_at,
+        "report": progress,
+    })))
 }
