@@ -66,7 +66,7 @@ pub struct MemoryReviseParams {
 pub struct MemoryReviewParams {
     /// 子操作
     #[schemars(
-        description = "审=蒸馏与复核。mode：\"distill\"（默认，触发会话蒸馏）/ \"result\"（取蒸馏结果，需 session_id）/ \"confirm\"（确认候选原子）/ \"discard\"（废弃候选原子）。其余参数与原动作同名平铺。"
+        description = "审=蒸馏与回执。mode：\"distill\"（默认，触发会话蒸馏）/ \"result\"（取蒸馏结果，需 session_id）/ \"duplicates\"（原子重复检测）。其余参数与原动作同名平铺。"
     )]
     pub mode: Option<String>,
 }

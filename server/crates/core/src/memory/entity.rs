@@ -186,7 +186,7 @@ impl MemoryService {
     }
 
     /// 实体级遗忘（「把小王忘了」）：级联归档挂链 active 原子 → 摘链 → 删实体+墓碑。
-    /// archived/superseded 等非 active 原子不动（本来就是历史）；待审候选一并归档。
+    /// archived/superseded 等非 active 原子不动（本来就是历史）。
     pub async fn forget_entity(&self, id: Uuid) -> Result<usize, MemoryError> {
         let cur = repo::live_entity_id(&self.pool, id).await?;
         if cur.is_none() {
