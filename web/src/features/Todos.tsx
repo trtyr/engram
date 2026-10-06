@@ -2,7 +2,7 @@
  *  与工单页（Tickets.tsx）同表不同心智：这里没有 severity、没有状态流转，只有「做完勾掉」。 */
 import { useEffect, useMemo, useState } from 'react'
 import { appConfirm } from '@/components/confirm'
-import { Check, ChevronDown, Trash2 } from 'lucide-react'
+import { Check, Trash2 } from 'lucide-react'
 import Pager from '@/components/Pager'
 import { api, type Todo } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
@@ -25,9 +25,6 @@ export default function Todos() {
   const [err, setErr] = useState('')
   const [selected, setSelected] = useState<Todo | null>(null)
   const [busy, setBusy] = useState(false)
-  const [doneRows, setDoneRows] = useState<Todo[] | null>(null)
-  const [doneCount, setDoneCount] = useState(0)
-  const [showDone, setShowDone] = useState(false) // 「已完成」折叠组，默认收起（微软 To Do 心智）
 
   // 翻页（前端切页：单用户数据量小，一次拉全 + slice，支持页码直跳）
   const [page, setPage] = useState(1)
@@ -63,19 +60,6 @@ export default function Todos() {
     setPage(1) // 筛选/视图变化回到第一页
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
-
-  // 「已完成」计数：始终拉（折叠组标题要显示真实数量，不能等展开才有数字）；
-  // 展开时同时拿全量行用于列表渲染——一次请求兼得两者。
-  useEffect(() => {
-    if (view !== 'active') return
-    api
-      .get<Todo[]>('/todos?kind=todo&status=done')
-      .then((r) => {
-        setDoneRows(r)
-        setDoneCount(r.length)
-      })
-      .catch(() => undefined)
-  }, [view, rows])
 
   async function quickAdd() {
     if (!title.trim()) return
@@ -268,8 +252,15 @@ export default function Todos() {
 
       {err && <ErrorBox msg={err} />}
 
-      {/* 清单（主从：点击行进详情） */}
-      <div className={cn('grid grid-cols-1 gap-4', selected ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]' : 'grid-cols-1')}>
+      {/* 清单（主从：点击行进详情；选中态定高双栏，左右各自独立滚动） */}
+      <div
+        className={cn(
+          'grid grid-cols-1 gap-4',
+          selected
+            ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:h-[calc(100dvh-7.5rem)]'
+            : 'grid-cols-1',
+        )}
+      >
       <div className={cn(selected && 'lg:h-full lg:overflow-y-auto lg:pr-1')}>
       {rows.length === 0 ? (
         <Empty
@@ -325,89 +316,11 @@ export default function Todos() {
       )}
       </div>
 
-      {/* 「已完成」折叠组：仅进行中视图，默认收起（微软 To Do 心智） */}
-      {view === 'active' && (
-        <DoneGroup
-          count={doneCount}
-          open={showDone}
-          rows={doneRows}
-          busy={busy}
-          onToggleOpen={() => setShowDone((v) => !v)}
-          onToggle={toggleDone}
-          onArchive={doArchive}
-          onDelete={doDelete}
-          onClearDue={clearDue}
-          onSelect={setSelected}
-        />
-      )}
     </div>
   )
 }
 
 /** 翻页条（公共组件 @/components/Pager）。 */
-
-/** 「已完成 N」折叠组（微软 To Do：完成后收进这里，默认收起，展开可看/可重开）。 */
-function DoneGroup({
-  count,
-  open,
-  rows,
-  busy,
-  onToggleOpen,
-  onToggle,
-  onArchive,
-  onDelete,
-  onClearDue,
-  onSelect,
-}: {
-  count: number
-  open: boolean
-  rows: Todo[] | null
-  busy: boolean
-  onToggleOpen: () => void
-  onToggle: (t: Todo) => void
-  onArchive: (t: Todo) => void
-  onDelete: (t: Todo) => void
-  onClearDue: (t: Todo) => void
-  onSelect: (t: Todo) => void
-}) {
-  return (
-    <div className="pt-3">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={onToggleOpen}
-        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        <ChevronDown className={cn('size-4 transition-transform', !open && '-rotate-90')} aria-hidden="true" />
-        已完成
-        <span className="font-mono text-xs">{count}</span>
-      </button>
-      {open && (
-        <div className="mt-1 space-y-1 border-l border-border pl-3">
-          {rows === null ? (
-            <Spinner />
-          ) : rows.length === 0 ? (
-            <p className="px-2 py-1 text-xs text-muted-foreground/70">还没有完成的待办</p>
-          ) : (
-            rows.map((t) => (
-              <TodoRow
-                key={t.id}
-                t={t}
-                busy={busy}
-                onToggle={() => onToggle(t)}
-                onArchive={onArchive}
-                onDelete={onDelete}
-                onClearDue={onClearDue}
-                onSelect={onSelect}
-                selected={false}
-              />
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
 
 /** 单条待办行：微软 To Do 式清单行（无卡片边框，hover 起底色）——勾选完成 + 元信息 + 归档/删除。 */
 function TodoRow({
