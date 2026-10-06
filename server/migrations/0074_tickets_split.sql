@@ -44,9 +44,20 @@ CREATE UNIQUE INDEX idx_tickets_short_no ON tickets (short_no);
 -- ---------- 存量退役：无绑定即悬空，直接删 ----------
 -- 删除顺序安全：todo_links / ticket_events 都 ON DELETE CASCADE，随行清空
 DELETE FROM todos WHERE kind = 'ticket';
+-- 旧世界 bug 产物：TodoService 曾给 kind=todo 的行也写过 ticket_events——
+-- 这些事件在工单独立表世界里全是孤儿，一并清掉（存量删除不留旧兼容）
+DELETE FROM ticket_events;
 
 -- ---------- ticket_events 外键重挂 ----------
-ALTER TABLE ticket_events DROP CONSTRAINT IF EXISTS ticket_events_ticket_id_fkey;
+-- 无差别卸掉 ticket_events 上所有旧 FK（内联 REFERENCES 的自动命名不猜），再重挂 → tickets
+DO $$ DECLARE c record;
+BEGIN
+  FOR c IN SELECT conname FROM pg_constraint
+           WHERE conrelid = 'ticket_events'::regclass AND contype = 'f'
+  LOOP
+    EXECUTE format('ALTER TABLE ticket_events DROP CONSTRAINT %I', c.conname);
+  END LOOP;
+END $$;
 ALTER TABLE ticket_events
     ADD CONSTRAINT ticket_events_ticket_id_fkey
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE;
