@@ -199,8 +199,8 @@ export default function Dashboard() {
       .then((t) => setOverdueTodos(t.length))
       .catch(() => setOverdueTodos(0))
     api
-      .get<{ status: string }[]>('/todos?kind=ticket&status=open')
-      .then((t) => setOpenTickets(t.length))
+      .get<{ items: { status: string }[] }>('/tickets?status=open')
+      .then((r) => setOpenTickets(r.items.length))
       .catch(() => setOpenTickets(0))
   }, [])
 

@@ -38,7 +38,7 @@ export default function Todos() {
     // 视图 → 服务端 status 过滤（todo 形态只有 open/done/archived 三态）
     const status = view === 'active' ? 'open' : view
     // limit 拉满（服务端默认 200 会静默截断）——翻页在前端切
-    const parts = [`kind=todo`, `status=${status}`, `limit=1000`]
+    const parts = [`status=${status}`, `limit=1000`]
     if (priority) parts.push(`priority=${priority}`)
     if (due) parts.push(`due=${due}`)
     if (tag.trim()) parts.push(`tag=${encodeURIComponent(tag.trim())}`)
@@ -65,7 +65,7 @@ export default function Todos() {
     if (!title.trim()) return
     setBusy(true)
     try {
-      await api.post('/todos', { title: title.trim(), kind: 'todo', priority: quickPriority })
+      await api.post('/todos', { title: title.trim(), priority: quickPriority })
       setTitle('')
       setQuickPriority('normal')
       setErr('')
@@ -390,9 +390,6 @@ function TodoRow({
         )}
         <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-4">
           <span className="font-mono text-[10px] text-muted-foreground/70">EN-{t.short_no}</span>
-          {t.project_hint && (
-            <span className="rounded bg-info/10 px-1.5 py-0.5 text-[10px] text-info">{t.project_hint}</span>
-          )}
           {t.tags.map((tag: string) => (
             <span key={tag} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
               #{tag}
