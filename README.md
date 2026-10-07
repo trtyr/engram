@@ -4,12 +4,12 @@
 
 ### 把 AI 的记忆，做成可蒸馏、可检索、可审计、可遗忘的资产
 
-**单用户 AI 长期记忆平台 · Rust 单二进制 · 十域 MCP 渐进式发现 · Wiki 单库 · 全程可溯源**
+**单用户 AI 长期记忆平台 · Rust 单二进制 · 十二域 MCP 渐进式发现 · Wiki 单库 · 全程可溯源**
 
 [![Rust](https://img.shields.io/badge/Rust-axum-DEA584?style=for-the-badge&logo=rust&logoColor=white)](server/)
 [![React](https://img.shields.io/badge/React_19-SPA-61DAFB?style=for-the-badge&logo=react&logoColor=black)](web/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](server/crates/storage/)
-[![MCP](https://img.shields.io/badge/MCP-十域_渐进式发现-8A2BE2?style=for-the-badge)](#-mcp给-ai-的原生接口)
+[![MCP](https://img.shields.io/badge/MCP-十二域_渐进式发现-8A2BE2?style=for-the-badge)](#-mcp给-ai-的原生接口)
 [![License](https://img.shields.io/badge/license-MIT-3DA639?style=for-the-badge)](LICENSE)
 
 > **en·gram**（/ˈenɡræm/）*n.* 神经科学中的「记忆痕迹」——记忆在脑中留下的物理印记。
@@ -36,49 +36,43 @@ Engram 是一个「平台即工具」：平台对外暴露 MCP 与 HTTP API，AI
 
 ## 🖼️ 界面一览
 
-**概览**——记忆管线四层（会话 → 原子 → 场景 → 画像）一目了然：
+**概览**——记忆管线（会话 → 原子 → 画像活文档）与全城资产态势一目了然：
 
 ![概览仪表盘](docs/screenshots/dashboard.png)
 
-| 用户记忆 | 工单 |
+| 用户记忆 | 画像 · 版本 diff |
 |:---:|:---:|
-| ![用户记忆页：四层记忆管线与原子事实列表](docs/screenshots/memory.png) | ![工单页：列表加详情面板](docs/screenshots/tickets.png) |
-| **代码图谱** | **MCP 工具面** |
-| ![代码图谱页：注册索引与符号查询](docs/screenshots/codegraph.png) | ![MCP 工具面：九域工具开关与渐进式发现](docs/screenshots/mcp.png) |
+| ![用户记忆：八类原子瓦片 + 置信量表](docs/screenshots/memory.png) | ![画像活文档：版本史与行级 diff](docs/screenshots/persona.png) |
+| **工单** | **待办** |
+| ![工单：必须绑定项目，列表 + 详情面板](docs/screenshots/tickets.png) | ![待办：微软 To Do 式清单](docs/screenshots/todos.png) |
+| **项目 · 文档库** | **项目详情** |
+| ![项目外层：repo 式卡片选项目](docs/screenshots/projects.png) | ![项目内层：左树右文的文档阅读](docs/screenshots/project-detail.png) |
+| **凭据** | **学习驾驶舱** |
+| ![凭据：密钥库式台账，十一类分类 + 项目绑定](docs/screenshots/credentials.png) | ![学习：连击热力图 + 领域工作台](docs/screenshots/study.png) |
+
+**代码图谱**（注册索引 + 调用图）与 **MCP 工具面**（三级开关）：
+
+| 代码图谱 | MCP 工具面 |
+|:---:|:---:|
+| ![代码图谱页：注册索引与符号查询](docs/screenshots/codegraph.png) | ![MCP 工具面：十二域工具开关与渐进式发现](docs/screenshots/mcp.png) |
 
 > 截图为演示数据（虚构人物与项目）。
 
-## 🪜 记忆蒸馏阶梯
-
-对话原文不是记忆，记忆是被蒸馏出来的。Engram 把「一句闲聊」变成四层可治理的资产：
-
-```mermaid
-flowchart LR
-    L0["💬 L0 会话<br/><i>原始对话</i>"] -->|蒸馏| L1["⚛️ L1 原子事实<br/><i>可检索的最小单元</i>"]
-    L1 -->|组织| L2["🌫️ L2 场景模式<br/><i>同类事实的沉淀</i>"]
-    L2 -->|沉淀| L3["👤 L3 用户画像<br/><i>prompt 注入用</i>"]
-    L3 -.->|冷启动注入| AI["🤖 你的 AI"]
-    L1 -.->|定向回忆| AI
-```
-
-- **全程可溯源**：蒸馏链每层记录 `prompt_version`，任意记忆可归因回放到产出它的那一版 prompt
-- **纠错走蒸馏**：把正确的表述写成对话，蒸馏自动生成取代链——永不直接改写语义内容
-- **遗忘是断层**：`forget` 作废会话，已蒸馏产物**级联归档**，检索立即失效
-- **实体坐标系**：人物 / 项目 / 主题 / 群组 / 地点，由蒸馏自动抽取，横向串联所有记忆
-
-## 🗂️ 十域资产
+## 🗂️ 十二域资产
 
 | 域 | 记什么 | 形态 |
 |:--|:--|:--|
-| 💬 **Chat Memory** | 用户的事实、偏好、决策、事件 | L0→L3 分层蒸馏，六动词入口（存/找/翻/改/审/忘），全程可溯源 |
+| 💬 **Chat Memory** | 用户的事实、偏好、决策、事件 | L0→L1 蒸馏 + 画像活文档，六动词入口，全程可溯源 |
 | 🕸️ **Wiki** | 世界的知识：文档 + LLM 增量互链 | 文档/URL 摄取 → `[[wikilink]]` 知识网 + 图谱 + lint 死链分级 |
 | 🧬 **CodeGraph** | 代码库结构索引 | 本地路径/git 注册 → 异步索引 → 结构化查询 + 调用子图 / 文件依赖全图 |
-| 🧩 **项目记忆** | 跨会话的工作「线」 | 项目 + 多主机位置 + 分类文档，精确寻址读（零截断） |
-| 🔐 **凭据** | API Key / Token 等机密 | 值 AES-GCM 加密落库、按名取用留审计痕、标签分组 + 到期治理（过期红/临期黄）、**台账永不回显值** |
-| ✅ **待办** | 行动项（todo） | 轻量清单：勾选即完成；截止时间 + 逾期/今日过滤（按到期升序） |
-| 🎫 **工单** | 结构化问题跟踪（ticket） | severity P0-P3 + 症状/复现/验收/解决四段 + 状态机 + **活动时间线**（状态流转自动留痕 + 评论） |
+| 🧩 **项目记忆** | 一件事的文档存放地 | 外层 repo 式卡片选项目，内层左树右文读文档；多主机位置 + 架构图制品（修订史可回滚） |
+| 🔐 **凭据** | API Key / Token 等机密 | 值 AES-GCM 加密落库、按名取用留审计痕、**十一类封闭分类 + 可选项目绑定**、到期治理（过期红/临期黄）、**台账永不回显值** |
+| ✅ **待办** | 行动项（todo） | 轻量清单：勾选即完成；截止时间 + 逾期/今日过滤（AI 写入，前端只治理） |
+| 🎫 **工单** | 结构化问题跟踪（ticket） | **必须绑定已有项目** + severity P0-P3 + 症状/复现/验收/解决四段 + 状态机 + **活动时间线**（状态流转自动留痕 + 评论） |
 | 🗄️ **资产台账** | 我拥有的、可被操作的对象（主机 / 云实例 / 域名 / 账号） | 类型 + 名称 + 别名[] + 结构化字段 + **Markdown 运行手册**（修订史可回滚）；项目只**引用不拥有** |
 | ⭕ **圈子** | 实体坐标系读写视图 | 人物/项目/主题/群组/地点——建实体、类型化关系、全景图（与 memory 同底座） |
+| 📚 **学习** | 学习路线图跟踪 | track → 知识点三态机 + 简化间隔复习（Leitner 阶梯）+ wiki 挂链；驾驶舱连击/热力图/领域工作台 |
+| 🚦 **日志** | 系统时间线 | 请求/错误/后台执行全量留痕，按域/级别/任务过滤——排障不靠猜 |
 | 🚦 **任务面（jobs）** | 异步任务的运行状态（蒸馏 / 摄取 / 索引 / 迁移） | PG 队列：pending / running / dead 可见可恢复，进程重启不丢 |
 
 ## 🛡️ 治理，不是摆设
@@ -95,7 +89,7 @@ flowchart LR
 ## 🔌 MCP：给 AI 的原生接口
 
 engram-server 内置 MCP 服务端（Streamable HTTP）。**工具面采用渐进式发现**：
-十个领域各一个入口工具 + 跨域全局检索，共 **11 个工具位**；
+十二个领域各一个入口工具 + 跨域全局检索，共 **13 个工具位**；
 域内操作按需发现（描述自带操作目录，`help` 一轮取回全部参数手册，坏参数报错附合法清单）。
 
 按密钥 scope 分权——AI 看到的工具面与它实际能调用的完全一致。
