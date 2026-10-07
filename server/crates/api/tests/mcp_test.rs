@@ -1201,16 +1201,8 @@ async fn todos_model_refinement_mcp_end_to_end() {
     assert_eq!(got["id"], added["id"], "EN-n 直达应等价 UUID");
 
     // ② add 无 project / 幽灵项目名 → 明确报错
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        call("add", json!({"title":"无主工单"})),
-    )
-    .await;
-    assert!(
-        v["error"].is_object(),
-        "无 project 应报错：{v}"
-    );
+    let (_, v) = mcp_rpc(&app, &key, call("add", json!({"title":"无主工单"}))).await;
+    assert!(v["error"].is_object(), "无 project 应报错：{v}");
     let (_, v) = mcp_rpc(
         &app,
         &key,
@@ -1218,7 +1210,10 @@ async fn todos_model_refinement_mcp_end_to_end() {
     )
     .await;
     assert!(
-        v["error"]["message"].as_str().unwrap_or_default().contains("不存在"),
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("不存在"),
         "幽灵项目应报不存在：{v}"
     );
 
@@ -1252,16 +1247,14 @@ async fn todos_model_refinement_mcp_end_to_end() {
     let (_, v) = mcp_rpc(
         &app,
         &key,
-        call("delete", json!({"id": format!("EN-{}", added4["short_no"].as_i64().unwrap())})),
+        call(
+            "delete",
+            json!({"id": format!("EN-{}", added4["short_no"].as_i64().unwrap())}),
+        ),
     )
     .await;
     assert_eq!(parse_text(&v)["deleted"], added4["id"], "删除应确认短号");
-    let (_, v) = mcp_rpc(
-        &app,
-        &key,
-        call("get", json!({"id": added4["id"]})),
-    )
-    .await;
+    let (_, v) = mcp_rpc(&app, &key, call("get", json!({"id": added4["id"]}))).await;
     assert!(v["error"].is_object(), "删除后 get 应报不存在：{v}");
 }
 

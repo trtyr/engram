@@ -118,8 +118,11 @@ fn ticket_svc(state: &AppState) -> engram_core::tickets::TicketService {
 }
 
 /// project 参数解析：UUID 直接认；否则精确项目名（不模糊匹配）。
-/// 解析不到 → 明确报错（绝不自动建项目）。
-async fn resolve_project(state: &AppState, project: &str) -> Result<Uuid, rmcp::ErrorData> {
+/// 解析不到 → 明确报错（绝不自动建项目）。工单/凭据两个域共用（0075）。
+pub(crate) async fn resolve_project(
+    state: &AppState,
+    project: &str,
+) -> Result<Uuid, rmcp::ErrorData> {
     let p = project.trim();
     if let Ok(id) = Uuid::parse_str(p) {
         let exists = engram_storage::repo::project::existing_ids(&state.pool, &[id])

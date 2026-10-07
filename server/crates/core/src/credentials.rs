@@ -77,7 +77,15 @@ impl CredentialsService {
         Ok(name.to_string())
     }
 
-    /// 写入/更新（同名换值即清零旧取用审计）。
+    /// 封闭分类白名单（0075）：与迁移 0075 的 CHECK 同源，改两边要同步。
+    pub const KINDS: &[&str] = &[
+        "password", "api_key", "token", "ssh_key", "database", "cert", "server", "payment",
+        "identity", "note", "custom",
+    ];
+
+    /// 写入/更新（同名换值即清零旧取用审计）。kind 封闭分类（缺省 custom）；
+    /// project_id 可选绑定——给了就必须指向已有项目（绝不自动建项目）。
+    #[allow(clippy::too_many_arguments)]
     pub async fn put(
         &self,
         name: &str,
@@ -86,10 +94,28 @@ impl CredentialsService {
         created_by: &str,
         tags: &[String],
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
+        kind: Option<&str>,
+        project_id: Option<Uuid>,
     ) -> Result<CredentialMetaDto, CredentialError> {
         let name = Self::validate_name(name)?;
         if value.is_empty() {
             return Err(CredentialError::BadRequest("凭据值不能为空".into()));
+        }
+        let kind = kind.unwrap_or("custom").trim();
+        if !Self::KINDS.contains(&kind) {
+            return Err(CredentialError::BadRequest(format!(
+                "凭据分类 kind 无效：{kind}——可用：{}",
+                Self::KINDS.join(" / ")
+            )));
+        }
+        // 可选绑定校验：给了 project_id 就必须真实存在（与工单同口径，不自动建项目）
+        if let Some(pid) = project_id {
+            let exists = engram_storage::repo::project::existing_ids(&self.pool, &[pid]).await?;
+            if exists.is_empty() {
+                return Err(CredentialError::BadRequest(format!(
+                    "项目 {pid} 不存在——凭据绑定项目可选，但绑了就必须是已有项目"
+                )));
+            }
         }
         let enc = self.enc(value)?;
         Ok(repo::upsert(
@@ -102,6 +128,8 @@ impl CredentialsService {
             created_by,
             tags,
             expires_at,
+            kind,
+            project_id,
         )
         .await?)
     }

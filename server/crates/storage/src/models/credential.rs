@@ -28,6 +28,10 @@ pub struct CredentialMetaDto {
     pub tags: Vec<String>,
     /// 到期时间（过期治理：台账页红/黄高亮，判定在调用端按 now() 算）
     pub expires_at: Option<DateTime<Utc>>,
+    /// 封闭分类（0075）：password/api_key/token/ssh_key/database/cert/server/payment/identity/note/custom
+    pub kind: String,
+    /// 可选项目绑定（0075）：项目删除时解绑留凭据（ON DELETE SET NULL）
+    pub project_id: Option<Uuid>,
 }
 
 /// 取用审计流水行。

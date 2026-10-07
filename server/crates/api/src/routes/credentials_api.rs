@@ -48,6 +48,12 @@ pub struct CredentialPutRequest {
     /// 到期时间（RFC3339；可选）
     #[serde(default)]
     pub expires_at: Option<String>,
+    /// 封闭分类（可选，缺省 custom）：password/api_key/token/ssh_key/database/cert/server/payment/identity/note/custom
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// 可选项目绑定（项目 id；项目删除时自动解绑留凭据）
+    #[serde(default)]
+    pub project_id: Option<uuid::Uuid>,
 }
 
 /// 台账列表（元数据，永不回显值）。
@@ -136,6 +142,8 @@ pub async fn put_credential(
             "console",
             &tags,
             expires_at,
+            req.kind.as_deref(),
+            req.project_id,
         )
         .await
         .map_err(ce)?;

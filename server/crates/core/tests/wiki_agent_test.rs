@@ -367,6 +367,8 @@ async fn demo_real_url_ingest_builds_pages() {
             "manual",
             &[],
             None,
+            None,
+            None,
         )
         .await
         .expect("凭据写入");

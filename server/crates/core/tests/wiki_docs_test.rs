@@ -820,6 +820,8 @@ async fn url_fetch_webreader_failure_degrades_with_event() {
             "test",
             &[],
             None,
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -871,7 +873,16 @@ async fn webreader_real_fetch_langchain_page() {
     let cipher = engram_llm::KeyCipher::from_hex_master(&"ab".repeat(32)).unwrap();
     let creds = engram_core::credentials::CredentialsService::new(pool.clone(), cipher);
     creds
-        .put("zhipu/web_reader_key", &key, None, "manual", &[], None)
+        .put(
+            "zhipu/web_reader_key",
+            &key,
+            None,
+            "manual",
+            &[],
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     let handle = run_jobs(pool.clone()).await;

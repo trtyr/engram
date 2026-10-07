@@ -118,7 +118,7 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
             "duplicates", false, "实体重复检测（T021 从 memory 挪入）：同名同类异形行" => crate::CirclesGraphParams
         ],
         "credentials" => action_docs![
-            "put", true, "写入/更新凭据（值加密落库；同名换值清零旧取用审计）" => crate::CredentialPutParams;
+            "put", true, "写入/更新凭据（值加密落库；同名换值清零旧取用审计；可选 kind 分类与 project 绑定）" => crate::CredentialPutParams;
             "get", false, "按名取用（返回直接可用值，取用留审计痕）" => crate::CredentialGetParams;
             "list", false, "台账列表（元数据，永不回显值）" => crate::CredentialListParams;
             "reads", false, "取用审计流水（谁/何时，最近在前）" => crate::CredentialReadsParams;

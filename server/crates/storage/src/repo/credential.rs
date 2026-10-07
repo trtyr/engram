@@ -21,6 +21,8 @@ pub async fn upsert(
     created_by: &str,
     tags: &[String],
     expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    kind: &str,
+    project_id: Option<Uuid>,
 ) -> StoreResult<Row_> {
     let mut tx = pool.begin().await.map_err(StoreError::from)?;
     // 换值即作废旧流水：先删该名下既有凭据的取用记录（新插入路径删 0 行，无害）
@@ -33,19 +35,21 @@ pub async fn upsert(
     .await
     .map_err(StoreError::from)?;
     let row = sqlx::query_as::<_, Row_>(
-        "INSERT INTO credentials (id, name, value_enc, sensitive, description, created_by, tags, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+        "INSERT INTO credentials (id, name, value_enc, sensitive, description, created_by, tags, expires_at, kind, project_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
          ON CONFLICT (lower(btrim(name))) DO UPDATE SET \
            value_enc = EXCLUDED.value_enc, \
            sensitive = EXCLUDED.sensitive, \
            description = EXCLUDED.description, \
            tags = EXCLUDED.tags, \
            expires_at = EXCLUDED.expires_at, \
+           kind = EXCLUDED.kind, \
+           project_id = EXCLUDED.project_id, \
            updated_at = now(), \
            last_read_at = NULL, \
            read_count = 0 \
          RETURNING id, name, sensitive, description, created_by, created_at, updated_at, \
-                   last_read_at, read_count, tags, expires_at",
+                   last_read_at, read_count, tags, expires_at, kind, project_id",
     )
     .bind(id)
     .bind(name)
@@ -55,6 +59,8 @@ pub async fn upsert(
     .bind(created_by)
     .bind(tags)
     .bind(expires_at)
+    .bind(kind)
+    .bind(project_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(StoreError::from)?;
@@ -103,7 +109,7 @@ pub async fn get_enc_by_name(pool: &sqlx::PgPool, name: &str) -> StoreResult<Opt
 pub async fn get_meta(pool: &sqlx::PgPool, id: Uuid) -> StoreResult<Option<Row_>> {
     sqlx::query_as::<_, Row_>(
         "SELECT id, name, sensitive, description, created_by, created_at, updated_at, \
-                last_read_at, read_count, tags, expires_at \
+                last_read_at, read_count, tags, expires_at, kind, project_id \
          FROM credentials WHERE id = $1",
     )
     .bind(id)
@@ -120,7 +126,7 @@ pub async fn list(
 ) -> StoreResult<Vec<Row_>> {
     sqlx::query_as::<_, Row_>(
         "SELECT id, name, sensitive, description, created_by, created_at, updated_at, \
-                last_read_at, read_count, tags, expires_at \
+                last_read_at, read_count, tags, expires_at, kind, project_id \
          FROM credentials \
          WHERE ($1::text IS NULL OR $1 = ANY(tags)) \
            AND ($2::text IS NULL \

@@ -98,7 +98,7 @@ async fn transfer_roundtrip_and_idempotency() {
     let todo_a = uuid::Uuid::now_v7();
     let todo_b = uuid::Uuid::now_v7();
     for (id, title) in [(todo_a, "迁移待办甲"), (todo_b, "迁移待办乙")] {
-        sqlx::query("INSERT INTO todos (id, title, kind) VALUES ($1,$2,'todo')")
+        sqlx::query("INSERT INTO todos (id, title) VALUES ($1,$2)")
             .bind(id)
             .bind(title)
             .execute(&pool)

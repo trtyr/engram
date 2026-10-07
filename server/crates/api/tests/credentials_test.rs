@@ -192,3 +192,86 @@ async fn credentials_tags_expiry_and_search() {
         let _ = req(&app, &tok, "DELETE", &format!("/credentials/{n}"), None).await;
     }
 }
+
+/// 0075：kind 封闭分类 + 可选项目绑定（绑了必须存在；删项目解绑留凭据）。
+#[tokio::test]
+async fn credentials_kind_and_project_binding() {
+    let (app, _pg) = support::app().await;
+    let tok = support::login_token(&app).await;
+
+    // ① 建 FK 前提项目
+    let (st, v) = req(
+        &app,
+        &tok,
+        "POST",
+        "/projects",
+        Some(serde_json::json!({"name":"kind-test-proj","type":"dev","description":""})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{v}");
+    let pid = v["id"]
+        .as_str()
+        .or(v["project"]["id"].as_str())
+        .expect("项目 id")
+        .to_string();
+
+    // ② 带 kind + project_id 写入：meta 回显分类与绑定
+    let (st, v) = req(
+        &app,
+        &tok,
+        "POST",
+        "/credentials",
+        Some(serde_json::json!({
+            "name":"t/kinded","value":"v1","kind":"api_key","project_id": pid
+        })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{v}");
+    let meta = &v["credential"];
+    assert_eq!(meta["kind"], "api_key", "{meta}");
+    assert_eq!(meta["project_id"], serde_json::json!(pid), "{meta}");
+
+    // ③ 非法 kind → 400
+    let (st, v) = req(
+        &app,
+        &tok,
+        "POST",
+        "/credentials",
+        Some(serde_json::json!({"name":"t/badkind","value":"v","kind":"nope"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+
+    // ④ 幽灵 project_id → 400（绑了就必须是已有项目，不自动建）
+    let (st, v) = req(
+        &app,
+        &tok,
+        "POST",
+        "/credentials",
+        Some(serde_json::json!({
+            "name":"t/ghost","value":"v","kind":"api_key",
+            "project_id":"00000000-0000-0000-0000-000000000001"
+        })),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v.to_string().contains("不存在"), "{v}");
+
+    // ⑤ 删项目 → 凭据保留但解绑（ON DELETE SET NULL）
+    let (st, _) = req(&app, &tok, "DELETE", &format!("/projects/{pid}"), None).await;
+    assert_eq!(st, StatusCode::NO_CONTENT, "项目删除（204）");
+    let (st, v) = req(&app, &tok, "GET", "/credentials", None).await;
+    assert_eq!(st, StatusCode::OK);
+    let row = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["name"] == "t/kinded")
+        .expect("凭据在删项目后仍保留");
+    assert!(row["project_id"].is_null(), "解绑留凭据：{row}");
+
+    // ⑥ 清理
+    let _ = req(&app, &tok, "DELETE", "/credentials/t%2Fkinded", None).await;
+    let _ = req(&app, &tok, "DELETE", "/credentials/t%2Fbadkind", None).await;
+    let _ = req(&app, &tok, "DELETE", "/credentials/t%2Fghost", None).await;
+}

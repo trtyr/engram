@@ -31,6 +31,19 @@ pub struct CredentialPutParams {
         description = "可选：到期时间（RFC3339，如 2026-12-31T00:00:00Z）——台账页过期红/临期黄高亮。"
     )]
     pub expires_at: Option<String>,
+    /// 封闭分类（写入必选）
+    #[schemars(
+        description = "可选分类（缺省 custom）：password=账号密码 / api_key=API·Secret / token=访问令牌 \
+         / ssh_key=SSH密钥 / database=数据库连接 / cert=证书·域名 / server=服务器凭据 \
+         / payment=支付·银行卡 / identity=证件身份 / note=安全笔记 / custom=自定义。"
+    )]
+    pub kind: Option<String>,
+    /// 可选项目绑定（项目名精确匹配或 UUID）
+    #[schemars(
+        description = "可选：绑定已有项目（项目名精确匹配或 UUID）。个人/零散凭据可不绑；\
+         项目删除时自动解绑但凭据保留；绑了不存在项目会直接报错，绝不自动建项目。"
+    )]
+    pub project: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -109,6 +122,13 @@ impl EngramMcpServer {
                     .map(|t| t.trim().to_string())
                     .filter(|t| !t.is_empty())
                     .collect();
+                // 可选项目绑定：项目名精确匹配或 UUID；解析不到直接拒绝（不自动建项目）
+                let project_id = match p.project.as_deref() {
+                    Some(s) if !s.trim().is_empty() => {
+                        Some(crate::tickets::resolve_project(&self.state, s).await?)
+                    }
+                    _ => None,
+                };
                 let meta = self
                     .state
                     .credentials()
@@ -119,6 +139,8 @@ impl EngramMcpServer {
                         "mcp",
                         &tags,
                         expires_at,
+                        p.kind.as_deref(),
+                        project_id,
                     )
                     .await
                     .map_err(credential_err)?;
@@ -127,6 +149,8 @@ impl EngramMcpServer {
                     "sensitive": meta.sensitive,
                     "description": meta.description,
                     "tags": meta.tags,
+                    "kind": meta.kind,
+                    "project_id": meta.project_id,
                     "expires_at": meta.expires_at,
                     "updated_at": meta.updated_at,
                     "hint": "值已加密落库（明文不落任何日志/文档）。同名 put = 换值。取用：action=\"get\"。"
