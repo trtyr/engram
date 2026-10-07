@@ -66,7 +66,6 @@ async fn setup_llm(
                 batch_size: 10,
                 reap_interval: Duration::from_secs(3600),
                 per_kind_concurrency: Default::default(),
-                cipher: None,
             },
         ),
         l1,

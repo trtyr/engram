@@ -388,7 +388,6 @@ async fn demo_real_url_ingest_builds_pages() {
                     batch_size: 10,
                     reap_interval: std::time::Duration::from_secs(3600),
                     per_kind_concurrency: Default::default(),
-                    cipher: None,
                 },
             ),
             registry.clone(),

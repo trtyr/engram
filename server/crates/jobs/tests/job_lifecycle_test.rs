@@ -161,7 +161,6 @@ async fn runner_executes_registered_handler() {
             poll_interval: Duration::from_millis(50),
             batch_size: 5,
             reap_interval: Duration::from_secs(3600),
-            cipher: None,
             per_kind_concurrency: HashMap::new(),
         },
     )
@@ -257,7 +256,6 @@ async fn per_kind_concurrency_actually_caps_running_jobs() {
             poll_interval: Duration::from_millis(30),
             batch_size: 10,
             reap_interval: Duration::from_secs(3600),
-            cipher: None,
             per_kind_concurrency: HashMap::from([("slow".to_string(), 1)]),
         },
     )

@@ -45,23 +45,7 @@ impl MemoryService {
 
     // ---------- KV 值保值通道（蒸馏零介入——value 逐字保存） ----------
 
-    /// JEV 哨兵解析（T017）：settings + cipher → 可用客户端；不可用 → None（放行）。
-    async fn jev_client(&self) -> Option<engram_llm::decisions::JevClient> {
-        let cipher = self.cipher.as_ref()?;
-        let cfg: engram_llm::decisions::JevConfig = engram_storage::repo::settings::get_json(
-            &self.pool,
-            engram_llm::decisions::SETTINGS_KEY,
-        )
-        .await
-        .unwrap_or_default();
-        engram_llm::decisions::resolve(&cfg, cipher, reqwest::Client::new()).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "JEV 配置解析失败——KV 闸降级放行");
-            None
-        })
-    }
-
     /// 写入/更新一个结构化值。同 key 就地覆盖（可变状态不产生取代链）。
-    /// T017：JEV 准入闸前置——非 kv_fit 判定拒绝入库并建议去处（失败/未配置放行）。
     pub async fn kv_put(
         &self,
         key: &str,
@@ -79,33 +63,6 @@ impl MemoryService {
             return Err(MemoryError::BadRequest(
                 "value 不能为空——KV 是精确值通道，不放空话".into(),
             ));
-        }
-        // T017 准入闸：哨兵可用才判定；失败/未配置降级放行（显式动作不阻塞）
-        if let Some(client) = self.jev_client().await {
-            let state =
-                serde_json::json!({ "key": k, "value": v, "context": context.unwrap_or("") });
-            match client
-                .decide(state, engram_llm::decisions::kv_gate_questions())
-                .await
-            {
-                Ok(result) => {
-                    let verdict = result
-                        .answers
-                        .get("gate")
-                        .and_then(|a| a.choice())
-                        .unwrap_or("kv_fit")
-                        .to_string();
-                    if verdict != "kv_fit" {
-                        return Err(MemoryError::BadRequest(format!(
-                            "KV 准入闸拒绝（JEV 判定: {verdict}）——{}",
-                            engram_llm::decisions::kv_gate_reject_hint(&verdict)
-                        )));
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, key = %k, "JEV KV 闸失败——放行（降级直通）");
-                }
-            }
         }
         const SOURCES: [&str; 4] = ["user_stated", "verified_probe", "agent_inferred", "doc"];
         let src = source.unwrap_or("user_stated");

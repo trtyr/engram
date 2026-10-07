@@ -96,77 +96,12 @@ async fn run_claimed(
     let (segments, turn_map) = build_segments(&sessions);
     let total_segments = segments.len();
 
-    // T014（决策 001）：JEV 保险级联——段级三档路由。哨兵不可用 = 全部直通（降级不阻塞）。
-    let mut jev = jev_client_for(&ctx).await;
-    let mut guard_stats: (u64, u64, u64) = (0, 0, 0); // (pass, review, reject)
-
     let mut pending: Vec<PendingAtom> = Vec::new();
     let mut all_relations: Vec<(String, String, String)> = Vec::new();
     for (i, seg) in segments.iter().enumerate() {
-        // 哨兵判定（一次请求两问：guard noul + 归因 choice）；失败 → 本任务起降级直通
-        if let Some(client) = &jev {
-            let seg_text = seg
-                .iter()
-                .map(|l| l.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            match engram_llm::decisions::guard_segment(client, &seg_text).await {
-                Ok(g) => match g.outcome {
-                    engram_llm::decisions::GuardOutcome::Reject => {
-                        guard_stats.2 += 1;
-                        ctx.emit(
-                            "JEV 拒绝（跳过精抽）",
-                            Some(serde_json::json!({
-                                "segment": i + 1,
-                                "p": g.p,
-                                "reason": g.reason.unwrap_or_else(|| "unknown".into()),
-                            })),
-                        )
-                        .await
-                        .ok();
-                        continue;
-                    }
-                    engram_llm::decisions::GuardOutcome::Review => {
-                        guard_stats.1 += 1;
-                        ctx.emit(
-                            "JEV 低置信（照常落库，confidence 靠后）",
-                            Some(serde_json::json!({ "segment": i + 1, "p": g.p })),
-                        )
-                        .await
-                        .ok();
-                    }
-                    engram_llm::decisions::GuardOutcome::Pass => {
-                        guard_stats.0 += 1;
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!(error = %e, segment = i + 1, "JEV 哨兵失败——本任务起降级直通");
-                    ctx.emit(
-                        "JEV 哨兵不可用（降级直通）",
-                        Some(serde_json::json!({ "error": e.to_string() })),
-                    )
-                    .await
-                    .ok();
-                    jev = None;
-                }
-            }
-        }
         let (atoms, rels) = extract_segment(&ctx, llm.as_ref(), seg, i + 1, total_segments).await?;
         all_relations.extend(rels);
         pending.extend(parse_atoms(&atoms, &turn_map, &session_sensitive));
-    }
-    if jev.is_some() {
-        ctx.emit(
-            "JEV 保险级联",
-            Some(serde_json::json!({
-                "segments": total_segments,
-                "pass": guard_stats.0,
-                "review": guard_stats.1,
-                "reject": guard_stats.2,
-            })),
-        )
-        .await
-        .ok();
     }
 
     let candidate_ids = persist_atoms(&ctx, llm.as_ref(), pending).await?;
@@ -195,31 +130,6 @@ async fn run_claimed(
     // P015：抽取直落 active + 向量化即完成——判重/归档/画像归离线整理 Agent
     // （节律每天巡逻 + 手动触发），写入链不再串行接棒。
     Ok(json!({"session_ids": session_ids, "candidate_ids": candidate_ids}))
-}
-
-/// JEV 哨兵解析（T014）：settings 配置 + ctx.cipher → 可用客户端；
-/// 未启用/未配置/无 cipher → None（调用方全部直通）。
-async fn jev_client_for(ctx: &JobContext) -> Option<engram_llm::decisions::JevClient> {
-    // 无 cipher = 未部署哨兵（常态，静默直通不噪音）
-    let cipher = ctx.cipher.as_ref()?;
-    let cfg: engram_llm::decisions::JevConfig =
-        engram_storage::repo::settings::get_json(ctx.pool(), engram_llm::decisions::SETTINGS_KEY)
-            .await
-            .unwrap_or_default();
-    // 配置了但解析失败（坏 key_enc 等）= 异常态，必须可见（T020 精神：降级可观测）
-    match engram_llm::decisions::resolve(&cfg, cipher, reqwest::Client::new()) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(error = %e, "JEV 配置解析失败——降级直通");
-            ctx.emit(
-                "JEV 哨兵不可用（降级直通）",
-                Some(serde_json::json!({ "error": e.to_string(), "stage": "resolve" })),
-            )
-            .await
-            .ok();
-            None
-        }
-    }
 }
 
 /// 单段抽取：一次 LLM 调用 + 段级事件留痕（空段显式确认「无持久洞察」）。

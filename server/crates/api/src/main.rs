@@ -112,8 +112,8 @@ async fn build_runner(
     if let Ok(v) = std::env::var("AGENT_MEMORY_JOB_CONCURRENCY") {
         runner_config.per_kind_concurrency = engram_jobs::runner::parse_per_kind_concurrency(&v);
     }
-    // T014/T017：JEV 哨兵解密 settings 里的 api_key——runner 需 cipher（None=哨兵降级直通）
-    let jev_cipher = {
+    // ProviderRegistry 解密供应商 api_key 用（密文在 llm_providers 表）。
+    let cipher = {
         let master_key_hex = cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32));
         Some(engram_llm::KeyCipher::from_hex_master(&master_key_hex).map_err(|e| {
             anyhow::anyhow!(
@@ -123,8 +123,7 @@ async fn build_runner(
             )
         })?)
     };
-    runner_config.cipher = jev_cipher.clone();
-    let distill_llm = engram_distill::gateway_llm(pool.clone(), jev_cipher.expect("上方已校验"));
+    let distill_llm = engram_distill::gateway_llm(pool.clone(), cipher.expect("上方已校验"));
     let runner = engram_distill::register_handlers(
         engram_jobs::Runner::new(pool.clone(), runner_config),
         distill_llm.clone(),

@@ -20,14 +20,10 @@ struct Env {
 }
 
 async fn setup(chats: Vec<serde_json::Value>) -> Env {
-    setup_with(chats, None).await
+    setup_with(chats).await
 }
 
-/// 带 cipher 的变体（T014：JEV 哨兵解密配置用；None = 哨兵静默降级）。
-async fn setup_with(
-    chats: Vec<serde_json::Value>,
-    cipher: Option<engram_llm::crypto::KeyCipher>,
-) -> Env {
+async fn setup_with(chats: Vec<serde_json::Value>) -> Env {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
@@ -52,7 +48,6 @@ async fn setup_with(
                 batch_size: 10,
                 reap_interval: Duration::from_secs(3600),
                 per_kind_concurrency: Default::default(),
-                cipher,
             },
         ),
         llm.clone(),
@@ -568,69 +563,6 @@ async fn jobs_mock_extract_main_and_error() {
         "失败应把认领会话回滚为 pending（重试不丢数据）"
     );
     env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
-}
-
-/// arbitrate：主分支按裁决归档候选并写取代链；错误分支失败且候选保持 candidate（无部分写入）。
-#[tokio::test]
-async fn jev_gate_degrades_to_passthrough_with_visible_event() {
-    let cipher = engram_llm::crypto::KeyCipher::from_hex_master(&"bb".repeat(32)).unwrap();
-    let env = setup_with(
-        vec![
-            json!({"atoms": [
-                {"kind": "fact", "content": "用户住在杭州", "confidence": 0.9, "turn_refs": [1]},
-            ]}),
-            json!({"verdicts": []}),
-            json!({"tool": "finish", "args": {"summary": ""}}),
-        ],
-        Some(cipher),
-    )
-    .await;
-
-    // settings 写非法 jev 配置（api_key_enc 非法 hex → resolve Err → 降级直通）
-    sqlx::query(
-        "INSERT INTO settings (key, value) VALUES ('jev', '{\"enabled\":true,\"api_key_enc\":\"zz\"}'::jsonb) \
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-    )
-    .execute(&env.pool)
-    .await
-    .unwrap();
-
-    let sid = Uuid::now_v7();
-    sqlx::query("INSERT INTO raw_sessions (id, agent, content) VALUES ($1, 'pi', $2)")
-        .bind(sid)
-        .bind(session(&[("user", "我住在杭州")]))
-        .execute(&env.pool)
-        .await
-        .unwrap();
-
-    env.queue
-        .enqueue(JobTemplate::new("extract_atoms"))
-        .await
-        .unwrap();
-    let j = wait_done(&env.queue, "extract_atoms").await;
-    assert_eq!(
-        j.status,
-        JobStatus::Succeeded,
-        "降级直通不应失败: {:?}",
-        j.error
-    );
-
-    // 降级事件可查（logs 表唯一时间线，target=job.extract_atoms）
-    let degraded: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM logs \
-         WHERE target = 'job.extract_atoms' AND message LIKE '%JEV 哨兵不可用%'",
-    )
-    .fetch_one(&env.pool)
-    .await
-    .unwrap();
-    assert!(degraded >= 1, "降级事件应落日志可查（count={degraded}）");
-
-    // 原子照常产出（直通 = 不丢功能）
-    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms")
-        .fetch_one(&env.pool)
-        .await
-        .unwrap();
-    assert!(n >= 1, "降级直通后原子应照常产出（count={n}）");
 }
 
 /// T002 回归：contradicts 取代落空（旧条已 archived）时候选不得直接 active——

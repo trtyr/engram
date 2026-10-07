@@ -153,8 +153,6 @@ pub struct MemoryService {
     registry: ProviderRegistry,
     /// 防抖窗口（秒）
     pub debounce_secs: i64,
-    /// 主密钥 cipher（可选）：JEV KV 准入闸（T017）解密配置用；None = 闸降级放行。
-    pub cipher: Option<engram_llm::crypto::KeyCipher>,
 }
 
 /// deep purge 确认短语（canonical 常量，API 层引用）。
@@ -235,14 +233,7 @@ impl MemoryService {
             pool,
             registry,
             debounce_secs: 30,
-            cipher: None,
         }
-    }
-
-    /// 带 cipher（KV 准入闸 T017 需要——解密 settings 里的 JEV api_key）。
-    pub fn with_cipher(mut self, cipher: Option<engram_llm::crypto::KeyCipher>) -> Self {
-        self.cipher = cipher;
-        self
     }
 }
 

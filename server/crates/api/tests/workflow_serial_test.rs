@@ -4,14 +4,11 @@
 //! ② 非 workflow 任务不受 workflow 排队阻塞；
 //! ③ LLM 调用预算耗尽 → 任务 failed 且错误含「预算耗尽」。
 
-use axum::body::Body;
-use axum::http::Request;
 use engram_jobs::types::JobStatus;
 use engram_jobs::{JobContext, JobQueue, JobTemplate, Runner, RunnerConfig};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
-use tower::util::ServiceExt;
 
 mod support;
 
@@ -179,17 +176,4 @@ async fn llm_budget_exceeded_fails_job_with_clear_error() {
     }
 
     handle.shutdown_and_wait(Duration::from_secs(5)).await;
-}
-
-/// 非 Admin 的 JEV 设置读取鉴权烟测（本文件顺带覆盖——settings 面与 runner 无关但同批）。
-#[tokio::test]
-async fn jev_settings_requires_auth_smoke() {
-    let (app, _pg) = support::app().await;
-    let req = Request::builder()
-        .method("GET")
-        .uri("/settings/jev")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_ne!(res.status(), axum::http::StatusCode::OK, "无凭证不得放行");
 }
