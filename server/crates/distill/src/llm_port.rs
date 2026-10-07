@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use engram_jobs::types::JobError;
 use engram_llm::provider::LlmProvider as _;
-use engram_llm::types::{ChatMessage, ChatRequest, EmbedRequest, LlmError, Purpose};
+use engram_llm::types::{
+    ChatMessage, ChatRequest, ChatResponse, EmbedRequest, LlmError, Purpose, ToolCall, ToolDef,
+};
 use engram_llm::{KeyCipher, ProviderRegistry};
 use uuid::Uuid;
 
@@ -16,6 +18,14 @@ pub type ChatJsonFuture<'a> = std::pin::Pin<
 /// embed 返回的 boxed future 形态。
 pub type EmbedFuture<'a> = std::pin::Pin<
     Box<dyn std::future::Future<Output = Result<Vec<Vec<f32>>, JobError>> + Send + 'a>,
+>;
+/// 工具循环单轮返回的 boxed future 形态。
+pub type ChatToolsFuture<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<engram_llm::types::ChatResponse, JobError>>
+            + Send
+            + 'a,
+    >,
 >;
 
 pub trait DistillLlm: Send + Sync {
@@ -32,6 +42,17 @@ pub trait DistillLlm: Send + Sync {
 
     /// 批量嵌入（统一 1024 维，D0010）。
     fn embed<'a>(&'a self, texts: &'a [String], job_id: Uuid) -> EmbedFuture<'a>;
+
+    /// 工具循环单轮：多轮对话 + 工具定义 → 模型响应（content 或 tool_calls）。
+    /// Agent 化抽取（2026-10-07）的核心入口——模型通过 tool_calls 自主写入，
+    /// 调用方不再解析自由文本 JSON。
+    fn chat_tools<'a>(
+        &'a self,
+        purpose: Purpose,
+        messages: &'a [ChatMessage],
+        tools: &'a [engram_llm::types::ToolDef],
+        job_id: Uuid,
+    ) -> ChatToolsFuture<'a>;
 }
 
 fn to_job_err(e: LlmError) -> JobError {
@@ -347,12 +368,64 @@ impl DistillLlm for GatewayLlm {
             Ok(resp.embeddings)
         })
     }
+
+    fn chat_tools<'a>(
+        &'a self,
+        purpose: Purpose,
+        messages: &'a [ChatMessage],
+        tools: &'a [engram_llm::types::ToolDef],
+        job_id: Uuid,
+    ) -> ChatToolsFuture<'a> {
+        Box::pin(async move {
+            let started = std::time::Instant::now();
+            let (provider, model) = self.registry.resolve(purpose).await.map_err(to_job_err)?;
+            let resp = provider
+                .chat(ChatRequest {
+                    model: model.clone(),
+                    messages: messages.to_vec(),
+                    temperature: Some(0.1),
+                    json_mode: false,
+                    max_tokens: None,
+                    tools: Some(tools.to_vec()),
+                    extras: None,
+                })
+                .await
+                .map_err(|e| {
+                    tracing::warn!(purpose = %purpose.as_str(), model = %model, error = %e, "LLM chat_tools 失败");
+                    to_job_err(e)
+                })?;
+            self.registry
+                .record_usage(&engram_llm::types::UsageMeta {
+                    provider: provider.name().to_string(),
+                    model: model.clone(),
+                    purpose: purpose.as_str().to_string(),
+                    input_tokens: resp.input_tokens,
+                    output_tokens: resp.output_tokens,
+                    latency_ms: resp.latency_ms,
+                    job_id: Some(job_id),
+                })
+                .await;
+            metrics::counter!("llm_calls_total", "purpose" => purpose.as_str().to_string())
+                .increment(1);
+            metrics::histogram!("llm_duration_seconds", "purpose" => purpose.as_str().to_string())
+                .record(started.elapsed().as_secs_f64());
+            tracing::debug!(
+                purpose = purpose.as_str(),
+                job = %job_id,
+                tool_calls = ?resp.tool_calls.as_ref().map(|t| t.len()),
+                "chat_tools 轮完成"
+            );
+            Ok(resp)
+        })
+    }
 }
 
 /// mock：按调用顺序弹出预置响应（FIFO，测试注入）。
 pub struct MockLlm {
     /// chat 响应队列（可能是非法 JSON，用于测解析重试）
     pub chats: std::sync::Mutex<std::collections::VecDeque<String>>,
+    /// 工具循环响应队列（FIFO）：每轮一组 tool_calls + 可选 content
+    pub tool_rounds: std::sync::Mutex<std::collections::VecDeque<(String, Vec<ToolCall>)>>,
     /// embedding 固定输出维度
     pub embed_dim: usize,
     /// 测试注入（W3）：embed 一律失败
@@ -362,6 +435,8 @@ pub struct MockLlm {
     /// 测试录制：chat_json 收到的 user prompt 逐条入列——断言「LLM 到底看见了什么」
     /// （P1：验证仲裁相似列表是否把无嵌入种子原子喂给了模型）
     pub sent_user: std::sync::Mutex<Vec<String>>,
+    /// 测试录制：chat_tools 收到的完整消息历史逐轮入列
+    pub sent_tool_messages: std::sync::Mutex<Vec<Vec<ChatMessage>>>,
 }
 
 impl MockLlm {
@@ -373,11 +448,25 @@ impl MockLlm {
     pub fn with_raw_chats(chats: Vec<String>) -> Self {
         Self {
             chats: std::sync::Mutex::new(chats.into_iter().collect()),
+            tool_rounds: std::sync::Mutex::new(std::collections::VecDeque::new()),
             embed_dim: 1024, // 与存储层 vector(1024) 一致（D0010）
             embed_fail: false,
             embed_short: false,
             sent_user: std::sync::Mutex::new(Vec::new()),
+            sent_tool_messages: std::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    /// 工具循环脚本：每轮 (content, tool_calls) 按调用顺序弹出。
+    pub fn with_tool_rounds(rounds: Vec<(String, Vec<ToolCall>)>) -> Self {
+        let m = Self::with_raw_chats(Vec::new());
+        *m.tool_rounds.lock().unwrap_or_else(|e| e.into_inner()) = rounds.into_iter().collect();
+        m
+    }
+
+    /// 便捷构造：一轮工具调用（content 为空）。
+    pub fn tool_round(content: &str, calls: Vec<ToolCall>) -> (String, Vec<ToolCall>) {
+        (content.to_string(), calls)
     }
 }
 
@@ -431,6 +520,33 @@ impl DistillLlm for MockLlm {
                         .collect::<Vec<f32>>()
                 })
                 .collect())
+        })
+    }
+
+    fn chat_tools<'a>(
+        &'a self,
+        _purpose: Purpose,
+        messages: &'a [ChatMessage],
+        _tools: &'a [ToolDef],
+        _job_id: Uuid,
+    ) -> ChatToolsFuture<'a> {
+        Box::pin(async move {
+            self.sent_tool_messages
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(messages.to_vec());
+            let mut q = self.tool_rounds.lock().unwrap_or_else(|e| e.into_inner());
+            match q.pop_front() {
+                Some((content, calls)) => Ok(ChatResponse {
+                    content,
+                    tool_calls: if calls.is_empty() { None } else { Some(calls) },
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    model: "mock".to_string(),
+                    latency_ms: 1,
+                }),
+                None => Err(JobError::Permanent("MockLlm 工具轮耗尽".into())),
+            }
         })
     }
 }

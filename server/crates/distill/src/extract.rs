@@ -16,6 +16,8 @@ use crate::extract_model::{
 use crate::llm_port::LlmRef;
 use crate::prompts;
 
+use engram_llm::types::{ChatMessage, Purpose, ToolDef};
+
 pub async fn run(ctx: JobContext, llm: LlmRef) -> Result<serde_json::Value, JobError> {
     let sessions = claim_pending_sessions(&ctx).await?;
     if sessions.is_empty() {
@@ -99,9 +101,18 @@ async fn run_claimed(
     let mut pending: Vec<PendingAtom> = Vec::new();
     let mut all_relations: Vec<(String, String, String)> = Vec::new();
     for (i, seg) in segments.iter().enumerate() {
-        let (atoms, rels) = extract_segment(&ctx, llm.as_ref(), seg, i + 1, total_segments).await?;
+        let (atoms, rels) = extract_segment(
+            &ctx,
+            llm.as_ref(),
+            seg,
+            i + 1,
+            total_segments,
+            &turn_map,
+            &session_sensitive,
+        )
+        .await?;
         all_relations.extend(rels);
-        pending.extend(parse_atoms(&atoms, &turn_map, &session_sensitive));
+        pending.extend(atoms);
     }
 
     let candidate_ids = persist_atoms(&ctx, llm.as_ref(), pending).await?;
@@ -132,34 +143,193 @@ async fn run_claimed(
     Ok(json!({"session_ids": session_ids, "candidate_ids": candidate_ids}))
 }
 
-/// 单段抽取：一次 LLM 调用 + 段级事件留痕（空段显式确认「无持久洞察」）。
+/// Agent 工具循环单段轮数上限（防失控；正常 1-3 轮收敛）。
+const MAX_AGENT_ROUNDS: usize = 12;
+
+/// 抽取 Agent 的工具面：模型通过调用工具写入产物，不再输出自由文本 JSON。
+fn extract_tools() -> Vec<ToolDef> {
+    vec![
+        ToolDef {
+            name: "save_atoms".into(),
+            description: "提交抽取到的候选原子记忆。可多次调用，每次任意条；全部提交完后停止调工具即可".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "atoms": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "enum": ["preference", "fact", "decision", "event", "insight", "correction", "failure", "convention"]
+                                },
+                                "content": {"type": "string"},
+                                "confidence": {"type": "number"},
+                                "strength": {"type": "string", "enum": ["fact", "inference", "assumption"]},
+                                "turn_refs": {"type": "array", "items": {"type": "integer"}},
+                                "occurred_at": {"type": ["string", "null"]},
+                                "valid_until": {"type": ["string", "null"]},
+                                "entities": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": {"type": "string"},
+                                            "kind": {"type": "string", "enum": ["person", "project", "topic", "group", "place"]}
+                                        },
+                                        "required": ["name", "kind"]
+                                    }
+                                }
+                            },
+                            "required": ["kind", "content", "confidence", "strength", "turn_refs"]
+                        }
+                    }
+                },
+                "required": ["atoms"]
+            }),
+        },
+        ToolDef {
+            name: "add_relation".into(),
+            description: "提交实体间关系（可选）：仅在对话明确表达实体关系时调用".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "relations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "from": {"type": "string"},
+                                "to": {"type": "string"},
+                                "rel_type": {"type": "string", "enum": ["member_of", "located_in", "works_on", "part_of", "related_to"]}
+                            },
+                            "required": ["from", "to", "rel_type"]
+                        }
+                    }
+                },
+                "required": ["relations"]
+            }),
+        },
+        ToolDef {
+            name: "no_insight".into(),
+            description: "显式确认整段对话没有值得长期记住的内容（纯闲聊/事务性操作/全部是项目内部事实或瞬态读数）".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string"}
+                },
+                "required": ["reason"]
+            }),
+        },
+    ]
+}
+
+/// 工具分发：结构化参数直接进白名单解析（parse_atoms/parse_relations），
+/// 不存在自由文本 JSON 解析路径。返回值回填给模型（tool 消息）。
+fn dispatch_tool(
+    name: &str,
+    arguments: &str,
+    turn_map: &[Uuid],
+    session_sensitive: &HashMap<Uuid, bool>,
+    atoms: &mut Vec<PendingAtom>,
+    relations: &mut Vec<(String, String, String)>,
+) -> String {
+    let args: serde_json::Value = match serde_json::from_str(arguments) {
+        Ok(v) => v,
+        Err(e) => return format!("错误：工具参数不是合法 JSON：{e}。请用正确的 JSON 参数重试"),
+    };
+    match name {
+        "save_atoms" => {
+            let parsed = parse_atoms(&args, turn_map, session_sensitive);
+            let n = parsed.len();
+            atoms.extend(parsed);
+            format!("已接收 {n} 条候选原子（本批累计 {} 条）", atoms.len())
+        }
+        "add_relation" => {
+            let parsed = parse_relations(&args);
+            let n = parsed.len();
+            relations.extend(parsed);
+            format!("已接收 {n} 条关系")
+        }
+        "no_insight" => {
+            let reason = args.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+            format!("已确认：本段无持久洞察（{reason}）")
+        }
+        other => {
+            format!("错误：未知工具 {other}，可用工具：save_atoms / add_relation / no_insight")
+        }
+    }
+}
+
+/// 单段抽取（Agent 工具循环）：模型自主调工具写入产物，
+/// 停止调用工具（纯文本收尾）或调 no_insight 即完成本段。
+/// 每轮调用过 record_llm_call 预算闸（T007/T016），完整 I/O 经 GatewayLlm 记账。
 async fn extract_segment(
     ctx: &JobContext,
     llm: &dyn crate::llm_port::DistillLlm,
     seg: &[SegmentLine],
     index: usize,
     total: usize,
-) -> Result<(serde_json::Value, Vec<(String, String, String)>), JobError> {
+    turn_map: &[Uuid],
+    session_sensitive: &HashMap<Uuid, bool>,
+) -> Result<(Vec<PendingAtom>, Vec<(String, String, String)>), JobError> {
     let user = seg
         .iter()
         .map(|l| l.text.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let out = crate::llm_port::chat_json_retrying(
-        ctx,
-        llm,
-        engram_llm::types::Purpose::Extract,
-        &prompts::extract_system(),
-        &user,
-        ctx.job.id,
-    )
-    .await?;
-    let seg_count = out
-        .get("atoms")
-        .and_then(|a| a.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
-    if seg_count == 0 {
+    let mut messages = vec![
+        ChatMessage::system(prompts::extract_agent_system()),
+        ChatMessage::user(user),
+    ];
+    let tools = extract_tools();
+    let mut atoms: Vec<PendingAtom> = Vec::new();
+    let mut relations: Vec<(String, String, String)> = Vec::new();
+    let mut rounds = 0usize;
+
+    loop {
+        // T007/T016：每轮模型调用记账——超任务预算 → BudgetExceeded（failed 可 revive）
+        ctx.record_llm_call()?;
+        let resp = llm
+            .chat_tools(Purpose::Extract, &messages, &tools, ctx.job.id)
+            .await?;
+        let calls = match resp.tool_calls {
+            Some(c) if !c.is_empty() => c,
+            _ => {
+                // 模型纯文本收尾 = 本段完成
+                break;
+            }
+        };
+        rounds += 1;
+        messages.push(ChatMessage::assistant_with_tool_calls(
+            resp.content.clone(),
+            calls.clone(),
+        ));
+        let mut declared_no_insight = false;
+        for c in calls {
+            if c.name.trim() == "no_insight" {
+                declared_no_insight = true;
+            }
+            let result = dispatch_tool(
+                c.name.trim(),
+                &c.arguments,
+                turn_map,
+                session_sensitive,
+                &mut atoms,
+                &mut relations,
+            );
+            messages.push(ChatMessage::tool_result(c.id, result));
+        }
+        if declared_no_insight || rounds >= MAX_AGENT_ROUNDS {
+            if !declared_no_insight {
+                tracing::warn!(index, rounds, "agent 循环达轮数上限，强制收尾");
+            }
+            break;
+        }
+    }
+
+    if atoms.is_empty() {
         ctx.emit(
             &format!("分段抽取 {index}/{total}：无持久洞察（显式确认）"),
             None,
@@ -168,13 +338,16 @@ async fn extract_segment(
         .ok();
     } else {
         ctx.emit(
-            &format!("分段抽取 {index}/{total}：{seg_count} 条候选"),
+            &format!(
+                "分段抽取 {index}/{total}：{} 条候选（{rounds} 轮工具调用）",
+                atoms.len()
+            ),
             None,
         )
         .await
         .ok();
     }
-    Ok((out.clone(), parse_relations(&out)))
+    Ok((atoms, relations))
 }
 
 /// 3. 落库：嵌入 + 插入候选原子 + 实体挂链（失败不阻断主链）。

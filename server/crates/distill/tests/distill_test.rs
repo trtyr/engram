@@ -7,6 +7,7 @@ use engram_distill::llm_port::MockLlm;
 use engram_distill::register_handlers;
 use engram_jobs::types::{JobStatus, JobTemplate};
 use engram_jobs::{JobQueue, Runner, RunnerConfig};
+use engram_llm::types::ToolCall;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,24 +21,42 @@ struct Env {
 }
 
 async fn setup(chats: Vec<serde_json::Value>) -> Env {
-    setup_with(chats).await
+    // 原始文本（可非法，供 chat_json 路径测解析重试）
+    let raw = chats
+        .into_iter()
+        .map(|c| match c {
+            serde_json::Value::String(s) => s,
+            other => other.to_string(),
+        })
+        .collect();
+    setup_llm(Arc::new(MockLlm::with_raw_chats(raw))).await
 }
 
-async fn setup_with(chats: Vec<serde_json::Value>) -> Env {
+/// Agent 工具循环 mock 环：extract 走 chat_tools（工具轮次队列，FIFO）。
+async fn setup_tools(rounds: Vec<(String, Vec<ToolCall>)>) -> Env {
+    setup_llm(Arc::new(MockLlm::with_tool_rounds(rounds))).await
+}
+
+/// 构造一轮工具调用（content 为空）。
+fn tc(name: &str, args: serde_json::Value) -> ToolCall {
+    ToolCall {
+        id: format!("call-{name}"),
+        name: name.to_string(),
+        arguments: args.to_string(),
+    }
+}
+
+/// 终止轮：模型不再调工具（空 tool_calls）= 本段完成。
+fn done_round() -> (String, Vec<ToolCall>) {
+    (String::new(), vec![])
+}
+
+async fn setup_llm(llm: Arc<MockLlm>) -> Env {
     let container = support::start_pgvector().await.expect("容器");
     let url = support::connection_url(&container).await.unwrap();
     let pool = support::connect_with_retry(&url).await.expect("连接");
     engram_storage::run_migrations(&pool).await.expect("迁移");
 
-    let llm: Arc<MockLlm> = Arc::new(MockLlm::with_raw_chats(
-        chats
-            .into_iter()
-            .map(|c| match c {
-                serde_json::Value::String(s) => s, // 原始文本（可非法）
-                other => other.to_string(),
-            })
-            .collect(),
-    ));
     let runner = register_handlers(
         Runner::new(
             pool.clone(),
@@ -89,16 +108,22 @@ fn session(turns: &[(&str, &str)]) -> serde_json::Value {
     )
 }
 
-/// L0 → extract（解析重试，直落 active+向量化；P015 链到 organize 已退役）。
+/// L0 → extract（Agent 工具循环：模型调 save_atoms 写入；P015 链到 organize 已退役）。
 /// 验证：会话 done、原子 active、低置信（<0.55）丢弃、embedding/source_refs 齐全。
 #[tokio::test]
-async fn extract_with_retry_and_full_refs() {
-    let env = setup(vec![
-        serde_json::Value::String("抱歉这不是 JSON".into()), // 第一次：非法 → 重试
-        json!({"atoms": [
-            {"kind": "fact", "content": "用户用 Mac 开发", "confidence": 0.9, "turn_refs": [1]},
-            {"kind": "preference", "content": "用户喜欢暗色主题", "confidence": 0.5, "turn_refs": [1]},
-        ]}),
+async fn extract_lands_atoms_with_refs() {
+    let env = setup_tools(vec![
+        (
+            String::new(),
+            vec![tc(
+                "save_atoms",
+                json!({"atoms": [
+                    {"kind": "fact", "content": "用户用 Mac 开发", "confidence": 0.9, "strength": "fact", "turn_refs": [1]},
+                    {"kind": "preference", "content": "用户喜欢暗色主题", "confidence": 0.5, "strength": "inference", "turn_refs": [1]}
+                ]}),
+            )],
+        ),
+        done_round(),
     ])
     .await;
 
@@ -118,7 +143,7 @@ async fn extract_with_retry_and_full_refs() {
     assert_eq!(
         j.status,
         JobStatus::Succeeded,
-        "解析重试后应成功: {:?}",
+        "工具循环后应成功: {:?}",
         j.error
     );
 
@@ -157,12 +182,8 @@ async fn extract_with_retry_and_full_refs() {
 /// 防抖：同窗口两次触发复用同一任务；到期执行取走全部 pending 会话。
 #[tokio::test]
 async fn debounce_bucket_shares_job() {
-    let env = setup(vec![
-        json!({"atoms": []}),
-        json!({"verdicts": []}),
-        json!({"tool": "finish", "args": {"summary": ""}}),
-    ])
-    .await;
+    // 防抖任务 30s 后才到期，runner 立即关停——工具轮永远不被消费
+    let env = setup_tools(vec![]).await;
 
     let j1 = engram_distill::trigger_auto_extract(&env.queue, 30)
         .await
@@ -189,15 +210,21 @@ async fn debounce_bucket_shares_job() {
 /// B3：分面级证据链——不同分面 evidence_refs 只含各自依据的场景，并打通到 L0 会话。
 #[tokio::test]
 async fn extract_creates_and_links_entities() {
-    let env = setup(vec![
-        json!({"atoms": [
-            {"kind": "fact", "content": "张三建议用户用 Rust 重写索引层", "confidence": 0.9, "turn_refs": [1],
-             "entities": [{"name": "张三", "kind": "person"}, {"name": "Engram", "kind": "project"}]},
-            {"kind": "fact", "content": "张三的生日是 3 月 5 日", "confidence": 0.85, "turn_refs": [1],
-             "entities": [{"name": "张三", "kind": "person"}]},
-            {"kind": "preference", "content": "用户喜欢暗色主题", "confidence": 0.9, "turn_refs": [1]}
-        ]}),
-        json!({"tool": "finish", "args": {"summary": ""}}),
+    let env = setup_tools(vec![
+        (
+            String::new(),
+            vec![tc(
+                "save_atoms",
+                json!({"atoms": [
+                    {"kind": "fact", "content": "张三建议用户用 Rust 重写索引层", "confidence": 0.9, "strength": "fact", "turn_refs": [1],
+                     "entities": [{"name": "张三", "kind": "person"}, {"name": "Engram", "kind": "project"}]},
+                    {"kind": "fact", "content": "张三的生日是 3 月 5 日", "confidence": 0.85, "strength": "fact", "turn_refs": [1],
+                     "entities": [{"name": "张三", "kind": "person"}]},
+                    {"kind": "preference", "content": "用户喜欢暗色主题", "confidence": 0.9, "strength": "fact", "turn_refs": [1]}
+                ]}),
+            )],
+        ),
+        done_round(),
     ])
     .await;
 
@@ -265,12 +292,17 @@ async fn extract_creates_and_links_entities() {
 /// 会话级敏感标记：session sensitive=true → 蒸馏产物自动继承 sensitive。
 #[tokio::test]
 async fn extract_inherits_session_sensitive() {
-    let env = setup(vec![
-        json!({"atoms": [
-            {"kind": "fact", "content": "用户对青霉素过敏", "confidence": 0.9, "turn_refs": [1]}
-        ]}),
-        json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
-        json!({"tool": "finish", "args": {"summary": ""}}),
+    let env = setup_tools(vec![
+        (
+            String::new(),
+            vec![tc(
+                "save_atoms",
+                json!({"atoms": [
+                    {"kind": "fact", "content": "用户对青霉素过敏", "confidence": 0.9, "strength": "fact", "turn_refs": [1]}
+                ]}),
+            )],
+        ),
+        done_round(),
     ])
     .await;
 
@@ -309,14 +341,24 @@ async fn extract_inherits_session_sensitive() {
 /// 圈子强化 P3：extract 抽取类型化关系（顶层 relations → entity_relations）。
 #[tokio::test]
 async fn extract_creates_relations() {
-    let env = setup(vec![
-        json!({"atoms": [
-            {"kind": "fact", "content": "张三在后端组负责 API 层", "confidence": 0.9, "turn_refs": [1],
-             "entities": [{"name": "张三", "kind": "person"}, {"name": "后端组", "kind": "group"}]}
-        ],
-        "relations": [{"from": "张三", "to": "后端组", "rel_type": "member_of"}]}),
-        json!({"verdicts": [{"candidate_id": "00000000-0000-0000-0000-000000000000", "disposition": "duplicate"}]}),
-        json!({"tool": "finish", "args": {"summary": ""}}),
+    let env = setup_tools(vec![
+        (
+            String::new(),
+            vec![
+                tc(
+                    "save_atoms",
+                    json!({"atoms": [
+                        {"kind": "fact", "content": "张三在后端组负责 API 层", "confidence": 0.9, "strength": "fact", "turn_refs": [1],
+                         "entities": [{"name": "张三", "kind": "person"}, {"name": "后端组", "kind": "group"}]}
+                    ]}),
+                ),
+                tc(
+                    "add_relation",
+                    json!({"relations": [{"from": "张三", "to": "后端组", "rel_type": "member_of"}]}),
+                ),
+            ],
+        ),
+        done_round(),
     ])
     .await;
 
@@ -400,15 +442,20 @@ async fn reembed_memory_fills_missing_vectors() {
 /// 议题二：extract 把 LLM 解析出的相对时间（以 prompt 日期锚换算）落入 occurred_at/valid_until。
 #[tokio::test]
 async fn extract_carries_event_time() {
-    let env = setup(vec![
-        json!({"atoms": [
-            {"kind": "event", "content": "用户与张三去环淀山湖骑行", "confidence": 0.9, "turn_refs": [1],
-             "occurred_at": "2026-09-02", "valid_until": "2026-09-02T23:59:59Z",
-             "entities": [{"name": "淀山湖", "kind": "place"}]},
-            {"kind": "fact", "content": "用户偏好早上六点半出发", "confidence": 0.9, "turn_refs": [1]}
-        ]}),
-        json!({"verdicts": []}),
-        json!({"tool": "finish", "args": {"summary": ""}}),
+    let env = setup_tools(vec![
+        (
+            String::new(),
+            vec![tc(
+                "save_atoms",
+                json!({"atoms": [
+                    {"kind": "event", "content": "用户与张三去环淀山湖骑行", "confidence": 0.9, "strength": "fact", "turn_refs": [1],
+                     "occurred_at": "2026-09-02", "valid_until": "2026-09-02T23:59:59Z",
+                     "entities": [{"name": "淀山湖", "kind": "place"}]},
+                    {"kind": "fact", "content": "用户偏好早上六点半出发", "confidence": 0.9, "strength": "fact", "turn_refs": [1]}
+                ]}),
+            )],
+        ),
+        done_round(),
     ])
     .await;
 
@@ -462,7 +509,8 @@ async fn extract_carries_event_time() {
 // F4 口径更新（P001 决策 001）：敏感原子照常抽取——sensitive 只是标记不再排除。
 #[tokio::test]
 async fn extract_skips_distill_off_sessions() {
-    let env = setup(vec![]).await;
+    // 无工具轮：任何 extract LLM 调用都会失败——验证 off 会话根本不进抽取
+    let env = setup_tools(vec![]).await;
 
     let off_id = Uuid::now_v7();
     sqlx::query(
@@ -507,12 +555,22 @@ async fn insert_session(env: &Env, id: Uuid, text: &str) {
         .unwrap();
 }
 
-/// extract：主分支落候选原子；错误分支（LLM 两次解析全败）判失败且会话回滚 pending。
+/// extract：主分支（模型调 save_atoms 写入）落候选原子；
+/// 错误分支（LLM 调用失败）判失败且会话回滚 pending。
 #[tokio::test]
 async fn jobs_mock_extract_main_and_error() {
-    let env = setup(vec![json!({"atoms": [
-        {"kind": "fact", "content": "用户用 Mac 开发", "confidence": 0.9, "turn_refs": [1]}
-    ]})])
+    let env = setup_tools(vec![
+        (
+            String::new(),
+            vec![tc(
+                "save_atoms",
+                json!({"atoms": [
+                    {"kind": "fact", "content": "用户用 Mac 开发", "confidence": 0.9, "strength": "fact", "turn_refs": [1]}
+                ]}),
+            )],
+        ),
+        done_round(),
+    ])
     .await;
     let sid = Uuid::now_v7();
     insert_session(&env, sid, "我用 Mac 开发").await;
@@ -535,12 +593,8 @@ async fn jobs_mock_extract_main_and_error() {
     assert_eq!((n, st.as_str()), (1, "active"), "候选经链上仲裁转正");
     env.handle.shutdown_and_wait(Duration::from_secs(5)).await;
 
-    // 错误分支：两段垃圾响应 → 两次解析失败 → 任务失败；认领会话必须回滚 pending
-    let env = setup(vec![
-        serde_json::Value::String("不是 JSON".into()),
-        serde_json::Value::String("仍不是 JSON".into()),
-    ])
-    .await;
+    // 错误分支：mock 工具轮耗尽 → LLM 调用失败 → 任务失败；认领会话必须回滚 pending
+    let env = setup_tools(vec![]).await;
     let sid2 = Uuid::now_v7();
     insert_session(&env, sid2, "这条会失败").await;
     env.queue
@@ -733,15 +787,9 @@ async fn t008_archived_entity_revives_with_continuity() {
 /// 满批自续投下一批，最终全部蒸完（不再一次性全量抢占）。
 #[tokio::test]
 async fn t006_extract_claim_is_batched_with_continuation() {
-    // 60 个 pending 会话，内容为空话（extract 每段返回空 atoms）
-    let mut chats = vec![];
-    for _ in 0..60 {
-        chats.push(json!({"atoms": []}));
-    }
-    // 链尾 mock 兜底（P015 后 organize 链退役，多余响应不被消费）
-    chats.push(json!({"tool": "finish", "args": {"summary": ""}}));
-    chats.push(json!({"tool": "finish", "args": {"summary": ""}}));
-    let env = setup(chats).await;
+    // 60 个 pending 会话，内容为空话（模型每段直接纯文本收尾 → 零原子）
+    // 每段 1 轮（空 tool_calls = 完成）；两批 ≈ 2-4 段，给 10 轮余量
+    let env = setup_tools(vec![done_round(); 10]).await;
     for i in 0..60 {
         let sid = Uuid::now_v7();
         sqlx::query(
