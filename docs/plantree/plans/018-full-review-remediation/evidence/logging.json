@@ -1,0 +1,194 @@
+{
+  "report_schema_version": 1,
+  "task": "你是通用语言无关的审查员——所有语法示例都是模式族，按仓库所用语言的等价物取用。对目标仓库做全量审查，回答一个问题：\n这个项目有没有全面的、健全的、全覆盖的、统一的日志系统？按以下六个审查域逐一深挖：\n\n【域1 · 统一性】\n- 有没有统一的日志设施：集中初始化、统一门面/封装、全仓共用同一套日志库？\n- 还是反模式：各模块各写各的——裸输出语句直接往标准输出糊（print/println!/console.log/fmt.Println/echo 族）、\n  有人用库 A 有人用库 B、配置散落各处初始化时机不一？\n- 直接绕过日志门面的裸输出（print/puts/eprintln）穷举盘点，每个都是一条发现。\n\n【域2 · 级别纪律】\n- ERROR/WARN/INFO/DEBUG 的语义边界是否清晰且全仓一致？\n  典型滥用：用 ERROR 打普通提示、用 INFO 打完整堆栈、WARN 刷屏、该 ERROR 的失败降成了 DEBUG。\n- 每种级别在「事发时谁需要看、看完要做什么」上是否讲得通？\n\n【域3 · 全覆盖】\n- 关键路径是否有日志：进程/服务启动与退出、外部调用（网络/DB/文件）前后、\n  错误与重试分支、后台任务生命周期、关键状态迁移点。\n- 反向盘点更重要：哪些**应该有日志的关键路径是静默的**？逐条列出——线上排查时这些位置就是盲区。\n\n【域4 · 结构化与可检索】\n- 日志是纯自由字符串，还是结构化输出（键值对/JSON 字段）？\n- 有没有统一上下文注入：request id / trace id / 模块名 / 用户标识，能否把一次请求的多条日志串起来？\n- 消息模板是否固定、变量是否参数化（可检索聚合），还是字符串插值拼接（同一事件日志形态各异，无法查询）？\n\n【域5 · 敏感信息泄漏】\n- 日志里有没有密钥、token、密码、个人身份信息、完整请求体/响应体？\n- 调试级别遗留的敏感输出在生产行不行得通（级别开关是否真能关掉它）？\n\n【域6 · 输出与治理】\n- 输出目标是什么（stdout/文件/远端采集），有无轮转与大小控制，会不会写满磁盘？\n- 级别能否按模块/运行时动态调整？生产环境的 DEBUG 噪音有没有治理机制？\n- 与错误系统的衔接：错误发生时是否必然留下结构化日志（供告警），还是错误与日志两条线互不知情？\n\n【方法论】\n先找日志初始化点与统一封装（没有就是域1的结论）；\n统计各级别的使用分布与典型样例；对三条核心业务路径做覆盖核对（入口→外部调用→错误分支→出口）；\n裸输出语句按仓库语言的等价物穷举检索；敏感信息用模式检索（密钥字段名/token 形态）+ 抽样核对。\n\n【结论分级】\n总评定级：健全（统一设施+级别有纪律+关键路径全覆盖+可检索）/ 部分覆盖（有日志但各自为战或盲区多）/\n缺失（基本靠裸输出）。分级附三条最强证据与三条最弱证据。\n\n【证据纪律——硬约束】\n1. 每条发现必须给 file:line 证据；引用前必须真读过该文件——未读过的文件禁止出现在结论里。\n2. 区分「确证」与「疑似」：确证 = 代码路径完整可复述；疑似 = 说明缺口在哪、如何进一步确证。\n3. 搜过但没找到的，写进死胡同（避免后来者重复搜索）。\n4. 只审仓库内代码：第三方依赖内部实现不算发现，外部交互点只审我方的对接面。\n5. 结论按模板分级，禁止「总体良好」这类无证据套话——每个分级必须能被证据撑住。\n",
+  "answer": "总评定级：**健全**（服务端 Rust 部分）。项目存在设计完整、集中初始化、全仓共用的统一日志系统：以 tracing 为唯一门面（裸 println!/eprintln! 仅出现在测试与脚本，生产代码零命中），main.rs 最先初始化 JSON 结构化日志 + EnvFilter（RUST_LOG，默认 info），并通过自研 PgLogLayer 经无反压 mpsc channel 批量落 PG logs 表（64 条/500ms），request_id 经 task_local + request_id_mw 中间件贯穿 HTTP 全链路并提升为独立列；ApiError → 日志一体化（into_response 必打 tracing::error! 且错误信封回带 request_id），internal_bug 类自动打 alert 标记，每小时保留期清理（info 30 天/debug 7 天，env 可覆盖）。级别语义总体清晰（WARN=降级可继续、ERROR=需介入、INFO=审计/生命周期、DEBUG=幂等命中），LLM 外部调用、job 生命周期、文档摄取失败分支覆盖良好。最强三条证据：集中初始化管道（main.rs:22-42）、request_id 全链路（logging.rs:83-178）、错误→日志一体化（error.rs:118-141）。最弱三条：① 敏感信息靠业务纪律而非写侧过滤（logging.rs:8-9 自述红线，LLM 失败日志打响应体前 500 字符，主密钥错误信息含前 8 hex 字符）；② 所有 API 错误含 4xx 客户端错误统一打 ERROR（error.rs:118-128）；③ 日志丢失路径存在——channel 满即丢、flush 失败仅 warn 不重试（logging.rs:129-135/222-245），且无 logs 查询 API。另有文档脱节：docs/plantree/005 仍写「无落库」，现状已实现 PG 落地。前端 web/ 与脚本无日志设施，但属脚本性质，不构成生产盲区。",
+  "findings": [
+    {
+      "statement": "统一集中初始化：main() 最先建 channel+init_tracing，JSON 输出 + EnvFilter(RUST_LOG 默认 info) + PG 落地层，注释明确「必须最先初始化」的时序治理",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/main.rs",
+          "lines": "22-42",
+          "audit_seq": 7
+        },
+        {
+          "file": "server/crates/api/src/main.rs",
+          "lines": "61-73",
+          "audit_seq": 7
+        }
+      ]
+    },
+    {
+      "statement": "结构化落库管道：PgLogLayer 零 IO 经 mpsc(8192) 送出，批量 INSERT logs 表，channel 满即丢不反压；保留期清理 info 30 天/debug 7 天，env 可覆盖",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "98-136",
+          "audit_seq": 9
+        },
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "188-247",
+          "audit_seq": 9
+        },
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "249-285",
+          "audit_seq": 9
+        }
+      ]
+    },
+    {
+      "statement": "request_id 全链路贯穿：task_local + request_id_mw 中间件（x-request-id 或 uuid7，响应头回带，HTTP 请求日志含 method/path/status/latency_ms），request_id 提升为独立列",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "83-96",
+          "audit_seq": 9
+        },
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "141-178",
+          "audit_seq": 9
+        },
+        {
+          "file": "server/crates/api/src/routes/mod.rs",
+          "lines": "153-156",
+          "audit_seq": 34
+        }
+      ]
+    },
+    {
+      "statement": "错误与日志衔接一体化：ApiError::into_response 必打 tracing::error!(code,category,status,error) 且错误信封回带 request_id；internal_bug 类自动升级 alert=true 告警标记",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/error.rs",
+          "lines": "118-141",
+          "audit_seq": 22
+        },
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "123-128",
+          "audit_seq": 9
+        }
+      ]
+    },
+    {
+      "statement": "关键路径覆盖：外部 LLM 调用成败/失败重试、job 抢占幂等/debug 命中、runner 停机信号、文档摄取失败分支与失败态落库失败均有日志",
+      "evidence": [
+        {
+          "file": "server/crates/llm/src/provider/chat.rs",
+          "lines": "170-175",
+          "audit_seq": 36
+        },
+        {
+          "file": "server/crates/distill/src/llm_port.rs",
+          "lines": "178-185",
+          "audit_seq": 38
+        },
+        {
+          "file": "server/crates/jobs/src/queue.rs",
+          "lines": "33-38",
+          "audit_seq": 40
+        },
+        {
+          "file": "server/crates/jobs/src/runner.rs",
+          "lines": "219-224",
+          "audit_seq": 42
+        },
+        {
+          "file": "server/crates/core/src/wiki_docs/pipeline/steps.rs",
+          "lines": "3-14",
+          "audit_seq": 44
+        }
+      ]
+    },
+    {
+      "statement": "审计级结构化日志：credentials.put 带 audit=true, action, target, actor, expires_at 字段，模板固定变量参数化，可检索聚合",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/routes/credentials_api.rs",
+          "lines": "147-154",
+          "audit_seq": 46
+        }
+      ]
+    },
+    {
+      "statement": "裸输出（println!/eprintln!/console.log）仅存在于 Rust 测试与前端 e2e/脚本，服务端生产代码零命中",
+      "evidence": [
+        {
+          "file": "server/crates/api/tests/cg_upload_test.rs",
+          "lines": "579-588",
+          "audit_seq": 48
+        },
+        {
+          "file": "web/e2e-design-shots.mjs",
+          "lines": "44-51",
+          "audit_seq": 50
+        }
+      ]
+    },
+    {
+      "statement": "最弱①：敏感信息防护靠纪律而非机制——写侧无 secrets 过滤（logging.rs 红线自述）；LLM 失败日志打响应体前 500 字符；主密钥错误信息含前 8 hex 字符",
+      "evidence": [
+        {
+          "file": "server/crates/llm/src/provider/chat.rs",
+          "lines": "170-175",
+          "audit_seq": 36
+        },
+        {
+          "file": "server/crates/api/src/main.rs",
+          "lines": "115-124",
+          "audit_seq": 7
+        },
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "8-9",
+          "audit_seq": 9
+        }
+      ]
+    },
+    {
+      "statement": "最弱②：级别语义瑕疵——所有 API 错误含 BadRequest/NotFound/Conflict 等客户端错误统一打 ERROR，客户端噪音混入 ERROR 告警面",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/error.rs",
+          "lines": "110-128",
+          "audit_seq": 22
+        }
+      ]
+    },
+    {
+      "statement": "最弱③：日志丢失路径存在——channel 满即丢、批量 INSERT 失败仅 warn 不重试（有意取舍但属盲区）；且无 logs 查询 API；docs/plantree/005 旧文档描述「无落库」与现状脱节",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "129-135",
+          "audit_seq": 9
+        },
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "222-245",
+          "audit_seq": 9
+        },
+        {
+          "file": "docs/plantree/plans/005-logging/README.md",
+          "lines": "5-9",
+          "audit_seq": 52
+        }
+      ]
+    }
+  ],
+  "dead_ends": [
+    "检索 'logs_api|/logs' 零命中——logs 表没有配套查询 HTTP 端点（疑似缺口，可检索 routes/ 目录进一步确证）",
+    "docs/plantree/plans/005-logging/README.md 是 2026-10-01 的旧盘点（描述「无落库」），与当前代码不符，作历史文档参考而非现状"
+  ],
+  "confidence": "high",
+  "degraded": false,
+  "stats": {
+    "turns": 9,
+    "tool_calls": 22,
+    "duration_ms": 84492,
+    "total_tokens": 204180
+  }
+}

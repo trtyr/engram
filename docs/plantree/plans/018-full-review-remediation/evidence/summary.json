@@ -1,0 +1,47 @@
+{
+  "all_ok": true,
+  "tasks": {
+    "errors": {
+      "task": "errors",
+      "exit": 0,
+      "seconds": 97.8,
+      "result_line": "  [✓] [errors] 97.7s  置信度=high  findings=13  tokens=274594"
+    },
+    "logging": {
+      "task": "logging",
+      "exit": 0,
+      "seconds": 87.0,
+      "result_line": "  [✓] [logging] 86.9s  置信度=high  findings=10  tokens=204180"
+    },
+    "deadcode": {
+      "task": "deadcode",
+      "exit": 0,
+      "seconds": 133.0,
+      "result_line": "  [✓] [deadcode] 132.9s  置信度=medium  findings=6  tokens=526621"
+    },
+    "aifriendly": {
+      "task": "aifriendly",
+      "exit": 0,
+      "seconds": 145.2,
+      "result_line": "  [✓] [aifriendly] 145.1s  置信度=high  findings=12  tokens=777301"
+    },
+    "coupling": {
+      "task": "coupling",
+      "exit": 0,
+      "seconds": 45.5,
+      "result_line": "  [✓] [coupling] 45.4s  置信度=medium  findings=4  tokens=161745"
+    },
+    "bugs": {
+      "task": "bugs",
+      "exit": 0,
+      "seconds": 135.2,
+      "result_line": "  [✓] [bugs] 135.1s  置信度=high  findings=5  tokens=507372"
+    },
+    "config": {
+      "task": "config",
+      "exit": 0,
+      "seconds": 81.8,
+      "result_line": "  [✓] [config] 81.7s  置信度=high  findings=11  tokens=310854"
+    }
+  }
+}

@@ -1,0 +1,205 @@
+{
+  "report_schema_version": 1,
+  "task": "你就是一名专审「配置与易用性」的审查员。审查对象是这个工具/项目的配置面与 CLI 交互面，\n回答一个问题：用户（包括 AI 代理）用起来是否友好、省心？按以下六个审查域逐一深挖：\n\n【域1 · 配置优先级链健康度】\n- 优先级链是否清晰简单？黄金链是：CLI 旗标 > 配置文件 > 内置默认值，三层封顶。\n  中间层越多越恶心。\n- **环境变量滥用盘点**（重点）：工具依赖多少个环境变量？哪些本该走配置文件？\n  环境变量是共享污染源——每个工具塞几个，用户的 shell 环境就成垃圾场。\n  密钥类走配置文件（用户自担风险）或专用 secret 通道，唯独不该默认从 env 捞。\n- 配置文件位置是否符合生态惯例（~/.工具名/config.toml 之类），能否一处管全部？\n\n【域2 · 默认值质量（零配置体验）】\n- 不做任何配置能不能跑起来？第一次使用的最短路径是什么？\n- 每个参数的默认值是不是「写死的最佳实践」——用户不配也得到合理行为？\n  反例：默认值是开发调试用的（如默认开 debug、默认关校验）。\n- 必填项压到最少了吗？理想状态：必填只剩一个（如 api_key）。\n- 缺省是否安全：不配的开关默认落在安全侧（危险操作默认关、外部调用默认有超时）。\n\n【域3 · 参数简洁度】\n- CLI 参数总量是否克制？常用操作几步能达？列出明显冗余/可合并的参数。\n- 命名一致性：同类参数同一风格（--out/--output 混用、单复数混用、缩写不一致都是发现）。\n- 交互一致性：子命令/旗标的行为模式是否统一（有些带值有些布尔飘忽、\n  有的读配置有的只认旗标——同类操作应同类手法）。\n\n【域4 · 帮助与回显】\n- 帮助信息：--help 是否每个参数有说明+默认值+示例？新用户不看文档能否只靠 --help 上手？\n- 错误回显：参数缺失/格式错/值非法时，提示是否告诉你「缺什么、怎么改」\n  （如「缺少 --repo，用法：X --repo 路径」）？还是甩一行 usage 或干脆堆调用栈？\n- 运行回显：执行中是否回显关键状态（在干嘛、进度、产物落在哪）？用户是否需要「猜」工具在干什么？\n\n【域5 · AI 代理视角的友好】\n- 错误信息是否上下文充足：AI 拿到一条报错能否**自纠**（错误码/缺失项/期望格式/下一步动作）？\n  语义化错误码 + 人话描述 + 修复方向三件套是否齐？\n- --help 与文档输出是否结构化、稳定、可被程序化消费？\n- 有无机器可读输出模式（JSON + 稳定 schema 版本），供上游 agent/脚本消费？\n- 回显噪音控制：进度信息走 stderr、结果走 stdout 是否分离干净（AI 管道场景的生死线）。\n\n【域6 · 文档与配置的同步】\n- 配置文档是否覆盖全部参数：每个参数有说明+类型+默认值？文档里的参数实际存在吗\n  （声称 vs 实际，抽查核对——文档参数不存在或实际参数无文档都算发现）。\n- 样例配置能否直接抄了就跑？升级时配置的向后兼容有没有说法？\n\n【结论分级】\n总评定级：开箱即用（零配置能跑+报错可自纠+回显贴心）/ 需要学习但顺理成章 /\n反人类（env 满天飞+必填一堆+报错甩栈）。\n附：①环境变量清单（该迁配置文件的逐个点名）；②冗余/不一致参数清单；\n③最快见效的三项易用性改进。\n\n【证据纪律——硬约束】\n1. 每条发现必须给 file:line 证据；引用前必须真读过该文件——未读过的文件禁止出现在结论里。\n2. 区分「确证」与「疑似」：确证 = 代码路径完整可复述；疑似 = 说明缺口在哪、如何进一步确证。\n3. 搜过但没找到的，写进死胡同（避免后来者重复搜索）。\n4. 只审仓库内代码：第三方依赖内部实现不算发现，外部交互点只审我方的对接面。\n5. 结论按模板分级，禁止「总体良好」这类无证据套话——每个分级必须能被证据撑住。\n",
+  "answer": "总评定级：【需要学习但顺理成章，偏顺】。engram 是服务端 + MCP 工具面系统，没有传统「CLI 旗标 > 配置文件 > 默认值」三层链——实际链是「env（唯一配置层）> 代码默认值」两层，另由 engramctl 托管 ~/.engram/.env 文件（本质仍是 env 注入，算半个配置文件层，位置符合 ~/.工具名 生态惯例）。环境变量盘点：应用级约 20 个（AGENT_MEMORY_DATABASE_URL/PORT/ADMIN_PASSWORD/MASTER_KEY/DATA_DIR/METRICS/JOB_CONCURRENCY/EMBEDDING_DIMENSIONS/EMBED_QUERY_INSTRUCTION/VEC_FALLBACK_MAX_DISTANCE/VEC_FALLBACK_RELATIVE_MARGIN/MCP_ALLOWED_HOSTS/CG_LAYOUT_ITERS + ENGRAM_LOG_RETAIN_DAYS/RETAIN_DEBUG_DAYS/SYNC_TOKEN/CODEGRAPH_TOKEN/WIKI_AGENT_RELAY/DUMP_REQ_PATH），密钥类（ADMIN_PASSWORD/MASTER_KEY）走 env 属实但属「部署密钥」范畴且文档明示丢失后果；真正该收编的是散落在各 crate 现场读取的运维旋钮（VEC_FALLBACK_*、EMBED_QUERY_INSTRUCTION、CG_LAYOUT_ITERS、LOG_RETAIN_*）——无集中清单，只能靠 grep 代码发现。零配置体验：裸服务端只需 AGENT_MEMORY_DATABASE_URL 一个必填，其余全部安全默认（8080 端口、MCP Host 白名单默认仅 loopback、外部调用全带超时矩阵、危险操作分 erase scope 独立授权）；但 engramctl 在 .env 缺项时静默注入弱默认（dev-pw / \"ab\"×32）便利压倒安全（有启动 WARN 兜底）。帮助与回显是强项：错误体 {code,category,message,retryable,request_id} 四件套结构化、code 稳定、文案普遍人话+可照抄修复命令（openssl 生成、codegraph 装版命令、brew 指引）；MCP 侧 L0 目录/L1 JSON Schema 手册/action=help 渐进发现 + wiki 九组导航，AI 代理自纠能力一流。弱点：AGENT_MEMORY_EMBEDDING_DIMENSIONS 是「死参数」（非 1024 一律拒启，可配空间为零）；--token 与 ENGRAM_SYNC_TOKEN 双通道轻微不一致。最快见效三项改进：①把散点 env 收进 Config 或至少 .env.example 建总表；②EMBEDDING_DIMENSIONS 要么删要么真支持迁移；③engramctl 弱默认注入改为显式确认或首次生成随机值。",
+  "findings": [
+    {
+      "statement": "服务端唯一必填项是 AGENT_MEMORY_DATABASE_URL；端口默认 8080，admin 密码/master key 未设只 WARN 不拒启——必填压到最少，零配置（有 PG）可跑",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/config.rs",
+          "lines": "37-95",
+          "audit_seq": 7
+        }
+      ]
+    },
+    {
+      "statement": "deploy/.env.example 样例全部注释态+默认值+生成命令（openssl rand -hex 32），可直接抄跑；覆盖主要变量但未收录 ENGRAM_LOG_RETAIN_DAYS、ENGRAM_SYNC_TOKEN、AGENT_MEMORY_CG_LAYOUT_ITERS 等散点 env",
+      "evidence": [
+        {
+          "file": "deploy/.env.example",
+          "lines": "1-67",
+          "audit_seq": 29
+        }
+      ]
+    },
+    {
+      "statement": "engramctl 本地形态在 ~/.engram/.env 缺项时静默注入弱默认：ADMIN_PASSWORD=dev-pw、MASTER_KEY=\"ab\"×32——便利优先于安全；文档头部明示 .env 需含 ADMIN_PASSWORD/MASTER_KEY/ENGRAM_DATABASE_URL",
+      "evidence": [
+        {
+          "file": "scripts/engramctl.py",
+          "lines": "218-228",
+          "audit_seq": 12
+        },
+        {
+          "file": "scripts/engramctl.py",
+          "lines": "42-45",
+          "audit_seq": 12
+        }
+      ]
+    },
+    {
+      "statement": "HTTP 错误体为结构化信封 {error:{code,category,message,retryable,request_id}}：code 稳定可编程、message 人话安全子集、内部细节只进日志——AI 自纠三件套齐备",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/error.rs",
+          "lines": "13-30",
+          "audit_seq": 22
+        },
+        {
+          "file": "server/crates/api/src/error.rs",
+          "lines": "100-140",
+          "audit_seq": 22
+        }
+      ]
+    },
+    {
+      "statement": "MCP 错误按域映射语义错误码，scope 缺失错误明说「缺什么 scope、用带 X scope 的 amk_ key 连接」；codegraph 版本不符附带可照抄的安装+锁版修复命令（cli_fix_hint）",
+      "evidence": [
+        {
+          "file": "server/crates/mcp/src/guard.rs",
+          "lines": "42-105",
+          "audit_seq": 14
+        },
+        {
+          "file": "server/crates/mcp/src/guard.rs",
+          "lines": "138-160",
+          "audit_seq": 14
+        }
+      ]
+    },
+    {
+      "statement": "MCP 面向 AI 代理有三级渐进发现：工具描述尾部 L0 目录（一行一操作+【破坏性】标记）、action=help 的 L1 手册（含各操作 JSON Schema + cross_domain_hint 指路 search_all）、wiki 域另有九用途组导航——结构化可程序化消费",
+      "evidence": [
+        {
+          "file": "server/crates/mcp/src/dispatch.rs",
+          "lines": "546-643",
+          "audit_seq": 19
+        }
+      ]
+    },
+    {
+      "statement": "AGENT_MEMORY_EMBEDDING_DIMENSIONS 是「死参数」：配任何非 1024 值一律拒启（不支持自动重嵌入）——可配空间为零，易困惑（但错误文案含完整迁移指引）",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/config.rs",
+          "lines": "24-31",
+          "audit_seq": 7
+        },
+        {
+          "file": "server/crates/api/src/config.rs",
+          "lines": "67-86",
+          "audit_seq": 7
+        }
+      ]
+    },
+    {
+      "statement": "散点 env 现场读取（绕过 Config 集中加载）：检索阈值 VEC_FALLBACK_*（hybrid.rs）、EMBED_QUERY_INSTRUCTION（memory.rs）、CG_LAYOUT_ITERS（precompute.rs）、LOG_RETAIN_*（logging.rs）、MCP_ALLOWED_HOSTS（mcp/server.rs）、JOB_CONCURRENCY（main.rs）——优先级链为 env>代码默认两层，但入口分散无总表，其中阈值/迭代类应迁配置文件或集中声明",
+      "evidence": [
+        {
+          "file": "server/crates/search/src/hybrid.rs",
+          "lines": "27-41",
+          "audit_seq": 37
+        },
+        {
+          "file": "server/crates/core/src/memory.rs",
+          "lines": "143-147",
+          "audit_seq": 39
+        },
+        {
+          "file": "server/crates/cg-bridge/src/bridge/precompute.rs",
+          "lines": "11-17",
+          "audit_seq": 41
+        },
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "268-275",
+          "audit_seq": 43
+        },
+        {
+          "file": "server/crates/mcp/src/server.rs",
+          "lines": "246-256",
+          "audit_seq": 45
+        },
+        {
+          "file": "server/crates/api/src/main.rs",
+          "lines": "112-114",
+          "audit_seq": 9
+        }
+      ]
+    },
+    {
+      "statement": "外部调用全默认带超时（codegraph 600/60/30s 矩阵、web reader 60s）；MCP Host 白名单默认仅 loopback 防 DNS rebinding——缺省落在安全侧",
+      "evidence": [
+        {
+          "file": "server/crates/cg-bridge/src/bridge.rs",
+          "lines": "42-45",
+          "audit_seq": 2
+        },
+        {
+          "file": "server/crates/cg-bridge/src/bridge.rs",
+          "lines": "107-162",
+          "audit_seq": 2
+        },
+        {
+          "file": "server/crates/core/src/wiki_docs/web_reader.rs",
+          "lines": "56-59",
+          "audit_seq": 2
+        }
+      ]
+    },
+    {
+      "statement": "启动回显贴心：data_dir 解析结果与是否显式配置打进启动日志（防容器形态数据落可写层丢失）；master key 非法时错误给 openssl 生成命令并指向 ~/.engram/.env 具体文件",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/main.rs",
+          "lines": "28-35",
+          "audit_seq": 9
+        },
+        {
+          "file": "server/crates/api/src/main.rs",
+          "lines": "116-125",
+          "audit_seq": 9
+        }
+      ]
+    },
+    {
+      "statement": "engramctl CLI：子命令克制（start/stop/status/logs/restart/install/sync/codegraph）且 docstring 带 usage；Python 版本过旧给 brew 安装指引而非 traceback；start 有 [1/4]~[4/4] 进度回显与失败定位（查哪条日志）；非 loopback http 强制拒绝并给 https/ssh 隧道两种方案；但 --token 与 ENGRAM_SYNC_TOKEN/ENGRAM_CODEGRAPH_TOKEN 双通道属轻微不一致",
+      "evidence": [
+        {
+          "file": "scripts/engramctl.py",
+          "lines": "1-46",
+          "audit_seq": 12
+        },
+        {
+          "file": "scripts/engramctl.py",
+          "lines": "63-69",
+          "audit_seq": 12
+        },
+        {
+          "file": "scripts/engramctl.py",
+          "lines": "321-336",
+          "audit_seq": 12
+        },
+        {
+          "file": "scripts/engramctl.py",
+          "lines": "190-246",
+          "audit_seq": 12
+        }
+      ]
+    }
+  ],
+  "dead_ends": [
+    "AGENT_MEMORY_BIND：grep 确认仅 deploy/compose 与文档消费，服务端代码不读（compose 端口映射用，非应用配置）",
+    "传统 CLI 参数解析框架（clap 等）：仓库内不存在，服务二进制无 CLI 旗标面（用户面 CLI 是 engramctl.py 与外部 codegraph CLI）",
+    "stderr/stdout 分离：服务端走 tracing JSON 日志 + HTTP 响应，无 CLI 管道场景；engramctl 为人用交互脚本未做流分离（非硬伤）"
+  ],
+  "confidence": "high",
+  "degraded": false,
+  "stats": {
+    "turns": 10,
+    "tool_calls": 18,
+    "duration_ms": 80186,
+    "total_tokens": 310854
+  }
+}

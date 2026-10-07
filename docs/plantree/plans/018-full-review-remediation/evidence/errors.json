@@ -1,0 +1,220 @@
+{
+  "report_schema_version": 1,
+  "task": "你是通用语言无关的审查员——本文所有语法示例都是模式族示例，审查时按仓库所用语言的等价物取用。对目标仓库做全量审查，回答一个问题：\n这个项目有没有成熟的、完善的、健全的、全面覆盖的错误处理/错误管理系统？按以下六个审查域逐一深挖：\n\n【域1 · 错误类型体系】\n- 有没有统一的错误类型定义与层级（如集中定义的错误枚举/错误基类/错误码表）？\n- 还是反模式：散落的裸字符串错误、崩溃式展开与断言（unwrap/expect/assert/非空断言/裸 panic-raise 族）、\n  裸 except/空 catch、数字魔法值当错误码、同层模块各造各的错误类型？\n- 错误类型是否携带结构化信息（错误码、来源模块、可恢复标记），还是只有一段 message？\n\n【域2 · 传播链完整性】\n- 错误能否从产生点一路传播到最终处理点而不中断？\n- 逐个盘点吞错误的位置：忽略返回值/错误值（丢弃 err/let _=/漏 await/漏 catch 族）、\n  空 catch/except-pass、catch 后只打印不处理、\n  Option/Result 被静默展开成默认值。每个位置都是一条发现。\n\n【域3 · 上下文保真】\n- 错误在层层包装转抛时，源头信息（原始错误、参数、调用栈）是否保留？\n- 还是每包一层丢一层，最后日志里只剩一句「出错了」无法定位？\n\n【域4 · 上报与审计】\n- 有没有系统性的错误出口：结构化日志（级别/错误码/上下文字段）、错误计数、监控挂钩、审计记录？\n- 关键失败（外部调用失败、数据损坏风险、安全相关失败）是否必然留下可追溯的痕迹？\n- 错误信息本身会不会反过来泄漏敏感值（密钥/ token /用户数据）？\n\n【域5 · 边界覆盖】\n- 关键边界是否全部有错误处理：文件 IO、网络请求、外部进程、解析（JSON/正则/协议）、\n  并发（锁超时/通道关闭）、用户输入。列出你检查过哪些边界、哪些没找到守卫。\n\n【域6 · 恢复策略】\n- 对可预期失败有没有系统性恢复设计：重试（带退避）、降级、熔断、补偿、清理（defer/finally）？\n- 还是失败即崩/失败即停，没有任何中间态善后？\n\n【方法论】\n先从入口（main/HTTP handler/任务入口）和外部接口层开始，追踪典型错误从产生到终结的完整路径；\n找到仓库内错误处理做得最好的模块作为「内部基准」，其余模块对照它审；\n崩溃式展开与空捕获按仓库语言的等价物检索穷举盘点，不要抽样。\n\n【结论分级】\n最终给错误处理体系一个总评：健全（有统一体系+全链路+可观测）/ 部分覆盖（有意识但漏网多）/ 缺失（无体系，散兵游勇）。\n分级必须列出支撑它的三条最强证据与三条最弱证据。\n\n【证据纪律——硬约束】\n1. 每条发现必须给 file:line 证据；引用前必须真读过该文件——未读过的文件禁止出现在结论里。\n2. 区分「确证」与「疑似」：确证 = 代码路径完整可复述；疑似 = 说明缺口在哪、如何进一步确证。\n3. 搜过但没找到的，写进死胡同（避免后来者重复搜索）。\n4. 只审仓库内代码：第三方依赖内部实现不算发现，外部交互点只审我方的对接面。\n5. 结论按模板分级，禁止「总体良好」这类无证据套话——每个分级必须能被证据撑住。\n",
+  "answer": "总评：部分覆盖（偏上）——有明确设计文档支撑的统一错误体系骨架，关键链路（HTTP 出口、任务队列、LLM 外调）错误处理健全，但统一模型 EngramError 尚未下沉到全部域，多域错误仍为仅携 String 的独立 enum。分级支撑——三条最强证据：① API 层统一 ApiError 信封（code/category/retryable/request_id，内部细节只进日志防泄漏，error.rs:38-140）；② 任务队列完整恢复系统（JobError 三分类→指数退避+抖动封顶 30s→dead/failed 终态+人工 revive+僵尸回收+幂等键，queue.rs:294-336）；③ LLM 外调熔断器+429 Retry-After 退避+降级重试（chat.rs:40-96,244-264）+ request_id 贯穿与 internal_bug 自动告警（logging.rs:117-135）。三条最弱证据：① roadmap 自认「传播链剩余域批次 Deferred」，From<&WikiDocumentError> 是唯一 EngramError 桥（roadmap.md:15-21）；② ApiError::from 把 JobError/LlmError 全部压平为 Unavailable(String)，变体差异丢失（error.rs:143-156）；③ 各域 StoreError/MemoryError 等只携 String 无结构化上下文（storage/error.rs:5-17、mcp/guard.rs:5-40）。崩溃式展开盘点：生产路径 panic! 零命中，unwrap/expect 几乎全在 #[cfg(test)]；生产 expect 均带「恒合法」论证（main.rs:151-293）。吞错位置（let _=/.ok()/空 catch）多处存在但绝大多数带「有意忽略」理由注释（runner.rs:323-324、ingest.rs:184/212、web api.ts:37/68）；前端 localStorage 空 catch 属静默降级（Wiki.tsx:28-41、App.tsx:98-121）。综合：体系有、链路主干通、可观测好，但全域一致性未达成——部分覆盖（偏上）。",
+  "findings": [
+    {
+      "statement": "【域1最强】API 统一错误体系：ApiError 枚举映射 (状态码,语义码,retryable,归因类别)，ErrorEnvelope 含 code/category/message/retryable/request_id；内部 Debug（含 source 链）只进 tracing::error 日志，响应 message 走 safe_message 安全子集（防内部细节泄漏）",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/error.rs",
+          "lines": "38-66",
+          "audit_seq": 2
+        },
+        {
+          "file": "server/crates/api/src/error.rs",
+          "lines": "118-140",
+          "audit_seq": 2
+        }
+      ]
+    },
+    {
+      "statement": "【域1/3】core 统一模型 EngramError：code+category+message+结构化 context(json)+source 根因链，Display 保留根因；未注册码 new() 会 panic（运行时强制登记纪律）；From 桥仅 WikiDocumentError 一个域",
+      "evidence": [
+        {
+          "file": "server/crates/core/src/errors.rs",
+          "lines": "180-230",
+          "audit_seq": 2
+        },
+        {
+          "file": "server/crates/core/src/errors.rs",
+          "lines": "250-266",
+          "audit_seq": 2
+        },
+        {
+          "file": "server/crates/core/src/errors.rs",
+          "lines": "196-199",
+          "audit_seq": 2
+        }
+      ]
+    },
+    {
+      "statement": "【最弱证据1·确证】统一模型未下沉：roadmap 明写「storage→llm/jobs→mcp/api 各域 error enum→EngramError 桥接……Deferred」；StoreError 仅 Sql/Conflict 两变体携 String，无结构化上下文",
+      "evidence": [
+        {
+          "file": "docs/plantree/plans/006-error-handling/roadmap.md",
+          "lines": "15-24",
+          "audit_seq": 38
+        },
+        {
+          "file": "server/crates/storage/src/error.rs",
+          "lines": "5-17",
+          "audit_seq": 9
+        }
+      ]
+    },
+    {
+      "statement": "【最弱证据2·确证·域2/3】传播链压平：ApiError::from(JobError) 与 from(LlmError) 把所有变体一律映射 Unavailable(e.to_string())，BudgetExceeded/Permanent/Transient 语义在 HTTP 边界丢失",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/error.rs",
+          "lines": "143-156",
+          "audit_seq": 2
+        }
+      ]
+    },
+    {
+      "statement": "【最弱证据3·确证·域1】MCP 边界：各域错误手写映射到 rmcp::ErrorData（语义码对齐 HTTP），但 mcp_err 的 data 恒 None，上下文在 MCP 面扁平化",
+      "evidence": [
+        {
+          "file": "server/crates/mcp/src/guard.rs",
+          "lines": "5-40",
+          "audit_seq": 26
+        }
+      ]
+    },
+    {
+      "statement": "【域6最强】任务队列恢复系统：fail() 三态（Rescheduled=指数退避+抖动封 30s / Dead=可人工 revive / Failed=永久），另有幂等键复用、SKIP LOCKED 抢占、reap_orphans 僵尸回收、Cancelled 态（注释记录了曾因缺变体炸 503 的事故病根）",
+      "evidence": [
+        {
+          "file": "server/crates/jobs/src/queue.rs",
+          "lines": "294-336",
+          "audit_seq": 14
+        },
+        {
+          "file": "server/crates/jobs/src/types.rs",
+          "lines": "8-24",
+          "audit_seq": 14
+        }
+      ]
+    },
+    {
+      "statement": "【域6最强】LLM 外调：CircuitBreaker（allow/record_failure/record_success）+429 Retry-After 退避（最多 2 次）+ classify_http_error 分类 + embed 维度参数被拒时降级去参重试",
+      "evidence": [
+        {
+          "file": "server/crates/llm/src/provider/chat.rs",
+          "lines": "40-96",
+          "audit_seq": 16
+        },
+        {
+          "file": "server/crates/llm/src/provider/chat.rs",
+          "lines": "244-264",
+          "audit_seq": 16
+        }
+      ]
+    },
+    {
+      "statement": "【域4最强】可观测：request_id task_local 贯穿+回写响应头；internal_bug 归因自动升级 alert=true；日志 channel 满即丢弃不反压业务；job 失败事件落统一 logs 流并带 retryable/outcome 字段（审计可追溯）",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "117-135",
+          "audit_seq": 31
+        },
+        {
+          "file": "server/crates/api/src/logging.rs",
+          "lines": "139-169",
+          "audit_seq": 31
+        },
+        {
+          "file": "server/crates/jobs/src/queue.rs",
+          "lines": "188-225",
+          "audit_seq": 14
+        }
+      ]
+    },
+    {
+      "statement": "【域2】吞错盘点：生产代码 let _=/.ok() 多处但均带「有意忽略」理由注释（停机语义、目录已存在、best-effort 清理、emit 日志失败不阻断）；emit 失败确实无痕迹但属自觉设计",
+      "evidence": [
+        {
+          "file": "server/crates/jobs/src/runner.rs",
+          "lines": "322-324",
+          "audit_seq": 11
+        },
+        {
+          "file": "server/crates/wiki-engine/src/ingest.rs",
+          "lines": "184-212",
+          "audit_seq": 40
+        },
+        {
+          "file": "server/crates/jobs/src/queue.rs",
+          "lines": "66-67",
+          "audit_seq": 14
+        }
+      ]
+    },
+    {
+      "statement": "【域1/5】崩溃式展开盘点：生产路径 panic! 零命中；unwrap/expect 几乎全在 #[cfg(test)]；生产 expect 带论证（主密钥格式恒合法、SIGTERM handler）；Client 构建失败回退默认；锁中毒统一 unwrap_or_else(e.into_inner())",
+      "evidence": [
+        {
+          "file": "server/crates/api/src/main.rs",
+          "lines": "126-293",
+          "audit_seq": 14
+        },
+        {
+          "file": "server/crates/llm/src/provider/chat.rs",
+          "lines": "13-32",
+          "audit_seq": 16
+        }
+      ]
+    },
+    {
+      "statement": "【前端】ApiError 类含 status/code/retryable；401 统一广播 engram-auth-expired 回登录页；错误体解析失败保底 'HTTP xxx'；logoutSession .catch(()=>{}) 静默（有意：本地登出不阻塞）",
+      "evidence": [
+        {
+          "file": "web/src/lib/api.ts",
+          "lines": "8-18",
+          "audit_seq": 2
+        },
+        {
+          "file": "web/src/lib/api.ts",
+          "lines": "49-69",
+          "audit_seq": 2
+        },
+        {
+          "file": "web/src/lib/api.ts",
+          "lines": "30-38",
+          "audit_seq": 2
+        }
+      ]
+    },
+    {
+      "statement": "【域5弱点】前端 localStorage 读写/JSON 解析空 catch 回退默认值（Wiki.tsx lsGet/lsSet、App.tsx 侧边栏状态）——静默降级，用户无感知",
+      "evidence": [
+        {
+          "file": "web/src/features/Wiki.tsx",
+          "lines": "28-41",
+          "audit_seq": 42
+        },
+        {
+          "file": "web/src/App.tsx",
+          "lines": "98-121",
+          "audit_seq": 28
+        }
+      ]
+    },
+    {
+      "statement": "【Python e2e】统一断言辅助：Fail 异常带上下文、失败时打印服务日志尾部+完整 traceback、exit 1——测试侧纪律良好",
+      "evidence": [
+        {
+          "file": "scripts/e2e/_lib/check.py",
+          "lines": "19-57",
+          "audit_seq": 14
+        }
+      ]
+    }
+  ],
+  "dead_ends": [
+    "grep EngramError 全仓仅 6 文件命中——确认统一模型未在业务域铺开，非检索遗漏",
+    "未发现结构化错误计数/指标导出（metrics/prometheus）——监控挂钩疑似缺失，需运行时确证",
+    "生产代码 panic! 零命中（仅测试断言用 panic!），崩溃式展开检索已穷举主要模式（unwrap/expect/panic/let _=/.ok()/空 catch）"
+  ],
+  "confidence": "high",
+  "degraded": false,
+  "stats": {
+    "turns": 9,
+    "tool_calls": 17,
+    "duration_ms": 95026,
+    "total_tokens": 274594
+  }
+}

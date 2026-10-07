@@ -1,0 +1,113 @@
+{
+  "report_schema_version": 1,
+  "task": "你是通用语言无关的审查员——所有机制示例都是模式族，按仓库所用语言的等价物取用。目标：把这个仓库里所有「不该还在的东西」列成清单。\n审两类：残余死代码 + 乱七八糟的残余物。价值取决于误杀率——一条误杀毁掉整份清单的可信度。\n\n【第一类 · 残余死代码】\n先建立「不可判死名单」：公共 API（库导出/HTTP 路由/CLI 子命令）、注册表与工厂注册的符号、\n配置/脚本/模板引用的名字、外部契约（序列化字段名、协议常量）。\n然后反向核对引用图：\n- 「确定死」：零引用 + 不在任何注册/反射/配置/模板中 + 无文档标注为外部契约。\n- 「疑似死」：零直接引用但有动态调用可能（动态派发/反射/字符串拼名/宏与代码生成/插件机制族）——列出排查过的动态路径与结果。\n- 「孤儿簇」：互相引用但与主程序无连接的整片子图——整簇报，不逐个报。\n每条给：位置 file:line + 判死等级 + 删除风险评估（破坏什么契约、哪些测试会红）+ 如何进一步确证。\n\n【第二类 · 乱七八糟的残余物】\n逐类扫荡：\n1. 注释掉的代码块：不是解释性注释，是被注释掉的真代码——单行不算，成块的算。\n2. 调试残留：遗留的 print/断点/日志噪音、被注释的调试开关、写死的测试用 ID。\n3. 债务标记堆积：TODO/FIXME/HACK/XXX 注释——不是都要删，但要做登记：哪些是有效待办、\n   哪些已过时（所指代码已重写）、哪些早就该处理却挂了几年。\n4. 临时与一次性产物：提交进仓的一次性脚本、迁移完没删的迁移辅助、备份文件（.bak/.old/copy）、\n   示例代码的僵尸副本。\n5. 废弃声明残留：无引用的依赖声明、再也不匹配的配置项与兼容开关、指向不存在路径的构建规则。\n6. 过时文档：README/注释里描述的行为与代码现状明显不符的段落。\n\n【防误杀纪律——硬约束】\n1. 模板/宏/代码生成器产生的调用不算死。\n2. 框架生命周期钩子（main/handler/init）不算死。\n3. 测试夹具引用的代码不算死；tests/fixtures 下的金标素材（预期输出样本、golden files、回归基线）整体豁免——它们是测试资产不是残余物，不逐个盘点不逐个标注，列了只烧 token 不产生行动。\n4. 「写了一半的功能」与「死代码」分开列——前者是未完成特性，后者是遗留物。\n\n【输出】\n按「删除收益 × 误杀风险」排序，给出建议的一次性清理批次（哪些可以放心删、哪些要再确认）。\n\n【证据纪律——硬约束】\n1. 每条发现必须给 file:line 证据；引用前必须真读过该文件——未读过的文件禁止出现在结论里。\n2. 区分「确证」与「疑似」：确证 = 代码路径完整可复述；疑似 = 说明缺口在哪、如何进一步确证。\n3. 搜过但没找到的，写进死胡同（避免后来者重复搜索）。\n4. 只审仓库内代码：第三方依赖内部实现不算发现，外部交互点只审我方的对接面。\n5. 结论按模板分级，禁止「总体良好」这类无证据套话——每个分级必须能被证据撑住。\n",
+  "answer": "这个仓库整体卫生水平出乎意料地高：零 TODO/FIXME/HACK 债务标记、零 .bak/.old 备份、零 dbg!/println!/console.log 调试残留、零注释掉的成块代码。真正\"不该还在的东西\"集中在三处：(1) scripts/quality/ 下的三个一次性重构迁移脚本，其操作对象（crates/storage/src/repo/memory.rs 单体、core/src/skills.rs、mcp 单 lib）已被拆分或裁撤，脚本已失效；(2) scripts/zztest_m10.py 一次性黑盒测试载具（仓库自己的债务清单都登记在案）；(3) 两处小的 #[allow(dead_code)] 残留与一份描述已修复代码的风险速览文档。没有发现孤儿簇级别的死代码大片。建议一次清理批次：quality/ 三脚本 + zztest_m10.py + insights.rs 两个死函数（收益高、误杀风险低）；risk-hotspots.md 的 backup 条目改为更新而非删除。",
+  "findings": [
+    {
+      "statement": "scripts/quality/split_domain_modules.py（以及同目录 split_engine_modules.py、split_mcp_lib.py）是一次性架构治理 wave-2 重构脚本，配置指向的拆分目标已全部完成或消失：CONFIGS 里的 crates/storage/src/repo/memory.rs 现在已是拆分后的薄 mod 壳（无函数可拆），core/src/skills.rs 已随 EN-252 skills 域裁撤删除；全仓 grep 三个脚本名 0 引用（不在 CI/文档/其他脚本中）。判死等级：确定死（一次性迁移辅助，迁移已完）。删除风险：无——不破坏任何契约，无测试引用。确证方式：已 grep 全仓确认零引用 + 目标文件现状已读。",
+      "evidence": [
+        {
+          "file": "scripts/quality/split_domain_modules.py",
+          "lines": "38-131",
+          "audit_seq": 18
+        },
+        {
+          "file": "server/crates/storage/src/repo/memory.rs",
+          "lines": "6-17",
+          "audit_seq": 54
+        }
+      ]
+    },
+    {
+      "statement": "scripts/zztest_m10.py 是「ZZTEST-M10」一轮黑盒测试载具：文件名自带轮次标记、硬编码 http://127.0.0.1:8080 与 admin123 弱口令登录、顶层直接执行副作用（无 main 入口）。仓库自己的债务清单两次登记它待处置（risk-inventory #19「zztest_m10 处置」、risk-hotspots「zztest_m10 硬编码 8080」）。判死等级：确定的一次性产物。删除风险：极低——其覆盖场景已被 scripts/e2e/ 体系（test_wiki_governance.py 等 14 个文件 + _lib 支撑库）取代。确证方式：e2e/run_all.py 不引用它（文件列表确认）。",
+      "evidence": [
+        {
+          "file": "scripts/zztest_m10.py",
+          "lines": "1-24",
+          "audit_seq": 4
+        },
+        {
+          "file": "docs/plantree/baseline/risk-hotspots.md",
+          "lines": "27-27",
+          "audit_seq": 2
+        },
+        {
+          "file": "docs/plantree/plans/001-risk-debt-remediation/topics/risk-inventory.md",
+          "lines": "42-42",
+          "audit_seq": 2
+        }
+      ]
+    },
+    {
+      "statement": "wiki-engine/src/insights.rs 尾部两个 #[allow(dead_code)] 标注的函数 ts_now()（L320）与 uuid7()（L325）零引用（全仓 grep ts_now|uuid7 仅命中定义处），是显式压告警的弃用残留。判死等级：确定死。删除风险：无。确证方式：grep 全仓 0 引用。",
+      "evidence": [
+        {
+          "file": "server/crates/wiki-engine/src/insights.rs",
+          "lines": "319-327",
+          "audit_seq": 16
+        }
+      ]
+    },
+    {
+      "statement": "docs/plantree/baseline/risk-hotspots.md:9 描述「backup 兜底空卷：引用已弃用 named volume engram_appdata，restore 可能静默清空数据」，指向 scripts/backup.sh:56,65——但现文件 pack_data 在数据目录缺失时已改为报错退出并注明「P001-T001：不再落回已弃用的 named volume」，且全仓 grep engram_appdata 仅此文档一处命中（代码与 docker-compose 均已清除）。该条目描述的行为与代码现状明显不符，属过时文档。处置：更新或删除该行，而非删文档本身。",
+      "evidence": [
+        {
+          "file": "docs/plantree/baseline/risk-hotspots.md",
+          "lines": "9-9",
+          "audit_seq": 2
+        },
+        {
+          "file": "scripts/backup.sh",
+          "lines": "53-61",
+          "audit_seq": 35
+        }
+      ]
+    },
+    {
+      "statement": "【防误杀备案·非死代码】mcp/src/lib.rs 中 mod circles 上的 #[allow(dead_code)]（L17）与 pub(crate) use circles::* 上的 #[allow(unused_imports)]（L50）看似可疑，但 circles 模块经 rmcp #[tool_router] 宏注册并在 build_tool_router L100 显式 merge——宏收集导致静态分析看不到引用。同类地 mcp/src/memory_manage.rs 虽然只被 lib.rs 的 mod 声明引用一次，但其方法 memory_atom_duplicates/memory_atom_archive 在 memory.rs 的六动词分发（review mode=duplicates → \"atom_duplicates\"，revise mode=archive → \"atom_archive\"，L350/361/499-526）中按字符串派发调用，属动态调用路径，明确不判死。",
+      "evidence": [
+        {
+          "file": "server/crates/mcp/src/lib.rs",
+          "lines": "14-18",
+          "audit_seq": 14
+        },
+        {
+          "file": "server/crates/mcp/src/lib.rs",
+          "lines": "50-51",
+          "audit_seq": 14
+        },
+        {
+          "file": "server/crates/mcp/src/lib.rs",
+          "lines": "96-120",
+          "audit_seq": 14
+        }
+      ]
+    },
+    {
+      "statement": "【轻微·不建议立刻动】scripts/backup.sh:12-13 注释承认 fallback DSN（trtyr@127.0.0.1）是「本机专属值」——机器特定配置写死在通用脚本里，换机需靠环境变量覆盖。属债务而非死代码，登记备查。",
+      "evidence": [
+        {
+          "file": "scripts/backup.sh",
+          "lines": "12-14",
+          "audit_seq": 35
+        }
+      ]
+    }
+  ],
+  "dead_ends": [
+    "全仓 grep TODO/FIXME/HACK/XXX：0 命中——无债务标记可登记",
+    "grep console.log/dbg!/println!：0 命中——无调试残留",
+    "未找到任何 .bak/.old/copy 备份文件（find_files 命中的均为正文含这些子串的源文件）",
+    "risk-hotspots.md 提到的前端死代码群（react-query/setBase/withLib/uploadArtifact/revive_entity）：grep 全部 0 命中，已被清理，文档过时而非代码残留",
+    "engramctl.py 弱口令回落（risk-hotspots P0）：在 engramctl.py 225-254 读到的 cmd_start 段未见 admin123/'ab'×32 硬编码（该口令仅出现在 start-dev.sh 与 README 的 dev 示例中，属文档示例非残留）",
+    "storage/repo/memory.rs 拆分后的空段注释（'L0 会话'等无内容标题行）属轻微残余，量小不单列批次"
+  ],
+  "confidence": "medium",
+  "degraded": false,
+  "stats": {
+    "turns": 20,
+    "tool_calls": 38,
+    "duration_ms": 129422,
+    "total_tokens": 526621
+  }
+}

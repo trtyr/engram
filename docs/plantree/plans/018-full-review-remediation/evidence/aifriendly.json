@@ -1,0 +1,220 @@
+{
+  "report_schema_version": 1,
+  "task": "你就是一名专审「仓库对 AI 编码代理友好度」的审查员。核心理念：\nAI 代理完全依赖当下上下文建立认知——文档失真、命令失灵、魔法滥用、词汇不一致，\n对人是小烦扰，对代理是系统性带偏。按以下六个审查域逐一深挖\n（各域均按仓库所用语言/生态的惯例取其等价物，不预设语言）：\n\n【域1 · 代理入口文件】\n- 有没有代理引导文件：**AGENTS.md**（主，仓库级代理规范的事实标准）为核，\n  llms.txt 为辅（站级索引）。没有 = 域 1 直接一条发现。\n- 质量三问：①有没有「项目概述 + 构建/测试/校验命令 + 风格约定 + 禁区」四要素；\n  ②命令是不是**能直接抄了就跑**（还是「伪命令」，跑起来必失败）；③文件与代码现状是否同步（失真文档比没有更毒）。\n- README 是否回答「是什么/为什么/怎么跑」三问，且入口命令与真实入口一致。\n\n【域2 · 设计可认知】\n- 有没有架构/决策文档（ARCHITECTURE.md 或等价物），记录的是「为什么这么设计」而非复读目录树？\n- 关键非常规逻辑有没有「为什么这么写」的注释（workaround/性能补丁/外部缺陷规避），\n  带不带出处（issue/链接）？——没有这类注释，代理会好心把它「改正」回 bug。\n\n【域3 · 可验证性】\n- 有没有代理可自助执行的验证闭环：构建、lint、测试命令存在且文档可查？\n- 测试是否确定性（不依赖外部服务/顺序/时间）、能否当可执行规格读？\n- 有没有持续集成配置（任何形式），失败会不会被拦住？\n\n【域4 · 架构可认知】\n- 分层与依赖方向：架构是否分层清晰、依赖单向（高层依赖低层）？找出依赖环（A→B→C→A——\n  环内模块实为一体，代理无法局部理解）与逆流依赖（底层反过来依赖高层）。\n- 稳定依赖：被最多模块依赖的「地基」是否反而频繁变动？地基不稳，代理每次都要重学全仓。\n- 抽象边界：模块对外暴露的是稳定接口还是内部细节？依赖具体实现还是可替换抽象？\n- 模块边界与上下文税：模块是否单一职责、边界清晰？超大文件/超长函数列出最重的几个\n  （代理要么装不下要么读偏）。\n- 生态惯例布局：目录布局是否符合该生态的惯例位置（代理按惯例预测文件在哪）？入口点是否一目了然？\n\n【域5 · 显式性（反魔法）】\n- 类型/接口标注覆盖如何——类型是代理能读的机器契约，无类型仓库等于让代理猜签名。\n- 隐式魔法盘点：全局可变状态、远距离副作用（改个常量山崩）、深层继承树、\n  运行时代码生成/重度元编程、隐式约定（靠「大家都知道」维持的行为）。每个都是代理理解成本的黑洞。\n- 命名是否「可检索」：一个概念一个词（同义命名是代理检索的灾难），词汇表全仓一致。\n\n【域6 · 事实保真】\n- 文档/注释与代码现状的漂移点：声称的命令、路径、参数、行为，抽查核对是否属实。\n- 配置样例与环境说明能不能照着跑通？废弃的东西有没有标注（还是让代理当成活契约）？\n\n【结论分级】\n总评定级：AI-native（引导文件+可验证闭环+自描述代码齐备）/ 友好（大体清晰，缺引导或验证有缝）/\n不友好（魔法密布+文档失真+命令失灵）。附三条最强证据与三条最弱证据；\n并给「最快见效的三项改进」清单（对代理友好度的边际收益排序）。\n\n【证据纪律——硬约束】\n1. 每条发现必须给 file:line 证据；引用前必须真读过该文件——未读过的文件禁止出现在结论里。\n2. 区分「确证」与「疑似」：确证 = 代码路径完整可复述；疑似 = 说明缺口在哪、如何进一步确证。\n3. 搜过但没找到的，写进死胡同（避免后来者重复搜索）。\n4. 只审仓库内代码：第三方依赖内部实现不算发现，外部交互点只审我方的对接面。\n5. 结论按模板分级，禁止「总体良好」这类无证据套话——每个分级必须能被证据撑住。\n",
+  "answer": "总评定级：**友好（AI-friendly，非 AI-native）**。这是一个对代理友好度相当高的仓库：AGENTS.md 存在且四要素齐备（概述/命令/纪律/禁区），门禁命令可直接抄跑并与 CI 逐字一致，三层验证闭环（unit+integration / golden 快照 / compose-e2e）真实存在，代码注释大量带出处（EN-xxx/RJ-xx/决策编号），Rust 强类型自描述。但有三处系统性缺口使它够不到 AI-native：①「文档即数据」策略把全部权威架构文档外置到运行中的 engram 服务端（doc_get/doc_search），仓库内文档索引（AGENTS.md 的 UUID 清单）对没有活服务连接的代理是不可解析的死引用；②事实保真有漂移实锤——AGENTS.md 声称迁移版本 63、实际是 75，README 指向不存在的 deploy/README.md；③核心层存在人工同步的重复常量（ATOM_MAX_CHARS 双写）与「为什么不依赖」仅靠一句注释维系的隐式契约。最快见效三项（按边际收益排序）：修正 AGENTS.md 迁移版本号并在 migrations_test.rs 断言旁加「改此处须同步 AGENTS.md」提示；补建或删除 README:131 的 deploy/README.md 死链；把 AGENTS.md 文档清单改为「活服务可达时按 UUID 直达 + 不可达时 fallback 到本地 docs/plantree/ 决策目录」的双轨说明。",
+  "findings": [
+    {
+      "statement": "【域1·确证】AGENTS.md 存在，四要素齐备：项目概述、可直接抄跑的构建/测试/校验命令、风格与纪律约定、明确禁区（e2e 唯一入口、快照门禁、凭据红线），且命令与 CI 工作流逐字一致（AGENTS.md:79 ↔ ci.yml:44-52/71-74），非伪命令；README 回答「是什么/为什么/怎么跑」三问，入口命令（setup.sh/engramctl start）真实存在",
+      "evidence": [
+        {
+          "file": "AGENTS.md",
+          "lines": "1-84",
+          "audit_seq": 7
+        },
+        {
+          "file": "README.md",
+          "lines": "107-119",
+          "audit_seq": 7
+        }
+      ]
+    },
+    {
+      "statement": "【域1/域2·确证】「文档即数据」策略：全部架构/决策文档外置于运行中的 engram 服务端（projects 域 doc_get/doc_search 按 UUID 寻址），仓库内只留索引。对无活服务连接的代理，AGENTS.md 的 UUID 文档清单是不可解析的死引用——设计选择但构成上下文税；本地 docs/plantree/ 决策文档存在但 AGENTS.md 仅第 77 行一笔带过",
+      "evidence": [
+        {
+          "file": "AGENTS.md",
+          "lines": "3-6",
+          "audit_seq": 7
+        },
+        {
+          "file": "AGENTS.md",
+          "lines": "18-64",
+          "audit_seq": 7
+        }
+      ]
+    },
+    {
+      "statement": "【域6·确证】README.md:131 链接 deploy/README.md（完整部署文档），grep 全仓确认该文件不存在——失效文档链接，代理按图索骥扑空",
+      "evidence": [
+        {
+          "file": "README.md",
+          "lines": "131-136",
+          "audit_seq": 7
+        }
+      ]
+    },
+    {
+      "statement": "【域6·确证】AGENTS.md:83 声称迁移版本断言「当前 63」，实际 migrations_test.rs:18 断言 75——引导文件与代码漂移 12 个版本，代理按 63 核对会误判",
+      "evidence": [
+        {
+          "file": "AGENTS.md",
+          "lines": "83",
+          "audit_seq": 7
+        },
+        {
+          "file": "server/crates/storage/tests/migrations_test.rs",
+          "lines": "16-18",
+          "audit_seq": 24
+        }
+      ]
+    },
+    {
+      "statement": "【域3·确证】验证闭环完备：CI 后端 job（fmt+clippy -D warnings+test，带 pgvector/pg17 service）、前端 job（lint+tsc+test+build）、Docker 构建 job；e2e 工作流起 compose 栈跑 Playwright 全旅程；PR 触发失败即拦",
+      "evidence": [
+        {
+          "file": ".github/workflows/ci.yml",
+          "lines": "11-52",
+          "audit_seq": 19
+        },
+        {
+          "file": ".github/workflows/ci.yml",
+          "lines": "82-95",
+          "audit_seq": 19
+        },
+        {
+          "file": ".github/workflows/e2e.yml",
+          "lines": "29-52",
+          "audit_seq": 56
+        }
+      ]
+    },
+    {
+      "statement": "【域3/域5·确证】测试即规格的典范：MCP 工具面 golden 快照逐字节比对（含 UPDATE_GOLDEN 更新通道），action 读写归类完备性护栏测试（新增 action 漏归类即红并给出可行动失败信息）",
+      "evidence": [
+        {
+          "file": "server/crates/api/tests/mcp_surface_snapshot_test.rs",
+          "lines": "1-60",
+          "audit_seq": 34
+        },
+        {
+          "file": "server/crates/mcp/src/dispatch.rs",
+          "lines": "719-735",
+          "audit_seq": 36
+        }
+      ]
+    },
+    {
+      "statement": "【域3·确证】本地 e2e 唯一合法入口 scripts/e2e-local.sh 真实存在且自洽（独立 DB+端口+trap 清理+就绪探测），AGENTS.md:80 引用属实，教训出处写明",
+      "evidence": [
+        {
+          "file": "scripts/e2e-local.sh",
+          "lines": "1-49",
+          "audit_seq": 12
+        },
+        {
+          "file": "AGENTS.md",
+          "lines": "80",
+          "audit_seq": 7
+        }
+      ]
+    },
+    {
+      "statement": "【域4·确证】依赖方向总体单向：storage/jobs/llm/search/parsing 为底层，distill 只依赖底层，core 依赖全部低层，wiki-engine 不依赖 core，api 与 mcp 为顶层适配器；Cargo.toml 层面未发现依赖环",
+      "evidence": [
+        {
+          "file": "server/Cargo.toml",
+          "lines": "3-15",
+          "audit_seq": 44
+        },
+        {
+          "file": "server/crates/core/Cargo.toml",
+          "lines": "10-17",
+          "audit_seq": 59
+        },
+        {
+          "file": "server/crates/distill/Cargo.toml",
+          "lines": "10-13",
+          "audit_seq": 64
+        },
+        {
+          "file": "server/crates/wiki-engine/Cargo.toml",
+          "lines": "9-13",
+          "audit_seq": 66
+        }
+      ]
+    },
+    {
+      "statement": "【域4/域6·确证】跨 crate 重复常量契约：ATOM_MAX_CHARS=500 在 core 与 distill 各定义一份，靠注释「两处人工同步」维系——改一处漏另一处，类型系统无法发现，属隐式约定黑洞（所幸注释已双向声明）",
+      "evidence": [
+        {
+          "file": "server/crates/distill/src/extract_model.rs",
+          "lines": "15-17",
+          "audit_seq": 92
+        },
+        {
+          "file": "server/crates/core/src/memory.rs",
+          "lines": "165-167",
+          "audit_seq": 94
+        }
+      ]
+    },
+    {
+      "statement": "【域5·确证】「为什么这么写」注释文化浓厚：data_dir 测试默认值的防污染理由（EN-47）、expect_used 不可失败分类理由、占位/弱主密钥检测的攻击模型——代理不会被诱导「改正」这些看似可疑的代码",
+      "evidence": [
+        {
+          "file": "server/crates/core/src/state.rs",
+          "lines": "27-31",
+          "audit_seq": 74
+        },
+        {
+          "file": "server/crates/core/src/state.rs",
+          "lines": "50-76",
+          "audit_seq": 74
+        },
+        {
+          "file": "server/crates/core/src/state.rs",
+          "lines": "92-107",
+          "audit_seq": 74
+        }
+      ]
+    },
+    {
+      "statement": "【域4/域5·确证】生态惯例布局良好：Rust workspace 11 crates 分层命名、crate description 一句话职责、lib+bin 分离（engram-server）；web/ 标准 Vite 布局；入口点一目了然；CI 注释记录了撤除 api-types job 的原因（历史决策可考）",
+      "evidence": [
+        {
+          "file": "server/crates/api/Cargo.toml",
+          "lines": "8-24",
+          "audit_seq": 61
+        },
+        {
+          "file": "server/crates/core/Cargo.toml",
+          "lines": "1-3",
+          "audit_seq": 59
+        },
+        {
+          "file": ".github/workflows/ci.yml",
+          "lines": "77-80",
+          "audit_seq": 19
+        }
+      ]
+    },
+    {
+      "statement": "【域6·疑似】词汇漂移轻微面：mcp crate description 写「九域」，README 写「十二域/13 工具位」——同一概念不同文档不同数字，疑为 description 未随域扩容更新（进一步确证：比对 DOMAIN_TOOLS 清单）",
+      "evidence": [
+        {
+          "file": "server/crates/mcp/Cargo.toml",
+          "lines": "3",
+          "audit_seq": 69
+        },
+        {
+          "file": "README.md",
+          "lines": "89-93",
+          "audit_seq": 7
+        }
+      ]
+    }
+  ],
+  "dead_ends": [
+    "llms.txt / CLAUDE.md / ARCHITECTURE.md：不存在（后者是「文档即数据」策略的有意结果）",
+    "deploy/README.md：不存在——grep 全仓仅 README.md:131 引用它，确证死链",
+    "scripts/e2e-local.sh:2 提及 'P11 落地'，但 docs/plantree/plans/ 目录只到 017，未定位 P11 对应计划（疑为另一编号体系，非确证缺失）"
+  ],
+  "confidence": "high",
+  "degraded": false,
+  "stats": {
+    "turns": 21,
+    "tool_calls": 37,
+    "duration_ms": 142901,
+    "total_tokens": 777301
+  }
+}

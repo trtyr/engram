@@ -1,0 +1,94 @@
+{
+  "report_schema_version": 1,
+  "task": "你就是一名专司捉虫的资深审查员。目标：找出仓库里真实的正确性缺陷——代码声称做的与实际做的之间的差距。\n大 bug（数据损坏/崩溃/核心功能错误）与小 bug（边缘场景/显示/日志级）都要，但每一条都必须是真 bug——\n静态读码报告最大的耻辱是「看起来是 bug 其实有上游保证」，所以每条都要么论证上游防线不成立，要么降级为疑似。\n\n【捉虫方法（按此顺序工作，不是按域扫荡）】\n1. 三方对质：读函数的签名+文档注释+全部调用点——签名承诺的、文档声称的、调用方期望的，\n   三者任何不一致就是 bug 线索。\n2. 数据流跟踪：挑外部输入与关键状态，从产生点到消费点走完整路径，沿途检查每一步的隐含假设\n   （判空了吗？越界了吗？类型对吗？顺序对吗？）。\n3. 复制粘贴对质：相似代码段逐行对比——「两段几乎一样但有一处不同」是漏改改漏的高发区。\n4. 边界值代入：对每个边界条件心算代入 空/零/一/负值/最大值/特殊字符，看行为是否如声称。\n5. 复杂度×流量交叉点优先：又复杂又常被依赖的模块 bug 密度最高，先审这里。\n\n【bug 类型清单（对照排查）】\n- 逻辑错误：条件写反/写偏、边界差一、短路求值误用、运算优先级、复制粘贴改漏、\n  单位混淆（秒/毫秒、字节/KB）、时区与编码假设、浮点直接比较、整数除法截断。\n- 状态与生命周期：未初始化即使用、状态机可达非法状态、缓存只写不失效、用过期数据、\n  可重入函数带隐藏状态。\n- 并发正确性：竞态窗口、检查-后-行动（先查再用的间隙）、非原子复合操作、\n  双检锁错误（只审会导致错误结果的；资源泄漏归资源维度，不在此重复）。\n- API 误用：标准库/依赖的错误用法——参数顺序、可空返回未检查、异步未等待、\n  错误处理分支遗漏、用了废弃行为。\n- 数据一致性：部分失败后的中间态残留、多步写入无事务保护、读写顺序错误、\n  批处理中一条失败拖垮或悄悄跳过整批。\n- 平台与环境假设：路径分隔符/大小写敏感、字节序、字长假设、locale 依赖、\n  「测试环境有而生产没有」的依赖。\n\n【每条 bug 的报告格式】\n- 严重级：P0 致命（数据损坏/崩溃/安全后果）/ P1 严重（核心功能错误）/ P2 一般（边缘场景错误）/\n  P3 轻微（显示/文案/日志级）。\n- 触发条件（什么输入+什么时序+什么环境）、错误行为 vs 应有行为、位置 file:line。\n- 「上游防线为何不成立」论证（调用方都判空了？框架保证了？——写明你查过什么），\n  论证不了的确证度降为「疑似」，附验证方法。\n\n【结论】\n按严重级汇总数量与典型样例；指出 bug 密度最高的模块（这比总数更有行动价值）；\n如果你审完后认为某区域「干净」，必须说明审了什么、怎么审的——空口说干净不算数。\n\n【证据纪律——硬约束】\n1. 每条发现必须给 file:line 证据；引用前必须真读过该文件——未读过的文件禁止出现在结论里。\n2. 区分「确证」与「疑似」：确证 = 代码路径完整可复述；疑似 = 说明缺口在哪、如何进一步确证。\n3. 搜过但没找到的，写进死胡同（避免后来者重复搜索）。\n4. 只审仓库内代码：第三方依赖内部实现不算发现，外部交互点只审我方的对接面。\n5. 结论按模板分级，禁止「总体良好」这类无证据套话——每个分级必须能被证据撑住。\n",
+  "answer": "本轮捉虫确证 5 条真实缺陷，全部集中在「job 队列/幂等」与「校验不对称」两类。最严重的是 JobQueue::enqueue 的幂等键复用不过滤终态（P1）：注释声称「任何非终态或已成功的同键任务都直接复用」，但 SQL 对 failed/dead 也复用，导致同键任务一旦失败，后续同键入队永远返回死任务、恢复链路中断——仓库里 reenqueue_stale_source 被迫用带随机后缀的新幂等键绕这堵墙，本身就是该缺陷存在且作者已感知的旁证。其次：enqueue 的先查后插窗口在并发同键时直接抛 Permanent(\"idempotency_conflict\") 而非复用既有任务（P2）；rerank 的 LLM 输出校验不查重复索引，畸形输出会把漏掉的候选悄悄降序而非降级原序（P2）；todos update 漏掉 create 有的 title 长度校验（P3）；web 前端 BASE 常量三元两分支同为空串（P3 疑似残留）。加密、鉴权 scope、cg-bridge 查询/删除、transfer 导入编排均审过未见正确性缺陷。",
+  "findings": [
+    {
+      "statement": "P1【幂等键终态复用断链】JobQueue::enqueue 的幂等查询 SELECT * FROM jobs WHERE idempotency_key=$1 LIMIT 1 不过滤任务状态，注释却声称「任何非终态或已成功的同键任务都直接复用」——failed/dead 的同键任务也会被原样返回。后果：固定幂等键（如 analyze_job 链式入队的 wiki-generate-{source_id}）对应的任务一旦失败/死亡，后续所有同键 enqueue 都返回这个终态死任务、不发起新执行，恢复链路静默中断。上游防线不成立：enqueue 是全部 20+ 调用方的唯一收口，无任何调用方再做状态检查；而 reenqueue_stale_source 恢复路径刻意改用带随机 uuid 后缀的新幂等键（wiki-generate-{id}-{uuid}）绕开这堵墙，正是该缺陷真实存在的旁证。",
+      "evidence": [
+        {
+          "file": "server/crates/jobs/src/queue.rs",
+          "lines": "26-39",
+          "audit_seq": 2
+        },
+        {
+          "file": "server/crates/wiki-engine/src/ingest.rs",
+          "lines": "271-314",
+          "audit_seq": 2
+        },
+        {
+          "file": "server/crates/wiki-engine/src/ingest.rs",
+          "lines": "366-371",
+          "audit_seq": 2
+        }
+      ]
+    },
+    {
+      "statement": "P2【并发幂等键冲突抛错而非复用】enqueue 先 SELECT 后 INSERT（queue.rs:28-39 查、43-64 插），两步之间无原子性；并发提交同幂等键时第二个 INSERT 撞唯一约束，被映射为 JobError::Permanent(\"idempotency_conflict\") 直接抛给调用方——与函数签名承诺「幂等键命中时返回既有任务（不重复入队）」矛盾，调用方（经 From<JobError> 转成 503 Unavailable）收到失败而非既有 job。确证为并发窗口真实行为；影响面为偶发的请求失败，客户端重试即可恢复，故 P2。",
+      "evidence": [
+        {
+          "file": "server/crates/jobs/src/queue.rs",
+          "lines": "28-64",
+          "audit_seq": 2
+        }
+      ]
+    },
+    {
+      "statement": "P2【rerank 输出校验不查重复索引】apply_unified_rerank 的守卫条件是 order.len()==top 且全部索引 <top，但不检查索引重复。LLM 返回含重复索引（必然同时漏掉一个合法索引）时校验仍通过：reordered 中重复槽位第二次 take() 得 None，被漏掉的候选落到 top_vec.into_iter().flatten() 追加在 top 段末尾——结果是相关性最高的候选之一被静默降位，而非函数注释承诺的「越界/长度不符/失败一律降级原序」。上游防线不成立：rerank_hits 的输出解析（unified.rs:234-242）对 order 数组只做 filter_map 不去重，校验缺口完整可复述。默认 rerank=false 是旁路，故 P2。",
+      "evidence": [
+        {
+          "file": "server/crates/core/src/unified.rs",
+          "lines": "311-323",
+          "audit_seq": 9
+        },
+        {
+          "file": "server/crates/core/src/unified.rs",
+          "lines": "234-243",
+          "audit_seq": 9
+        }
+      ]
+    },
+    {
+      "statement": "P3【todos update 漏掉 title 长度校验】create 对 title 检查 chars().count() > 200（todos.rs:195-197），update 分支只查空与 NUL 字符、不复查长度（todos.rs:300-306）——典型复制粘贴改漏。经 PATCH 可把 title 更新为任意长度，绕过创建侧约束；与「update 是 create 的部分字段镜像」的注释语义不符。上游防线不成立：repo::update 直接透传 TodoPatch，未读任何 DB 层长度约束。影响限于数据规范一致性，故 P3。",
+      "evidence": [
+        {
+          "file": "server/crates/core/src/todos.rs",
+          "lines": "191-197",
+          "audit_seq": 17
+        },
+        {
+          "file": "server/crates/core/src/todos.rs",
+          "lines": "300-306",
+          "audit_seq": 17
+        }
+      ]
+    },
+    {
+      "statement": "P3（疑似）【前端 BASE 常量三元两分支同为空串】const BASE = import.meta.env.DEV ? '' : ''——条件表达式两个分支相同，形同残留；当前行为是所有请求打到同源相对路径，若存在生产环境与 API 不同域的部署形态则会全部 404。疑似而非确证：若项目约定前后端永远同源部署则无行为差异；验证方法为检索部署配置中 API 域名分离的场景。",
+      "evidence": [
+        {
+          "file": "web/src/lib/api.ts",
+          "lines": "6-6",
+          "audit_seq": 22
+        }
+      ]
+    }
+  ],
+  "dead_ends": [
+    "jobs 状态机 resolve_fail_outcome 的 dead/failed 分支与注释核对——无缺陷（can_retry 逻辑正确，退避封顶 30s 计算实际成立）",
+    "web_reader.rs 的 \"00\"*32 fallback 主密钥——与 main.rs/config.rs 的 \"00\" 占位口径一致，非缺陷",
+    "cg-bridge query/delete/freshness_for——注释与实现对质（快照戳优先、删除目录纵深防御、truncate 边界）未发现缺陷",
+    "transfer import 外键编排与 backfill——自引用 FK 后置回填处理正确，多库映射 fallback 合理",
+    "crypto.rs AES-GCM 加解密、长度校验、nonce 处理——干净",
+    "auth.rs require_scope/require_scope_read/domain_access 与 bearer_auth——写/读语义区分一致，SPA 分流只影响 text/html Accept，无越权",
+    "JobStatus::parse_filter 对空字符串报错（而非无过滤）——视为有意设计，未列为缺陷"
+  ],
+  "confidence": "high",
+  "degraded": false,
+  "stats": {
+    "turns": 11,
+    "tool_calls": 18,
+    "duration_ms": 133244,
+    "total_tokens": 507372
+  }
+}

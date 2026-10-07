@@ -1,0 +1,64 @@
+{
+  "report_schema_version": 1,
+  "task": "你就是一名专审「模块耦合与聚合」的架构审查员。核心理念：\n耦合与聚合是同一枚硬币的两面——好架构 = 相关的东西放在一起（高内聚），无关的东西彼此独立（低耦合）。\n判断标准不是感觉，是「改动时会发生什么」。按以下六个审查域逐一深挖\n（语言无关：所有机制示例均为模式族，按仓库所用语言的等价物取用）：\n\n【域1 · 内聚性（模块内部是否团结）】\n- 每个模块/文件/类是否只有一个存在的理由？用「方法与共享状态的关联度」判：\n  一堆方法各自操作互不相干的数据 = 只是住在同一屋檐下的陌生人（偶然内聚，最差）。\n- 内聚分级行话对照：功能内聚（最好，为一个目的协同）→ 顺序/通信内聚 → 时间/逻辑内聚\n  （「都是初始化所以放一起」「都是工具函数所以放一起」）→ 偶然内聚（最差）。\n- 特性漂移：同一业务特性的实现散落在多少个互不相干的目录里？改一个特性要在几个「领域」间跳？\n\n【域2 · 耦合类型（从良到恶）】\n- 数据耦合（传值，最良）→ 控制耦合（传标志位遥控别人内部行为）→ 公共耦合\n  （多个模块读写同一全局状态/单例/可变配置——改一处全域惊魂）→ 内容耦合（直接摸别人内部结构，最恶）。\n- 找出仓库里最重的公共耦合与内容耦合实例。\n- 贪心引用：a.b.c.d.e 长链取物（跨模块越级伸手）——每条链都是对别人内部布局的硬编码。\n\n【域3 · 时序耦合与隐式契约】\n- 调用顺序假设：必须先 A 后 B 才不炸的组合，顺序知识写在谁那里？没写在编译器/类型里的顺序假设都是地雷。\n- 远距离动作：改一个常量/配置/标志，行为在八竿子外的模块变化——列出你找到的这类远程扳机。\n- 隐式参数契约：靠「调用方保证」维持的前置条件，无校验无声明。\n\n【域4 · 变更放大（耦合的终极试金石）】\n- 从近期提交历史（若可读）或跨模块同名概念的分布推断：一个典型逻辑改动要触碰几个文件？\n- 两种病灶分开报：散弹式修改（一个改动散落 N 处=耦合过重）与\n  发散式修改（一个模块因 N 个不相关原因被改=内聚缺失）。\n- 列出 Top3「牵一发动全身」的节点与 Top3「无人敢动」的模块。\n\n【域5 · 代码干净度与习惯】\n- 结构卫生：超长函数、深嵌套（超过三层的缩进迷宫）、超多参数签名、单字母/缩写命名。\n- 重复：明显复制粘贴的代码簇（同型不同名），以及「微重复」——同一逻辑的第三种写法。\n- 惯用法一致性：是否用仓库语言社区的惯用写法，还是用别种语言的口音写代码；\n  魔法数字/裸字符串有无语义化；副作用混入查询函数（is_xxx() 顺手改状态）。\n\n【结论分级】\n总评定级：高内聚低耦合 / 中等（局部纠缠，主干健康）/ 纠缠（改动放大普遍存在）。\n附：①耦合最重的 Top3 节点及原因；②最值得「拆开」的模块对与最值得「合并」的模块对（各给理由）；\n③最快见效的三项解耦/提聚改进。\n\n【证据纪律——硬约束】\n1. 每条发现必须给 file:line 证据；引用前必须真读过该文件——未读过的文件禁止出现在结论里。\n2. 区分「确证」与「疑似」：确证 = 代码路径完整可复述；疑似 = 说明缺口在哪、如何进一步确证。\n3. 搜过但没找到的，写进死胡同（避免后来者重复搜索）。\n4. 只审仓库内代码：第三方依赖内部实现不算发现，外部交互点只审我方的对接面。\n5. 结论按模板分级，禁止「总体良好」这类无证据套话——每个分级必须能被证据撑住。\n",
+  "answer": "总评定级：中等（局部纠缠，主干健康）。这是一个清晰的分层 Rust workspace（storage → llm/search/core → wiki-engine/cg-bridge/distill → api/mcp 适配器 → jobs），适配器层（api/mcp）通过薄包装函数调 core 服务，主干是数据耦合（传 PgPool/Uuid/&str），整体架构方向正确。但存在四类确证的局部纠缠：①同步点式内容耦合——mcp/dispatch.rs 的 DOMAIN_TOOLS 硬编码域名清单与各域模块、scope 命名（projects≠project 的单复数例外）三方手工同步，新增/改名一个域要同时改 dispatch、guard、模块文件、api 路由四处；②微重复簇——AppState 里占位密钥→cipher 的推导逻辑逐字复制三份（registry/llm/credentials），guard.rs 里 require_* 权限检查七连复制，api 各域路由的 pe()/svc()/require_* 三件套每域一份；③服务构造散落——unified.rs 内联 new 出三个服务而非注入，与 AppState 这个\"依赖注入容器\"职责重叠；④隐式契约与时序假设——jobs runner 把\"workflow 类必须串行\"这一正确性不变量写死在 runner 内部（T016 注释自认\"写死非配置\"），跨域主键命名不一致（id/asset_id/source_uri）靠报错文案兜底而非类型统一。未发现超长函数迷宫级的结构卫生问题（读过的文件函数普遍短小、嵌套浅、注释密度高且解释设计决策）；但 AppState 258 个调用方使它成为事实上的全库公共耦合点（虽然只暴露 pool+配置，属受控公共耦合）。",
+  "findings": [
+    {
+      "statement": "主干为分层+依赖注入架构：AppState 是显式的轻量 DI 容器（pool+admin_password+master_key+data_dir），api 与 mcp 两个适配器共用，主干耦合为数据耦合（传值/传池），健康",
+      "evidence": [
+        {
+          "file": "server/crates/core/src/state.rs",
+          "lines": "1-19",
+          "audit_seq": 2
+        }
+      ]
+    },
+    {
+      "statement": "内容耦合确证：DOMAIN_TOOLS 硬编码 12 个域名清单，与各域模块文件、scope 名（projects 与 scope 'project' 单复数例外需 tool_scope 换算）三方手工同步；代码注释自认跨域主键名不统一（jobs/tickets 用 id、assets 用 asset_id、codegraph register 用 source_uri）——新增域/改名的散弹式修改点至少 4 处（dispatch 清单、guard 权限函数、域模块、api 路由三件套）",
+      "evidence": [
+        {
+          "file": "server/crates/mcp/src/dispatch.rs",
+          "lines": "204-227",
+          "audit_seq": 7
+        },
+        {
+          "file": "server/crates/mcp/src/dispatch.rs",
+          "lines": "264-268",
+          "audit_seq": 7
+        }
+      ]
+    },
+    {
+      "statement": "微重复簇①（确证）：guard.rs 中 require_memory/require_original/require_project/require_credentials/require_assets/require_todos/require_codegraph 七个函数结构逐字相同，仅 scope 字符串与报错文案不同——一次权限语义改动要改七处，典型时间/逻辑内聚",
+      "evidence": [
+        {
+          "file": "server/crates/mcp/src/guard.rs",
+          "lines": "42-115",
+          "audit_seq": 12
+        }
+      ]
+    },
+    {
+      "statement": "微重复簇②（确证）：AppState::registry/llm/credentials 三个方法各自逐字复制『master_key 缺省则 ",
+      "evidence": [
+        {
+          "file": "server/crates/core/src/state.rs",
+          "lines": "53-90",
+          "audit_seq": 2
+        }
+      ]
+    }
+  ],
+  "dead_ends": [
+    "无法读取 git 提交历史（只读检索工具不含 VCS 历历），变更放大只能从代码内同步点与架构治理注释（task-5/T016/EN-x 编号）间接推断，非确证",
+    "web/src 前端与 server 的跨端特性漂移只看了 App.tsx 路由表，未逐 feature 与后端域对照，特性漂移的跨端维度是疑似"
+  ],
+  "confidence": "medium",
+  "degraded": false,
+  "stats": {
+    "turns": 6,
+    "tool_calls": 9,
+    "duration_ms": 43746,
+    "total_tokens": 161745
+  }
+}
