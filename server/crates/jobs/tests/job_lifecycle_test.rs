@@ -112,13 +112,41 @@ async fn idempotency_key_dedupes() {
     let second = queue.enqueue(t).await.unwrap();
     assert_eq!(first.id, second.id, "同幂等键应返回既有任务");
 
-    // 终态后同键新任务：当前语义仍复用（调用方如需强制重跑应换键或 revive）
+    // 已成功（succeeded）同键新任务：仍复用（调用方如需强制重跑应换键）
     queue.complete(first.id, None).await.unwrap();
     let third = queue
         .enqueue(JobTemplate::new("ingest").with_idempotency_key("doc-abc-ingest"))
         .await
         .unwrap();
     assert_eq!(third.id, first.id);
+}
+
+#[tokio::test]
+async fn idempotency_terminal_failure_allows_rerun() {
+    let (_c, queue, _pool, _url) = setup().await;
+
+    let t = JobTemplate::new("ingest").with_idempotency_key("doc-rerun");
+    let first = queue.enqueue(t.clone()).await.unwrap();
+
+    // failed 终态不再阻塞同键入队：复位为 pending 新一轮执行（P018-T001）
+    queue
+        .fail(first.id, &JobError::Permanent("boom".into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        queue.get(first.id).await.unwrap().unwrap().status,
+        JobStatus::Failed
+    );
+
+    let second = queue.enqueue(t).await.unwrap();
+    assert_eq!(second.id, first.id, "终态失败复位复用同 id（事件历史保留）");
+    let j = queue.get(first.id).await.unwrap().unwrap();
+    assert_eq!(
+        j.status,
+        JobStatus::Pending,
+        "终态后同键入队应复位为 pending"
+    );
+    assert_eq!(j.attempts, 0, "复位后重试计数应归零");
 }
 
 #[tokio::test]

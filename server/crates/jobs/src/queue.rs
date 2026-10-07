@@ -23,15 +23,22 @@ impl JobQueue {
     }
 
     /// 入队。幂等键命中时返回既有任务（不重复入队）。
+    /// 复用语义（P018-T001）：非终态或已成功（succeeded）的同键任务直接复用；
+    /// 终态失败（failed/dead/cancelled）不阻塞——同键新入队把旧行复位为 pending 重跑
+    /// （复位字段口径与 revive 一致）。旧实现预查不过滤状态，failed/dead 同键任务
+    /// 会永久阻塞后续同键入队，恢复链路静默中断。
     pub async fn enqueue(&self, template: JobTemplate) -> Result<Job, JobError> {
-        // 幂等键先查（任何非终态或已成功的同键任务都直接复用）
+        // 幂等键先查（只复用非终态或已成功的同键任务）
         if let Some(key) = &template.idempotency_key {
-            let existing =
-                sqlx::query_as::<_, Job>("SELECT * FROM jobs WHERE idempotency_key = $1 LIMIT 1")
-                    .bind(key)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(|e| JobError::Retryable(e.to_string()))?;
+            let existing = sqlx::query_as::<_, Job>(
+                "SELECT * FROM jobs WHERE idempotency_key = $1 \
+                 AND status NOT IN ('failed', 'dead', 'cancelled') \
+                 LIMIT 1",
+            )
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
             if let Some(job) = existing {
                 tracing::debug!(job_id = %job.id, kind = %job.kind, "幂等键命中，复用既有任务");
                 return Ok(job);
@@ -40,9 +47,25 @@ impl JobQueue {
 
         let id = Uuid::now_v7();
         let due = template.due_at.unwrap_or_else(Utc::now);
+        // ON CONFLICT 两分支（P018-T002）：旧行终态失败 → 复位重跑（同 id，事件历史保留）；
+        // 并发窗口撞非终态同键行 → WHERE 不满足无行返回，回查复用先到者。
+        // 旧实现把唯一约束冲突映射 Permanent 抛给调用方，与幂等承诺矛盾。
         let job = sqlx::query_as::<_, Job>(
             "INSERT INTO jobs (id, kind, payload, max_attempts, idempotency_key, due_at, visibility_timeout_s)
              VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (idempotency_key) DO UPDATE SET
+                kind = EXCLUDED.kind,
+                payload = EXCLUDED.payload,
+                max_attempts = EXCLUDED.max_attempts,
+                visibility_timeout_s = EXCLUDED.visibility_timeout_s,
+                due_at = EXCLUDED.due_at,
+                status = 'pending',
+                attempts = 0,
+                error = NULL,
+                finished_at = NULL,
+                locked_by = NULL,
+                locked_at = NULL
+             WHERE jobs.status IN ('failed', 'dead', 'cancelled')
              RETURNING *",
         )
         .bind(id)
@@ -52,19 +75,35 @@ impl JobQueue {
         .bind(&template.idempotency_key)
         .bind(due)
         .bind(template.visibility_timeout_s)
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await
-        .map_err(|e| {
-            // 幂等键唯一约束竞争窗口：并发插入同键
-            if e.to_string().contains("duplicate key") {
-                JobError::Permanent("idempotency_conflict".into())
-            } else {
-                JobError::Retryable(e.to_string())
-            }
-        })?;
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
 
-        self.emit(job.id, "info", "任务入队", None).await.ok();
-        Ok(job)
+        if let Some(job) = job {
+            self.emit(job.id, "info", "任务入队", None).await.ok();
+            return Ok(job);
+        }
+
+        // 并发窗口：先到者的非终态同键任务已占位，回查复用（与预查同口径）。
+        let Some(key) = template.idempotency_key.as_deref() else {
+            // 无幂等键的 INSERT 不会触发该唯一约束，理论不可达；不裸 expect（task-5）
+            return Err(JobError::Permanent(
+                "idempotency_conflict_without_key".into(),
+            ));
+        };
+        let existing = sqlx::query_as::<_, Job>(
+            "SELECT * FROM jobs WHERE idempotency_key = $1 \
+             AND status NOT IN ('failed', 'dead', 'cancelled') \
+             LIMIT 1",
+        )
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+        existing.ok_or_else(|| {
+            // 理论竞态：回查前对方任务瞬间走完到终态。返回可重试错误而非编造行。
+            JobError::Retryable("幂等键冲突但既有任务不可见，请重试".into())
+        })
     }
 
     /// 批量抢占待处理任务（FOR UPDATE SKIP LOCKED），置 running 并锁定。

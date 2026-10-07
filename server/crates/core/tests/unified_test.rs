@@ -52,6 +52,7 @@ async fn unified_search_fuses_three_domains() {
     )
     .bind(Uuid::now_v7())
     .bind(doc_id)
+    .bind("Rust 语言的内存安全特性")
     .execute(&pool)
     .await
     .unwrap();
@@ -62,6 +63,7 @@ async fn unified_search_fuses_three_domains() {
          VALUES ($1, (SELECT id FROM wiki_libraries WHERE slug = 'main'), 'rust-page', 'Rust', 'concept', 'Rust 是一门系统编程语言', '{}'::jsonb, 'llm', 1, to_tsvector('simple', $2))",
     )
     .bind(Uuid::now_v7())
+    .bind("Rust 是一门系统编程语言")
     .execute(&pool)
     .await
     .unwrap();

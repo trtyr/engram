@@ -300,7 +300,19 @@ fn merge_domain_hits(
     merged
 }
 
-/// R6：LLM 精排——top 候选交模型输出目标顺序（越界/长度不符/失败一律降级原序）。
+/// R6：LLM 精排——top 候选交模型输出目标顺序（越界/重复/长度不符/失败一律降级原序）。
+/// P018-T003：order 含重复索引时旧守卫仍放行，重复槽位 take() 得 None，
+/// 最高相关候选之一被静默降位——守卫必须同时查重。
+fn is_valid_order(order: &[usize], top: usize) -> bool {
+    if order.len() != top {
+        return false;
+    }
+    let mut seen = vec![false; top];
+    order
+        .iter()
+        .all(|i| *i < top && !std::mem::replace(&mut seen[*i], true))
+}
+
 async fn apply_unified_rerank(
     llm: &engram_distill::llm_port::LlmRef,
     query: &str,
@@ -308,7 +320,7 @@ async fn apply_unified_rerank(
 ) {
     let top = merged.len().min(10);
     match rerank_hits(llm, query, &merged[..top]).await {
-        Ok(order) if order.len() == top && order.iter().all(|i| *i < top) => {
+        Ok(order) if is_valid_order(&order, top) => {
             let rest: Vec<UnifiedHit> = merged.split_off(top);
             let mut top_vec: Vec<Option<UnifiedHit>> = merged.drain(..).map(Some).collect();
             let mut reordered: Vec<UnifiedHit> = Vec::with_capacity(top);
@@ -322,7 +334,7 @@ async fn apply_unified_rerank(
             *merged = reordered;
         }
         Ok(order) if order.len() == top => {
-            tracing::warn!("统一检索 rerank：order 含越界索引，降级原序");
+            tracing::warn!("统一检索 rerank：order 含越界或重复索引，降级原序");
         }
         Ok(_) => tracing::warn!("统一检索 rerank：order 长度不符，降级原序"),
         Err(e) => tracing::warn!(error = %e, "统一检索 rerank 失败，降级原序"),
@@ -441,5 +453,15 @@ mod tests {
             })
             .collect();
         assert!(first_scores.iter().all(|s| (*s - 1.0 / 60.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn rerank_order_guard_rejects_duplicates_and_out_of_range() {
+        // P018-T003：重复索引必须拒绝（旧守卫只查长度+越界）
+        assert!(is_valid_order(&[2, 0, 1], 3));
+        assert!(!is_valid_order(&[0, 0, 1], 3), "重复索引应拒绝");
+        assert!(!is_valid_order(&[0, 1, 5], 3), "越界应拒绝");
+        assert!(!is_valid_order(&[0, 1], 3), "长度不符应拒绝");
+        assert!(is_valid_order(&[], 0), "空序对空 top 合法");
     }
 }
