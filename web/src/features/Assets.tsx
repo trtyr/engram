@@ -33,14 +33,6 @@ export default function Assets() {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // 建档表单
-  const [kind, setKind] = useState('host')
-  const [name, setName] = useState('')
-  const [aliases, setAliases] = useState('')
-  const [ip, setIp] = useState('')
-  const [os, setOs] = useState('')
-  const [note, setNote] = useState('')
-
   // 编辑表单（右栏内联）
   const [editing, setEditing] = useState(false)
   // 运行手册（0062）：查看/编辑/修订史
@@ -102,31 +94,6 @@ export default function Assets() {
     () => (k: string) => kinds.find((x) => x.kind === k)?.label ?? k,
     [kinds],
   )
-
-  async function doCreate() {
-    if (!name.trim()) return
-    setBusy(true)
-    try {
-      await api.post('/assets', {
-        kind,
-        name: name.trim(),
-        aliases: aliases.split(',').map((s) => s.trim()).filter(Boolean),
-        ip: ip.trim(),
-        os: os.trim(),
-        note: note.trim(),
-      })
-      setName('')
-      setAliases('')
-      setIp('')
-      setOs('')
-      setNote('')
-      await load()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '建档失败')
-    } finally {
-      setBusy(false)
-    }
-  }
 
   async function doSave() {
     if (!detail || !eName.trim()) return
@@ -236,61 +203,10 @@ export default function Assets() {
         </div>
       </PageHeader>
 
-      <Card className="p-3">
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            doCreate()
-          }}
-        >
-          <select className={selectCls} value={kind} onChange={(e) => setKind(e.target.value)}>
-            {kinds.map((k) => (
-              <option key={k.kind} value={k.kind}>
-                {k.label}
-              </option>
-            ))}
-          </select>
-          <input
-            className={`${inputCls} w-48`}
-            placeholder="台账名（如 MacBook Air M1）"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <input
-            className={`${inputCls} w-56`}
-            placeholder="别名（逗号分隔，如 trtyr-mac, tencent-beijing）"
-            value={aliases}
-            onChange={(e) => setAliases(e.target.value)}
-          />
-          <input
-            className={`${inputCls} w-40`}
-            placeholder="IP（可选）"
-            value={ip}
-            onChange={(e) => setIp(e.target.value)}
-          />
-          <input
-            className={`${inputCls} w-32`}
-            placeholder="系统（可选）"
-            value={os}
-            onChange={(e) => setOs(e.target.value)}
-          />
-          <input
-            className={`${inputCls} flex-1`}
-            placeholder="备注（规格 / 位置 / 用途线索，可选）"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <Button size="sm" type="submit" disabled={busy || !name.trim()}>
-            建档
-          </Button>
-        </form>
-      </Card>
-
       {err && <ErrorBox msg={err} />}
 
       {rows.length === 0 ? (
-        <Empty text="台账还是空的——上面建第一台资产，或先跑 MCP assets add" />
+        <Empty text="台账还是空的——让 AI 通过 MCP assets add 建第一台资产" />
       ) : (
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:h-[calc(100dvh-11rem)]">
           {/* 左：台账列表（区域滚动，页面框架不动） */}

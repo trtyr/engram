@@ -30,10 +30,6 @@ export default function Todos() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 
-  // 快速输入条：一行输入回车即建，优先级轻量可调
-  const [title, setTitle] = useState('')
-  const [quickPriority, setQuickPriority] = useState('normal')
-
   const query = useMemo(() => {
     // 视图 → 服务端 status 过滤（todo 形态只有 open/done/archived 三态）
     const status = view === 'active' ? 'open' : view
@@ -60,22 +56,6 @@ export default function Todos() {
     setPage(1) // 筛选/视图变化回到第一页
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
-
-  async function quickAdd() {
-    if (!title.trim()) return
-    setBusy(true)
-    try {
-      await api.post('/todos', { title: title.trim(), priority: quickPriority })
-      setTitle('')
-      setQuickPriority('normal')
-      setErr('')
-      load()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '创建失败')
-    } finally {
-      setBusy(false)
-    }
-  }
 
   /** 清空截止时间（PUT {"due_at": null}——serde double_option 显式清除语义） */
   async function clearDue(t: Todo) {
@@ -217,38 +197,6 @@ export default function Todos() {
           </button>
         ))}
       </div>
-
-      {/* 快速输入：一行输入 + 回车即建（归档视图不建新） */}
-      {view !== 'archived' && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm transition-colors focus-within:border-foreground/30">
-          <input
-            className={`${inputCls} min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0`}
-            placeholder="记一条待办…（回车快速创建）"
-            aria-label="新建待办"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                quickAdd()
-              }
-            }}
-          />
-          <select
-            className={cn(selectCls, 'w-auto')}
-            aria-label="优先级"
-            value={quickPriority}
-            onChange={(e) => setQuickPriority(e.target.value)}
-          >
-            <option value="normal">普通</option>
-            <option value="high">高</option>
-            <option value="low">低</option>
-          </select>
-          <Button size="sm" disabled={busy || !title.trim()} onClick={quickAdd}>
-            添加
-          </Button>
-        </div>
-      )}
 
       {err && <ErrorBox msg={err} />}
 

@@ -89,7 +89,7 @@ describe('凭据页（保险箱式双栏）', () => {
     expect(await screen.findByText('newapi/api_key')).toBeTruthy()
     expect(screen.getByText('helm/admin-login')).toBeTruthy()
     expect(screen.getByText('已过期')).toBeTruthy() // helm 2020 到期 → 过期徽章
-    expect(screen.getByText(/共/)).toBeTruthy() // 态势条
+    expect(screen.getByText(/^凭据总数$/)).toBeTruthy() // 姿态条大数字仪表
     expect(screen.queryByText(/sk-value-of/)).toBeNull() // 值明文不进台账
   })
 
@@ -97,7 +97,7 @@ describe('凭据页（保险箱式双栏）', () => {
     render(<Credentials />)
     fireEvent.click(await screen.findByText('newapi/api_key'))
     // 保险箱：默认遮蔽
-    expect(screen.getByText('••••••••••••')).toBeTruthy()
+    expect(screen.getByText('••••••••')).toBeTruthy()
     // 揭示 → 明文 + 自动遮蔽倒计时
     fireEvent.click(screen.getByRole('button', { name: '揭示' }))
     expect(await screen.findByText('sk-value-of-newapi/api_key')).toBeTruthy()
@@ -105,8 +105,8 @@ describe('凭据页（保险箱式双栏）', () => {
     // 取用流水时间线：agent 的历史留痕可见
     expect((await screen.findAllByText(/agent/)).length).toBeGreaterThan(0)
     // 遮蔽按钮可收回明文
-    fireEvent.click(screen.getByRole('button', { name: '遮蔽' }))
-    expect(screen.getByText('••••••••••••')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '立即遮蔽' }))
+    expect(screen.getByText('••••••••')).toBeTruthy()
     // 复制：取值 + 剪贴板
     fireEvent.click(screen.getByRole('button', { name: '复制' }))
     await waitFor(() => {
@@ -130,7 +130,7 @@ describe('凭据页（保险箱式双栏）', () => {
 
     // 选中 helm → 换值折叠区写入新值 → 流水清零提示
     fireEvent.click(screen.getByText('helm/admin-login'))
-    fireEvent.click(screen.getByText('换值（旧取用流水清零）'))
+    fireEvent.click(screen.getByText(/换值（旧取用流水清零）/))
     fireEvent.change(screen.getByPlaceholderText('新值（写入即加密）'), {
       target: { value: 'another-secret' },
     })

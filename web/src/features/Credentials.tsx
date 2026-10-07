@@ -1,23 +1,25 @@
 /**
- * 凭据页（EN-234 治理面 · 2026-10-06 重设计——保险箱式双栏）：
+ * 凭据页（EN-234 治理面 · 2026-10-07 视觉重构）：
  * 机密值的一等台账——静态加密落库、按名取用、取用留痕。
  *
- * 安全语义（与 MCP credentials 域同一 core 服务，零分叉）：
- * - 列表永不回显值；值只在显式「揭示/复制」后返回，且每次留取用痕（read_count+1、流水+1）；
- * - 揭示后 30 秒倒计时自动遮蔽——明文不挂在屏幕上过夜；
- * - 同名换值清零旧取用审计（值变了旧痕作废）——换值区内明说；
- * - 删除级联清流水，需输入凭据名确认——删机密的分量要对。
+ * 设计语言（1Password/Vault 式密钥库）：
+ * - 列表行有锚点：密钥图标瓦片 + mono 名 + 淡元信息——徽章只留健康度，不撒一地；
+ * - 姿态条是仪表不是状态行：大数字 + 小标签 + 竖分隔；
+ * - 值保险箱：实底卡片（虚线是拖拽区的语言）+ 锁形微文案 + 揭示倒计时琥珀章；
+ * - 详情一卡到底：分区用分隔线，不用三张卡叠罗汉。
  *
- * 布局：工单式双栏（对齐工单/待办/资产页）——左台账列表（搜索+标签筛选+健康徽章），
- * 右详情（值保险箱 + 元信息 + 取用流水时间线 + 换值 + 危险区）。
+ * 安全语义（与 MCP credentials 域同一 core 服务，零分叉）：
+ * - 列表永不回显值；值只在显式「揭示/复制」后返回，且每次留取用痕；
+ * - 揭示后 30 秒倒计时自动遮蔽——明文不挂在屏幕上过夜；
+ * - 同名换值清零旧取用审计；删除需输入凭据名确认。
  */
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import { cn } from '@/lib/utils'
-import { copyText } from '@/lib/utils'
+import { cn, copyText } from '@/lib/utils'
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
+import { KeyRound, Lock, ShieldAlert } from 'lucide-react'
 
 export interface CredentialMetaDto {
   id: string
@@ -54,9 +56,13 @@ function health(c: CredentialMetaDto): 'expired' | 'expiring' | 'ok' | 'none' {
 function HealthBadge({ c }: { c: CredentialMetaDto }) {
   const h = health(c)
   if (h === 'expired')
-    return <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-xs text-red-400">已过期</span>
+    return <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] font-medium text-red-400">已过期</span>
   if (h === 'expiring')
-    return <span className="rounded bg-yellow-500/15 px-1.5 py-0.5 text-xs text-yellow-500">30 天内到期</span>
+    return (
+      <span className="rounded bg-yellow-500/10 px-1.5 py-0.5 text-[11px] font-medium text-yellow-500">
+        30 天内到期
+      </span>
+    )
   return null
 }
 
@@ -66,6 +72,28 @@ function relTime(ts: string): string {
   if (s < 3600) return `${Math.floor(s / 60)} 分钟前`
   if (s < 86400) return `${Math.floor(s / 3600)} 小时前`
   return `${Math.floor(s / 86400)} 天前`
+}
+
+/** 密钥图标瓦片：列表行的视觉锚点；敏感凭据琥珀底。 */
+function KeyTile({ sensitive, size = 'md' }: { sensitive: boolean; size?: 'md' | 'lg' }) {
+  return (
+    <span
+      className={cn(
+        'flex shrink-0 items-center justify-center rounded-lg',
+        sensitive ? 'bg-amber-500/12 text-amber-500' : 'bg-muted text-muted-foreground',
+        size === 'md' ? 'size-9' : 'size-11',
+      )}
+    >
+      <KeyRound className={size === 'md' ? 'size-4' : 'size-5'} aria-hidden="true" />
+    </span>
+  )
+}
+
+/** 分区微标题（一卡到底的分节语言）。 */
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">{children}</div>
+  )
 }
 
 export default function Credentials() {
@@ -178,12 +206,12 @@ export default function Credentials() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="凭据">
+      <PageHeader title="凭据" desc={posture.total > 0 ? `${posture.total} 条机密 · 静态加密` : undefined}>
         <Button onClick={() => setShowCreate(true)}>＋ 新建凭据</Button>
       </PageHeader>
       {err && <ErrorBox msg={err} />}
       {notice && (
-        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+        <div className="rounded-md border border-emerald-500/25 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-300">
           {notice}
         </div>
       )}
@@ -192,27 +220,63 @@ export default function Credentials() {
         <Empty text="台账空——点右上角「＋ 新建凭据」写入第一条机密。" />
       ) : (
         <>
-          {/* 态势条：一眼健康度 */}
-          <Card className="flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-2.5 text-sm">
-            <span className="text-muted-foreground">
-              共 <span className="font-medium text-foreground">{posture.total}</span> 条
-            </span>
-            <span className={posture.expiring > 0 ? 'text-yellow-500' : 'text-muted-foreground'}>
-              临期 {posture.expiring}
-            </span>
-            <span className={posture.expired > 0 ? 'text-red-400' : 'text-muted-foreground'}>
-              过期 {posture.expired}
-            </span>
-            <span className={posture.neverRead > 0 ? 'text-muted-foreground' : 'text-muted-foreground'}>
-              从未取用 {posture.neverRead}
-            </span>
+          {/* 姿态条：大数字 + 小标签 + 竖分隔——一眼健康度 */}
+          <Card className="flex items-stretch divide-x divide-border px-0 py-0">
+            <div className="flex flex-1 items-center gap-3 px-5 py-3.5">
+              <span className="text-2xl leading-none font-semibold tabular-nums">{posture.total}</span>
+              <span className="text-xs leading-tight text-muted-foreground">
+                凭据
+                <br />
+                总数
+              </span>
+            </div>
+            <div className="flex flex-1 items-center gap-3 px-5 py-3.5">
+              <span
+                className={cn(
+                  'text-2xl leading-none font-semibold tabular-nums',
+                  posture.expiring > 0 ? 'text-yellow-500' : 'text-muted-foreground/50',
+                )}
+              >
+                {posture.expiring}
+              </span>
+              <span className="text-xs leading-tight text-muted-foreground">
+                临期
+                <br />
+                （30 天内）
+              </span>
+            </div>
+            <div className="flex flex-1 items-center gap-3 px-5 py-3.5">
+              <span
+                className={cn(
+                  'text-2xl leading-none font-semibold tabular-nums',
+                  posture.expired > 0 ? 'text-red-400' : 'text-muted-foreground/50',
+                )}
+              >
+                {posture.expired}
+              </span>
+              <span className="text-xs leading-tight text-muted-foreground">
+                已过期
+                <br />
+                需轮换
+              </span>
+            </div>
+            <div className="hidden flex-1 items-center gap-3 px-5 py-3.5 sm:flex">
+              <span className="text-2xl leading-none font-semibold tabular-nums text-muted-foreground/50">
+                {posture.neverRead}
+              </span>
+              <span className="text-xs leading-tight text-muted-foreground">
+                从未
+                <br />
+                取用
+              </span>
+            </div>
           </Card>
 
           {/* 工单式双栏：左台账右详情，各自独立滚动 */}
           <div
             className={cn(
               'grid grid-cols-1 gap-4',
-              cur ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:h-[calc(100dvh-9.5rem)]' : 'grid-cols-1',
+              cur ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:h-[calc(100dvh-10.5rem)]' : 'grid-cols-1',
             )}
           >
             {/* 左：列表 */}
@@ -248,53 +312,62 @@ export default function Credentials() {
               {filtered.length === 0 ? (
                 <Empty text={q || filterTag ? '没有匹配的凭据——换个关键词试试。' : '台账空。'} />
               ) : (
-                filtered.map((c) => {
-                  const sel = c.name === selected
-                  return (
-                    <button
-                      key={c.id}
-                      className={cn(
-                        'block w-full rounded-lg border p-3 text-left transition-colors',
-                        sel ? 'border-primary/60 bg-primary/10' : 'border-border hover:bg-muted/40',
-                      )}
-                      onClick={() => setSelected(sel ? null : c.name)}
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-sm font-medium break-all">{c.name}</span>
-                        {c.sensitive && (
-                          <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-400">敏感</span>
+                <div className="space-y-1.5">
+                  {filtered.map((c) => {
+                    const sel = c.name === selected
+                    return (
+                      <button
+                        key={c.id}
+                        className={cn(
+                          'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
+                          sel
+                            ? 'border-primary/45 bg-primary/5 shadow-[inset_2px_0_0_0] shadow-primary/50'
+                            : 'border-border hover:border-foreground/20 hover:bg-muted/40',
                         )}
-                        <HealthBadge c={c} />
-                        <span className="ml-auto text-xs text-muted-foreground">取用 {c.read_count}</span>
-                      </div>
-                      {c.description && (
-                        <div className="mt-0.5 truncate text-xs text-muted-foreground">{c.description}</div>
-                      )}
-                      {c.tags.length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap gap-1">
-                          {c.tags.map((t) => (
-                            <span
-                              key={t}
-                              className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                            >
-                              {t}
-                            </span>
-                          ))}
+                        onClick={() => setSelected(sel ? null : c.name)}
+                      >
+                        <KeyTile sensitive={c.sensitive} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate font-mono text-sm font-medium">{c.name}</span>
+                            {c.sensitive && (
+                              <ShieldAlert
+                                className="size-3.5 shrink-0 text-amber-500"
+                                aria-label="敏感凭据"
+                              />
+                            )}
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                            <span className="truncate">{c.description || '（无说明）'}</span>
+                          </div>
                         </div>
-                      )}
-                    </button>
-                  )
-                })
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <HealthBadge c={c} />
+                          <span className="text-[10px] text-muted-foreground/70">
+                            {c.read_count > 0 ? `取用 ${c.read_count} 次` : '从未取用'}
+                          </span>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
               )}
             </div>
 
-            {/* 右：详情 */}
+            {/* 右：详情一卡到底（身份 → 保险箱 → 元信息 → 流水 → 换值 → 危险区） */}
             {cur && (
-              <div className="min-w-0 space-y-3 lg:self-start lg:max-h-full lg:overflow-y-auto lg:overflow-x-hidden lg:pl-1">
+              <div className="min-w-0 lg:self-start lg:max-h-full lg:overflow-y-auto lg:overflow-x-hidden lg:pl-1">
                 <Card className="p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="font-mono text-sm font-medium break-all">{cur.name}</div>
+                  {/* 身份区 */}
+                  <div className="flex items-start gap-3">
+                    <KeyTile sensitive={cur.sensitive} size="lg" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm font-semibold break-all">{cur.name}</span>
+                        {cur.sensitive && (
+                          <ShieldAlert className="size-3.5 shrink-0 text-amber-500" aria-label="敏感凭据" />
+                        )}
+                      </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">{cur.description || '（无说明）'}</div>
                     </div>
                     <button
@@ -306,29 +379,42 @@ export default function Credentials() {
                     </button>
                   </div>
 
-                  {/* 值保险箱：默认遮蔽，揭示 30s 自动遮蔽，复制留痕 */}
-                  <div className="mt-3 rounded-lg border border-dashed border-border bg-muted/30 p-3">
-                    <div className="mb-2 text-xs font-medium text-muted-foreground">值（默认遮蔽）</div>
+                  {/* 值保险箱：实底 + 锁形微文案；默认遮蔽，揭示 30s 自动遮蔽，复制留痕 */}
+                  <div className="mt-4 rounded-lg border border-border/70 bg-muted/40 p-3.5">
+                    <div className="mb-2.5 flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground">
+                        <Lock className="size-3" aria-hidden="true" />
+                        静态加密值（AES-GCM）
+                      </span>
+                      {reveal && reveal.name === cur.name && (
+                        <span className="rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-500">
+                          {countdown}s 后自动遮蔽
+                        </span>
+                      )}
+                    </div>
                     {reveal && reveal.name === cur.name ? (
                       <>
-                        <div className="mb-2 font-mono text-sm break-all">{reveal.value}</div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setReveal(null)}
-                          >
-                            遮蔽
+                        <div className="rounded border border-border/70 bg-background/60 px-3 py-2.5 font-mono text-sm break-all">
+                          {reveal.value}
+                        </div>
+                        <div className="mt-2.5 flex items-center gap-2">
+                          <Button size="sm" variant="outline" onClick={() => setReveal(null)}>
+                            立即遮蔽
                           </Button>
-                          <span className="text-xs text-yellow-500">{countdown}s 后自动遮蔽</span>
+                          <span className="text-[11px] text-muted-foreground">
+                            明文已上屏——看完点遮蔽，别让它过夜
+                          </span>
                         </div>
                       </>
                     ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm tracking-widest text-muted-foreground select-none">
-                          ••••••••••••
+                      <div className="flex items-center justify-between gap-3">
+                        <span
+                          className="select-none font-mono text-base tracking-[0.35em] text-muted-foreground/60"
+                          aria-label="值已遮蔽"
+                        >
+                          ••••••••
                         </span>
-                        <div className="ml-auto flex gap-2">
+                        <div className="flex shrink-0 gap-2">
                           <Button size="sm" variant="outline" disabled={busy} onClick={() => doReveal(cur.name)}>
                             揭示
                           </Button>
@@ -340,10 +426,26 @@ export default function Credentials() {
                     )}
                   </div>
 
+                  {/* 标签 */}
+                  {cur.tags.length > 0 && (
+                    <div className="mt-3.5 flex flex-wrap items-center gap-1.5">
+                      {cur.tags.map((t) => (
+                        <button
+                          key={t}
+                          className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                          onClick={() => setFilterTag(t)}
+                          title="按此标签筛选"
+                        >
+                          #{t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {/* 元信息 */}
-                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                  <dl className="mt-4 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
                     <dt className="text-muted-foreground">创建者</dt>
-                    <dd className="font-mono">{cur.created_by}</dd>
+                    <dd className="truncate font-mono">{cur.created_by}</dd>
                     <dt className="text-muted-foreground">创建</dt>
                     <dd>{new Date(cur.created_at).toLocaleString()}</dd>
                     <dt className="text-muted-foreground">更新</dt>
@@ -357,28 +459,39 @@ export default function Credentials() {
                       </>
                     )}
                   </dl>
+
+                  {/* 分区：取用流水（谁 · 何时） */}
+                  <div className="mt-4 border-t border-border pt-3.5">
+                    <SectionLabel>取用流水 · 谁 · 何时</SectionLabel>
+                    <ReadsTimeline name={cur.name} />
+                  </div>
+
+                  {/* 分区：换值（折叠） */}
+                  <div className="mt-3.5 border-t border-border pt-3.5">
+                    <RevalueBox
+                      c={cur}
+                      onDone={() => {
+                        setNotice(`已换值「${cur.name}」——旧取用流水已清零（值变了旧痕作废）`)
+                        setReveal(null)
+                        load()
+                      }}
+                      onError={setErr}
+                    />
+                  </div>
                 </Card>
 
-                {/* 取用流水：选中项的完整审计（时间线） */}
-                <ReadsTimeline name={cur.name} />
-
-                {/* 换值：折叠区——换值清零旧流水，明说 */}
-                <RevalueBox c={cur} onDone={() => {
-                  setNotice(`已换值「${cur.name}」——旧取用流水已清零（值变了旧痕作废）`)
-                  setReveal(null)
-                  load()
-                }} onError={setErr} />
-
-                {/* 危险区：输名字确认 */}
-                <DangerZone
-                  name={cur.name}
-                  onDeleted={() => {
-                    setSelected(null)
-                    setNotice(`已删除「${cur.name}」——取用流水一并清除`)
-                    load()
-                  }}
-                  onError={setErr}
-                />
+                {/* 危险区独立成卡（红色语义不与其他区混流） */}
+                <div className="mt-3">
+                  <DangerZone
+                    name={cur.name}
+                    onDeleted={() => {
+                      setSelected(null)
+                      setNotice(`已删除「${cur.name}」——取用流水一并清除`)
+                      load()
+                    }}
+                    onError={setErr}
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -412,29 +525,26 @@ function ReadsTimeline({ name }: { name: string }) {
       .catch((e) => setErr(String(e)))
   }, [name])
 
+  if (err) return <ErrorBox msg={err} />
+  if (reads === null) return <Spinner />
+  if (reads.length === 0)
+    return <div className="mt-1.5 text-xs text-muted-foreground">从未取用——流水在「揭示 / 复制」时生成。</div>
   return (
-    <Card className="p-4">
-      <div className="mb-2 text-xs font-medium text-muted-foreground">取用流水（谁 · 何时，揭示与复制都留痕）</div>
-      {err && <ErrorBox msg={err} />}
-      {reads === null ? (
-        <Spinner />
-      ) : reads.length === 0 ? (
-        <div className="text-xs text-muted-foreground">从未取用——流水在「揭示 / 复制」时生成。</div>
-      ) : (
-        <ol className="space-y-2 border-l border-border pl-3">
-          {reads.map((r) => (
-            <li key={r.id} className="relative text-xs">
-              <span className="absolute top-1.5 -left-[17px] h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
-              <span className="font-mono">{r.reader}</span>
-              <span className="text-muted-foreground">
-                {' '}
-                · {relTime(r.read_at)} · {new Date(r.read_at).toLocaleString()}
-              </span>
-            </li>
-          ))}
-        </ol>
+    <ol className="mt-2 space-y-2 border-l border-border pl-3">
+      {reads.slice(0, 20).map((r) => (
+        <li key={r.id} className="relative text-xs">
+          <span className="absolute top-1.5 -left-[17px] h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+          <span className="font-mono">{r.reader}</span>
+          <span className="text-muted-foreground">
+            {' '}
+            · {relTime(r.read_at)} · {new Date(r.read_at).toLocaleString()}
+          </span>
+        </li>
+      ))}
+      {reads.length > 20 && (
+        <li className="text-muted-foreground">…其余 {reads.length - 20} 条更早记录</li>
       )}
-    </Card>
+    </ol>
   )
 }
 
@@ -453,6 +563,7 @@ function RevalueBox({
     c.expires_at ? new Date(c.expires_at).toISOString().slice(0, 16) : '',
   )
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
 
   async function submit() {
     if (!value) return
@@ -472,37 +583,44 @@ function RevalueBox({
     setBusy(false)
     if (r) {
       setValue('')
+      setOpen(false)
       onDone()
     }
   }
 
   return (
-    <details className="rounded-lg border border-border">
-      <summary className="cursor-pointer px-4 py-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/40">
-        换值（旧取用流水清零）
-      </summary>
-      <div className="space-y-2 border-t border-border px-4 py-3">
-        <div className="text-xs text-muted-foreground">值变了，旧痕作废——流水与次数清零，重新开始记。</div>
-        <input
-          className={inputCls + ' w-full font-mono'}
-          placeholder="新值（写入即加密）"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-        <div className="flex items-center gap-2">
+    <div>
+      <button
+        type="button"
+        className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => setOpen((v) => !v)}
+      >
+        换值（旧取用流水清零）{open ? ' ▲' : ' ▼'}
+      </button>
+      {open && (
+        <div className="mt-2.5 space-y-2">
+          <div className="text-xs text-muted-foreground">值变了，旧痕作废——流水与次数清零，重新开始记。</div>
           <input
-            className={inputCls + ' w-48'}
-            type="datetime-local"
-            value={expires}
-            onChange={(e) => setExpires(e.target.value)}
-            aria-label="到期时间"
+            className={inputCls + ' w-full font-mono'}
+            placeholder="新值（写入即加密）"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
           />
-          <Button size="sm" disabled={busy || !value} onClick={submit}>
-            写入新值
-          </Button>
+          <div className="flex items-center gap-2">
+            <input
+              className={inputCls + ' w-48'}
+              type="datetime-local"
+              value={expires}
+              onChange={(e) => setExpires(e.target.value)}
+              aria-label="到期时间"
+            />
+            <Button size="sm" disabled={busy || !value} onClick={submit}>
+              写入新值
+            </Button>
+          </div>
         </div>
-      </div>
-    </details>
+      )}
+    </div>
   )
 }
 
@@ -529,8 +647,11 @@ function DangerZone({
   }
 
   return (
-    <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4">
-      <div className="mb-1.5 text-xs font-medium text-red-400">危险区</div>
+    <Card className="border-red-500/25 bg-red-500/[0.04] p-4">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-red-400">
+        <ShieldAlert className="size-3.5" aria-hidden="true" />
+        危险区
+      </div>
       <div className="mb-2 text-xs text-muted-foreground">
         删除「{name}」并级联清除全部取用流水，不可恢复。输入凭据名确认：
       </div>
@@ -541,20 +662,15 @@ function DangerZone({
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
         />
-        <Button
-          size="sm"
-          variant="destructive"
-          disabled={busy || !match}
-          onClick={del}
-        >
+        <Button size="sm" variant="destructive" disabled={busy || !match} onClick={del}>
           删除
         </Button>
       </div>
-    </div>
+    </Card>
   )
 }
 
-/** 新建凭据弹窗：顶部常驻表单退役——写入是低频动作，不该常驻页面。 */
+/** 新建凭据弹窗：写入是低频动作，收进弹窗不常驻页面。 */
 function CreateDialog({
   onClose,
   onCreated,
@@ -603,7 +719,10 @@ function CreateDialog({
         className="w-full max-w-md space-y-3 p-4"
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
-        <div className="text-sm font-medium">新建凭据</div>
+        <div className="flex items-center gap-2">
+          <KeyRound className="size-4 text-muted-foreground" aria-hidden="true" />
+          <span className="text-sm font-medium">新建凭据</span>
+        </div>
         <input
           className={inputCls + ' w-full font-mono'}
           placeholder="名称（如 newapi/api_key）"
@@ -637,7 +756,7 @@ function CreateDialog({
           aria-label="到期时间（可选）"
         />
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">同名换值：旧取用流水清零（值变了旧痕作废）</span>
+          <span className="text-xs text-muted-foreground">同名换值：旧取用流水清零</span>
           <div className="flex shrink-0 gap-2">
             <Button variant="outline" onClick={onClose}>
               取消
