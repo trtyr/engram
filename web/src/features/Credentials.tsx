@@ -13,13 +13,29 @@
  * - 揭示后 30 秒倒计时自动遮蔽——明文不挂在屏幕上过夜；
  * - 同名换值清零旧取用审计；删除需输入凭据名确认。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/lib/api'
 import { cn, copyText } from '@/lib/utils'
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import { KeyRound, Lock, ShieldAlert } from 'lucide-react'
+
+/** 封闭分类（0075）——与服务端 KINDS 同源，改两边要同步。 */
+export const KINDS: ReadonlyArray<{ k: string; label: string }> = [
+  { k: 'password', label: '账号密码' },
+  { k: 'api_key', label: 'API · Secret' },
+  { k: 'token', label: '访问令牌' },
+  { k: 'ssh_key', label: 'SSH 密钥' },
+  { k: 'database', label: '数据库连接' },
+  { k: 'cert', label: '证书 · 域名' },
+  { k: 'server', label: '服务器凭据' },
+  { k: 'payment', label: '支付 · 银行卡' },
+  { k: 'identity', label: '证件身份' },
+  { k: 'note', label: '安全笔记' },
+  { k: 'custom', label: '自定义' },
+]
 
 export interface CredentialMetaDto {
   id: string
@@ -35,6 +51,10 @@ export interface CredentialMetaDto {
   tags: string[]
   /** 到期时间（过期红/临期黄） */
   expires_at: string | null
+  /** 封闭分类（0075） */
+  kind: string
+  /** 可选项目绑定（项目删除时解绑留凭据） */
+  project_id: string | null
 }
 
 export interface CredentialReadRow {
@@ -97,14 +117,15 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 export default function Credentials() {
+  const nav = useNavigate()
   const [rows, setRows] = useState<CredentialMetaDto[] | null>(null)
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
-  // 选中详情（按名）；左列表筛选
+  // 选中详情（按名）；左列表搜索
   const [selected, setSelected] = useState<string | null>(null)
   const [q, setQ] = useState('')
-  const [filterTag, setFilterTag] = useState('')
   // 揭示（只对选中项、只在显式点击后；30s 倒计时自动遮蔽）
   const [reveal, setReveal] = useState<{ name: string; value: string } | null>(null)
   const [countdown, setCountdown] = useState(0)
@@ -112,9 +133,15 @@ export default function Credentials() {
   const [showCreate, setShowCreate] = useState(false)
 
   const load = useCallback(() => {
-    api
-      .get<{ items: CredentialMetaDto[] }>('/credentials')
-      .then((r) => setRows(r.items))
+    Promise.all([
+      api.get<{ items: CredentialMetaDto[] }>('/credentials'),
+      api.get<{ topics?: unknown[] } | unknown[]>('/projects').catch(() => null),
+    ])
+      .then(([r, pj]) => {
+        setRows(r.items)
+        const list = Array.isArray(pj) ? pj : ((pj as { projects?: { id: string; name: string }[] })?.projects ?? [])
+        setProjects((list as { id: string; name: string }[]).map((p) => ({ id: p.id, name: p.name })))
+      })
       .catch((e) => setErr(String(e)))
   }, [])
   useEffect(() => {
@@ -146,7 +173,6 @@ export default function Credentials() {
   const cur = rows?.find((r) => r.name === selected) ?? null
 
   const filtered = (rows ?? []).filter((c) => {
-    if (filterTag && !c.tags.includes(filterTag)) return false
     if (!q.trim()) return true
     const k = q.trim().toLowerCase()
     return (
@@ -155,6 +181,17 @@ export default function Credentials() {
       c.tags.some((t) => t.toLowerCase().includes(k))
     )
   })
+
+  // 按分类分组（KINDS 顺序，空组不显）——组内 updated_at 倒序（后端序）
+  const groups = useMemo(
+    () =>
+      KINDS.map(({ k, label }) => ({
+        k,
+        label,
+        items: filtered.filter((c) => (c.kind || 'custom') === k),
+      })).filter((g) => g.items.length > 0),
+    [filtered],
+  )
 
   const posture = {
     total: rows?.length ?? 0,
@@ -199,14 +236,19 @@ export default function Credentials() {
     )
   }
 
-  const allTags = [...new Set((rows ?? []).flatMap((c) => c.tags))]
-
   if (err && !rows) return <ErrorBox msg={err} />
   if (!rows) return <Spinner />
 
   return (
     <div className="space-y-4">
       <PageHeader title="凭据" desc={posture.total > 0 ? `${posture.total} 条机密 · 静态加密` : undefined}>
+        <input
+          className={inputCls + ' w-56'}
+          placeholder="搜索名称 / 说明 / 标签…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="搜索凭据"
+        />
         <Button onClick={() => setShowCreate(true)}>＋ 新建凭据</Button>
       </PageHeader>
       {err && <ErrorBox msg={err} />}
@@ -281,39 +323,18 @@ export default function Credentials() {
           >
             {/* 左：列表 */}
             <div className={cn('min-w-0 space-y-2', cur && 'lg:h-full lg:overflow-y-auto lg:pr-1')}>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  className={inputCls + ' w-64'}
-                  placeholder="搜索名称 / 说明 / 标签…"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  aria-label="搜索凭据"
-                />
-                {filterTag && (
-                  <button
-                    className="rounded-full border border-primary/50 bg-primary/10 px-2 py-0.5 text-xs"
-                    onClick={() => setFilterTag('')}
-                  >
-                    ✕ {filterTag}
-                  </button>
-                )}
-                {allTags
-                  .filter((t) => t !== filterTag)
-                  .map((t) => (
-                    <button
-                      key={t}
-                      className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted"
-                      onClick={() => setFilterTag(t)}
-                    >
-                      {t}
-                    </button>
-                  ))}
-              </div>
               {filtered.length === 0 ? (
-                <Empty text={q || filterTag ? '没有匹配的凭据——换个关键词试试。' : '台账空。'} />
+                <Empty text={q.trim() ? '没有匹配的凭据——换个关键词试试。' : '台账空。'} />
               ) : (
-                <div className="space-y-1.5">
-                  {filtered.map((c) => {
+                <div className="space-y-4">
+                  {groups.map((g) => (
+                    <div key={g.k}>
+                      <div className="mb-1.5 flex items-baseline gap-1.5 px-1">
+                        <span className="text-xs font-medium text-muted-foreground">{g.label}</span>
+                        <span className="text-[10px] text-muted-foreground/50">{g.items.length}</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {g.items.map((c) => {
                     const sel = c.name === selected
                     return (
                       <button
@@ -350,6 +371,9 @@ export default function Credentials() {
                       </button>
                     )
                   })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -426,24 +450,37 @@ export default function Credentials() {
                     )}
                   </div>
 
-                  {/* 标签 */}
+                  {/* 标签：纯元数据展示，不做筛选 */}
                   {cur.tags.length > 0 && (
                     <div className="mt-3.5 flex flex-wrap items-center gap-1.5">
                       {cur.tags.map((t) => (
-                        <button
+                        <span
                           key={t}
-                          className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-                          onClick={() => setFilterTag(t)}
-                          title="按此标签筛选"
+                          className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
                         >
                           #{t}
-                        </button>
+                        </span>
                       ))}
                     </div>
                   )}
 
                   {/* 元信息 */}
                   <dl className="mt-4 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
+                    <dt className="text-muted-foreground">分类</dt>
+                    <dd>{KINDS.find((x) => x.k === cur.kind)?.label ?? cur.kind}</dd>
+                    <dt className="text-muted-foreground">项目</dt>
+                    <dd>
+                      {cur.project_id ? (
+                        <button
+                          className="text-left font-mono text-foreground underline decoration-border underline-offset-2 transition-colors hover:decoration-foreground"
+                          onClick={() => nav(`/projects/${cur.project_id}`)}
+                        >
+                          {projects.find((p) => p.id === cur.project_id)?.name ?? '未知项目'}
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">未绑定（个人/零散）</span>
+                      )}
+                    </dd>
                     <dt className="text-muted-foreground">创建者</dt>
                     <dd className="truncate font-mono">{cur.created_by}</dd>
                     <dt className="text-muted-foreground">创建</dt>
@@ -500,6 +537,7 @@ export default function Credentials() {
 
       {showCreate && (
         <CreateDialog
+          projects={projects}
           onClose={() => setShowCreate(false)}
           onCreated={(name, hint) => {
             setShowCreate(false)
@@ -568,6 +606,7 @@ function RevalueBox({
   async function submit() {
     if (!value) return
     setBusy(true)
+    // 换值必须透传 kind/project_id——upsert 整行覆盖，漏传会把分类和绑定重置掉
     const r = await api
       .post<{ credential?: unknown; hint?: string }>('/credentials', {
         name: c.name,
@@ -575,6 +614,8 @@ function RevalueBox({
         description: c.description,
         tags: c.tags,
         expires_at: expires ? new Date(expires).toISOString() : null,
+        kind: c.kind || 'custom',
+        project_id: c.project_id,
       })
       .catch((e) => {
         onError(String(e))
@@ -670,12 +711,14 @@ function DangerZone({
   )
 }
 
-/** 新建凭据弹窗：写入是低频动作，收进弹窗不常驻页面。 */
+/** 新建凭据弹窗：写入是低频动作，收进弹窗不常驻页面。分类必选、项目可选。 */
 function CreateDialog({
+  projects,
   onClose,
   onCreated,
   onError,
 }: {
+  projects: { id: string; name: string }[]
   onClose: () => void
   onCreated: (name: string, hint?: string) => void
   onError: (m: string) => void
@@ -685,6 +728,8 @@ function CreateDialog({
   const [desc, setDesc] = useState('')
   const [tags, setTags] = useState('')
   const [expires, setExpires] = useState('')
+  const [kind, setKind] = useState('custom')
+  const [projectId, setProjectId] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function submit() {
@@ -700,6 +745,8 @@ function CreateDialog({
           .map((s) => s.trim())
           .filter(Boolean),
         expires_at: expires ? new Date(expires).toISOString() : null,
+        kind,
+        project_id: projectId || null,
       })
       .catch((e) => {
         onError(String(e))
@@ -716,7 +763,7 @@ function CreateDialog({
       role="presentation"
     >
       <Card
-        className="w-full max-w-md space-y-3 p-4"
+        className="max-h-[85dvh] w-full max-w-md space-y-3 overflow-y-auto p-4"
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2">
@@ -736,6 +783,33 @@ function CreateDialog({
           value={value}
           onChange={(e) => setValue(e.target.value)}
         />
+        <div className="flex gap-2">
+          <select
+            className={inputCls + ' min-w-0 flex-1'}
+            value={kind}
+            onChange={(e) => setKind(e.target.value)}
+            aria-label="分类"
+          >
+            {KINDS.map((x) => (
+              <option key={x.k} value={x.k}>
+                {x.label}
+              </option>
+            ))}
+          </select>
+          <select
+            className={inputCls + ' min-w-0 flex-1'}
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            aria-label="绑定项目（可选）"
+          >
+            <option value="">不绑定项目（个人/零散）</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <input
           className={inputCls + ' w-full'}
           placeholder="说明（可选）"

@@ -19,6 +19,19 @@ import { useSystemStatus } from '@/lib/status'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { appConfirm, type ConfirmOptions } from '@/components/confirm'
+import WikiMarkdown from '@/components/WikiMarkdown'
+import {
+  Bookmark,
+  Calendar,
+  Heart,
+  Lightbulb,
+  PenLine,
+  Repeat,
+  Scale,
+  ShieldAlert,
+  TriangleAlert,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
 type Tab = 'sessions' | 'atoms' | 'persona' | 'search' | 'kv'
 
@@ -35,6 +48,52 @@ const KIND_LABEL: Record<string, string> = {
   correction: '修正',
   failure: '教训',
   convention: '惯例',
+}
+
+/** 原子 kind 图标 + 色（八类八色，一眼认形态）。 */
+const KIND_ICON: Record<string, { icon: LucideIcon; color: string }> = {
+  preference: { icon: Heart, color: '#f43f5e' },
+  fact: { icon: Bookmark, color: '#3b82f6' },
+  decision: { icon: Scale, color: '#8b5cf6' },
+  event: { icon: Calendar, color: '#f59e0b' },
+  insight: { icon: Lightbulb, color: '#eab308' },
+  correction: { icon: PenLine, color: '#06b6d4' },
+  failure: { icon: TriangleAlert, color: '#ef4444' },
+  convention: { icon: Repeat, color: '#10b981' },
+}
+
+/** kind 图标瓦片：色底色字圆角方块。 */
+function KindTile({ kind }: { kind: string }) {
+  const spec = KIND_ICON[kind] ?? { icon: Bookmark, color: '#6b7280' }
+  const Icon = spec.icon
+  return (
+    <span
+      className="flex size-6 shrink-0 items-center justify-center rounded-md"
+      style={{ background: `${spec.color}1f`, color: spec.color }}
+      title={KIND_LABEL[kind] ?? kind}
+    >
+      <Icon className="size-3.5" aria-hidden="true" />
+    </span>
+  )
+}
+
+/** 置信度微型量表：细条 + 数值——低置信一眼可见。 */
+function ConfidenceMeter({ v }: { v: number }) {
+  const pct = Math.round(v * 100)
+  return (
+    <span className="inline-flex items-center gap-1.5" title={`置信度 ${v.toFixed(2)}`}>
+      <span className="h-1 w-10 overflow-hidden rounded-full bg-muted">
+        <span
+          className={cn(
+            'block h-full rounded-full',
+            v < 0.6 ? 'bg-yellow-500' : 'bg-emerald-500/70',
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className={cn('font-mono text-xs', v < 0.6 && 'text-warning')}>{v.toFixed(2)}</span>
+    </span>
+  )
 }
 
 /** 画像分面中英对照（迁移 0005 CHECK 枚举的 7 个分面）。 */
@@ -252,7 +311,7 @@ function Sessions() {
                 title: (s) => s.content?.[0]?.text ?? '',
                 render: (s) => s.content?.[0]?.text ?? '（空会话）',
               },
-              { key: 'agent', label: 'Agent', tdClassName: 'whitespace-nowrap font-mono text-xs' },
+              { key: 'agent', label: 'Agent', tdClassName: 'whitespace-nowrap font-mono text-xs text-muted-foreground' },
               { key: 'turns', label: '轮次', tdClassName: 'whitespace-nowrap font-mono text-xs', render: (s) => s.content?.length ?? 0 },
               {
                 key: 'distill',
@@ -260,7 +319,13 @@ function Sessions() {
                 tdClassName: 'whitespace-nowrap',
                 render: (s) => <StatusBadge status={s.distill_status} />,
               },
-              { key: 'time', label: '时间', tdClassName: 'whitespace-nowrap text-muted-foreground', render: (s) => fmtTime(s.created_at) },
+              {
+                key: 'time',
+                label: '时间',
+                tdClassName: 'whitespace-nowrap text-muted-foreground',
+                title: (s) => new Date(s.created_at).toLocaleString(),
+                render: (s) => relTime(s.created_at),
+              },
             ]}
             rows={(() => {
               // 全量排序后再分页（数据 limit=200 已全量在前端）
@@ -506,18 +571,18 @@ function Atoms({ kind, status }: { kind: string; status: string }) {
             columns={[
               {
                 key: 'kind',
-                label: 'kind',
+                label: '类型',
                 render: (a) => (
-                  <>
-                    {/* 中英对照一行：中文为主（可读），kind 英文 mono 为数据标识 */}
+                  <span className="flex items-center gap-2 whitespace-nowrap">
+                    <KindTile kind={a.kind} />
                     <span className="text-sm">{KIND_LABEL[a.kind] ?? a.kind}</span>
-                    <span className="ml-1.5 font-mono text-xs text-muted-foreground">{a.kind}</span>
-                  </>
+                  </span>
                 ),
               },
               {
                 key: 'content',
                 label: '内容',
+                thClassName: 'w-[60%]',
                 render: (a) =>
                   editing === a.id ? (
                     <span className="flex items-center gap-1.5">
@@ -556,9 +621,9 @@ function Atoms({ kind, status }: { kind: string; status: string }) {
               {
                 key: 'confidence',
                 label: '置信',
-                tdClassName: (a) => cn(tableCls.tdMono, a.confidence < 0.6 && 'text-warning'),
+                tdClassName: 'whitespace-nowrap',
                 title: () => '置信度（低于 0.60 黄色提示）',
-                render: (a) => a.confidence.toFixed(2),
+                render: (a) => <ConfidenceMeter v={a.confidence} />,
               },
               {
                 key: 'status',
@@ -596,14 +661,21 @@ function Atoms({ kind, status }: { kind: string; status: string }) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className={cn('mr-1', a.sensitive && 'text-warning')}
+                      className={cn('mr-1 gap-1', a.sensitive && 'text-warning')}
                       title={a.sensitive ? '敏感原子（检索/快照隐身，点击取消）' : '标记敏感（医疗/感情/财务等，检索与快照隐身）'}
                       onClick={async () => {
                         await api.patch(`/memory/atoms/${a.id}`, { sensitive: !a.sensitive })
                         setRows(rows.map((r) => (r.id === a.id ? { ...r, sensitive: !a.sensitive } : r)))
                       }}
                     >
-                      {a.sensitive ? '已敏感' : '敏感'}
+                      {a.sensitive ? (
+                        <>
+                          <ShieldAlert className="size-3.5" aria-hidden="true" />
+                          已敏感
+                        </>
+                      ) : (
+                        '敏感'
+                      )}
                     </Button>
                     <Button variant="ghost" size="sm" className="mr-1" title="改写留痕历史" onClick={() => setHistoryAtom(a)}>
                       历史
@@ -877,49 +949,172 @@ function AtomHistoryDrawer({ atom, onClose }: { atom: Atom; onClose: () => void 
 }
 
 
-/** 画像活文档（persona_doc）：离线整理 Agent 维护的单份 Markdown 活文档 + 版本史（只读；手动编辑走 POST /memory/persona-doc）。 */
+/** 画像活文档（persona_doc）：离线整理 Agent 维护的单份 Markdown 活文档 + 版本史。
+ *  版本管理式两栏：左版本史（当前版在顶），右正文 Markdown 渲染 / 逐版行级 diff。 */
 interface PersonaDocData {
   doc: { content: string; summary: string | null; version: number; updated_at: string } | null
-  history: { version: number; summary: string | null; created_at: string }[]
+  history: { version: number; content: string; summary: string | null; created_at: string }[]
 }
+
+/** 行级 LCS diff（画像文档小，O(n·m) 足够）——版本管理感的核心。 */
+function diffLines(a: string, b: string): { t: 'same' | 'add' | 'del'; s: string }[] {
+  const x = a.split('\n')
+  const y = b.split('\n')
+  const n = x.length
+  const m = y.length
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = x[i] === y[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+  const out: { t: 'same' | 'add' | 'del'; s: string }[] = []
+  let i = 0
+  let j = 0
+  while (i < n && j < m) {
+    if (x[i] === y[j]) {
+      out.push({ t: 'same', s: x[i] })
+      i++
+      j++
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ t: 'del', s: x[i] })
+      i++
+    } else {
+      out.push({ t: 'add', s: y[j] })
+      j++
+    }
+  }
+  while (i < n) out.push({ t: 'del', s: x[i++] })
+  while (j < m) out.push({ t: 'add', s: y[j++] })
+  return out
+}
+
+/** diff 视图：红删绿增、前缀 +/-——跟 git 终端同语言。 */
+function LineDiff({ oldText, newText }: { oldText: string; newText: string }) {
+  const rows = diffLines(oldText, newText)
+  return (
+    <div className="overflow-hidden rounded-lg border border-border font-mono text-xs leading-5">
+      {rows.map((r, i) => (
+        <div
+          key={i}
+          className={cn(
+            'whitespace-pre-wrap px-3 py-0.5',
+            r.t === 'add' && 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+            r.t === 'del' && 'bg-red-500/10 text-red-500',
+          )}
+        >
+          <span className="mr-2 select-none text-muted-foreground/50">
+            {r.t === 'add' ? '+' : r.t === 'del' ? '-' : ' '}
+          </span>
+          {r.s || ' '}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function PersonaDocPane() {
   const [data, setData] = useState<PersonaDocData | null>(null)
+  // 选中版本（null = 当前版）；diff 模式对比「选中版 vs 它的上一版」
+  const [sel, setSel] = useState<number | null>(null)
+  const [diffMode, setDiffMode] = useState(false)
   useEffect(() => {
     api
-      .get<PersonaDocData>('/memory/persona-doc?history_limit=10')
+      .get<PersonaDocData>('/memory/persona-doc?history_limit=20')
       .then(setData)
       .catch(() => setData({ doc: null, history: [] }))
   }, [])
   if (!data) return <Spinner />
   const { doc, history } = data
+  if (!doc)
+    return <Empty text="画像尚未生成——记忆蒸馏后由离线整理 Agent 自动维护" />
+
+  // 版本链：当前版在顶，历史随后（新→旧）
+  const versions: PersonaDocData['history'] = [
+    {
+      version: doc.version,
+      content: doc.content,
+      summary: doc.summary,
+      created_at: doc.updated_at,
+    },
+    ...history,
+  ]
+  const cur = versions.find((v) => v.version === (sel ?? doc.version)) ?? versions[0]
+  const base = (() => {
+    const idx = versions.findIndex((v) => v.version === cur.version)
+    return idx >= 0 && idx + 1 < versions.length ? versions[idx + 1] : null
+  })()
+
   return (
-    <Card className="space-y-3 p-4">
-      {doc ? (
-        <>
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">画像 v{doc.version}</span>
-            <span className="text-xs text-muted-foreground">{fmtTime(doc.updated_at)}</span>
+    <div className="grid grid-cols-1 gap-4 lg:h-[calc(100dvh-7.5rem)] lg:grid-cols-[15rem_minmax(0,1fr)]">
+      {/* 左：版本史——版本管理的主入口，不藏折叠 */}
+      <div className="min-h-0 space-y-1.5 lg:h-full lg:overflow-y-auto lg:pr-1">
+        <div className="px-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
+          版本 · 新 → 旧
+        </div>
+        {versions.map((v, i) => {
+          const active = v.version === cur.version
+          return (
+            <button
+              key={v.version}
+              className={cn(
+                'block w-full rounded-lg border px-3 py-2 text-left transition-colors',
+                active
+                  ? 'border-primary/45 bg-primary/5 shadow-[inset_2px_0_0_0] shadow-primary/50'
+                  : 'border-border hover:border-foreground/20 hover:bg-muted/40',
+              )}
+              onClick={() => {
+                setSel(v.version)
+                setDiffMode(false)
+              }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs font-medium">
+                  v{v.version}
+                  {i === 0 && (
+                    <span className="ml-1.5 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] text-emerald-500">
+                      当前
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">{relTime(v.created_at)}</span>
+              </div>
+              {v.summary && (
+                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{v.summary}</div>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* 右：正文（Markdown 渲染）或版本间 diff */}
+      <Card className="flex min-h-0 flex-col p-4 lg:h-full">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <span className="text-sm font-medium">画像 v{cur.version}</span>
+            <span className="ml-2 text-xs text-muted-foreground">{fmtTime(cur.created_at)}</span>
           </div>
-          {doc.summary && <p className="text-xs text-muted-foreground">{doc.summary}</p>}
-          <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap font-sans text-sm leading-relaxed">{doc.content}</pre>
-          {history.length > 0 && (
-            <details className="text-xs text-muted-foreground">
-              <summary className="cursor-pointer">版本史（{history.length}）</summary>
-              <ul className="mt-1 space-y-0.5">
-                {history.map((h) => (
-                  <li key={h.version}>
-                    v{h.version} · {fmtTime(h.created_at)}
-                    {h.summary ? ` · ${h.summary}` : ''}
-                  </li>
-                ))}
-              </ul>
-            </details>
+          {base && (
+            <Button
+              size="sm"
+              variant={diffMode ? 'default' : 'outline'}
+              onClick={() => setDiffMode((m) => !m)}
+            >
+              {diffMode ? '退出 diff' : `diff v${base.version} → v${cur.version}`}
+            </Button>
           )}
-        </>
-      ) : (
-        <Empty text="画像尚未生成——记忆蒸馏后由离线整理 Agent 自动维护" />
-      )}
-    </Card>
+        </div>
+        {cur.summary && !diffMode && (
+          <p className="mb-3 text-xs text-muted-foreground">{cur.summary}</p>
+        )}
+        {/* 正文区独立滚动——留白吃掉，长文档不出页 */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {diffMode && base ? (
+            <LineDiff oldText={base.content} newText={cur.content} />
+          ) : (
+            <WikiMarkdown content={cur.content} />
+          )}
+        </div>
+      </Card>
+    </div>
   )
 }
 
@@ -970,7 +1165,7 @@ function KvPane() {
         <input
           className={inputCls}
           aria-label="KV 检索"
-          placeholder="按 key / value / context 子串检索…"
+          placeholder="按键名 / 值 / 上下文子串检索…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
@@ -989,28 +1184,28 @@ function KvPane() {
           columns={[
             {
               key: 'key',
-              label: 'key',
+              label: '键名',
               tdClassName: `${tableCls.tdMono} max-w-52 truncate font-medium`,
               title: (r) => r.key,
               render: (r) => r.key,
             },
             {
               key: 'value',
-              label: 'value',
+              label: '值',
               tdClassName: `${tableCls.tdMono} max-w-64 truncate`,
               title: (r) => r.value,
               render: (r) => r.value,
             },
             {
               key: 'context',
-              label: 'context',
+              label: '上下文',
               tdClassName: `${tableCls.td} max-w-72 truncate text-muted-foreground`,
               title: (r) => r.context,
               render: (r) => r.context,
             },
             {
               key: 'source',
-              label: 'source',
+              label: '来源',
               thClassName: 'whitespace-nowrap',
               tdClassName: `${tableCls.td} whitespace-nowrap text-muted-foreground`,
               render: (r) => r.source,
@@ -1057,20 +1252,20 @@ function KvPane() {
               </div>
               <dl className="mt-3 space-y-2">
                 <div>
-                  <dt className="text-xs text-muted-foreground">value（逐字）</dt>
+                  <dt className="text-xs text-muted-foreground">值（逐字保存）</dt>
                   <dd className="mt-0.5 max-h-80 overflow-auto break-all rounded bg-background p-2 font-mono text-xs whitespace-pre-wrap">
                     {pretty(r.value)}
                   </dd>
                 </div>
                 {r.context && (
                   <div>
-                    <dt className="text-xs text-muted-foreground">context</dt>
+                    <dt className="text-xs text-muted-foreground">上下文</dt>
                     <dd className="mt-0.5 text-xs break-words">{r.context}</dd>
                   </div>
                 )}
                 <div className="flex gap-4 text-xs text-muted-foreground">
-                  <span>source：{r.source}</span>
-                  <span>tags：{r.tags.length ? r.tags.join(' / ') : '—'}</span>
+                  <span>来源：{r.source}</span>
+                  <span>标签：{r.tags.length ? r.tags.join(' / ') : '—'}</span>
                   <span>更新：{fmtTime(r.updated_at)}</span>
                 </div>
               </dl>

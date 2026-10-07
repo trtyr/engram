@@ -1,29 +1,55 @@
-/** 项目记忆域：项目列表（类型筛选 / 新建 / 编辑 / 多选 / 批量删除）。 */
+/**
+ * 项目记忆域 · 外层项目选择页（2026-10-07 大改版）：
+ * 这一层的职责只有一个——把「有哪些项目、该点进哪个」讲清楚。点击卡片才进项目详情，
+ * 详情页才是文档阅读的地方（两层分工：外层选项目，内层读文档）。
+ *
+ * 卡片语言（GitHub repo / Vercel project 同族）：瓦片 + 名称 + 状态 + 描述两行 +
+ * 分类 chips + 更新时间脚注；编辑/删除悬浮才显，复选框右上角常驻。
+ * 新建是低频动作收进弹窗；场景分组 + 图谱 tab 保留。
+ */
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type ProjectDto, type ProjectTypeDto } from '@/lib/api'
 import ProjectAssetGraph from '@/components/ProjectAssetGraph'
-import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
-import { inputCls, selectCls } from '@/lib/ui'
+import { Card, Checkbox, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
+import { inputCls, selectCls, relTime } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import { BookOpen, Code2, Coffee, FlaskConical, Hammer, Palette, PenTool } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 
-/**
- * 场景色点（标签文字由 `/projects/types` 提供——场景值域的单一事实源在后端 `PROJECT_TYPES` 常量）。
- * 未知场景回落灰点，不猜语义。
- */
-const TYPE_DOT: Record<string, string> = {
-  dev: '#3b82f6', // 开发
-  ops: '#10b981', // 运维
-  research: '#8b5cf6', // 调研
-  study: '#f59e0b', // 学习
-  life: '#06b6d4', // 生活
-  create: '#ec4899', // 创作
-}
 const STATUS_META: Record<string, { label: string; cls: string }> = {
   active: { label: '进行中', cls: 'text-emerald-600' },
   paused: { label: '暂停', cls: 'text-amber-600' },
   done: { label: '完成', cls: 'text-muted-foreground' },
   abandoned: { label: '放弃', cls: 'text-destructive' },
+}
+
+/** 场景图标（标签文字由 `/projects/types` 提供——场景值域的单一事实源在后端 `PROJECT_TYPES` 常量）。供项目外层与详情页共用。 */
+export const TYPE_ICON: Record<string, { icon: LucideIcon; color: string }> = {
+  dev: { icon: Code2, color: '#3b82f6' },
+  ops: { icon: Hammer, color: '#10b981' },
+  research: { icon: FlaskConical, color: '#8b5cf6' },
+  study: { icon: BookOpen, color: '#f59e0b' },
+  life: { icon: Coffee, color: '#06b6d4' },
+  create: { icon: PenTool, color: '#ec4899' },
+}
+
+/** 场景图标瓦片：分组标题与卡片的视觉锚点。 */
+export function TypeTile({ type, size = 'md' }: { type: string; size?: 'sm' | 'md' | 'lg' }) {
+  const spec = TYPE_ICON[type] ?? { icon: Palette, color: '#6b7280' }
+  const Icon = spec.icon
+  return (
+    <span
+      className={cn(
+        'flex shrink-0 items-center justify-center rounded-md',
+        size === 'sm' ? 'size-5' : size === 'lg' ? 'size-11' : 'size-9',
+      )}
+      style={{ background: `${spec.color}1f`, color: spec.color }}
+    >
+      <Icon className={size === 'sm' ? 'size-3' : size === 'lg' ? 'size-5' : 'size-4'} aria-hidden="true" />
+    </span>
+  )
 }
 
 export default function Projects() {
@@ -35,13 +61,10 @@ export default function Projects() {
   const [busy, setBusy] = useState(false)
   /** 列表 / 图谱（共享引擎第四位住户：项目 ↔ 资产关系网） */
   const [tab, setTab] = useState<'list' | 'graph'>('list')
+  // 新建弹窗（低频动作不常驻页面）
+  const [showCreate, setShowCreate] = useState(false)
 
-  // 新建表单
-  const [name, setName] = useState('')
-  const [type, setType] = useState('dev')
-  const [desc, setDesc] = useState('')
-
-  // 编辑表单（内联）
+  // 编辑表单（卡片内联展开）
   const [editId, setEditId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editStatus, setEditStatus] = useState('active')
@@ -74,22 +97,6 @@ export default function Projects() {
       if (prev.size === (rows?.length ?? 0) && rows && rows.length > 0) return new Set()
       return new Set((rows ?? []).map((r) => r.id))
     })
-  }
-
-  async function doCreate() {
-    if (!name.trim()) return
-    setBusy(true)
-    try {
-      await api.post('/projects', { name: name.trim(), type, description: desc.trim() || null })
-      setName('')
-      setDesc('')
-      setErr('')
-      load()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : '新建失败')
-    } finally {
-      setBusy(false)
-    }
   }
 
   async function doDelete(id: string) {
@@ -173,220 +180,278 @@ export default function Projects() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="项目">
-        <select className={selectCls} value={filter} onChange={(e) => setFilter(e.target.value)}>
-          <option value="">全部类型</option>
-          {types.map((t) => (
-            <option key={t.type} value={t.type}>
-              {t.label}
-            </option>
-          ))}
-        </select>
+      <PageHeader title="项目" desc={`${rows.length} 个项目`}>
+        <Button onClick={() => setShowCreate(true)}>＋ 新建项目</Button>
       </PageHeader>
 
-      {/* 列表 / 图谱 切换（图谱 = 共享引擎第四位住户：项目 ↔ 资产关系网） */}
-      <div className="flex items-center gap-1 border-b border-border">
-        {(
-          [
-            ['list', '列表'],
-            ['graph', '图谱'],
-          ] as const
-        ).map(([k, label]) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setTab(k)}
-            className={`-mb-px border-b-2 px-3 py-1.5 text-sm transition-colors ${
-              tab === k
-                ? 'border-foreground font-medium text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* 文档库 / 图谱 切换（全局 Tabs 同款；图谱 = 共享引擎第四位住户：项目 ↔ 资产关系网） */}
+      <div className="flex flex-wrap items-center gap-4">
+        <Tabs
+          items={[
+            { value: 'list', label: '文档库' },
+            { value: 'graph', label: '图谱' },
+          ]}
+          value={tab}
+          onChange={(v) => setTab(v as 'list' | 'graph')}
+        />
+        <div className="ml-auto">
+          <select className={selectCls} value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="类型筛选">
+            <option value="">全部类型</option>
+            {types.map((t) => (
+              <option key={t.type} value={t.type}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {tab === 'graph' ? (
         <ProjectAssetGraph />
       ) : (
         <>
-          {/* 新建 + 全选（同一行） */}
-      <Card className="p-3">
-        <div className="flex flex-wrap items-center gap-3">
-          {rows.length > 1 && (
-            <Checkbox
-              checked={selected.size === rows.length && rows.length > 0}
-              onChange={() => toggleAll()}
-              label="全选"
-            >
-              {selected.size === rows.length ? '取消全选' : '全选'}
-            </Checkbox>
+          {err && <ErrorBox msg={err} />}
+
+          {/* 批量操作条（选中时出现） */}
+          {selected.size > 0 && (
+            <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+              <span className="text-sm text-muted-foreground">已选 {selected.size} 项</span>
+              <Button size="sm" variant="ghost" onClick={toggleAll}>
+                {rows.length > 0 && selected.size === rows.length ? '取消全选' : '全选'}
+              </Button>
+              <Button size="sm" variant="destructive" disabled={busy} onClick={doBatchDelete}>
+                批量删除
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+                取消选择
+              </Button>
+            </div>
           )}
-          <form
-            className="flex flex-wrap items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              doCreate()
-            }}
-          >
-            <input
-              className={`${inputCls} w-52`}
-              placeholder="项目名"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-            <select className={selectCls} value={type} onChange={(e) => setType(e.target.value)}>
-              {types.map((t) => (
-                <option key={t.type} value={t.type}>
-                  {t.label}
-                </option>
+
+          {rows.length === 0 ? (
+            <Empty text="暂无项目——让 AI 通过 MCP projects create 建第一个项目" />
+          ) : (
+            <div className="space-y-7">
+              {grouped.map(([t, items]) => (
+                <section key={t} className="space-y-2.5">
+                  <h2 className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <TypeTile type={t} size="sm" />
+                    {types.find((x) => x.type === t)?.label ?? t}
+                    <span className="text-muted-foreground/50">（{items.length}）</span>
+                  </h2>
+                  <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                    {items.map((p) => (
+                      <Card
+                        key={p.id}
+                        className="group relative flex flex-col p-4 transition-all hover:-translate-y-px hover:border-foreground/25 hover:shadow-md"
+                      >
+                        {/* 右上角轻操作区：编辑/删除悬浮才显，复选框常驻 */}
+                        <div className="absolute right-3 top-3 flex items-center gap-1">
+                          <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <Button size="sm" variant="ghost" onClick={() => startEdit(p)}>
+                              编辑
+                            </Button>
+                            <Button size="sm" variant="ghost" disabled={busy} onClick={() => doDelete(p.id)}>
+                              删除
+                            </Button>
+                          </div>
+                          <Checkbox
+                            checked={selected.has(p.id)}
+                            onChange={() => toggle(p.id)}
+                            label={`选择 ${p.name}`}
+                          />
+                        </div>
+
+                        {/* 身份行：瓦片 + 名称 + 状态 */}
+                        <div className="flex items-start gap-3 pr-16">
+                          <TypeTile type={p.type} />
+                          <div className="min-w-0 flex-1">
+                            <Link
+                              to={`/projects/${p.id}`}
+                              className="block truncate font-medium leading-6 hover:underline"
+                              title={p.name}
+                            >
+                              {p.name}
+                            </Link>
+                            <StatusDot status={p.status} />
+                          </div>
+                        </div>
+
+                        {/* 描述（两行截断） */}
+                        <p className="mt-2 line-clamp-2 min-h-8 text-xs leading-5 text-muted-foreground">
+                          {p.description || '（无描述）'}
+                        </p>
+
+                        {/* 脚注：分类 chips + 更新时间 */}
+                        <div className="mt-auto flex items-center gap-2 pt-3">
+                          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+                            {p.categories.slice(0, 3).map((c) => (
+                              <span
+                                key={c}
+                                className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                              >
+                                {c}
+                              </span>
+                            ))}
+                            {p.categories.length > 3 && (
+                              <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground/60">
+                                +{p.categories.length - 3}
+                              </span>
+                            )}
+                          </div>
+                          <span className="shrink-0 text-[10px] text-muted-foreground/60" title={p.updated_at}>
+                            {relTime(p.updated_at)}
+                          </span>
+                        </div>
+
+                        {/* 编辑表单（内联展开） */}
+                        {editId === p.id && (
+                          <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
+                            <input
+                              className={`${inputCls} w-full`}
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                            />
+                            <div className="flex gap-2">
+                              <select
+                                className={selectCls}
+                                value={editStatus}
+                                onChange={(e) => setEditStatus(e.target.value)}
+                              >
+                                {Object.entries(STATUS_META).map(([k, v]) => (
+                                  <option key={k} value={k}>
+                                    {v.label}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                className={`${inputCls} flex-1`}
+                                placeholder="描述（可选）"
+                                value={editDesc}
+                                onChange={(e) => setEditDesc(e.target.value)}
+                              />
+                            </div>
+                            <input
+                              className={`${inputCls} w-full`}
+                              placeholder="分类（逗号分隔，如：后端, 前端, 运维）"
+                              value={editCats}
+                              onChange={(e) => setEditCats(e.target.value)}
+                            />
+                            <div className="flex gap-2">
+                              <Button size="sm" disabled={busy} onClick={doEdit}>
+                                保存
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setEditId(null)}>
+                                取消
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </Card>
+                    ))}
+                  </div>
+                </section>
               ))}
-            </select>
-            <input
-              className={`${inputCls} flex-1`}
-              placeholder="描述（可选）"
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-            />
-            <Button size="sm" type="submit" disabled={busy || !name.trim()}>
-              新建
-            </Button>
-          </form>
-        </div>
-      </Card>
-
-      {err && <ErrorBox msg={err} />}
-
-      {/* 批量操作条（选中时出现） */}
-      {selected.size > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
-          <span className="text-sm text-muted-foreground">已选 {selected.size} 项</span>
-          <Button size="sm" variant="destructive" disabled={busy} onClick={doBatchDelete}>
-            批量删除
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-            取消选择
-          </Button>
-        </div>
-      )}
-
-      {rows.length === 0 ? (
-        <Empty text="暂无项目" />
-      ) : (
-        <div className="space-y-6">
-          {grouped.map(([t, items]) => (
-            <section key={t} className="space-y-2">
-              <h2 className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                <i
-                  className="size-2 rounded-full"
-                  style={{ background: TYPE_DOT[t] ?? '#6b7280' }}
-                  aria-hidden="true"
-                />
-                {types.find((x) => x.type === t)?.label ?? t}（{items.length}）
-              </h2>
-              <div className="grid gap-3 md:grid-cols-2">
-                {items.map((p) => (
-            <Card key={p.id} className="p-4">
-              <div className="flex items-start gap-3">
-                <Checkbox
-                  className="mt-1"
-                  checked={selected.has(p.id)}
-                  onChange={() => toggle(p.id)}
-                  label={`选择 ${p.name}`}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <Link to={`/projects/${p.id}`} className="truncate font-medium hover:underline">
-                      {p.name}
-                    </Link>
-                    <span className="flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                      <i
-                        className="size-1.5 rounded-full"
-                        style={{ background: TYPE_DOT[p.type] ?? '#6b7280' }}
-                        aria-hidden="true"
-                      />
-                      {types.find((t) => t.type === p.type)?.label ?? p.type}
-                    </span>
-                    <StatusDot status={p.status} />
-                  </div>
-                  {p.description && (
-                    <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{p.description}</p>
-                  )}
-                  {p.categories.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {p.categories.map((c) => (
-                        <span
-                          key={c}
-                          className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                        >
-                          {c}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => startEdit(p)}>
-                    编辑
-                  </Button>
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => doDelete(p.id)}>
-                    删除
-                  </Button>
-                </div>
-              </div>
-
-              {editId === p.id && (
-                <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
-                  <input
-                    className={`${inputCls} w-full`}
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                  />
-                  <div className="flex gap-2">
-                    <select
-                      className={selectCls}
-                      value={editStatus}
-                      onChange={(e) => setEditStatus(e.target.value)}
-                    >
-                      {Object.entries(STATUS_META).map(([k, v]) => (
-                        <option key={k} value={k}>
-                          {v.label}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      className={`${inputCls} flex-1`}
-                      placeholder="描述（可选）"
-                      value={editDesc}
-                      onChange={(e) => setEditDesc(e.target.value)}
-                    />
-                  </div>
-                  <input
-                    className={`${inputCls} w-full`}
-                    placeholder="分类（逗号分隔，如：后端, 前端, 运维）"
-                    value={editCats}
-                    onChange={(e) => setEditCats(e.target.value)}
-                  />
-                  <div className="flex gap-2">
-                    <Button size="sm" disabled={busy} onClick={doEdit}>
-                      保存
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditId(null)}>
-                      取消
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </Card>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
+            </div>
+          )}
         </>
       )}
+
+      {showCreate && (
+        <CreateProjectDialog
+          types={types}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false)
+            load()
+          }}
+          onError={setErr}
+        />
+      )}
+    </div>
+  )
+}
+
+/** 新建项目弹窗：低频动作不常驻页面（与凭据/工单同款自建模态）。 */
+function CreateProjectDialog({
+  types,
+  onClose,
+  onCreated,
+  onError,
+}: {
+  types: ProjectTypeDto[]
+  onClose: () => void
+  onCreated: () => void
+  onError: (m: string) => void
+}) {
+  const [name, setName] = useState('')
+  const [type, setType] = useState('dev')
+  const [desc, setDesc] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submit() {
+    if (!name.trim()) return
+    setBusy(true)
+    try {
+      await api.post('/projects', { name: name.trim(), type, description: desc.trim() || null })
+      onCreated()
+    } catch (e) {
+      onError(e instanceof Error ? e.message : '新建失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <Card
+        className="w-full max-w-md space-y-3 p-4"
+        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2">
+          <TypeTile type={type} />
+          <span className="text-sm font-medium">新建项目</span>
+        </div>
+        <input
+          className={inputCls + ' w-full'}
+          placeholder="项目名"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoFocus
+        />
+        <div className="flex gap-2">
+          <select
+            className={selectCls + ' min-w-0 flex-1'}
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            aria-label="场景"
+          >
+            {types.map((t) => (
+              <option key={t.type} value={t.type}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <input
+          className={inputCls + ' w-full'}
+          placeholder="描述（可选）"
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+        />
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button disabled={busy || !name.trim()} onClick={submit}>
+            新建
+          </Button>
+        </div>
+      </Card>
     </div>
   )
 }

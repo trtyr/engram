@@ -5,7 +5,7 @@ import { appConfirm } from '@/components/confirm'
 import { Check, Trash2 } from 'lucide-react'
 import Pager from '@/components/Pager'
 import { api, type Todo } from '@/lib/api'
-import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
+import { Card, Empty, ErrorBox, PageHeader, Spinner, Tabs } from '@/components/ui-bits'
 import { fmtTime, inputCls, selectCls } from '@/lib/ui'
 import WikiMarkdown from '@/components/WikiMarkdown'
 import { Button } from '@/components/ui/button'
@@ -126,17 +126,18 @@ export default function Todos() {
   const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
   const cur = Math.min(page, maxPage)
 
-  const views: { key: View; label: string }[] = [
-    { key: 'active', label: '进行中' },
-    { key: 'done', label: '已完成' },
-    { key: 'archived', label: '已归档' },
+  const views: { value: View; label: string }[] = [
+    { value: 'active', label: '进行中' },
+    { value: 'done', label: '已完成' },
+    { value: 'archived', label: '已归档' },
   ]
+  const viewLabel = views.find((v) => v.value === view)?.label ?? ''
 
   return (
     <div className="space-y-5">
-      <PageHeader title="待办">
+      <PageHeader title="待办" desc={`${rows.length} 条 · ${viewLabel}`}>
         <input
-          className={`${inputCls} w-40`}
+          className={`${inputCls} w-56`}
           placeholder="搜索待办…"
           aria-label="搜索待办"
           value={q}
@@ -178,25 +179,11 @@ export default function Todos() {
       </PageHeader>
 
       {/* 视图切换（微软 To Do 的清单心智：进行中 / 已完成 / 已归档） */}
-      <div className="flex gap-1" role="tablist" aria-label="待办视图">
-        {views.map((v) => (
-          <button
-            key={v.key}
-            type="button"
-            role="tab"
-            aria-selected={view === v.key}
-            onClick={() => setView(v.key)}
-            className={cn(
-              'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-              view === v.key
-                ? 'bg-foreground text-background'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-            )}
-          >
-            {v.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        items={views}
+        value={view}
+        onChange={(v) => setView(v as View)}
+      />
 
       {err && <ErrorBox msg={err} />}
 
@@ -205,7 +192,7 @@ export default function Todos() {
         className={cn(
           'grid grid-cols-1 gap-4',
           selected
-            ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:h-[calc(100dvh-7.5rem)]'
+            ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,32rem)] lg:h-[calc(100dvh-7.5rem)]'
             : 'grid-cols-1',
         )}
       >
@@ -214,7 +201,7 @@ export default function Todos() {
         <Empty
           text={
             view === 'active'
-              ? '没有进行中的待办——上方输入框回车记一条，或让 AI 通过 todo_add 帮你记'
+              ? '没有进行中的待办——让 AI 通过 todo_add 帮你记'
               : view === 'done'
                 ? '还没有完成的待办'
                 : '没有归档的待办'
@@ -295,7 +282,10 @@ function TodoRow({
   return (
     <div
       className={cn(
-        'group flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/40',
+        'group flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors',
+        selected
+          ? 'bg-primary/5 shadow-[inset_2px_0_0_0] shadow-primary/50'
+          : 'hover:bg-muted/40',
         done && 'opacity-55',
       )}
     >
@@ -315,7 +305,7 @@ function TodoRow({
         {done && <Check className="size-3.5" aria-hidden="true" />}
       </button>
       <div
-        className={cn('min-w-0 flex-1 cursor-pointer rounded px-1 py-0.5', selected && 'bg-muted/50')}
+        className={cn('min-w-0 flex-1 cursor-pointer rounded px-1 py-0.5')}
         onClick={() => onSelect(t)}
         role="button"
         tabIndex={0}
@@ -339,7 +329,7 @@ function TodoRow({
         <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-4">
           <span className="font-mono text-[10px] text-muted-foreground/70">EN-{t.short_no}</span>
           {t.tags.map((tag: string) => (
-            <span key={tag} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            <span key={tag} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
               #{tag}
             </span>
           ))}
@@ -380,7 +370,12 @@ function TodoRow({
 }
 
 
-/** 待办详情：markdown 渲染正文 + 行内操作。 */
+/** 待办详情：结构化面板（完成勾选 + 属性栅格 + 正文阅读区 + 操作行），不是裸 Markdown。 */
+const TODO_STATUS_LABEL: Record<string, string> = {
+  open: '进行中',
+  done: '已完成',
+  archived: '已归档',
+}
 function TodoDetail({
   t,
   busy,
@@ -398,42 +393,124 @@ function TodoDetail({
 }) {
   const done = t.status === 'done'
   return (
-    <Card className="flex flex-col gap-3 p-4 lg:h-full lg:overflow-y-auto">
-      <div className="flex items-start justify-between gap-2">
-        <h3 className={cn('text-sm font-semibold leading-6', done && 'text-muted-foreground line-through')}>
-          {t.title}
-        </h3>
+    <Card className="flex flex-col gap-4 p-5 lg:h-full lg:overflow-y-auto">
+      {/* 头部：大勾选圆 + 标题 + 关闭 */}
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={done}
+          aria-label={done ? `重开 ${t.title}` : `完成 ${t.title}`}
+          disabled={busy}
+          onClick={() => onToggle(t)}
+          className={cn(
+            'mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors',
+            done
+              ? 'border-success bg-success text-white'
+              : 'border-input bg-card hover:border-success/60',
+          )}
+        >
+          {done && <Check className="size-4" aria-hidden="true" />}
+        </button>
+        <div className="min-w-0 flex-1">
+          <h3
+            className={cn(
+              'text-base font-semibold leading-7 break-words',
+              done && 'text-muted-foreground line-through',
+            )}
+          >
+            {t.title}
+          </h3>
+          <p className="mt-0.5 font-mono text-xs text-muted-foreground/70">EN-{t.short_no}</p>
+        </div>
         <Button size="sm" variant="ghost" onClick={onClose} aria-label="关闭详情">
           ✕
         </Button>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="font-mono">EN-{t.short_no}</span>
-        <span>{PRIO_LABEL[t.priority] ?? t.priority}</span>
-        <span>·</span>
-        <span>{t.status}</span>
-        {t.due_at && (
+
+      {/* 标签 */}
+      {t.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {t.tags.map((tag: string) => (
+            <span key={tag} className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+              #{tag}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* 属性栅格 */}
+      <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
+        <dt className="text-muted-foreground">状态</dt>
+        <dd>
+          <span
+            className={cn(
+              'rounded px-1.5 py-0.5',
+              done
+                ? 'bg-emerald-500/10 text-emerald-600'
+                : t.status === 'archived'
+                  ? 'bg-muted text-muted-foreground'
+                  : 'bg-info/10 text-info',
+            )}
+          >
+            {TODO_STATUS_LABEL[t.status] ?? t.status}
+          </span>
+        </dd>
+        <dt className="text-muted-foreground">优先级</dt>
+        <dd className="flex items-center gap-1.5">
+          <span
+            className={cn('size-2 rounded-full', PRIO_DOT[t.priority] ?? 'bg-muted-foreground/30')}
+            aria-hidden="true"
+          />
+          {PRIO_LABEL[t.priority] ?? t.priority}
+        </dd>
+        <dt className="text-muted-foreground">截止</dt>
+        <dd>
+          {t.due_at ? (
+            t.due_at && t.status === 'open' && new Date(t.due_at) < new Date() ? (
+              <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-destructive">
+                已逾期 · {fmtTime(t.due_at)}
+              </span>
+            ) : (
+              fmtTime(t.due_at)
+            )
+          ) : (
+            <span className="text-muted-foreground/60">未设置</span>
+          )}
+        </dd>
+        {t.created_at && (
           <>
-            <span>·</span>
-            <span>到期 {fmtTime(t.due_at)}</span>
+            <dt className="text-muted-foreground">创建</dt>
+            <dd>{fmtTime(t.created_at)}</dd>
           </>
         )}
-      </div>
-      <div className="min-h-0 border-t pt-3">
+      </dl>
+
+      {/* 正文阅读区 */}
+      <div className="min-h-0 border-t border-border pt-3">
+        <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">正文</div>
         {t.body ? (
           <WikiMarkdown content={t.body} />
         ) : (
           <p className="text-sm text-muted-foreground">（无正文——记的时候没展开写）</p>
         )}
       </div>
-      <div className="mt-auto flex flex-wrap gap-2 border-t pt-3">
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => onToggle(t)}>
+
+      {/* 操作行：主操作左，破坏性操作远端 */}
+      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-3">
+        <Button size="sm" disabled={busy} onClick={() => onToggle(t)}>
           {done ? '重开' : '完成'}
         </Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => onArchive(t)}>
           归档
         </Button>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => onDelete(t)}>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          className="ml-auto text-destructive hover:text-destructive"
+          onClick={() => onDelete(t)}
+        >
           删除
         </Button>
       </div>

@@ -91,7 +91,7 @@ describe('Projects 列表页', () => {
     await waitFor(() => {
       expect(screen.getByText('engram')).toBeTruthy()
     })
-    expect(screen.getAllByText('开发').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/开发/).length).toBeGreaterThan(0)
     expect(screen.getByText('后端')).toBeTruthy()
   })
 
@@ -99,6 +99,8 @@ describe('Projects 列表页', () => {
     renderPage()
     await waitFor(() => expect(screen.getByText('engram')).toBeTruthy())
 
+    // 弹窗流程：页头 ＋新建项目 → 填名 → 弹窗内 新建
+    fireEvent.click(screen.getByRole('button', { name: /新建项目/ }))
     fireEvent.change(screen.getByPlaceholderText('项目名'), { target: { value: '新项目' } })
     fireEvent.click(screen.getByRole('button', { name: '新建' }))
 

@@ -11,6 +11,7 @@ import { appConfirm } from '@/components/confirm'
 import { ApiError, api, getToken, type CgGraph, type CgProject } from '@/lib/api'
 import { Card, Empty, ErrorBox, PageHeader, Spinner, StatusBadge } from '@/components/ui-bits'
 import { inputCls, selectCls } from '@/lib/ui'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import ForceGraph from '@/components/ForceGraph/ForceGraph'
 import CgTabs from '@/components/CgTabs'
@@ -35,6 +36,26 @@ function dotCls(status: string): string {
   if (status === 'ready') return 'bg-success'
   if (status === 'error' || status === 'version_mismatch') return 'bg-destructive'
   return 'bg-muted-foreground/50'
+}
+
+/** 查询类型中英对照（值是后端 kind，标签给人看）。 */
+const QUERY_KINDS: { k: string; label: string }[] = [
+  { k: 'search', label: '符号搜索' },
+  { k: 'explore', label: '结构探索' },
+  { k: 'node', label: '节点详情' },
+  { k: 'callers', label: '谁在调用' },
+  { k: 'callees', label: '调用了谁' },
+  { k: 'impact', label: '影响面' },
+]
+
+/** 统计数字块：大数字 + 小标签——库规模一眼可见。 */
+function StatBlock({ label, value }: { label: string; value: number | string | undefined }) {
+  return (
+    <div className="flex-1 rounded-lg border border-border px-3 py-2">
+      <div className="text-lg leading-tight font-semibold tabular-nums">{value ?? '—'}</div>
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+    </div>
+  )
 }
 
 export default function CodeGraph() {
@@ -152,9 +173,12 @@ function ProjectList({
                 type="button"
                 onClick={() => onSelect(p.id)}
                 aria-current={on}
-                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ${
-                  on ? 'bg-muted' : 'hover:bg-muted/50'
-                }`}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                  on
+                    ? 'bg-primary/5 shadow-[inset_2px_0_0_0] shadow-primary/50'
+                    : 'hover:bg-muted/50',
+                )}
               >
                 <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${dotCls(p.status)}`} />
                 <span className="min-w-0 flex-1">
@@ -316,30 +340,41 @@ function ProjectDetail({ p, onChanged }: { p: CgProject; onChanged: () => void }
         </div>
       </div>
 
-      {/* 元信息 */}
-      <div className="space-y-0.5 text-[11px] text-muted-foreground">
-        <p className="truncate" title={p.source_uri}>
+      {/* 元信息：栅格对齐 + 库规模数字块 */}
+      <dl className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[11px]">
+        <dt className="text-muted-foreground">来源</dt>
+        <dd className="truncate font-mono" title={p.source_uri}>
           {p.source_uri}
-        </p>
-        <p className="truncate font-mono" title={p.path}>
-          落盘：{p.path}
-          {p.dest_mode === 'default' ? '（默认：删除连目录清）' : '（自定义：删除保留目录）'}
-        </p>
-        {p.head ? (
-          <p className="truncate font-mono">
-            head {p.head.slice(0, 10)}
-            {p.last_producer ? ` · 投递者 ${p.last_producer}` : ''}
-          </p>
-        ) : (
-          isUpload && <p>未声明 head——新鲜度无法比对</p>
+        </dd>
+        <dt className="text-muted-foreground">落盘</dt>
+        <dd className="truncate font-mono" title={p.path}>
+          {p.path}
+          <span className="ml-1 text-muted-foreground/60">
+            {p.dest_mode === 'default' ? '（默认：删除连目录清）' : '（自定义：删除保留目录）'}
+          </span>
+        </dd>
+        <dt className="text-muted-foreground">head</dt>
+        <dd className="truncate font-mono">
+          {p.head
+            ? `${p.head.slice(0, 10)}${p.last_producer ? ` · 投递者 ${p.last_producer}` : ''}`
+            : isUpload
+              ? '未声明——新鲜度无法比对'
+              : '—'}
+        </dd>
+        {p.freshness?.hint && (
+          <>
+            <dt className="text-muted-foreground">新鲜度</dt>
+            <dd className="truncate">{p.freshness.hint}</dd>
+          </>
         )}
-        {p.freshness?.hint && <p>{p.freshness.hint}</p>}
-        {p.stats && (p.stats.files || p.stats.symbols) && (
-          <p className="tabular-nums">
-            files={p.stats.files ?? '?'} symbols={p.stats.symbols ?? '?'} edges={p.stats.edges ?? '?'}
-          </p>
-        )}
-      </div>
+      </dl>
+      {p.stats && (p.stats.files || p.stats.symbols) && (
+        <div className="flex gap-2">
+          <StatBlock label="文件" value={p.stats.files} />
+          <StatBlock label="符号" value={p.stats.symbols} />
+          <StatBlock label="边" value={p.stats.edges} />
+        </div>
+      )}
       {p.error && <p className="line-clamp-3 text-xs text-destructive">{p.error}</p>}
 
       {/* 操作（按 source_kind 分区） */}
@@ -428,8 +463,10 @@ function ProjectDetail({ p, onChanged }: { p: CgProject; onChanged: () => void }
           value={kind}
           onChange={(e) => setKind(e.target.value)}
         >
-          {['search', 'explore', 'node', 'callers', 'callees', 'impact'].map((k) => (
-            <option key={k}>{k}</option>
+          {QUERY_KINDS.map(({ k, label }) => (
+            <option key={k} value={k}>
+              {label}
+            </option>
           ))}
         </select>
         <input

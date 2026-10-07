@@ -5,6 +5,7 @@
  * 项目通过位置登记**引用**它（不在项目里重抄身份）。所以本页右栏的「被哪些项目用到」就是那层引用。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { cn } from '@/lib/utils'
 import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -12,6 +13,7 @@ import { api, type AssetDetailDto, type AssetDto, type AssetKindDto, type AssetR
 import { Card, Empty, ErrorBox, PageHeader, Spinner } from '@/components/ui-bits'
 import { inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
+import { Box, Cloud, Globe, IdCard, Server, Smartphone } from 'lucide-react'
 
 /** 类型色点（标签文字由 `/assets/types` 提供——值域单一事实源在后端 ASSET_KINDS 常量）。 */
 const KIND_DOT: Record<string, string> = {
@@ -21,6 +23,33 @@ const KIND_DOT: Record<string, string> = {
   account: '#10b981', // 账号
   device: '#06b6d4', // 设备
   other: '#6b7280', // 其他
+}
+
+/** 类型图标（与 KIND_DOT 同源着色）。 */
+const KIND_ICON: Record<string, typeof Server> = {
+  host: Server,
+  cloud: Cloud,
+  domain: Globe,
+  account: IdCard,
+  device: Smartphone,
+  other: Box,
+}
+
+/** 类型图标瓦片：列表行的视觉锚点——色底色字，一眼认类型。 */
+function AssetTile({ kind, size = 'md' }: { kind: string; size?: 'md' | 'lg' }) {
+  const color = KIND_DOT[kind] ?? '#6b7280'
+  const Icon = KIND_ICON[kind] ?? Box
+  return (
+    <span
+      className={cn(
+        'flex shrink-0 items-center justify-center rounded-lg',
+        size === 'md' ? 'size-9' : 'size-11',
+      )}
+      style={{ background: `${color}1f`, color }}
+    >
+      <Icon className={size === 'md' ? 'size-4' : 'size-5'} aria-hidden="true" />
+    </span>
+  )
 }
 
 export default function Assets() {
@@ -182,12 +211,10 @@ export default function Assets() {
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="资产"
-      >
+      <PageHeader title="资产" desc={`${rows.length} 项资产`}>
         <div className="flex items-center gap-2">
           <input
-            className={`${inputCls} w-40`}
+            className={`${inputCls} w-64`}
             placeholder="搜名称 / 别名 / IP"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -208,7 +235,7 @@ export default function Assets() {
       {rows.length === 0 ? (
         <Empty text="台账还是空的——让 AI 通过 MCP assets add 建第一台资产" />
       ) : (
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:h-[calc(100dvh-11rem)]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:h-[calc(100dvh-7.5rem)]">
           {/* 左：台账列表（区域滚动，页面框架不动） */}
           <div className="min-h-0 space-y-2 lg:h-full lg:overflow-y-auto lg:pr-1">
             {rows.map((a) => (
@@ -216,33 +243,29 @@ export default function Assets() {
                 key={a.id}
                 type="button"
                 onClick={() => openDetail(a.id)}
-                className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
                   selId === a.id
-                    ? 'border-foreground/30 bg-muted/40'
-                    : 'border-border bg-card hover:border-foreground/20'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <i
-                    className="size-2 shrink-0 rounded-full"
-                    style={{ background: KIND_DOT[a.kind] ?? '#6b7280' }}
-                    aria-hidden="true"
-                  />
-                  <span className="truncate text-sm font-medium">{a.name}</span>
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                    {kindLabel(a.kind)}
-                  </span>
-                  {a.ip && (
-                    <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
-                      {a.ip}
-                    </span>
-                  )}
-                </div>
-                {a.aliases.length > 0 && (
-                  <div className="mt-1 truncate text-[11px] text-muted-foreground">
-                    别名：{a.aliases.join('、')}
-                  </div>
+                    ? 'border-primary/45 bg-primary/5 shadow-[inset_2px_0_0_0] shadow-primary/50'
+                    : 'border-border hover:border-foreground/20 hover:bg-muted/40',
                 )}
+              >
+                <AssetTile kind={a.kind} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{a.name}</span>
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                      {kindLabel(a.kind)}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                    {a.ip ? (
+                      <span className="truncate font-mono">{a.ip}</span>
+                    ) : (
+                      <span className="truncate">{a.aliases.length > 0 ? a.aliases.join('、') : '—'}</span>
+                    )}
+                  </div>
+                </div>
               </button>
             ))}
           </div>
@@ -256,34 +279,49 @@ export default function Assets() {
                 {!editing ? (
                   <>
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <i
-                            className="size-2 shrink-0 rounded-full"
-                            style={{ background: KIND_DOT[detail.kind] ?? '#6b7280' }}
-                            aria-hidden="true"
-                          />
-                          <h3 className="truncate font-medium">{detail.name}</h3>
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                            {kindLabel(detail.kind)}
-                          </span>
-                        </div>
-                        <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
-                          {detail.ip && (
-                            <div>
-                              IP：<span className="font-mono">{detail.ip}</span>
-                            </div>
-                          )}
-                          {detail.os && <div>系统：{detail.os}</div>}
-                          {detail.aliases.length > 0 && <div>别名：{detail.aliases.join('、')}</div>}
-                          {detail.note && <div>备注：{detail.note}</div>}
-                          {Object.entries(
-                            (detail.fields ?? {}) as Record<string, unknown>,
-                          ).map(([k, v]) => (
-                            <div key={k}>
-                              {k}：<span className="font-mono">{v == null ? '' : String(v)}</span>
-                            </div>
-                          ))}
+                      <div className="flex min-w-0 items-start gap-3">
+                        <AssetTile kind={detail.kind} size="lg" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="truncate font-medium">{detail.name}</h3>
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                              {kindLabel(detail.kind)}
+                            </span>
+                          </div>
+                          <dl className="mt-1.5 grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+                            {detail.ip && (
+                              <>
+                                <dt className="text-muted-foreground">IP</dt>
+                                <dd className="truncate font-mono">{detail.ip}</dd>
+                              </>
+                            )}
+                            {detail.os && (
+                              <>
+                                <dt className="text-muted-foreground">系统</dt>
+                                <dd className="truncate">{detail.os}</dd>
+                              </>
+                            )}
+                            {detail.aliases.length > 0 && (
+                              <>
+                                <dt className="text-muted-foreground">别名</dt>
+                                <dd className="truncate">{detail.aliases.join('、')}</dd>
+                              </>
+                            )}
+                            {detail.note && (
+                              <>
+                                <dt className="text-muted-foreground">备注</dt>
+                                <dd className="truncate">{detail.note}</dd>
+                              </>
+                            )}
+                            {Object.entries(
+                              (detail.fields ?? {}) as Record<string, unknown>,
+                            ).map(([k, v]) => (
+                              <span key={k} className="contents">
+                                <dt className="text-muted-foreground">{k}</dt>
+                                <dd className="truncate font-mono">{v == null ? '' : String(v)}</dd>
+                              </span>
+                            ))}
+                          </dl>
                         </div>
                       </div>
                       <div className="flex shrink-0 gap-1">

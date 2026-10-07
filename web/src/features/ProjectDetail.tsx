@@ -4,7 +4,7 @@
  * 「规划」是 dev 类型的一个分类（0004 plan-tree 消融），非特殊区块。
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import {
   api,
   type AssetDto,
@@ -14,10 +14,14 @@ import {
   type ProjectLocationDto,
 } from '@/lib/api'
 import { Card, Empty, ErrorBox, Spinner } from '@/components/ui-bits'
-import { fmtTime, inputCls, selectCls } from '@/lib/ui'
+import { fmtTime, inputCls, selectCls, relTime } from '@/lib/ui'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import WikiMarkdown from '@/components/WikiMarkdown'
+import { TypeTile } from '@/features/Projects'
+import { File, FileText, Folder, Paperclip, Wrench } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 
 const TYPE_LABEL: Record<string, string> = { dev: '开发', research: '调研' }
 const STATUS_LABEL: Record<string, string> = {
@@ -172,6 +176,16 @@ export default function ProjectDetail() {
     load()
   }, [load])
 
+  // ?doc= 深链：从项目文档库直达某篇文档（Projects 页右栏文档行点击跳转）
+  const location = useLocation()
+  useEffect(() => {
+    const docId = new URLSearchParams(location.search).get('doc')
+    if (!docId || !detail) return
+    const d = detail.docs.find((x) => x.id === docId)
+    if (d) setSel({ kind: 'doc', doc: d })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail, location.search])
+
   const toggleGroup = (key: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -189,17 +203,33 @@ export default function ProjectDetail() {
   return (
     <div className="flex flex-col gap-4 lg:h-[calc(100vh-3rem)]">
       <div className="shrink-0">
-        <div className="flex items-center gap-3">
-          <Link to="/projects" className="text-sm text-muted-foreground hover:text-foreground">
-            ← 项目
-          </Link>
-          <h2 className="text-lg font-semibold">{detail.name}</h2>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-            {TYPE_LABEL[detail.type] ?? detail.type}
-          </span>
-          <span className="text-xs text-muted-foreground">{STATUS_LABEL[detail.status] ?? detail.status}</span>
+        <div className="flex items-start gap-3">
+          <TypeTile type={detail.type} size="lg" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Link to="/projects" className="text-xs text-muted-foreground hover:text-foreground">
+                ← 项目
+              </Link>
+              <span className="text-border">/</span>
+              <h2 className="truncate text-lg font-semibold">{detail.name}</h2>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                {TYPE_LABEL[detail.type] ?? detail.type}
+              </span>
+              <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-600">
+                {STATUS_LABEL[detail.status] ?? detail.status}
+              </span>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              {detail.description && <span className="truncate">{detail.description}</span>}
+              <span className="text-border">·</span>
+              <span>文档 {detail.docs.length}</span>
+              <span>·</span>
+              <span>文件 {files.length}</span>
+              <span>·</span>
+              <span>更新 {relTime(detail.updated_at)}</span>
+            </div>
+          </div>
         </div>
-        {detail.description && <p className="mt-1 text-sm text-muted-foreground">{detail.description}</p>}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
@@ -207,7 +237,7 @@ export default function ProjectDetail() {
         <div className="flex w-full shrink-0 flex-col lg:w-64">
           <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
             <nav aria-label="项目目录" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
-              <GroupHeader label="📄 文档" count={detail.docs.length} open={!collapsed.has('docs')} onToggle={() => toggleGroup('docs')} />
+              <GroupHeader icon={FileText} label="文档" count={detail.docs.length} open={!collapsed.has('docs')} onToggle={() => toggleGroup('docs')} />
 
               {!collapsed.has('docs') &&
                 detail.categories.map((cat) => {
@@ -256,7 +286,8 @@ export default function ProjectDetail() {
               {/* 📎 项目文件（架构图 HTML 等制品；0045） */}
               <div className="mt-1 border-t border-border pt-1">
                 <GroupHeader
-                  label="📎 文件"
+                  icon={Paperclip}
+                  label="文件"
                   count={files.length}
                   open={!collapsed.has('files')}
                   onToggle={() => toggleGroup('files')}
@@ -269,12 +300,15 @@ export default function ProjectDetail() {
                       type="button"
                       onClick={() => setSel({ kind: 'file', name: f.name })}
                       className={cn(
-                        'block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-muted',
-                        sel.kind === 'file' && sel.name === f.name ? 'bg-muted font-medium' : 'text-muted-foreground',
+                        'flex w-full items-center gap-1.5 truncate rounded px-2 py-1 text-left text-sm transition-colors',
+                        sel.kind === 'file' && sel.name === f.name
+                          ? 'bg-primary/5 font-medium text-foreground shadow-[inset_2px_0_0_0] shadow-primary/50'
+                          : 'text-muted-foreground hover:bg-muted',
                       )}
                     >
-                      {f.mime === 'text/html' ? '🖼️' : '📄'} {f.name}
-                      <span className="ml-1 text-xs text-muted-foreground">v{f.version}</span>
+                      <File className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+                      <span className="truncate">{f.name}</span>
+                      <span className="ml-auto shrink-0 text-xs text-muted-foreground/60">v{f.version}</span>
                     </button>
                   ))}
               </div>
@@ -285,11 +319,14 @@ export default function ProjectDetail() {
                   type="button"
                   onClick={() => setSel({ kind: 'maintain' })}
                   className={cn(
-                    'block w-full rounded px-2 py-1 text-left text-sm hover:bg-muted',
-                    sel.kind === 'maintain' ? 'bg-muted font-medium' : 'text-muted-foreground',
+                    'flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm transition-colors hover:bg-muted',
+                    sel.kind === 'maintain'
+                      ? 'bg-primary/5 font-medium text-foreground shadow-[inset_2px_0_0_0] shadow-primary/50'
+                      : 'text-muted-foreground',
                   )}
                 >
-                  🛠 运维
+                  <Wrench className="size-3.5 shrink-0" aria-hidden="true" />
+                  运维
                 </button>
               </div>
             </nav>
@@ -368,18 +405,25 @@ function GroupHeader({
   open,
   onToggle,
   onAdd,
+  icon: Icon,
 }: {
   label: string
   count: number
   open: boolean
   onToggle: () => void
   onAdd?: () => void
+  icon?: LucideIcon
 }) {
   return (
     <div className="flex items-center justify-between">
-      <button type="button" onClick={onToggle} className="flex-1 rounded px-2 py-1 text-left text-sm font-medium hover:bg-muted">
-        {open ? '▾' : '▸'} {label}
-        <span className="ml-1 text-xs text-muted-foreground">({count})</span>
+      <button type="button" onClick={onToggle} className="flex flex-1 items-center gap-1 rounded px-2 py-1 text-left text-sm font-medium transition-colors hover:bg-muted">
+        <ChevronRight
+          className={cn('size-3 shrink-0 text-muted-foreground/70 transition-transform', open && 'rotate-90')}
+          aria-hidden="true"
+        />
+        {Icon && <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+        {label}
+        <span className="text-xs font-normal text-muted-foreground">({count})</span>
       </button>
       {onAdd && (
         <button type="button" title="新增" onClick={onAdd} className="px-1 text-xs text-muted-foreground hover:text-foreground">
@@ -522,7 +566,7 @@ function OverviewPane({
       </Card>
 
       <Card className="p-4">
-        <h3 className="text-sm font-semibold">📄 文档（{detail.docs.length}）</h3>
+        <h3 className="text-sm font-semibold">文档（{detail.docs.length}）</h3>
         {detail.categories.map((cat) => {
           const docs = detail.docs.filter((d) => d.category === cat)
           return (
@@ -533,11 +577,17 @@ function OverviewPane({
               {docs.length === 0 ? (
                 <p className="mt-1 text-xs text-muted-foreground/70">暂无文档</p>
               ) : (
-                <ul className="mt-1 space-y-1">
+                <ul className="mt-1 space-y-0.5">
                   {docs.map((d) => (
                     <li key={d.id}>
-                      <button type="button" onClick={() => onOpenDoc(d)} className="text-left text-sm hover:underline">
-                        {d.title}
+                      <button
+                        type="button"
+                        onClick={() => onOpenDoc(d)}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-muted/50"
+                      >
+                        <FileText className="size-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                        <span className="min-w-0 flex-1 truncate text-sm">{d.title}</span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground/60">{relTime(d.updated_at)}</span>
                       </button>
                     </li>
                   ))}
@@ -759,16 +809,27 @@ function DocPane({
         </>
       ) : (
         <>
-          <div className="flex shrink-0 items-center justify-between">
-            <div>
-              <h3 className="text-base font-semibold">{doc.title}</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {doc.category} · {fmtTime(doc.updated_at)}
-              </p>
+          <div className="shrink-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                {/* 面包屑：分类 / 子文件夹 / 标题 */}
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Folder className="size-3 shrink-0" aria-hidden="true" />
+                  <span>{doc.category}</span>
+                  {doc.folder && (
+                    <>
+                      <span className="text-muted-foreground/50">/</span>
+                      <span className="font-mono">{doc.folder}</span>
+                    </>
+                  )}
+                </div>
+                <h3 className="mt-0.5 truncate text-base font-semibold">{doc.title}</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">更新于 {relTime(doc.updated_at)}</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                编辑
+              </Button>
             </div>
-            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-              编辑
-            </Button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] lg:pr-1">
             <WikiMarkdown content={doc.content} />

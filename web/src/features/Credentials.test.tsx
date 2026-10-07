@@ -5,7 +5,11 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import Credentials from './Credentials'
+
+// useNavigate 需 Router 上下文（详情面板项目跳转）
+const renderPage = () => render(<MemoryRouter><Credentials /></MemoryRouter>)
 
 vi.mock('@/lib/utils', async (importOriginal) => {
   const orig = await importOriginal<typeof import('@/lib/utils')>()
@@ -29,6 +33,8 @@ const state: {
       read_count: 1,
       tags: ['newapi', 'prod'],
       expires_at: null,
+      kind: 'api_key',
+      project_id: null,
     },
     {
       id: 'c2',
@@ -42,6 +48,8 @@ const state: {
       read_count: 0,
       tags: ['helm'],
       expires_at: '2020-01-01T00:00:00Z',
+      kind: 'password',
+      project_id: null,
     },
   ],
   reads: { 'newapi/api_key': [{ id: 'r1', credential_id: 'c1', reader: 'agent', read_at: '2026-09-26T09:00:00Z' }] },
@@ -51,6 +59,7 @@ vi.mock('@/lib/api', () => {
   const api = {
     get: vi.fn(async (p: string) => {
       if (p === '/credentials') return { items: state.rows }
+      if (p === '/projects') return []
       if (p.endsWith('/reads')) {
         const name = decodeURIComponent(p.split('/')[2])
         return { name, reads: state.reads[name] ?? [] }
@@ -85,7 +94,7 @@ beforeEach(() => {
 
 describe('凭据页（保险箱式双栏）', () => {
   it('台账两条存量凭据可见、含过期健康徽章与态势条，且列表不含值明文', async () => {
-    render(<Credentials />)
+    renderPage()
     expect(await screen.findByText('newapi/api_key')).toBeTruthy()
     expect(screen.getByText('helm/admin-login')).toBeTruthy()
     expect(screen.getByText('已过期')).toBeTruthy() // helm 2020 到期 → 过期徽章
@@ -94,7 +103,7 @@ describe('凭据页（保险箱式双栏）', () => {
   })
 
   it('选中进详情：值默认遮蔽，揭示后明文只在保险箱内且留痕，复制走剪贴板', async () => {
-    render(<Credentials />)
+    renderPage()
     fireEvent.click(await screen.findByText('newapi/api_key'))
     // 保险箱：默认遮蔽
     expect(screen.getByText('••••••••')).toBeTruthy()
@@ -115,7 +124,7 @@ describe('凭据页（保险箱式双栏）', () => {
   })
 
   it('新建弹窗写入 → 提示；换值折叠区清零流水语义可复现；危险区输名字才可删', async () => {
-    render(<Credentials />)
+    renderPage()
     await screen.findByText('newapi/api_key') // 等台账加载完
     // 新建弹窗
     fireEvent.click(screen.getByRole('button', { name: /新建凭据/ }))
