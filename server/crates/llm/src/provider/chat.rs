@@ -170,7 +170,8 @@ impl LlmProvider for OpenAiCompatProvider {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            tracing::warn!(status = %status, body = %text.chars().take(500).collect::<String>(), "LLM chat 失败");
+            // P018-Q007：不再记录响应体内容（可能回显账号/配额信息），只记长度供排障
+            tracing::warn!(status = %status, body_len = text.len(), "LLM chat 失败");
             self.circuit
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())

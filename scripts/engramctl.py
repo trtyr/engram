@@ -97,6 +97,34 @@ def load_env() -> dict:
     return env
 
 
+def ensure_credentials(env: dict) -> None:
+    """P018-Q003：ADMIN_PASSWORD/MASTER_KEY 缺失时生成强随机值并固化到 ~/.engram/.env。
+
+    旧实现静默注入 dev-pw/"ab"*32 弱默认（安全债）。随机 MASTER_KEY 必须固化——
+    凭据/LLM provider key 用它加密，每次随机会导致历史密文不可解。生成后回显一次密码。
+    """
+    import secrets
+
+    generated = []
+    if not env.get("AGENT_MEMORY_ADMIN_PASSWORD"):
+        env["AGENT_MEMORY_ADMIN_PASSWORD"] = secrets.token_urlsafe(15)
+        generated.append("AGENT_MEMORY_ADMIN_PASSWORD")
+    if not env.get("AGENT_MEMORY_MASTER_KEY"):
+        env["AGENT_MEMORY_MASTER_KEY"] = secrets.token_hex(32)
+        generated.append("AGENT_MEMORY_MASTER_KEY")
+    if not generated:
+        return
+    lines = []
+    if ENV_FILE.exists():
+        lines = ENV_FILE.read_text().splitlines()
+    for key in generated:
+        lines.append(f"{key}={env[key]}")
+    ENV_FILE.write_text("\n".join(lines) + "\n")
+    print(f"🔐 已生成随机凭据并写入 {ENV_FILE}：{', '.join(generated)}")
+    if "AGENT_MEMORY_ADMIN_PASSWORD" in generated:
+        print(f"   管理员密码（本次回显一次，请自存）：{env['AGENT_MEMORY_ADMIN_PASSWORD']}")
+
+
 def pg_ready(dsn: str) -> bool:
     r = subprocess.run(["psql", dsn, "-tc", "SELECT 1;"], capture_output=True, text=True, timeout=10)
     return r.returncode == 0
@@ -215,12 +243,13 @@ def cmd_start(skip_build: bool) -> int:
         return 1
 
     print("[3/4] 后台挂起 engram-server...", end=" ", flush=True)
+    ensure_credentials(env)
     child_env = {
         **os.environ,
         "AGENT_MEMORY_DATABASE_URL": dsn,
         "AGENT_MEMORY_PORT": str(PORT),
-        "AGENT_MEMORY_ADMIN_PASSWORD": env.get("AGENT_MEMORY_ADMIN_PASSWORD", "dev-pw"),
-        "AGENT_MEMORY_MASTER_KEY": env.get("AGENT_MEMORY_MASTER_KEY", "ab" * 32),
+        "AGENT_MEMORY_ADMIN_PASSWORD": env["AGENT_MEMORY_ADMIN_PASSWORD"],
+        "AGENT_MEMORY_MASTER_KEY": env["AGENT_MEMORY_MASTER_KEY"],
         "AGENT_MEMORY_DATA_DIR": env.get("AGENT_MEMORY_DATA_DIR", str(HOME / ".engram" / "app")),
         "RUST_LOG": env.get("RUST_LOG", "info"),
     }

@@ -4,6 +4,8 @@
 > 文档即数据：全部架构文档沉淀在 engram 自身 projects 域（`name=engram`），
 > 本地仓库不留文档（README 仅 GitHub 门面）。本文件是 engram 档案索引快照，
 > **权威在 engram 服务端**——文档清单变化时同步更新本段。
+> 服务端不可达时的降级路径（P018-Q008）：先查本地 `docs/plantree/baseline/`（模块图/风险热点/门禁口径），
+> 架构详篇等 engram 恢复后 doc_get——勿因 doc_get 失败误判文档丢失，更勿在仓库内新建重复架构文档。
 
 ## 档案寻址
 

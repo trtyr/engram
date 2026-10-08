@@ -47,46 +47,33 @@ impl AppState {
         self
     }
 
-    /// LLM 注册表（master_key 缺省时用占位密钥——仅查询用量等不涉密操作可用）。
-    /// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
+    /// master_key（缺省用占位密钥）→ KeyCipher。三处消费方（registry/llm/credentials）共用
+    /// （P018-Q004：原三份逐字复制收敛为单实现）。
+    /// 不可失败（架构治理 task-5 分类 A：占位/合法 hex 恒可解析，保留 expect 并注明理由）。
     #[allow(clippy::expect_used)]
-    pub fn registry(&self) -> engram_llm::ProviderRegistry {
+    fn cipher(&self) -> engram_llm::KeyCipher {
         let hex = self
             .master_key
             .as_ref()
             .map(|m| m.0.clone())
             .unwrap_or_else(|| "00".repeat(32));
-        let cipher =
-            engram_llm::KeyCipher::from_hex_master(&hex).expect("主密钥格式恒合法（占位 64 hex）");
-        engram_llm::ProviderRegistry::new(self.pool.clone(), cipher)
+        engram_llm::KeyCipher::from_hex_master(&hex).expect("主密钥格式恒合法（占位 64 hex）")
+    }
+
+    /// LLM 注册表（master_key 缺省时用占位密钥——仅查询用量等不涉密操作可用）。
+    pub fn registry(&self) -> engram_llm::ProviderRegistry {
+        engram_llm::ProviderRegistry::new(self.pool.clone(), self.cipher())
     }
 
     /// LLM 门面（R6 rerank 等轻量 LLM 调用用；master_key 缺省时占位密钥——解密类操作不可用）。
-    /// 不可失败（架构治理 task-5 分类 A：不可失败，保留并注明理由）。
-    #[allow(clippy::expect_used)]
     pub fn llm(&self) -> engram_distill::llm_port::LlmRef {
-        let hex = self
-            .master_key
-            .as_ref()
-            .map(|m| m.0.clone())
-            .unwrap_or_else(|| "00".repeat(32));
-        let cipher =
-            engram_llm::KeyCipher::from_hex_master(&hex).expect("主密钥格式恒合法（占位 64 hex）");
-        engram_distill::gateway_llm(self.pool.clone(), cipher)
+        engram_distill::gateway_llm(self.pool.clone(), self.cipher())
     }
 
     /// 凭据域服务（EN-234）：值加解密走 AGENT_MEMORY_MASTER_KEY 体系。
     /// master_key 缺省时用占位密钥——put/get 会产出无意义的密文，与 provider 密钥同口径。
-    #[allow(clippy::expect_used)]
     pub fn credentials(&self) -> crate::credentials::CredentialsService {
-        let hex = self
-            .master_key
-            .as_ref()
-            .map(|m| m.0.clone())
-            .unwrap_or_else(|| "00".repeat(32));
-        let cipher =
-            engram_llm::KeyCipher::from_hex_master(&hex).expect("主密钥格式恒合法（占位 64 hex）");
-        crate::credentials::CredentialsService::new(self.pool.clone(), cipher)
+        crate::credentials::CredentialsService::new(self.pool.clone(), self.cipher())
     }
 
     /// L10：占位主密钥检测——此状态下创建的 provider 密钥与后续真实密钥不兼容。

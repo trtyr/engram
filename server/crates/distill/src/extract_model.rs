@@ -13,8 +13,9 @@ use uuid::Uuid;
 pub const SEGMENT_CHARS: usize = 6000;
 
 /// 单条候选原子内容上限（字符数）。2026-09-23 用户拍板 120 → 500；
-/// 与 engram-core::memory::ATOM_MAX_CHARS 配对（distill 不依赖 core，两处人工同步）。
-const ATOM_MAX_CHARS: usize = 500;
+/// 与 engram-core::memory::ATOM_MAX_CHARS 配对（distill 不依赖 core）——
+/// 两处相等由 api crate 的 atom_max_chars_sync 测试强制（P018-Q006：原靠注释人工同步）。
+pub const ATOM_MAX_CHARS: usize = 500;
 /// 实体名上限（字符数）。
 const ENTITY_NAME_MAX_CHARS: usize = 60;
 /// 关系类型白名单（与 consolidate 同表）。

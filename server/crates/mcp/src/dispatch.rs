@@ -202,6 +202,11 @@ pub fn action_docs(domain: &str) -> Option<&'static [ActionDoc]> {
 }
 
 /// 域工具名（= scope 名，projects 例外——scope 叫 project）。
+///
+/// ⚠ 同步点清单（P018-Q005：手工同步四方，新增/改名一个域至少改四处——
+/// ① 本清单 ② guard.rs 的 require_scope 域名 ③ 对应域模块文件 ④ api 路由三件套。
+/// 工具面本身已由 golden 快照（mcp_surface.json）护住；跨域主键命名不一（id/asset_id/source_uri）
+/// 靠报错文案兜底。表驱动化评估过：涉及面大，Deferred——改域时对照本清单逐项过。
 pub const DOMAIN_TOOLS: &[&str] = &[
     "memory",
     "projects",

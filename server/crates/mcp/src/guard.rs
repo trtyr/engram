@@ -39,37 +39,30 @@ pub(crate) fn from_asset(e: engram_core::assets::AssetError) -> rmcp::ErrorData 
     }
 }
 
-pub(crate) fn require_memory(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    match principal.domain_access("memory") {
+/// 域 scope 守卫单实现（P018-Q004：原七连逐字复制收敛于此；scope 名=域名，project 单数例外）。
+/// ReadOnly 的动作级判定在 call_tool 入口（check_action_access）已做，此处只拦完全无权限。
+fn require_scope(principal: &Principal, scope: &str) -> Result<(), rmcp::ErrorData> {
+    match principal.domain_access(scope) {
         DomainAccess::None => Err(mcp_err(
             ErrorCode::INVALID_REQUEST,
-            "缺少 memory scope——请用带 memory scope 的 amk_ key 连接 MCP",
+            format!("缺少 {scope} scope——请用带 {scope} scope 的 amk_ key 连接 MCP"),
         )),
-        // Full 直过；ReadOnly 的动作级判定在 call_tool 入口（check_action_access）已做
         _ => Ok(()),
     }
+}
+
+pub(crate) fn require_memory(principal: &Principal) -> Result<(), rmcp::ErrorData> {
+    require_scope(principal, "memory")
 }
 
 /// 原件（精确值：凭据/序列号/IP:端口/账号 ID）读写权——从 memory 独立的 scope。
 /// 签 key 时「给不给原件」是显式决策：memory scope 不再顺手可读凭据（收录哲学线）。
 pub(crate) fn require_original(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    match principal.domain_access("original") {
-        DomainAccess::None => Err(mcp_err(
-            ErrorCode::INVALID_REQUEST,
-            "缺少 original scope（原件：凭据/序列号等精确值读写）——请用带 original scope 的 amk_ key 连接 MCP",
-        )),
-        _ => Ok(()),
-    }
+    require_scope(principal, "original")
 }
 
 pub(crate) fn require_project(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    match principal.domain_access("project") {
-        DomainAccess::None => Err(mcp_err(
-            ErrorCode::INVALID_REQUEST,
-            "缺少 project scope——请用带 project scope 的 amk_ key 连接 MCP",
-        )),
-        _ => Ok(()),
-    }
+    require_scope(principal, "project")
 }
 
 pub(crate) fn require_erase(principal: &Principal) -> Result<(), rmcp::ErrorData> {
@@ -85,33 +78,15 @@ pub(crate) fn require_erase(principal: &Principal) -> Result<(), rmcp::ErrorData
 
 /// 资产台账域（2026-09-21 新增）：scope 名同域名，叫 assets。
 pub(crate) fn require_credentials(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    match principal.domain_access("credentials") {
-        DomainAccess::None => Err(mcp_err(
-            ErrorCode::INVALID_REQUEST,
-            "缺少 credentials scope——请用带 credentials scope 的 amk_ key 连接 MCP",
-        )),
-        _ => Ok(()),
-    }
+    require_scope(principal, "credentials")
 }
 
 pub(crate) fn require_assets(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    match principal.domain_access("assets") {
-        DomainAccess::None => Err(mcp_err(
-            ErrorCode::INVALID_REQUEST,
-            "缺少 assets scope——请用带 assets scope 的 amk_ key 连接 MCP",
-        )),
-        _ => Ok(()),
-    }
+    require_scope(principal, "assets")
 }
 
 pub(crate) fn require_todos(principal: &Principal) -> Result<(), rmcp::ErrorData> {
-    match principal.domain_access("todos") {
-        DomainAccess::None => Err(mcp_err(
-            ErrorCode::INVALID_REQUEST,
-            "缺少 todos scope——请用带 todos scope 的 amk_ key 连接 MCP",
-        )),
-        _ => Ok(()),
-    }
+    require_scope(principal, "todos")
 }
 
 /// TodoError → MCP 错误码。

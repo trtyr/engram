@@ -116,10 +116,10 @@ async fn build_runner(
     let cipher = {
         let master_key_hex = cfg.master_key.clone().unwrap_or_else(|| "00".repeat(32));
         Some(engram_llm::KeyCipher::from_hex_master(&master_key_hex).map_err(|e| {
+            // P018-Q007：错误信息不回显密钥片段（哪怕前 8 字符也降低熵）
             anyhow::anyhow!(
                 "AGENT_MEMORY_MASTER_KEY 非法（{e}）——必须是 64 个 hex 字符（生成：openssl rand -hex 32）；\
-                 请修正 ~/.engram/.env 后重启。当前值前 8 字符：{}",
-                &master_key_hex[..master_key_hex.len().min(8)]
+                 请修正 ~/.engram/.env 后重启"
             )
         })?)
     };

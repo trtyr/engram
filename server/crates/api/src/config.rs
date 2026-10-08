@@ -25,13 +25,11 @@ pub enum ConfigError {
     MissingDatabaseUrl,
     #[error("环境变量 {name} 解析失败: {reason}")]
     Parse { name: &'static str, reason: String },
-    #[error(
-        "AGENT_MEMORY_EMBEDDING_DIMENSIONS={configured} 与表列维度 {column} 不匹配——四张表 embedding 列建为 vector({column})，改维度需迁移改列并全量重嵌入（当前版本不支持自动重嵌入）。请保持 {column}，或先清空向量数据再迁移"
-    )]
-    EmbeddingDimensionMismatch { configured: u32, column: u32 },
 }
 
 /// 既有迁移写死的向量列维度（0005 atoms/scenarios、0006 chunks、0007 wiki_pages）。
+/// 唯一口径：embedding 维度不可配（P018-Q002 删死参数，原 AGENT_MEMORY_EMBEDDING_DIMENSIONS
+/// 守门与 llm_port 的 env 读取均已移除）；改维度需迁移改列 + 全量重嵌入。
 pub const EMBEDDING_COLUMN_DIM: u32 = 1024;
 
 impl Config {
@@ -64,26 +62,7 @@ impl Config {
             tracing::warn!("AGENT_MEMORY_MASTER_KEY 未设置：Phase 1 密钥加密上线后将拒绝启动");
         }
 
-        // R11 校验：配置维度 ≠ 既有表列维度时拒启（错误信息含迁移+重嵌入指引）。
-        // 值本身由 engram_distill::llm_port::embedding_dimensions() 运行时读取——此处只做守门。
-        if let Ok(v) = std::env::var("AGENT_MEMORY_EMBEDDING_DIMENSIONS") {
-            let d = v.trim().parse::<u32>().map_err(|e| ConfigError::Parse {
-                name: "AGENT_MEMORY_EMBEDDING_DIMENSIONS",
-                reason: e.to_string(),
-            })?;
-            if d == 0 {
-                return Err(ConfigError::Parse {
-                    name: "AGENT_MEMORY_EMBEDDING_DIMENSIONS",
-                    reason: "维度必须为正整数".into(),
-                });
-            }
-            if d != EMBEDDING_COLUMN_DIM {
-                return Err(ConfigError::EmbeddingDimensionMismatch {
-                    configured: d,
-                    column: EMBEDDING_COLUMN_DIM,
-                });
-            }
-        }
+        // R11 校验已移除（P018-Q002）：embedding 维度不可配，见 EMBEDDING_COLUMN_DIM 注释。
 
         Ok(Self {
             database_url,
@@ -119,39 +98,11 @@ mod tests {
     }
 
     #[test]
-    fn default_dimensions_is_column_dim() {
+    fn from_env_with_only_database_url() {
         let _g = env_lock();
         rm_env!("AGENT_MEMORY_EMBEDDING_DIMENSIONS");
         set_env!("AGENT_MEMORY_DATABASE_URL", "postgres://x");
-        // 默认（未配置）应通过守门（无字段——值由 helper 消费）
+        // 仅必填项即可启动（P018-Q002 后维度不可配，守门测试随死参数一起删）
         let _cfg = Config::from_env().unwrap();
-    }
-
-    #[test]
-    fn mismatched_dimensions_refuse_to_start() {
-        let _g = env_lock();
-        set_env!("AGENT_MEMORY_DATABASE_URL", "postgres://x");
-        set_env!("AGENT_MEMORY_EMBEDDING_DIMENSIONS", "768");
-        let err = Config::from_env().unwrap_err();
-        assert!(err.to_string().contains("不匹配"), "{err}");
-        assert!(err.to_string().contains("重嵌入"), "{err}");
-        rm_env!("AGENT_MEMORY_EMBEDDING_DIMENSIONS");
-    }
-
-    #[test]
-    fn illegal_dimensions_parse_error() {
-        let _g = env_lock();
-        set_env!("AGENT_MEMORY_DATABASE_URL", "postgres://x");
-        set_env!("AGENT_MEMORY_EMBEDDING_DIMENSIONS", "abc");
-        assert!(matches!(
-            Config::from_env().unwrap_err(),
-            ConfigError::Parse { .. }
-        ));
-        set_env!("AGENT_MEMORY_EMBEDDING_DIMENSIONS", "0");
-        assert!(matches!(
-            Config::from_env().unwrap_err(),
-            ConfigError::Parse { .. }
-        ));
-        rm_env!("AGENT_MEMORY_EMBEDDING_DIMENSIONS");
     }
 }
