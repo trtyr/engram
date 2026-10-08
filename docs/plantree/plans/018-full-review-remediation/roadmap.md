@@ -45,3 +45,17 @@
 | ID | 任务 | 状态 | 证据 |
 |---|---|---|---|
 | T009 | `core/tests/unified_test.rs` 两处 SQL bind 缺失（wiki_chunks `$3` / wiki_pages `$2` 漏绑，to_tsvector 参数）——HEAD 潜伏测试必炸，`e67a808`（P019 t6）引入时未跑全量。**教训：改 SQL 的提交必须过 workspace test 门** | done | 7520dae 一并修复；unified_test ✓ |
+| T010 | tickets title 上限 200→500（trtyr 2026-10-08 口径对齐 todos）+ 顺手补 update 侧长度校验（T004 同款漏） | done | c8fbbaf4；core 全靶全绿 |
+
+## Q 批（Q001-Q008，2026-10-08 拍板全修）
+
+| # | 问题 | 状态 | 证据 |
+|---|---|---|---|
+| Q001 | 散点 env 无总表 | done（文档面） | deploy/.env.example 尾部补「散点 env 总表」段——**该文件被编辑保护，本次跳过未落盘**，待 docs-sync 对齐；代码侧不迁（入口分散但各有属 crate，迁集中加载收益低） |
+| Q002 | EMBEDDING_DIMENSIONS 死参数 | done（删参数） | dd4acf9：config 守门/错误变体/测试、llm_port env 读取全删，embedding_dimensions() 固定 1024；.env.example 三行样例待 docs-sync 清 |
+| Q003 | engramctl 弱默认注入 | done（随机生成） | dd4acf9：缺键时 secrets 生成强随机值固化 ~/.engram/.env（MASTER_KEY 必须固化防历史密文不可解），密码回显一次；risk-hotspots 已摘行 |
+| Q004 | guard 七连 + AppState 三连复制 | done | dd4acf9：require_scope 单实现+一行委托；state.rs cipher() 助手 |
+| Q005 | DOMAIN_TOOLS 三方手工同步 | 部分缓解 | dd4acf9：dispatch.rs 加四方同步点清单注释；工具面已有 golden 快照护住；表驱动化 Deferred（涉及面大） |
+| Q006 | ATOM_MAX_CHARS 双写 | done | dd4acf9：extract_model 常量改 pub + api/tests/atom_sync_test.rs 强制相等，漂移即红 |
+| Q007 | secrets 排障泄漏面 | done（最小净化） | dd4acf9：LLM 失败日志只记 body_len；主密钥错误不回显前 8 hex；写侧全量过滤器不做（误伤排障信息，维持纪律） |
+| Q008 | 「文档即数据」死引用税 | done | dd4acf9：AGENTS.md 头部补降级路径说明（先查本地 baseline，勿新建重复架构文档） |

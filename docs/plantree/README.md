@@ -39,7 +39,7 @@
 | P015 | [distill-agent-unify](plans/015-distill-agent-unify/README.md) | server/distill, server/core/memory, server/search, server/storage, web | planning | 蒸馏链全面 Agent 化：维护 Agent 四工具（查/入库/修改/删除）替代向量仲裁 + embedding 退役评估（2026-10-04 拍板登记） | — | README 四个拍板点过会 |
 | P016 | [wiki-maintenance-agent](plans/016-wiki-maintenance-agent/README.md) | server/wiki-engine, server/jobs, server/api, web | done | maintain_wiki 巡逻 Agent 全量落地（2026-10-05）：lint→repair→回填→duplicates + patrol_agent 语义裁决；前端运维 tab 换 PatrolPane | fmt 0/clippy 0/巡逻测试 2/2/web 四件套绿 | — |
 | P017 | [project-maintenance-agent](plans/017-project-maintenance-agent/README.md) | server/distill, server/api | done | maintain_project Agent 全量落地（2026-10-06）：per-project 单飞+节律 fanout+四工具循环（list_docs/get_doc/note_issue/finish）+Markdown 报告 | distill 19+14+3 全绿/clippy 0 | — |
-| P018 | [full-review-remediation](plans/018-full-review-remediation/README.md) | server/jobs, server/core, server/wiki-engine, server/api, web, scripts, docs | executing | 第一二三批收官（2026-10-08）：T001-T009 全 done（含 T009 计划外）；余 open-questions Q001-Q008 待拍板 | 7520dae / 71df416（server+web 门禁全绿） | 拍板过会后按需开第四批 |
+| P018 | [full-review-remediation](plans/018-full-review-remediation/README.md) | server/jobs, server/core, server/wiki-engine, server/api, server/mcp, server/distill, server/llm, web, scripts, docs | done | 全线收官（2026-10-08）：T001-T010 + Q001-Q008 全 done（余 .env.example 文档面一处待 docs-sync）；七路审查 61 findings 全处置 | 7520dae / 71df416 / c8fbbaf4 / dd4acf9（各批门禁全绿） | — |
 
 ## Ideas
 
