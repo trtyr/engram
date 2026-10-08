@@ -14,26 +14,26 @@
 
 | ID | 任务 | 状态 | 证据 |
 |---|---|---|---|
-| T004 | todos update 漏 title 长度校验：`core/todos.rs:300-306` update 未校验，而 create 同文件 `191-197` 有 200 字上限——复制粘贴改漏。补齐同款校验 | todo | core/todos.rs:300-306（create 对照 191-197） |
-| T005 | 前端 BASE 三元残留：`web/src/lib/api.ts:6` `import.meta.env.DEV ? '' : ''` 两支恒等空串——简化为 `const API_BASE = ''`（P3 疑似：同源部署下无实际差异，纯可读性） | todo | api.ts:6 |
+| T004 | todos update 漏 title 长度校验：`core/todos.rs:300-306` update 未校验，而 create 同文件 `191-197` 有 200 字上限——复制粘贴改漏。补齐同款校验 | done | 71df416：与 create 同款 200 字上限校验 |
+| T005 | 前端 BASE 三元残留：`web/src/lib/api.ts:6` `import.meta.env.DEV ? '' : ''` 两支恒等空串——简化为 `const API_BASE = ''`（P3 疑似：同源部署下无实际差异，纯可读性） | done | 71df416；web 四件套全绿 |
 
 ## 死代码清理（确定死，删除收益高/误杀风险低）
 
 | ID | 任务 | 状态 | 证据 |
 |---|---|---|---|
-| T006 | ① `scripts/quality/split_domain_modules.py`、`split_engine_modules.py`、`split_mcp_lib.py`——wave-2 一次性治理残留；② `scripts/zztest_m10.py`——zz 前缀探针脚本，职责已由正式测试覆盖；③ `core/insights.rs` L319-327 `ts_now()`/`uuid7()` 两个 `#[allow(dead_code)]` 函数——删函数并连带删 allow 标注 | todo | deadcode 路 findings ①②③ |
+| T006 | ① `scripts/quality/split_domain_modules.py`、`split_engine_modules.py`、`split_mcp_lib.py`——wave-2 一次性治理残留；② `scripts/zztest_m10.py`——zz 前缀探针脚本，职责已由正式测试覆盖；③ `core/insights.rs` L319-327 `ts_now()`/`uuid7()` 两个 `#[allow(dead_code)]` 函数——删函数并连带删 allow 标注 | done | 71df416：四文件删除（-1520 行）+ 函数删除连带清 chrono 未用 import |
 
 ## 文档漂移（确证三处 + 一处疑似）
 
 | ID | 任务 | 状态 | 证据 |
 |---|---|---|---|
-| T007 | ① `AGENTS.md:83` 迁移版本写 63，实际 **75**（migrations_test.rs:18 断言已核实）——修法可顺带在 migrations_test.rs 版本注释加「改此处须同步 AGENTS.md」防复发；② `README.md:131` 链接不存在的 `deploy/README.md`；③ `baseline/risk-hotspots.md:9` backup 兜底空卷条目已过时（`scripts/backup.sh` P001-T001 已改为报错退出，不再落回弃用 volume）；④ 疑似：`mcp/Cargo.toml:3` description 写「九域」vs `README.md:89-93`「十二域/13 工具位」——修前比对 DOMAIN_TOOLS 确证 | todo | aifriendly 路确证 3 + bugs 路疑似 1（①已亲验） |
+| T007 | ① `AGENTS.md:83` 迁移版本写 63，实际 **75**（migrations_test.rs:18 断言已核实）——修法可顺带在 migrations_test.rs 版本注释加「改此处须同步 AGENTS.md」防复发；② `README.md:131` 链接不存在的 `deploy/README.md`；③ `baseline/risk-hotspots.md:9` backup 兜底空卷条目已过时（`scripts/backup.sh` P001-T001 已改为报错退出，不再落回弃用 volume）；④ 疑似：`mcp/Cargo.toml:3` description 写「九域」vs `README.md:89-93`「十二域/13 工具位」——修前比对 DOMAIN_TOOLS 确证 | done | 71df416：①63→75+防复发提示✓ ③删过时行+弱口令挂 Q003✓ ④九域→十二域全清单✓；②**误报**——deploy/README.md 实存（ea68b9c 2026-09-27），codesleuth grep 结论错误，未改动 |
 
 ## logging 级别纪律（行为改动，小）
 
 | ID | 任务 | 状态 | 证据 |
 |---|---|---|---|
-| T008 | 4xx 客户端错误降级：`api/src/error.rs:110-128` 所有 API 错误（含 BadRequest/NotFound/Conflict）统一打 ERROR——客户端噪音混入 ERROR 告警面。修法：4xx→WARN，5xx/internal_bug 保持 ERROR | todo | logging 路最弱② |
+| T008 | 4xx 客户端错误降级：`api/src/error.rs:110-128` 所有 API 错误（含 BadRequest/NotFound/Conflict）统一打 ERROR——客户端噪音混入 ERROR 告警面。修法：4xx→WARN，5xx/internal_bug 保持 ERROR | done | 71df416：is_client_error() 分支 WARN/ERROR；web 四件套与 workspace test 全绿 |
 
 ## Deferred / 关联
 
