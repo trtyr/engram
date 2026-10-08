@@ -14,7 +14,7 @@
 
 | ID | 任务 | 状态 | 证据 |
 |---|---|---|---|
-| T004 | todos update 漏 title 长度校验：`core/todos.rs:300-306` update 未校验，而 create 同文件 `191-197` 有 200 字上限——复制粘贴改漏。补齐同款校验 | done | 71df416：与 create 同款 200 字上限校验 |
+| T004 | todos update 漏 title 长度校验：`core/todos.rs:300-306` update 未校验，而 create 同文件 `191-197` 有 200 字上限——复制粘贴改漏。补齐同款校验 | done | 71df416 补校验；dc7fce5 上限改 500（trtyr 2026-10-08 拍板，create/update 双侧对齐） |
 | T005 | 前端 BASE 三元残留：`web/src/lib/api.ts:6` `import.meta.env.DEV ? '' : ''` 两支恒等空串——简化为 `const API_BASE = ''`（P3 疑似：同源部署下无实际差异，纯可读性） | done | 71df416；web 四件套全绿 |
 
 ## 死代码清理（确定死，删除收益高/误杀风险低）
