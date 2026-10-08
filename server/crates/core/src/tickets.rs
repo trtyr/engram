@@ -156,8 +156,8 @@ impl TicketService {
         if title.is_empty() {
             return Err(TicketError::BadRequest("title 不能为空".into()));
         }
-        if title.chars().count() > 200 {
-            return Err(TicketError::BadRequest("title 超长：最多 200 字".into()));
+        if title.chars().count() > 500 {
+            return Err(TicketError::BadRequest("title 超长：最多 500 字".into()));
         }
         reject_nul("title", title)?;
         reject_nul("body", body)?;
@@ -275,6 +275,10 @@ impl TicketService {
             let t = t.trim();
             if t.is_empty() {
                 return Err(TicketError::BadRequest("title 不能为空".into()));
+            }
+            // 与 create 同款上限 500（P018-T004 同款漏：旧实现 update 不查长度）
+            if t.chars().count() > 500 {
+                return Err(TicketError::BadRequest("title 超长：最多 500 字".into()));
             }
             reject_nul("title", t)?;
         }
