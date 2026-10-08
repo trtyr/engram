@@ -3,7 +3,7 @@
  * token 三处可能：admin 会话（ams_）/api key（amk_，供开发调试）。
  */
 
-const BASE = import.meta.env.DEV ? '' : ''
+const BASE = ''
 
 export class ApiError extends Error {
   code: string

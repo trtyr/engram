@@ -302,6 +302,10 @@ impl TodoService {
             if t.is_empty() {
                 return Err(TodoError::BadRequest("title 不能为空".into()));
             }
+            // 与 create 同款上限（P018-T004：旧实现漏查，PATCH 可绕过创建侧约束）
+            if t.chars().count() > 200 {
+                return Err(TodoError::BadRequest("title 过长（>200 字符）".into()));
+            }
             Self::reject_nul("title", t)?;
         }
         if let Some(b) = body {

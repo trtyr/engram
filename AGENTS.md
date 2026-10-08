@@ -80,5 +80,5 @@
 2. **本地 journey 唯一合法入口 `scripts/e2e-local.sh`**（Playwright 无 `E2E_BASE` 直接 throw——三次误删生产库的教训）
 3. 改 MCP 工具面必须过 `tests/golden/mcp_surface.json` 快照；新增 action 必须登记读写分类（dispatch.rs:718 护栏）
 4. 前端产物 `web/dist` 被 rust-embed 编译期嵌入——前端改动生效必须重建 dist；`assetsDir` 必须是 `'static'`（与 /assets API 前缀相撞事故）
-5. 迁移只增不改（sqlx 单向）；加迁移必同步 `migrations_test.rs` 的版本断言（当前 63）
+5. 迁移只增不改（sqlx 单向）；加迁移必同步 `migrations_test.rs` 的版本断言（当前 75）与 AGENTS.md 本条版本号（P018-T007：曾漂移 12 个版本未被发现）
 6. 凭据红线：token/密码只写变量名；credentials 值永不进日志/文档/记忆

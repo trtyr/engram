@@ -118,14 +118,26 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code, retryable, category) = self.parts();
-        // 内部细节（Debug 格式含 source 链）进日志，一次性记录
-        tracing::error!(
-            code,
-            category,
-            status = status.as_u16(),
-            error = ?self,
-            "API 错误"
-        );
+        // 内部细节（Debug 格式含 source 链）进日志，一次性记录。
+        // 级别纪律（P018-T008）：4xx 客户端错误降 WARN，不污染 ERROR 告警面；
+        // 5xx/internal_bug 保持 ERROR（internal_bug 归因自动升 alert）。
+        if status.is_client_error() {
+            tracing::warn!(
+                code,
+                category,
+                status = status.as_u16(),
+                error = ?self,
+                "API 客户端错误"
+            );
+        } else {
+            tracing::error!(
+                code,
+                category,
+                status = status.as_u16(),
+                error = ?self,
+                "API 错误"
+            );
+        }
         let body = ErrorEnvelope {
             error: ErrorBody {
                 code,

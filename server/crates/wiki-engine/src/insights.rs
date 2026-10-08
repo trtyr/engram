@@ -1,7 +1,6 @@
 //! 图洞察（llm_wiki 对齐）：意外连接 / 知识缺口（孤立页/稀疏社区/桥节点）
 //! + dismiss 持久化（wiki_insight_dismissals）。
 
-use chrono::{DateTime, Utc};
 use engram_jobs::types::JobError;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -314,14 +313,4 @@ pub async fn reset_dismissals(pool: &PgPool, lib: Uuid) -> Result<(), JobError> 
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
     Ok(())
-}
-
-#[allow(dead_code)]
-fn ts_now() -> DateTime<Utc> {
-    Utc::now()
-}
-
-#[allow(dead_code)]
-fn uuid7() -> Uuid {
-    Uuid::now_v7()
 }

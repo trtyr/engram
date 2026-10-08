@@ -6,8 +6,7 @@
 
 | 风险 | 位置 | 一句话 |
 |---|---|---|
-| backup 兜底空卷 | scripts/backup.sh:56,65 | 引用已弃用 named volume `engram_appdata`，无宿主 pg_dump 时 restore 可能静默清空数据 |
-| 弱口令静默回落 | scripts/engramctl.py:231-232 | .env 缺键时以 dev-pw/"ab"×32 启动只 warn 不拒启 |
+| 弱口令静默回落 | scripts/engramctl.py:231-232 | .env 缺键时以 dev-pw/"ab"×32 启动只 warn 不拒启（P018 Q003 待拍板） |
 | 生产反代无 IaC | 仓库外 | EdgeOne/Caddy 配置零留痕，不可审计不可重现 |
 
 ## P1 语义债（需要产品拍板）
