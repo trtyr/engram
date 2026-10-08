@@ -192,8 +192,8 @@ impl TodoService {
         if title.is_empty() {
             return Err(TodoError::BadRequest("title 不能为空".into()));
         }
-        if title.chars().count() > 200 {
-            return Err(TodoError::BadRequest("title 过长（>200 字符）".into()));
+        if title.chars().count() > 500 {
+            return Err(TodoError::BadRequest("title 过长（>500 字符）".into()));
         }
         Self::reject_nul("title", title)?;
         Self::reject_nul("body", body)?;
@@ -302,9 +302,9 @@ impl TodoService {
             if t.is_empty() {
                 return Err(TodoError::BadRequest("title 不能为空".into()));
             }
-            // 与 create 同款上限（P018-T004：旧实现漏查，PATCH 可绕过创建侧约束）
-            if t.chars().count() > 200 {
-                return Err(TodoError::BadRequest("title 过长（>200 字符）".into()));
+            // 与 create 同款上限（P018-T004：旧实现漏查，PATCH 可绕过创建侧约束；500 口径经 trtyr 2026-10-08 拍板）
+            if t.chars().count() > 500 {
+                return Err(TodoError::BadRequest("title 过长（>500 字符）".into()));
             }
             Self::reject_nul("title", t)?;
         }
