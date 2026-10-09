@@ -1948,3 +1948,68 @@ async fn patrol_rhythm_handler_enqueues_patrol_and_tomorrow_bucket() {
         "维护 Agent 纪要应进报告: {progress}"
     );
 }
+
+/// P019-M1：rebuild_all_links 系统页不进边表——index/overview 的满页 [[slug]]
+/// 不得给内容页造入链（否则 orphan lint / attach_orphan 永久失效）。
+#[tokio::test]
+async fn rebuild_all_links_excludes_system_pages() {
+    let (pool, wiki, handle, _pg, lib) = setup(vec![]).await;
+
+    // 两个内容页（alpha 出链 beta）+ 一个含满页链接的 index 系统页
+    for (slug, ptype, content) in [
+        ("alpha", "concept", "# Alpha\n\n参见 [[beta]]。"),
+        ("beta", "concept", "# Beta\n\n正文。"),
+        (
+            "index",
+            "index",
+            "# 索引\n\n- [[alpha]] — A\n- [[beta]] — B",
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO wiki_pages (id, library_id, slug, title, page_type, content, frontmatter, origin, version, tsv) \
+             VALUES ($1, $2, $3, $3, $4, $5, jsonb_build_object('title', $3::text, 'sources', '[]'::jsonb), 'llm', 1, to_tsvector('simple', $5))",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(lib)
+        .bind(slug)
+        .bind(ptype)
+        .bind(content)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    wiki.rebuild_all_links(lib).await.unwrap();
+
+    let index_edges: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_links WHERE library_id = $1 AND from_slug = 'index'",
+    )
+    .bind(lib)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(index_edges, 0, "index 系统页不得产生出边");
+
+    let content_edges: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_links WHERE library_id = $1 \
+         AND from_slug = 'alpha' AND to_slug = 'beta'",
+    )
+    .bind(lib)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(content_edges, 1, "内容页出边应正常保留");
+
+    // 修复后孤页检测不再被污染：beta 有入链（来自 alpha），alpha 无入链也不因 index 误获得
+    let alpha_inlinks: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM wiki_links WHERE library_id = $1 AND to_slug = 'alpha'",
+    )
+    .bind(lib)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(alpha_inlinks, 0, "alpha 不应因 index 页误获得入链");
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}

@@ -159,17 +159,25 @@ impl JobQueue {
     }
 
     /// 标记成功。
+    /// P019-M1：带 running 态守卫——任务已被回收重排/终态化时本次 complete 落空，
+    /// 防止后完成者覆盖先完成者的终态（双执行场景下后到的 stale worker）。
     pub async fn complete(
         &self,
         job_id: Uuid,
         result: Option<serde_json::Value>,
     ) -> Result<(), JobError> {
-        sqlx::query("UPDATE jobs SET status = 'succeeded', finished_at = now(), locked_by = NULL, locked_at = NULL, progress = COALESCE($2, progress) WHERE id = $1")
+        let res = sqlx::query("UPDATE jobs SET status = 'succeeded', finished_at = now(), locked_by = NULL, locked_at = NULL, progress = COALESCE($2, progress) WHERE id = $1 AND status = 'running'")
             .bind(job_id)
             .bind(result.clone().map(sqlx::types::Json))
             .execute(&self.pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
+        if res.rows_affected() == 0 {
+            tracing::warn!(
+                job_id = %job_id,
+                "complete 落空：任务已不处于 running（僵尸回收或已终态）——忽略本次结果"
+            );
+        }
         self.emit(job_id, "info", "任务成功", result).await.ok();
         Ok(())
     }
@@ -185,6 +193,16 @@ impl JobQueue {
             .get(job_id)
             .await?
             .ok_or_else(|| JobError::Permanent(format!("任务 {job_id} 不存在")))?;
+        // P019-M1：非 running（僵尸回收重排/已终态）时 fail 落空——防 stale worker
+        // 把他人正在重跑的任务改状态。重排语义上等价：任务已回 pending。
+        if job.status != crate::types::JobStatus::Running {
+            tracing::warn!(
+                job_id = %job_id,
+                status = ?job.status,
+                "fail 落空：任务已不处于 running——忽略本次失败"
+            );
+            return Ok(crate::types::FailOutcome::Rescheduled);
+        }
         let (message, retryable) = match error {
             JobError::Retryable(m) => (m.clone(), true),
             JobError::Permanent(m) => (m.clone(), false),

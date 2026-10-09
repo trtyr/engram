@@ -236,6 +236,33 @@ impl TicketService {
         Ok((rows, total))
     }
 
+    /// 全量导出（数据主权 P4）：keyset 循环拉全，绕开 list 单页 limit 钉制。
+    /// （P019-M1：原 export 传 limit=10_000 被 list 内 min(500) 静默截断且 total 报全量）
+    pub async fn export_all(&self) -> Result<Vec<TicketDto>, TicketError> {
+        const PAGE: i64 = 500;
+        let mut all = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let (rows, _) = self
+                .list(None, None, None, None, cursor.as_deref(), PAGE)
+                .await?;
+            let done = rows.len() < PAGE as usize;
+            if let Some(last) = rows.last() {
+                let flag = if last.status == "open" { 1 } else { 0 };
+                cursor = Some(format!(
+                    "{flag}|{}|{}",
+                    last.updated_at.to_rfc3339(),
+                    last.id
+                ));
+            }
+            all.extend(rows);
+            if done {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
     /// 按引用取工单：完整 UUID 或短号「EN-<n>」。
     pub async fn find_by_ref(&self, r: &str) -> Result<Option<TicketDto>, TicketError> {
         let r = r.trim();

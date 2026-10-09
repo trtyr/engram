@@ -122,6 +122,14 @@ impl JobTemplate {
         self.due_at = Some(due_at);
         self
     }
+
+    /// 僵尸回收阈值（running 超过该秒数视为 worker 死亡，被 reap_orphans 重排）。
+    /// 长任务（索引/大批量嵌入等耗时可达分钟级以上）必须显式调大，
+    /// 否则默认 300s 内未跑完会被回收重排导致同 job 双执行（P019-M1）。
+    pub fn with_visibility_timeout_s(mut self, secs: i32) -> Self {
+        self.visibility_timeout_s = secs;
+        self
+    }
 }
 
 /// 执行错误分类（决定重试与否）。

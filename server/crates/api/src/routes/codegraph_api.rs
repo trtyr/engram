@@ -50,6 +50,10 @@ fn bridge(state: &AppState) -> CgBridge {
     CgBridge::new(state.pool.clone(), state.data_dir.join("codegraph"))
 }
 
+/// 索引/同步为长任务（大仓库可达 10 分钟+）：显式放大僵尸回收阈值——
+/// 默认 300s 未跑完会被 reap_orphans 重排导致同 job 双执行（P019-M1）。
+const CG_VISIBILITY_TIMEOUT_S: i32 = 3600;
+
 /// 入队索引/同步 job，返回 job_id。执行进度看 jobs 事件流与项目状态。
 async fn enqueue(
     state: &AppState,
@@ -57,7 +61,11 @@ async fn enqueue(
     id: Uuid,
 ) -> Result<engram_jobs::types::Job, ApiError> {
     JobQueue::new(state.pool.clone())
-        .enqueue(JobTemplate::new(kind).with_payload(json!({ "project_id": id })))
+        .enqueue(
+            JobTemplate::new(kind)
+                .with_payload(json!({ "project_id": id }))
+                .with_visibility_timeout_s(CG_VISIBILITY_TIMEOUT_S),
+        )
         .await
         .map_err(|e| ApiError::Unavailable(format!("job 入队失败: {e}")))
 }

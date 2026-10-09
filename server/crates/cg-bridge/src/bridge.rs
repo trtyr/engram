@@ -124,7 +124,10 @@ async fn run_cli(
         c
     };
     cmd.stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+        .stderr(std::process::Stdio::piped())
+        // P019-M1：超时丢弃 wait_with_output future 时连带杀子进程——否则 CLI 成孤儿
+        // 继续写产物，且 Timeout 归 Retryable 重试会与孤儿并发写同一 SQLite。
+        .kill_on_drop(true);
     if let Some(dir) = cwd {
         // 先探 cwd：NotFound 无法区分「二进制缺失」还是「工作目录缺失」——显式检查给出可行动文案
         if !dir.exists() {

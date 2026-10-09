@@ -241,9 +241,7 @@ pub async fn export_tickets(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_tickets_read(&principal)?;
-    let (items, total) = svc(&state)
-        .list(None, None, None, None, None, 10_000)
-        .await
-        .map_err(te)?;
+    let items = svc(&state).export_all().await.map_err(te)?;
+    let total = items.len() as i64;
     Ok(Json(serde_json::json!({ "items": items, "total": total })))
 }

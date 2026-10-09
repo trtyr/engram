@@ -103,11 +103,14 @@ impl CgBridge {
         }
 
         // clone（超时保护 + 失败清理：绝不留下半成品目录，也绝不落条目）
+        // P019-M1：kill_on_drop——超时丢弃 output() future 时杀掉 git 进程，
+        // 否则孤儿 clone 继续往已删除/将删的目录写。
         let cloned = tokio::time::timeout(
             Duration::from_secs(CLONE_TIMEOUT_SECS),
             tokio::process::Command::new("git")
                 .args(["clone", "--depth", "1", source_uri])
                 .arg(&target)
+                .kill_on_drop(true)
                 .output(),
         )
         .await;

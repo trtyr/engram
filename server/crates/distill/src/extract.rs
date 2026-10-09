@@ -115,9 +115,20 @@ async fn run_claimed(
         pending.extend(atoms);
     }
 
-    let candidate_ids = persist_atoms(&ctx, llm.as_ref(), pending).await?;
-    persist_relations(&ctx, &all_relations).await;
-    mark_sessions_done(&ctx, &session_ids).await?;
+    // P019-M1：落库+会话标记同事务——旧序 persist 后若 mark_sessions_done 失败，
+    // 队列重试会重新抽取并把同一批原子再插一遍（重复落库且立即向量化）。
+    // 嵌入/LLM 调用都在事务外完成，事务只覆盖纯 DB 写（短事务）。
+    let mut tx = ctx
+        .pool()
+        .begin()
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
+    let candidate_ids = persist_atoms(&ctx, llm.as_ref(), pending, &mut tx).await?;
+    persist_relations(&all_relations, &mut tx).await;
+    mark_sessions_done(&session_ids, &mut tx).await?;
+    tx.commit()
+        .await
+        .map_err(|e| JobError::Retryable(e.to_string()))?;
 
     // T006：满批自续——认领满额说明可能仍有积压，链式投下一批（批间独立，无幂等键）
     if sessions.len() as i64 >= EXTRACT_CLAIM_BATCH {
@@ -351,10 +362,13 @@ async fn extract_segment(
 }
 
 /// 3. 落库：嵌入 + 插入候选原子 + 实体挂链（失败不阻断主链）。
+///
+/// 在调用方事务内执行（conn），与 mark_sessions_done 同事务防重放重复落库。
 async fn persist_atoms(
     ctx: &JobContext,
     llm: &dyn crate::llm_port::DistillLlm,
     mut pending: Vec<PendingAtom>,
+    conn: &mut sqlx::PgConnection,
 ) -> Result<Vec<Uuid>, JobError> {
     if pending.is_empty() {
         return Ok(Vec::new());
@@ -370,7 +384,6 @@ async fn persist_atoms(
     if pending.is_empty() {
         return Ok(Vec::new());
     }
-    let pool = ctx.pool();
     let texts: Vec<String> = pending.iter().map(|p| p.content.clone()).collect();
     let embeddings = llm.embed(&texts, ctx.job.id).await?;
     let mut candidate_ids = Vec::with_capacity(pending.len());
@@ -397,11 +410,11 @@ async fn persist_atoms(
                 .map(|v| pgvector::Vector::from(v.clone())),
         )
         .bind(&p.strength)
-        .execute(pool)
+        .execute(&mut *conn)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
         for (name, kind) in &p.entities {
-            if let Err(e) = link_entity(pool, id, name, kind).await {
+            if let Err(e) = link_entity_conn(conn, id, name, kind).await {
                 tracing::warn!(error = %e, entity = %name, "实体挂链失败（不影响原子产出）");
             }
         }
@@ -420,6 +433,16 @@ pub async fn link_entity(
     name: &str,
     kind: &str,
 ) -> Result<(), String> {
+    let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
+    link_entity_conn(&mut conn, atom_id, name, kind).await
+}
+
+async fn link_entity_conn(
+    conn: &mut sqlx::PgConnection,
+    atom_id: Uuid,
+    name: &str,
+    kind: &str,
+) -> Result<(), String> {
     // T005：误吞修复——只认「旧名完整出现在新名里」（如「王小明」复用「小王」档），
     // 去掉「新名在旧名内」方向（「云」不再吞进「星云」）；精确命中优先，其次最长旧名。
     let similar: Option<Uuid> = sqlx::query_scalar(
@@ -430,7 +453,7 @@ pub async fn link_entity(
     )
     .bind(name)
     .bind(kind)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
     let eid: Uuid = match similar {
@@ -446,14 +469,21 @@ pub async fn link_entity(
             )
             .bind(name)
             .bind(kind)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *conn)
             .await
             .map_err(|e| e.to_string())?;
             match archived {
                 Some(eid) => {
-                    engram_storage::repo::memory::revive_entity(pool, eid)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                    // P019-M1：内联 revive（原 repo::revive_entity 收 &PgPool）——
+                    // 本函数运行在调用方事务内，不能跨连接逃逸事务。
+                    sqlx::query(
+                        "UPDATE entities SET archived_at = NULL \
+                         WHERE id = $1 AND archived_at IS NOT NULL AND merged_into IS NULL",
+                    )
+                    .bind(eid)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(|e| e.to_string())?;
                     eid
                 }
                 None => {
@@ -463,7 +493,7 @@ pub async fn link_entity(
                     .bind(Uuid::now_v7())
                     .bind(name)
                     .bind(kind)
-                    .execute(pool)
+                    .execute(&mut *conn)
                     .await
                     .map_err(|e| e.to_string())?;
                     sqlx::query_scalar(
@@ -472,7 +502,7 @@ pub async fn link_entity(
                     )
                     .bind(name)
                     .bind(kind)
-                    .fetch_one(pool)
+                    .fetch_one(&mut *conn)
                     .await
                     .map_err(|e| e.to_string())?
                 }
@@ -484,7 +514,7 @@ pub async fn link_entity(
     )
     .bind(atom_id)
     .bind(eid)
-    .execute(pool)
+    .execute(&mut *conn)
     .await
     .map_err(|e| e.to_string())?;
     // 复活语义已废除（审计五驳）：近似查询只命中活体（merged_into/archived_at 双排除）——
@@ -494,11 +524,11 @@ pub async fn link_entity(
 }
 
 /// 关系落库：实体已在挂链里 upsert，name→id 解析后建关系（best-effort，不阻断主链）。
-async fn persist_relations(ctx: &JobContext, relations: &[(String, String, String)]) {
-    let pool = ctx.pool();
+/// 在调用方事务内执行。
+async fn persist_relations(relations: &[(String, String, String)], conn: &mut sqlx::PgConnection) {
     for (from, to, rel_type) in relations {
-        let fid = lookup_entity(pool, from).await;
-        let tid = lookup_entity(pool, to).await;
+        let fid = lookup_entity_conn(conn, from).await;
+        let tid = lookup_entity_conn(conn, to).await;
         let (Some(fid), Some(tid)) = (fid, tid) else {
             continue;
         };
@@ -511,7 +541,7 @@ async fn persist_relations(ctx: &JobContext, relations: &[(String, String, Strin
         .bind(fid)
         .bind(tid)
         .bind(rel_type)
-        .execute(pool)
+        .execute(&mut *conn)
         .await
         {
             tracing::warn!(error = %e, "关系落库失败（不影响主链）");
@@ -521,6 +551,12 @@ async fn persist_relations(ctx: &JobContext, relations: &[(String, String, Strin
 
 /// T005：关系 lookup 与挂链口径统一（trim/lower + 子串归并同款）。
 pub async fn lookup_entity(pool: &sqlx::PgPool, name: &str) -> Option<Uuid> {
+    let mut conn = pool.acquire().await.ok()?;
+    lookup_entity_conn(&mut conn, name).await
+}
+
+/// P019-M1：事务内变体。
+async fn lookup_entity_conn(conn: &mut sqlx::PgConnection, name: &str) -> Option<Uuid> {
     sqlx::query_scalar(
         "SELECT id FROM entities \
          WHERE merged_into IS NULL AND archived_at IS NULL \
@@ -529,17 +565,20 @@ pub async fn lookup_entity(pool: &sqlx::PgPool, name: &str) -> Option<Uuid> {
          LIMIT 1",
     )
     .bind(name)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await
     .ok()
     .flatten()
 }
 
-/// 4. 会话标记完成。
-async fn mark_sessions_done(ctx: &JobContext, session_ids: &[Uuid]) -> Result<(), JobError> {
+/// 4. 会话标记完成（在调用方事务内，与原子落库同 commit）。
+async fn mark_sessions_done(
+    session_ids: &[Uuid],
+    conn: &mut sqlx::PgConnection,
+) -> Result<(), JobError> {
     sqlx::query("UPDATE raw_sessions SET distill_status = 'done' WHERE id = ANY($1)")
         .bind(session_ids)
-        .execute(ctx.pool())
+        .execute(&mut *conn)
         .await
         .map_err(|e| JobError::Retryable(e.to_string()))?;
     Ok(())

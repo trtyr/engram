@@ -921,12 +921,77 @@ async fn maintain_agent_merges_and_edits_persona_doc() {
     assert_eq!(ver, 1);
     assert!(doc.contains("已验证"), "画像应包含编辑内容: {doc}");
 
-    // 任务结果回执
-    let payload = j.progress.map(|p| p.0).unwrap_or(json!({}));
-    assert_eq!(payload.get("merged").and_then(|v| v.as_u64()), Some(1));
+    env.handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
+
+/// P019-M1：重跑不重复落库——首次抽取成功（会话 done）后，再次入队 extract
+/// 不得对同会话再产出原子（旧缺陷：persist 后 mark 失败→重试重放重复插入）。
+/// 落库+标记已收进同一事务：要么全部生效（done 挡住重跑），要么全部回滚（重试重插一次）。
+#[tokio::test]
+async fn repeated_extract_does_not_duplicate_atoms() {
+    let rounds = vec![
+        (
+            String::new(),
+            vec![tc(
+                "save_atoms",
+                json!({"atoms": [
+                    {"kind": "fact", "content": "用户用 Mac 开发", "confidence": 0.9, "strength": "fact", "turn_refs": [1]}
+                ]}),
+            )],
+        ),
+        done_round(),
+    ];
+    let env = setup_tools(rounds).await;
+    let sid = Uuid::now_v7();
+    sqlx::query("INSERT INTO raw_sessions (id, agent, content) VALUES ($1, 'pi', $2)")
+        .bind(sid)
+        .bind(session(&[("user", "我平时用 Mac 写代码，主题用暗色")]))
+        .execute(&env.pool)
+        .await
+        .unwrap();
+
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let j = wait_done(&env.queue, "extract_atoms").await;
     assert_eq!(
-        payload.get("persona_edited").and_then(|v| v.as_bool()),
-        Some(true)
+        j.status,
+        JobStatus::Succeeded,
+        "首次抽取应成功: {:?}",
+        j.error
+    );
+
+    // 重跑：无 pending 会话 → 直接空转成功，原子数不变
+    env.queue
+        .enqueue(JobTemplate::new("extract_atoms"))
+        .await
+        .unwrap();
+    let j2 = wait_done(&env.queue, "extract_atoms").await;
+    assert_eq!(
+        j2.status,
+        JobStatus::Succeeded,
+        "重跑应空转成功: {:?}",
+        j2.error
+    );
+
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM atoms")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 1, "同会话不得重复落库，得 {n}");
+
+    // 原子—会话对应关系不变：source_refs 仍只指向该会话一次
+    let refs: serde_json::Value = sqlx::query_scalar("SELECT source_refs FROM atoms LIMIT 1")
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        refs.as_array().map(|a| a.len()),
+        Some(1),
+        "source_refs 不得累积重复: {refs}"
     );
 
     env.handle

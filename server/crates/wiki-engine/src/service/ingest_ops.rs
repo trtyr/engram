@@ -312,8 +312,12 @@ impl WikiService {
     /// 存量回填（D4 遗留）：重析全部页面正文重建 wiki_links（库内）。
     /// 修复前写入的页面链接索引缺失——一次性全量重析（幂等，先清后建）。
     pub async fn rebuild_all_links(&self, lib: Uuid) -> Result<u64, WikiError> {
+        // 系统页不进边表（P019-M1）：index/overview 由 rebuild_index/overview_page 生成满页
+        // [[slug]] 列表，若参与建边则全库页面获得入链，瘫痪 orphan lint 与 attach_orphan。
+        // 与 put_page / ingest::rebuild_links 口径对齐（它们只对内容页建边）。
         let pages: Vec<(String, String)> = sqlx::query_as(
-            "SELECT slug, content FROM wiki_pages WHERE library_id = $1 ORDER BY slug",
+            "SELECT slug, content FROM wiki_pages \
+             WHERE library_id = $1 AND page_type NOT IN ('index', 'log', 'overview') ORDER BY slug",
         )
         .bind(lib)
         .fetch_all(&self.pool)

@@ -1,6 +1,5 @@
 //! 工单域服务集成测试（0074 拆独立表）：项目绑定制（不存在项目拒绝）、
 //! 字段往返、解决必填闸门、六态状态机自动留痕、按项目过滤。
-
 mod support;
 
 use engram_core::tickets::TicketService;
@@ -248,4 +247,29 @@ async fn project_delete_cascades_tickets() {
         .unwrap();
     let gone = svc.find_by_ref(&t.id.to_string()).await.unwrap();
     assert!(gone.is_none(), "项目删除应级联清工单");
+}
+
+/// P019-M1：export_all 跨页拉全——>500 条（list 单页 min(500) 钉制）时导出行数 == 全量。
+#[tokio::test]
+async fn export_all_pages_past_single_page_limit() {
+    let (_pool, svc, pid, _pg) = setup().await;
+    for i in 0..501 {
+        svc.create(pid, &format!("批量工单 {i:03}"), "", None, "", "", "")
+            .await
+            .unwrap();
+    }
+    let (page, total) = svc
+        .list(None, None, Some(pid), None, None, 500)
+        .await
+        .unwrap();
+    assert_eq!(page.len(), 500, "list 单页仍应钉 500");
+    assert_eq!(total, 501);
+
+    let all = svc.export_all().await.unwrap();
+    assert_eq!(all.len(), 501, "export_all 应跨页拉全，得 {}", all.len());
+    // 无重无漏：id 唯一
+    let mut ids: Vec<_> = all.iter().map(|t| t.id).collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 501, "导出不得重复");
 }

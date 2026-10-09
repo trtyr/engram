@@ -14,6 +14,34 @@ async fn timeout_path_is_classified() {
     assert!(start.elapsed() < Duration::from_secs(5));
 }
 
+/// P019-M1：kill_on_drop 契约——超时丢弃 future 后子进程不得残留。
+/// run_cli 固定走 codegraph 二进制，此处用同款 spawn+timeout+kill_on_drop 模式
+/// 借 sleep 验证机制本身（与 run_cli / register clone 内实现一致）。
+#[tokio::test]
+async fn timeout_kills_child_process() {
+    let mut cmd = tokio::process::Command::new("sleep");
+    cmd.arg("30").kill_on_drop(true);
+    let child = cmd.spawn().expect("spawn sleep");
+    let pid = child.id().expect("应有 pid");
+    let r = tokio::time::timeout(Duration::from_millis(200), child.wait_with_output()).await;
+    assert!(r.is_err(), "应超时");
+
+    // 子进程应被杀：kill -0 最终报 ESRCH（等 tokio reaper 收尸，重试至多 2s）
+    let mut reaped = false;
+    for _ in 0..20 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let alive = std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .expect("kill -0");
+        if !alive.status.success() {
+            reaped = true;
+            break;
+        }
+    }
+    assert!(reaped, "超时后子进程 sleep({pid}) 应被杀死，不得残留");
+}
+
 #[test]
 fn truncation_respects_char_boundary() {
     let s = "你好世界".repeat(100);

@@ -117,6 +117,8 @@ async fn idempotency_key_dedupes() {
     assert_eq!(first.id, second.id, "同幂等键应返回既有任务");
 
     // 已成功（succeeded）同键新任务：仍复用（调用方如需强制重跑应换键）
+    // P019-M1：complete 带 running 守卫——先 claim 再 complete（模拟真实执行序）
+    queue.claim("w-test", 10).await.unwrap();
     queue.complete(first.id, None).await.unwrap();
     let third = queue
         .enqueue(JobTemplate::new("ingest").with_idempotency_key("doc-abc-ingest"))
@@ -133,6 +135,8 @@ async fn idempotency_terminal_failure_allows_rerun() {
     let first = queue.enqueue(t.clone()).await.unwrap();
 
     // failed 终态不再阻塞同键入队：复位为 pending 新一轮执行（P018-T001）
+    // P019-M1：fail 带 running 态守卫——先 claim 再 fail（模拟真实执行序）
+    queue.claim("w-test", 10).await.unwrap();
     queue
         .fail(first.id, &JobError::Permanent("boom".into()))
         .await
@@ -327,4 +331,71 @@ async fn per_kind_concurrency_actually_caps_running_jobs() {
         "配置 cap=1 的 kind 并发峰值应恰为 1（实际 {slow}）"
     );
     assert!(fast >= 2, "未配置 kind 应走全局池可并发（实际峰值 {fast}）");
+}
+
+/// P019-M1：complete/fail 终态守卫——stale worker 的迟到结果不得覆盖已终态任务。
+#[tokio::test]
+async fn stale_complete_and_fail_are_noops() {
+    let (_c, queue, _pool, _url) = setup().await;
+
+    let job = queue.enqueue(JobTemplate::new("echo")).await.unwrap();
+    queue.claim("w1", 10).await.unwrap();
+    queue
+        .complete(job.id, Some(serde_json::json!({"who": "w1"})))
+        .await
+        .unwrap();
+    assert_eq!(
+        queue.get(job.id).await.unwrap().unwrap().status,
+        JobStatus::Succeeded
+    );
+
+    // 迟到的 stale complete：落空不报错，终态不被改写
+    queue
+        .complete(job.id, Some(serde_json::json!({"who": "stale"})))
+        .await
+        .unwrap();
+    let j = queue.get(job.id).await.unwrap().unwrap();
+    assert_eq!(j.status, JobStatus::Succeeded, "重复 complete 不得改写终态");
+    assert_eq!(
+        j.progress.map(|p| p.0["who"].as_str().unwrap().to_string()),
+        Some("w1".to_string()),
+        "stale complete 的 progress 不得覆盖先完成者"
+    );
+
+    // 迟到的 stale fail：返回 Rescheduled 语义（任务已不在途），状态不被改写
+    let outcome = queue
+        .fail(job.id, &JobError::Retryable("迟到的失败".into()))
+        .await
+        .unwrap();
+    assert_eq!(outcome, FailOutcome::Rescheduled);
+    assert_eq!(
+        queue.get(job.id).await.unwrap().unwrap().status,
+        JobStatus::Succeeded,
+        "stale fail 不得把 succeeded 改写为 pending/dead"
+    );
+}
+
+/// P019-M1：with_visibility_timeout_s 显式调大后，长任务在窗口内不被回收重排。
+#[tokio::test]
+async fn large_visibility_timeout_prevents_reap() {
+    let (_c, queue, _pool, _url) = setup().await;
+
+    let job = queue
+        .enqueue(
+            JobTemplate::new("cg_index")
+                .with_payload(serde_json::json!({}))
+                .with_visibility_timeout_s(3600),
+        )
+        .await
+        .unwrap();
+    assert_eq!(job.visibility_timeout_s, 3600, "入队模板应携带显式阈值");
+
+    queue.claim("w-long", 10).await.unwrap();
+    // 模拟任务跑了 2s（> 默认 300s 之外的验证：用小窗口对照——直接确认 reap 不回收）
+    let reaped = queue.reap_orphans().await.unwrap();
+    assert_eq!(reaped, 0, "3600s 阈值内的 running 任务不得被回收");
+    assert_eq!(
+        queue.get(job.id).await.unwrap().unwrap().status,
+        JobStatus::Running
+    );
 }
