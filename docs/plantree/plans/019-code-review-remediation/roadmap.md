@@ -76,7 +76,9 @@
 - overdesign：wiki 多库残件处置、LLM Purpose 枚举收敛（**待拍板**，见 open-questions）
 - jobs-crate heal 重摄取旧 chunk 残留（疑似）— features/jobs-crate.md #2
 - CircuitBreaker HalfOpen 复位语义 — features/llm-crate.md #1
-- errors/config 两宏观维补跑完成后通读排查（进行中）
+- errors/config 两宏观维补跑完成后通读排查（**2026-10-09 已完成，下两条为新增**）
+- 错误注册表收编未完成：From<域错误>→EngramError 桥仅 WikiDocumentError 一批，Memory/Todo/Ticket 等域错误经 String 传出口丢结构化码（P006 Deferred 同源，并入该线跟进）— global/errors.md #9；LLM 用量记账失败仅 WARN 无监控信号 — global/errors.md #8；read_stats 连环吞错（.ok()?）静默降级 — global/errors.md #6（并入 T002 cg 线复核）
+- config 面：散点 env 旋钮（≥8 个）绕过 Config 无总表、.env.example 死参数 AGENT_MEMORY_EMBEDDING_DIMENSIONS（P018 已登记待 docs-sync）+ 未收录散点变量、DSN 变量名三方不一、config.rs 过时 WARN 文案 — global/config.md #7-#11
 
 ## 里程碑
 
