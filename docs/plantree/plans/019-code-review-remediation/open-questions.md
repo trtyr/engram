@@ -10,7 +10,7 @@
 ## Q002 · wiki 多库残件处置
 
 产品已官宣单库终局，但多库基础设施仍在付费（每请求 resolve、每库 purpose、patrol 只巡 main 的 bug 即源于此）。
-选项：①冻结（library_id 恒 main，删 handler resolve 调用）②真做回多库 API。（global/overdesign.md #1-4；T005 内 patrol 硬编码修复与此相关）
+选项：①冻结（library_id 恒 main，删 handler resolve 调用）②真做回多库 API。（global/overdesign.md #1-4；T005 内 patrol 硬编码修复与此相关，同源还有 wiki-engine 跨库链接写入库内边表 — features/wiki-engine-crate.md #4）
 
 ## Q003 · LLM Purpose 枚举收敛
 

@@ -20,6 +20,8 @@
 - llm/erase/cron 的 :ro 变体可签发但全域不可用 — features/scope-system-13.md #3
 - migrate:ro 可 import（文档自认故意，待拍板口径）— features/scope-system-13.md #4
 - tool_scope `_ => "memory"` 兜底→study/logs 工具发现面错位；删兜底改显式表 — features/mcp-crate.md #2 + global/coupling.md #2
+- admin 登录把 DB 不可用计入爆破失败（5 次抖动锁 15 分钟；按错误类别豁免）— features/admin-pbkdf2-login.md #1
+- MCP call_tool 的 action 非字符串时动作级检查整体跳过（疑似：遍历 handler 确认或强制走 unknown_action）— features/scope-system-13.md #2
 
 ## T003 前端可用性/正确性族
 
@@ -50,6 +52,13 @@
 - delete_provider is_default 竞态（并入删除 SQL）— features/settings-platform-domain.md #1
 - credentials read_count 本地拼装 / 审计「谁」失真（MCP 记凭据名、HTTP 恒 console）— features/credentials-domain.md #1/#2
 - tickets update 状态机无迁移校验（注释承诺未实现）— features/tickets-domain.md #4
+- todos/tickets find_by_short_no 吞存储错误→DB 故障误报「不存在」（errors 宏观维确证为系统性断点）— features/todos-domain.md B2 + features/tickets-domain.md #2 + global/errors.md #5
+- todos due 过滤 × cursor 翻页排序键不一致（首页 due_at ASC / 翻页切 updated_at DESC）丢行重行 — features/todos-domain.md B1
+- study delete_item 越层直调 repo（不存在也 204、错误映 503，对照同文件 topic_delete 走 svc）— features/study-domain.md #2 + global/coupling.md #5
+- distill atom_merge 不校验 keep_id 存在/active，victims 归档指向虚无不可逆 — features/distill-crate.md #2
+- distill maintain_agent 工具错误 `?` 打死整个 job（对照 project_maintain 的 error 注入自纠模式）— features/distill-crate.md #3
+- cg-bridge index()/sync() 对 client_upload 无守卫→上传产物被建空索引静默摧毁且来源翻 cloud_index — features/cg-bridge-crate.md #2
+- change_credentials 改密+吊销其他会话两步独立写无事务，中间失败旧会话仍有效 — features/session-revocation.md #3 + features/auth-platform-domain.md #3
 
 ## T006 检索质量族
 
@@ -58,6 +67,7 @@
 - search_all rerank 候选无排序取前 10 — features/llm-platform-domain.md #3
 - QUERY_LOG_LOW_SCORE=0.017 阈值高于单通道 rank-1 满分 — features/search-crate.md #5
 - wiki 检索 limit 负值守卫 — features/search-crate.md #4
+- tickets list 负 limit 无守卫（对照 todos 同款补齐）— features/core-crate.md #1
 - Circles graph 悬空引用（edges/relations 未过滤归档实体）— features/circles-domain.md #2
 
 ## T007 死代码/残余清理批（一批清）
@@ -68,6 +78,8 @@
 - CirclesEntityFullParams、api.setBase、withLib、parsing head 分支 + 重复断言、core/errors.rs Display 冗余条件、rhythm 无用 clone、transfer.rs 空注释占位
 - api_keys.revoked_at 恒 NULL（删列或真软删除，待拍板）— features/auth-platform-domain.md #4
 - dispatch 读写分类表幽灵条目（wiki.folders/purpose_set）+ circles help/hint 指向不存在的 delete — features/mcp-crate.md #4 + features/circles-domain.md #1
+- codegraph register 工具文档仍称支持本地路径（AI 可见文案与实现矛盾）— features/codegraph-domain.md #2
+- rrf_merge 疑似死（crate 公共导出零生产引用，判生死）— features/search-crate.md #8
 
 ## T008 P3 长尾与文档面（随做随记，不设期限）
 
@@ -79,6 +91,10 @@
 - errors/config 两宏观维补跑完成后通读排查（**2026-10-09 已完成，下两条为新增**）
 - 错误注册表收编未完成：From<域错误>→EngramError 桥仅 WikiDocumentError 一批，Memory/Todo/Ticket 等域错误经 String 传出口丢结构化码（P006 Deferred 同源，并入该线跟进）— global/errors.md #9；LLM 用量记账失败仅 WARN 无监控信号 — global/errors.md #8；read_stats 连环吞错（.ok()?）静默降级 — global/errors.md #6（并入 T002 cg 线复核）
 - config 面：散点 env 旋钮（≥8 个）绕过 Config 无总表、.env.example 死参数 AGENT_MEMORY_EMBEDDING_DIMENSIONS（P018 已登记待 docs-sync）+ 未收录散点变量、DSN 变量名三方不一、config.rs 过时 WARN 文案 — global/config.md #7-#11
+- wiki-engine lint_deep 汇总明细被丢弃（report 只有计数，与模块文档承诺不符）— features/wiki-engine-crate.md #3
+- promote.rs 第⑤步 mark_doc_promoted 失败留半态且幂等闸门挡死重试补写 — features/core-crate.md #2
+
+> 逐条对账明细见 [reconciliation.md](reconciliation.md)（289 条三态标注，遗漏 14 / 误报 1）
 
 ## 里程碑
 
