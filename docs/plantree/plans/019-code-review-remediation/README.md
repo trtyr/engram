@@ -3,7 +3,7 @@
 ## 范围
 
 2026-10-09 code-review 技能全量审查（30 微观功能点 + 8 宏观维度）产出的排查整改。
-报告入口：[docs/review/index.md](../../../review/index.md)（36 篇检查项文档 + `.chain.json` 链路底稿）。
+报告入口：[docs/review/index.md](../../../review/index.md)（38 篇检查项文档 + `.chain.json` 链路底稿）。
 
 **排查结论**：主 agent 已逐篇通读全部检查项，6 条关键发现回源码核实（5 确证 / 1 误报）。
 已确证误报：search-crate 报「search_chunks vec CTE 漏 LIMIT」——实际

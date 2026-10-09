@@ -1,6 +1,6 @@
 # P019 Roadmap
 
-来源：docs/review/ 36 篇检查项（2026-10-09 审查），逐条发现以各篇 `features/<slug>.md` / `global/<dim>.md` 为详细依据（含 file:line 证据）。此处只登记任务级条目。
+来源：docs/review/ 38 篇检查项（2026-10-09 审查，errors/config 补跑后定稿），逐条发现以各篇 `features/<slug>.md` / `global/<dim>.md` 为详细依据（含 file:line 证据）。此处只登记任务级条目。
 
 ## T001 P1 正确性五条（先行）
 
@@ -94,7 +94,7 @@
 - wiki-engine lint_deep 汇总明细被丢弃（report 只有计数，与模块文档承诺不符）— features/wiki-engine-crate.md #3
 - promote.rs 第⑤步 mark_doc_promoted 失败留半态且幂等闸门挡死重试补写 — features/core-crate.md #2
 
-> 逐条对账明细见 [reconciliation.md](reconciliation.md)（289 条三态标注，遗漏 14 / 误报 1）
+> 逐条对账明细见 [reconciliation.md](reconciliation.md)（296 条三态标注，遗漏 14 / 误报 1）
 
 ## 里程碑
 
