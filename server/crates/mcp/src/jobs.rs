@@ -214,24 +214,13 @@ impl EngramMcpServer {
             )
         })?;
         let queue = engram_jobs::JobQueue::new(self.state.pool.clone());
+        // revive 对不存在/非 dead/failed 返回 Permanent（INVALID_PARAMS）——不再需要回读补救
         queue.revive(id).await.map_err(Self::from_job)?;
-        // 复活后回读确认——非 dead/failed 的执行 UPDATE 影响 0 行，如实告知而非假成功
         let job = queue
             .get(id)
             .await
             .map_err(Self::from_job)?
             .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("执行 {id} 不存在")))?;
-        if matches!(
-            job.status,
-            engram_jobs::types::JobStatus::Failed | engram_jobs::types::JobStatus::Dead
-        ) {
-            return Ok(CallToolResult::structured(serde_json::json!({
-                "revived": false,
-                "id": id,
-                "status": job.status.to_string(),
-                "hint": "只有 dead/failed 的后台执行能复活——当前状态不符合",
-            })));
-        }
         Ok(CallToolResult::structured(serde_json::json!({
             "revived": true,
             "id": id,

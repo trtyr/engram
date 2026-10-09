@@ -154,7 +154,12 @@ impl IntoResponse for ApiError {
 
 impl From<engram_jobs::types::JobError> for ApiError {
     fn from(e: engram_jobs::types::JobError) -> Self {
-        ApiError::Unavailable(e.to_string())
+        use engram_jobs::types::JobError;
+        match e {
+            // 参数/状态问题属请求方责任（如 revive 非 dead/failed），不是服务不可用
+            JobError::Permanent(m) => ApiError::BadRequest(m),
+            other => ApiError::Unavailable(other.to_string()),
+        }
     }
 }
 

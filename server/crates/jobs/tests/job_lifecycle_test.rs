@@ -101,6 +101,10 @@ async fn job_retry_backoff_then_dead() {
     let j = queue.get(job.id).await.unwrap().unwrap();
     assert_eq!(j.status, JobStatus::Pending);
     assert_eq!(j.attempts, 0);
+
+    // 非 dead/failed（现在是 pending）再复活 → Permanent 报错，不再假成功 + 发假事件
+    let err = queue.revive(job.id).await.unwrap_err();
+    assert!(matches!(err, JobError::Permanent(_)));
 }
 
 #[tokio::test]

@@ -320,13 +320,18 @@ impl JobQueue {
         .map_err(|e| JobError::Retryable(e.to_string()))
     }
 
-    /// 死任务复活（人工重跑）。
+    /// 死任务复活（人工重跑）。仅 dead/failed 可复活——未命中返回 Permanent，不发假事件。
     pub async fn revive(&self, job_id: Uuid) -> Result<(), JobError> {
-        sqlx::query("UPDATE jobs SET status = 'pending', attempts = 0, error = NULL, finished_at = NULL, due_at = now(), locked_by = NULL, locked_at = NULL WHERE id = $1 AND status IN ('dead','failed')")
+        let res = sqlx::query("UPDATE jobs SET status = 'pending', attempts = 0, error = NULL, finished_at = NULL, due_at = now(), locked_by = NULL, locked_at = NULL WHERE id = $1 AND status IN ('dead','failed')")
             .bind(job_id)
             .execute(&self.pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
+        if res.rows_affected() == 0 {
+            return Err(JobError::Permanent(format!(
+                "执行 {job_id} 不存在或非 dead/failed 状态，无法复活"
+            )));
+        }
         self.emit(job_id, "info", "人工复活重跑", None).await.ok();
         Ok(())
     }
@@ -341,15 +346,16 @@ impl JobQueue {
     ) -> Result<crate::types::FailOutcome, JobError> {
         let can_retry = retryable && attempts < max_attempts;
         let outcome = if can_retry {
-            // 指数退避 + 抖动：base * 2^n，封顶 30s
+            // 指数退避 + 抖动：base * 2^n；总延迟（含全幅抖动）一并钳 30s——承诺的是 due_at 上界
             let backoff_ms = (200_i64 * (1 << attempts.min(8) as u32)).min(30_000);
             let jitter = rand_jitter(backoff_ms);
+            let total_delay_ms = (backoff_ms + jitter).min(30_000);
             sqlx::query(
                 "UPDATE jobs SET status = 'pending', error = $2, due_at = now() + ($3 || ' milliseconds')::interval, locked_by = NULL, locked_at = NULL WHERE id = $1",
             )
             .bind(job_id)
             .bind(message)
-            .bind(backoff_ms + jitter)
+            .bind(total_delay_ms)
             .execute(&self.pool)
             .await
             .map_err(|e| JobError::Retryable(e.to_string()))?;
