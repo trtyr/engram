@@ -40,7 +40,7 @@
 | P016 | [wiki-maintenance-agent](plans/016-wiki-maintenance-agent/README.md) | server/wiki-engine, server/jobs, server/api, web | done | maintain_wiki 巡逻 Agent 全量落地（2026-10-05）：lint→repair→回填→duplicates + patrol_agent 语义裁决；前端运维 tab 换 PatrolPane | fmt 0/clippy 0/巡逻测试 2/2/web 四件套绿 | — |
 | P017 | [project-maintenance-agent](plans/017-project-maintenance-agent/README.md) | server/distill, server/api | done | maintain_project Agent 全量落地（2026-10-06）：per-project 单飞+节律 fanout+四工具循环（list_docs/get_doc/note_issue/finish）+Markdown 报告 | distill 19+14+3 全绿/clippy 0 | — |
 | P018 | [full-review-remediation](plans/018-full-review-remediation/README.md) | server/jobs, server/core, server/wiki-engine, server/api, server/mcp, server/distill, server/llm, web, scripts, docs | done | 全线收官（2026-10-08）：T001-T010 + Q001-Q008 全 done（余 .env.example 文档面一处待 docs-sync）；七路审查 61 findings 全处置 | 7520dae / 71df416 / c8fbbaf4 / dd4acf9（各批门禁全绿） | — |
-| P019 | [code-review-remediation](plans/019-code-review-remediation/README.md) | server/jobs, cg-bridge, distill, wiki-engine, api, mcp, core, storage, web, scripts | planning | 2026-10-09 全量审查收官 + 逐条对账（reconciliation.md）：296 条三态标注，遗漏 14 条已补入 T001-T008，误报 1 条登记不立项 | 0a1ea8c + 对账 commit | Q001-Q006 拍板 + M1（T001）开工 |
+| P019 | [code-review-remediation](plans/019-code-review-remediation/README.md) | server/jobs, cg-bridge, distill, wiki-engine, api, mcp, core, storage, web, scripts | executing | M1 收官（02126f8）：T001 五条 P1 全落地+回归测试，门禁三件套全绿；对账 296 条三态标注零缺口 | 02126f8 / 7bea16b / 0a1ea8c | Q001-Q006 拍板 + M2（T002 鉴权族） |
 
 ## Ideas
 

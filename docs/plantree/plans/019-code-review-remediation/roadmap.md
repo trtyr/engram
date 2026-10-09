@@ -1,8 +1,10 @@
 # P019 Roadmap
 
+> **M1 已收官（2026-10-09 晚，commit 02126f8）**：T001 五条 P1 全部落地 + 各配回归测试，门禁三件套全绿（fmt/clippy/test workspace；test 全量独占跑零 FAILED）。
+
 来源：docs/review/ 38 篇检查项（2026-10-09 审查，errors/config 补跑后定稿），逐条发现以各篇 `features/<slug>.md` / `global/<dim>.md` 为详细依据（含 file:line 证据）。此处只登记任务级条目。
 
-## T001 P1 正确性五条（先行）
+## T001 P1 正确性五条（先行）——✅ done（02126f8）
 
 | # | 内容 | 依据 |
 |---|---|---|
