@@ -76,7 +76,7 @@
 - wiki 检索 limit 负值守卫 — features/search-crate.md #4 ✅
 - tickets list 负 limit 无守卫（对照 todos 同款补齐）— features/core-crate.md #1 ✅
 - Circles graph 悬空引用（edges/relations 未过滤归档实体）— features/circles-domain.md #2 ✅（JOIN 活体过滤对齐 nodes）
-- 回归：entity_test graph_edges_and_relations_filter_archived_endpoints / tickets_test negative_limit / wiki_test search_negative_limit / unified rerank_order_guard 单测（既有）
+- 回归：entity_test graph_edges_and_relations_filter_archived_endpoints / tickets_test negative_limit / wiki_test search_negative_limit + punctuation_query_without_embedding_short_circuits + rerank_duplicate_order_degrades_to_original / wiki-engine k7_guard_tests 3（qv 守卫纯函数锁定）/ threshold_tests 1（阈值 < 单通道 rank-1）/ mcp top_candidates_tests 3（降序截取 + order 守卫复用）
 
 ## T007 死代码/残余清理批（一批清）
 

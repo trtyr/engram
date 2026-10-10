@@ -235,23 +235,17 @@ impl EngramMcpServer {
             }
 
             // P019-M5：候选按分数降序后再取前 10——「top-10」名副其实
-            candidates.sort_by(|a, b| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            let top = candidates.len().min(10);
+            let top_set = top_rerank_candidates(candidates, 10);
+            let top = top_set.len();
             if top > 1 {
-                match engram_core::unified::rerank_hits(&self.state.llm(), &q, &candidates[..top])
-                    .await
-                {
+                match engram_core::unified::rerank_hits(&self.state.llm(), &q, &top_set).await {
                     Ok(order) => {
                         // P019-M5：order 合法性校验（对齐 unified.rs P018-T003：长度+越界+查重），
                         // 不合法丢弃 reranked 视图（out 里只剩分组摘要）
                         if engram_core::unified::is_valid_order(&order, top) {
                             let reranked: Vec<serde_json::Value> = order
                                 .into_iter()
-                                .filter_map(|i| candidates.get(i))
+                                .filter_map(|i| top_set.get(i))
                                 .map(|h| {
                                     json!({
                                         "domain": h.domain,
@@ -282,4 +276,53 @@ impl EngramMcpServer {
 /// 供装配层合并（宏生成的 router 方法私有，本模块内包一层）。
 pub(crate) fn routes_search_all() -> ToolRouter<EngramMcpServer> {
     EngramMcpServer::search_all_router()
+}
+
+/// P019-M5：rerank 候选集——按分数降序取前 n（原实现拼接顺序直接截前 10，「top-10」实为「任意 10」）。
+fn top_rerank_candidates(mut hits: Vec<UnifiedHit>, n: usize) -> Vec<UnifiedHit> {
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits.truncate(n);
+    hits
+}
+
+#[cfg(test)]
+mod top_candidates_tests {
+    use super::*;
+
+    fn hit(score: f64, title: &str) -> UnifiedHit {
+        UnifiedHit {
+            domain: "memory".into(),
+            id: uuid::Uuid::now_v7(),
+            title: Some(title.into()),
+            snippet: String::new(),
+            score,
+            extra: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn candidates_sorted_by_score_desc_and_truncated() {
+        let cands = vec![hit(0.1, "low"), hit(0.9, "hi"), hit(0.5, "mid")];
+        let top = top_rerank_candidates(cands, 2);
+        let titles: Vec<_> = top.iter().map(|h| h.title.as_deref().unwrap()).collect();
+        assert_eq!(titles, vec!["hi", "mid"], "应按分数降序取前 2");
+    }
+
+    #[test]
+    fn fewer_than_n_all_kept() {
+        let cands = vec![hit(0.2, "a"), hit(0.8, "b")];
+        assert_eq!(top_rerank_candidates(cands, 10).len(), 2);
+    }
+
+    /// P019-M5：rerank order 含重复索引必须拒——search_all 复用 unified::is_valid_order
+    /// （P018-T003 守卫），此处锁定 search_all 复用点的契约。
+    #[test]
+    fn search_all_order_guard_rejects_duplicates() {
+        assert!(!engram_core::unified::is_valid_order(&[0, 0, 1], 3));
+        assert!(engram_core::unified::is_valid_order(&[2, 1, 0], 3));
+    }
 }

@@ -108,7 +108,7 @@ pub async fn entity_relations(
 
 pub async fn list_relations(pool: &PgPool) -> StoreResult<Vec<EntityRelationDto>> {
     let rows = sqlx::query_as::<_, EntityRelationDto>(
-        // P019-M4：过滤已合并/已归档端点——旧实现返回悬空关系（图节点过滤了而边没过滤）
+        // P019-M5：过滤已合并/已归档端点——旧实现返回悬空关系（图节点过滤了而边没过滤）
         "SELECT r.* FROM entity_relations r \
          JOIN entities a ON a.id = r.from_id AND a.merged_into IS NULL AND a.archived_at IS NULL \
          JOIN entities b ON b.id = r.to_id AND b.merged_into IS NULL AND b.archived_at IS NULL \
@@ -376,7 +376,7 @@ pub async fn merge_entities_tx(pool: &PgPool, from: Uuid, into: Uuid) -> StoreRe
 /// 星系图共现边：同一原子同时关联的两个实体（weight = 共同原子数）。
 pub async fn cooccurrence_edges(pool: &PgPool) -> StoreResult<Vec<GraphEdge>> {
     let rows = sqlx::query_as::<_, GraphEdge>(
-        // P019-M4：过滤已合并/已归档端点——对齐 entity_graph nodes 过滤，防悬空引用
+        // P019-M5：过滤已合并/已归档端点——对齐 entity_graph nodes 过滤，防悬空引用
         "SELECT ae1.entity_id AS a, ae2.entity_id AS b, count(*)::bigint AS weight \
          FROM atom_entities ae1 \
          JOIN atom_entities ae2 ON ae1.atom_id = ae2.atom_id AND ae1.entity_id < ae2.entity_id \

@@ -155,7 +155,7 @@ impl WikiService {
 
         // K7（P019-M5 对齐 core wiki_docs 同款修法）：无 token 且无查询向量才短路——
         // 旧序先短路再算 qv，单 CJK/单字母有语义嵌入却被误杀返回空
-        if qv.is_none() && !engram_search::tokenize::has_query_tokens(query) {
+        if should_short_circuit(&qv, query) {
             return Ok(vec![]);
         }
 
@@ -471,6 +471,12 @@ async fn discover_graph_communities<'a>(
     Ok((comms, cohesion, members))
 }
 
+/// K7 短路判定（P019-M5 抽出可测）：无 FTS token **且**无查询向量才短路——
+/// 有语义嵌入的查询（单 CJK/单字母/纯标点）必须放行走向量通道。
+fn should_short_circuit(qv: &Option<Vec<f32>>, query: &str) -> bool {
+    qv.is_none() && !engram_search::tokenize::has_query_tokens(query)
+}
+
 /// LLM rerank 精排：top-20 交模型重排（Purpose::SearchRerank；单次不重试——检索热路径；
 /// 失败或索引越界时降级原序，对齐后端增强线 R6 语义）。
 async fn apply_llm_rerank(llm: &crate::service::LlmRef, query: &str, pages: &mut Vec<WikiPageDto>) {
@@ -528,5 +534,29 @@ async fn apply_llm_rerank(llm: &crate::service::LlmRef, query: &str, pages: &mut
             }
         }
         Err(e) => tracing::warn!(error = %e, "wiki rerank 失败，降级原序"),
+    }
+}
+
+#[cfg(test)]
+mod k7_guard_tests {
+    use super::should_short_circuit;
+
+    #[test]
+    fn punctuation_query_with_embedding_not_short_circuited() {
+        // 修复核心：有查询向量时纯标点查询不得误杀（旧序先短路再算 qv）
+        assert!(!should_short_circuit(&Some(vec![0.1; 4]), "。。。。。"));
+        assert!(!should_short_circuit(&Some(vec![0.1; 4]), "透"));
+    }
+
+    #[test]
+    fn punctuation_query_without_embedding_short_circuits() {
+        assert!(should_short_circuit(&None, "。。。。。"));
+        assert!(should_short_circuit(&None, "..."));
+    }
+
+    #[test]
+    fn normal_token_query_never_short_circuits() {
+        assert!(!should_short_circuit(&None, "透传 原则"));
+        assert!(!should_short_circuit(&Some(vec![0.1; 4]), "透传 原则"));
     }
 }

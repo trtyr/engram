@@ -2021,3 +2021,65 @@ async fn rebuild_all_links_excludes_system_pages() {
         .shutdown_and_wait(std::time::Duration::from_secs(5))
         .await;
 }
+
+/// P019-M5① 对偶面：无 provider（qv=None）时纯标点查询按 K7 正确短路——
+/// Ok(空) 且不写查询日志（短路发生在 log_query 之前）。
+/// 有嵌入时不短路的分支由 search.rs 内 k7_guard_tests 单测锁定（测试环境无 provider 无法造 qv）。
+#[tokio::test]
+async fn punctuation_query_without_embedding_short_circuits() {
+    let (pool, svc, handle, _pg, lib) = setup(vec![]).await;
+    svc.put_page(
+        lib,
+        "punct-page",
+        "标点页",
+        "透传原则正文内容。",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let hits = svc.search(lib, "。。。。。", 10).await.unwrap();
+    assert!(hits.is_empty(), "无嵌入无 token 应短路空结果");
+    let logged: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM wiki_query_log WHERE library_id = $1")
+            .bind(lib)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(logged, 0, "短路不得写查询日志");
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}
+
+/// P019-M5②：LLM rerank 返回重复索引 → 降级原序（旧实现重复候选且回填丢行）。
+#[tokio::test]
+async fn rerank_duplicate_order_degrades_to_original() {
+    let (_pool, svc, handle, _pg, lib) =
+        setup(vec![serde_json::json!("{\"order\": [0, 0]}")]).await;
+    svc.put_page(lib, "dup-a", "透传 A", "透传原则详解内容。", None, None)
+        .await
+        .unwrap();
+    svc.put_page(lib, "dup-b", "透传 B", "透传原则的另一面。", None, None)
+        .await
+        .unwrap();
+
+    // 基线：无 rerank 的原序
+    let baseline = svc.search(lib, "透传", 10).await.unwrap();
+    assert!(baseline.len() >= 2, "两页都应命中: {:?}", baseline.len());
+
+    // rerank：mock 返回重复索引 [0,0] → 必须降级为原序（不重排、不丢页）
+    let reranked = svc.search_reranked(lib, "透传", 10).await.unwrap();
+    let base_slugs: Vec<_> = baseline.iter().map(|p| p.slug.clone()).collect();
+    let rerank_slugs: Vec<_> = reranked.iter().map(|p| p.slug.clone()).collect();
+    assert_eq!(
+        base_slugs, rerank_slugs,
+        "重复 order 应降级原序: {rerank_slugs:?}"
+    );
+
+    handle
+        .shutdown_and_wait(std::time::Duration::from_secs(5))
+        .await;
+}

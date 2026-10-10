@@ -116,6 +116,22 @@ pub struct QueryGapDto {
 /// low_calls，污染 query_gaps。降到 0.016：单通道 rank-1 不再误标，rank≥2 的勉强命中仍能被逮住。
 const QUERY_LOG_LOW_SCORE: f64 = 0.016;
 
+#[cfg(test)]
+mod threshold_tests {
+    /// P019-M5：阈值必须低于单通道 rank-1 理论满分 1/61≈0.01639——
+    /// 旧值 0.017 高于它，权重路由后合法的单通道首位命中全部被误记 low_calls。
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn low_score_threshold_below_single_channel_rank1() {
+        assert!(
+            super::QUERY_LOG_LOW_SCORE < 1.0 / 61.0,
+            "阈值 {} 不得高于单通道 rank-1 满分 {}",
+            super::QUERY_LOG_LOW_SCORE,
+            1.0 / 61.0
+        );
+    }
+}
+
 /// 审计缺陷④（2026-09-20）：存量页向量回填——embedding IS NULL 的非系统页批量补嵌。
 /// 织入尾部（自愈）与 repair job（手动触发）调用；cap 50/次防热路径长尾。返回补嵌页数。
 pub async fn backfill_page_embeddings(
