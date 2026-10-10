@@ -1,6 +1,8 @@
 # P019 Roadmap
 
-> **M1 已收官（2026-10-09 晚，commit 02126f8）**：T001 五条 P1 全部落地 + 各配回归测试，门禁三件套全绿（fmt/clippy/test workspace；test 全量独占跑零 FAILED）。
+> **M1 已收官（2026-10-09 晚，commit 02126f8）**：T001 五条 P1 全部落地 + 各配回归测试，门禁三件套全绿。
+> **M2 已收官（2026-10-10 午）**：T002 鉴权族七条全部落地 + 各配回归测试，门禁三件套全绿。
+> 迁移：migrate:ro 归 Q004 拍板（不在本批）。
 
 来源：docs/review/ 38 篇检查项（2026-10-09 审查，errors/config 补跑后定稿），逐条发现以各篇 `features/<slug>.md` / `global/<dim>.md` 为详细依据（含 file:line 证据）。此处只登记任务级条目。
 
@@ -14,7 +16,7 @@
 | 4 | wiki-engine rebuild_all_links 无 page_type 过滤→系统页边瘫痪 orphan lint/repair | features/wiki-engine-crate.md #1 |
 | 5 | tickets 全量导出被 core list `limit.min(500)` 静默截断（total 仍报全量） | features/tickets-domain.md #1 |
 
-## T002 鉴权/越权族
+## T002 鉴权/越权族——✅ done（M2）
 
 - study:ro 全拒（require_study 对 ReadOnly 直接 Err）— features/auth-platform-domain.md #1
 - /search 跨域越权：wiki-only key 可读 todos/tickets/entity（require_search 精确匹配绕开 domain_access）— features/scope-system-13.md #1 + features/llm-platform-domain.md #1

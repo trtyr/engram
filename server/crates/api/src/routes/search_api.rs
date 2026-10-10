@@ -10,14 +10,37 @@ use crate::auth::Principal;
 use crate::error::ApiError;
 use crate::state::AppState;
 
-/// 统一检索要求至少一个可读域 scope（Admin 恒通过）。
+use engram_core::auth::DomainAccess;
+
+/// 统一检索实际覆盖的域（与 unified.rs 五域合并一致）。
+const SEARCH_DOMAINS: [&str; 5] = ["memory", "wiki", "todos", "tickets", "circles"];
+
+/// 命中域标签 → scope 域（unified merge 时的 domain 字段命名与 scope 域名不同源）。
+fn hit_scope_domain(hit_domain: &str) -> &'static str {
+    match hit_domain {
+        "memory" => "memory",
+        "wiki" => "wiki",
+        "entity" => "circles",
+        "ticket" => "tickets",
+        _ => "todos",
+    }
+}
+
+/// 统一检索的域准入与结果过滤（P019-M2）。
+/// 判定收口到 domain_access 统一源：key 至少对一个被检索域有读权限（:ro 变体放行，
+/// 对齐全平台读语义）；返回结果按 key 实际可读域过滤——旧实现 require_search
+/// 用 has_scope 精确匹配（:ro 被拒），且无结果过滤（wiki-only key 可见 todos 命中）。
 fn require_search(p: &Principal) -> Result<(), ApiError> {
-    if p.has_scope("memory") || p.has_scope("wiki") {
+    if SEARCH_DOMAINS
+        .iter()
+        .any(|d| p.domain_access(d) != DomainAccess::None)
+    {
         Ok(())
     } else {
-        Err(ApiError::Forbidden(
-            "缺少 scope：memory / wiki 至少其一".into(),
-        ))
+        Err(ApiError::Forbidden(format!(
+            "缺少 scope：统一检索覆盖 {}，至少需其一（支持 :ro 只读变体）",
+            SEARCH_DOMAINS.join(" / ")
+        )))
     }
 }
 
@@ -67,10 +90,12 @@ pub async fn search(
     Json(req): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, ApiError> {
     require_search(&principal)?;
-    let hits = svc(&state)
+    let mut hits = svc(&state)
         .search(&req.query, req.limit, req.rerank)
         .await
         .map_err(ue)?;
+    // P019-M2：按 key 实际可读域过滤命中——准入域集合不得大于检索域集合
+    hits.retain(|h| principal.domain_access(hit_scope_domain(&h.domain)) != DomainAccess::None);
     Ok(Json(SearchResponse {
         query: req.query,
         hits,

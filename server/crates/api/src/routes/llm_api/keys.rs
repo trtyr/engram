@@ -150,6 +150,10 @@ pub async fn update_api_key(
                 .collect::<Result<Vec<String>, _>>()
         })
         .transpose()?;
+    // P019-M2：更新面同样拒绝无 :ro 语义的变体
+    if let Some(scopes) = &scopes {
+        engram_core::auth::validate_scopes_issuable(scopes).map_err(ApiError::BadRequest)?;
+    }
     let n = keys_repo::update_api_key(
         &state.pool,
         id,

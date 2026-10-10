@@ -14,7 +14,13 @@ const LOCK_WINDOW: Duration = Duration::from_secs(15 * 60);
 struct Entry {
     fails: u32,
     locked_until: Option<Instant>,
+    /// 最近一次失败时间（淘汰判据：非锁定且久未失败 = 死条目）
+    last_failure: Option<Instant>,
 }
+
+/// 条目上限：超过即顺带淘汰非锁定且超过锁定窗口未活动的死条目（P019-M2：
+/// 旧实现无淘汰——未认证请求可用任意用户名无界撑大进程内 HashMap）。
+const REGISTRY_SOFT_CAP: usize = 4096;
 
 fn registry() -> &'static Mutex<HashMap<String, Entry>> {
     static REG: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
@@ -54,10 +60,18 @@ pub fn record_failure(username: &str) {
     let e = reg.entry(key).or_insert(Entry {
         fails: 0,
         locked_until: None,
+        last_failure: None,
     });
     e.fails = e.fails.saturating_add(1);
+    e.last_failure = Some(Instant::now());
     if e.fails >= MAX_FAILURES {
         e.locked_until = Some(Instant::now() + LOCK_WINDOW);
+    }
+    // 软上限淘汰：只清「未锁定且超过锁定窗口没动静」的死条目，不碰活跃计数
+    if reg.len() > REGISTRY_SOFT_CAP {
+        reg.retain(|_, e| {
+            e.locked_until.is_some() || e.last_failure.is_some_and(|t| t.elapsed() < LOCK_WINDOW)
+        });
     }
 }
 
@@ -102,6 +116,54 @@ mod tests {
         assert!(
             is_locked(" UNIT-CASE-USER "),
             "大小写/空白归一后应命中同一条目"
+        );
+    }
+
+    /// P019-M2：软上限淘汰不误伤活跃条目——刚失败的条目（last_failure=now）
+    /// 超过软上限后仍保留计数与锁定状态。
+    #[test]
+    fn eviction_keeps_active_entries() {
+        let victim = "unit-evict-active";
+        for _ in 0..MAX_FAILURES {
+            record_failure(victim);
+        }
+        assert!(is_locked(victim), "前置：已锁定");
+        // 灌入超过软上限的新条目（全部刚失败 = 活跃）
+        for i in 0..(REGISTRY_SOFT_CAP + 8) {
+            record_failure(&format!("unit-flood-active-{i}"));
+        }
+        assert!(is_locked(victim), "软上限淘汰不得误伤活跃/锁定条目");
+        assert!(
+            registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key("unit-flood-active-0"),
+            "活跃新条目也应在（淘汰只清死条目）"
+        );
+    }
+
+    /// P019-M2：淘汰路径真的会清死条目——直接拨回 last_failure 构造过期条目。
+    #[test]
+    fn eviction_removes_stale_entries() {
+        let stale = "unit-evict-stale";
+        for _ in 0..3 {
+            record_failure(stale); // 有计数但未锁定，last_failure=now
+        }
+        // 时间后门：把 last_failure 拨回锁定窗口之前（模拟久未活动）
+        {
+            let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+            reg.get_mut(&key_of(stale)).unwrap().last_failure =
+                Some(Instant::now() - LOCK_WINDOW - Duration::from_secs(1));
+        }
+        for i in 0..(REGISTRY_SOFT_CAP + 8) {
+            record_failure(&format!("unit-flood-stale-{i}"));
+        }
+        assert!(
+            !registry()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&key_of(stale)),
+            "超窗口未活动的死条目应被淘汰"
         );
     }
 }

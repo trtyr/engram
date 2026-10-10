@@ -521,7 +521,12 @@ pub fn check_action_access(
     action: &str,
 ) -> Result<(), rmcp::ErrorData> {
     use engram_core::auth::DomainAccess;
-    let scope = crate::tool_scope(tool);
+    let scope = match crate::tool_scope(tool) {
+        Some(s) => s,
+        // P019-M2：非域工具不做动作级 :ro 判定——jobs/logs 任何合法凭证可读
+        // （写面 handler 内 Admin 拦）；search_all 在执行面分域过滤；未知名交 router 报错。
+        None => return Ok(()),
+    };
     match principal.domain_access(scope) {
         DomainAccess::Full | DomainAccess::None => Ok(()),
         DomainAccess::ReadOnly => {
@@ -776,6 +781,30 @@ mod ro_unify_tests {
             check_action_access(&ro, "memory", write).is_err(),
             ":ro 写动作应拒绝：{write}"
         );
+    }
+
+    /// P019-M2：study:ro 同款验收——读动作（含 help）放行、写动作拒绝。
+    /// 旧行为：study_tool 入口 require_study 对 ReadOnly 全拒，:ro 连 help 都不可用。
+    #[test]
+    fn study_ro_key_reads_ok_writes_rejected_mcp() {
+        let ro = Principal::ApiKey {
+            key_id: Uuid::nil(),
+            name: "t".into(),
+            scopes: vec!["study:ro".into()],
+        };
+        let actions: Vec<String> = action_docs("study")
+            .expect("study 域应有 action 文档表")
+            .iter()
+            .map(|d| d.action.to_string())
+            .collect();
+        for a in &actions {
+            let allowed = check_action_access(&ro, "study", a).is_ok();
+            let is_read = is_read_action("study", a);
+            assert_eq!(
+                allowed, is_read,
+                "study:ro 对 {a} 的放行与读/写分类不一致（read={is_read}）"
+            );
+        }
     }
 }
 

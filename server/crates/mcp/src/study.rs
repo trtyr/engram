@@ -169,7 +169,10 @@ impl EngramMcpServer {
         Parameters(call): Parameters<dispatch::DomainCall>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let p = principal_of(&ctx)?;
-        require_study(&p)?;
+        // P019-M2：入口只拦无 study scope——study:ro 放行进各 handler，
+        // 由各自 require_study（写）/ require_study_read（读）按动作分级。
+        // 旧入口对 ReadOnly 直接拒，导致 study:ro 连读动作与 help 都不可用。
+        require_study_read(&p)?;
         if call.action == "help" {
             let cfg = load_config(&self.state.pool).await;
             return ok_json(dispatch::render_manual("study", &cfg.disabled_tools));

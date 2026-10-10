@@ -139,13 +139,16 @@ impl ServerHandler for EngramMcpServer {
                     "search_all" => ["memory", "wiki", "todos", "project"]
                         .iter()
                         .any(|s| p.domain_access(s) != DomainAccess::None),
-                    // jobs 无域 scope（对齐 HTTP：任何合法凭证可读后台执行——AI 轮询自己触发的）
-                    "jobs" => true,
-                    name => {
-                        p.domain_access(tool_scope(name)) != DomainAccess::None
-                            || (name == "memory"
-                                && p.domain_access("original") != DomainAccess::None)
-                    }
+                    // jobs/logs 无域 scope（对齐 HTTP：任何合法凭证可读——AI 轮询自己触发的；写面 Admin 拦）
+                    "jobs" | "logs" => true,
+                    name => match tool_scope(name) {
+                        None => false,
+                        Some(s) => {
+                            p.domain_access(s) != DomainAccess::None
+                                || (name == "memory"
+                                    && p.domain_access("original") != DomainAccess::None)
+                        }
+                    },
                 })
             })
             .collect();
@@ -198,24 +201,31 @@ impl ServerHandler for EngramMcpServer {
         }
         // action 级开关：{"action":"delete"} → 键 "todos.delete"
         if dispatch::is_domain_tool(name) {
-            let action = request
-                .arguments
-                .as_ref()
-                .and_then(|a| a.get("action"))
-                .and_then(|v| v.as_str());
-            if let Some(action) = action {
-                let key = dispatch::action_key(name, action);
-                if cfg.disabled_tools.iter().any(|d| d == &key) {
+            let action_arg = request.arguments.as_ref().and_then(|a| a.get("action"));
+            match action_arg {
+                Some(serde_json::Value::String(action)) => {
+                    let key = dispatch::action_key(name, action);
+                    if cfg.disabled_tools.iter().any(|d| d == &key) {
+                        return Err(mcp_err(
+                            ErrorCode::INVALID_REQUEST,
+                            format!("操作 {key} 已停用——控制台「MCP」页可重新开启"),
+                        ));
+                    }
+                    // 动作级权限（公网多Agent P001 步骤3）：scope 的 :ro 只读变体只能调本域
+                    // 读类动作；拒绝报错列出可用只读动作（报错即文档）。缺 scope 的拒绝保持在
+                    // handler 内的 require_*（原语义不变）。
+                    let principal = principal_of(&context)?;
+                    dispatch::check_action_access(&principal, name, action)?;
+                }
+                // P019-M2：action 存在但非字符串时不再静默跳过检查（旧实现 as_str()→None
+                // 让停用开关与 :ro 动作级检查整体旁路），显式 400。
+                Some(other) => {
                     return Err(mcp_err(
-                        ErrorCode::INVALID_REQUEST,
-                        format!("操作 {key} 已停用——控制台「MCP」页可重新开启"),
+                        ErrorCode::INVALID_PARAMS,
+                        format!("action 必须是字符串，收到 {other}"),
                     ));
                 }
-                // 动作级权限（公网多Agent P001 步骤3）：scope 的 :ro 只读变体只能调本域
-                // 读类动作；拒绝报错列出可用只读动作（报错即文档）。缺 scope 的拒绝保持在
-                // handler 内的 require_*（原语义不变）。
-                let principal = principal_of(&context)?;
-                dispatch::check_action_access(&principal, name, action)?;
+                None => {} // 缺 action：交由 handler 报可行动的 INVALID_PARAMS
             }
         }
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);

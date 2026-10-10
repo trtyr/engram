@@ -233,3 +233,48 @@ async fn create_key_missing_scopes_is_422() {
         "缺 scopes 字段应为 422（serde 拒绝）"
     );
 }
+
+/// P019-M2：llm/erase/cron 无 :ro 语义——签发面拒绝死权限变体（400）。
+#[tokio::test]
+async fn create_key_rejects_dead_ro_variants() {
+    let (app, _pg) = support::app().await;
+    let token = login_token(&app).await;
+    for scope in ["llm:ro", "erase:ro", "cron:ro"] {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/settings/api-keys")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"name":"dead-ro","scopes":["{scope}"]}}"#
+            )))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "{scope} 应被签发面拒绝"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            v["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("不支持只读变体"),
+            "报错应可行动: {v}"
+        );
+    }
+    // 全量 llm 仍可签
+    let req = Request::builder()
+        .method("POST")
+        .uri("/settings/api-keys")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"name":"ok-llm","scopes":["llm"]}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "全量 llm 应可签");
+}

@@ -47,6 +47,25 @@ pub fn normalize_scope(s: &str) -> Option<String> {
     })
 }
 
+/// 无读/写动作之分的 scope：llm（设置面读写一体）/ erase（只有删除动作）/ cron（只控制节律开关）。
+/// 它们的 :ro 变体在任何端点都不生效（检查面不走 domain_access）——签发面直接拒绝，
+/// 不发「能签出但全域不可用」的死权限 key（P019-M2）。
+pub const NO_RO_SCOPES: [&str; 3] = ["llm", "erase", "cron"];
+
+/// 签发/更新面校验：拒绝无 :ro 语义的只读变体。
+pub fn validate_scopes_issuable(scopes: &[String]) -> Result<(), String> {
+    for s in scopes {
+        if let Some(base) = s.strip_suffix(":ro")
+            && NO_RO_SCOPES.contains(&base)
+        {
+            return Err(format!(
+                "scope `{s}` 不支持只读变体——{base} 域没有读/写动作之分，:ro 签发后全域不可用；请去掉 :ro 或改用其它 scope"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// 未知 scope 的可行动报错：带全部合法值 + 别名提示（报错即文档，EN-62）。
 pub fn unknown_scope_message(bad: &str) -> String {
     format!(

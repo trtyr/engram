@@ -80,7 +80,11 @@ pub async fn login_handler(
             Ok(Json(LoginResponse { token }))
         }
         Err(e) => {
-            crate::login_throttle::record_failure(&req.username);
+            // P019-M2：基础设施错误（DB 不可用）不计爆破——5 次 DB 抖动即锁管理员
+            // 15 分钟等于自我拒绝服务；只对鉴权类失败（凭据错）计数。
+            if !matches!(e, ApiError::Unavailable(_)) {
+                crate::login_throttle::record_failure(&req.username);
+            }
             tracing::warn!(audit = true, action = "auth.login", target = %req.username, outcome = "failure", error = %e, ip = ?ip, "审计");
             Err(e)
         }

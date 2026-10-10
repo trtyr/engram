@@ -16,6 +16,7 @@ use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 
 pub use engram_core::auth::{
     DomainAccess, Principal, SCOPES, normalize_scope, unknown_scope_message,
+    validate_scopes_issuable,
 };
 
 fn sha256_hex(input: &str) -> String {
@@ -81,6 +82,7 @@ pub async fn create_api_key(
         .iter()
         .map(|s| normalize_scope(s).ok_or_else(|| ApiError::BadRequest(unknown_scope_message(s))))
         .collect::<Result<Vec<_>, _>>()?;
+    validate_scopes_issuable(&scopes).map_err(ApiError::BadRequest)?;
     let mut raw = [0u8; 24];
     rand::rng().fill_bytes(&mut raw);
     let key = format!("amk_{}", hex(&raw));

@@ -2225,3 +2225,55 @@ async fn logout_deletes_backend_session() {
     );
     drop(container);
 }
+
+/// P019-M2：DB 不可用时登录不计爆破——基础设施错误连发 8 次也不得触发 429
+/// 锁定（旧实现把 Unavailable 也 record_failure，5 次 DB 抖动即锁管理员 15 分钟）。
+#[tokio::test]
+async fn login_db_unavailable_does_not_count_bruteforce() {
+    let (app, container) = app().await;
+    let user = "unit-db-down-user"; // 独立用户名：避开其它测试对 admin 的计数干扰
+    drop(container); // 断库：容器停止有延迟，先等到首个 503 出现
+
+    async fn login_status(app: &axum::Router, user: &str) -> StatusCode {
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"username":"{user}","password":"whatever"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    // 等待库真正死透（容器 stop 异步）：首个 503 出现即断库生效
+    let mut saw_503 = false;
+    for _ in 0..60 {
+        if login_status(&app, "unit-db-down-probe").await == StatusCode::SERVICE_UNAVAILABLE {
+            saw_503 = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(saw_503, "断库后应出现 503");
+
+    // 固定用户名连发 8 次：全 503，永不 429（DB 错误不计爆破）
+    for i in 0..8 {
+        let status = login_status(&app, user).await;
+        assert_ne!(
+            status,
+            StatusCode::TOO_MANY_REQUESTS,
+            "第 {i} 次就 429 说明 DB 错误被计入了爆破"
+        );
+        assert_eq!(
+            status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "断库期间应统一 503: 第 {i} 次得到 {status}"
+        );
+    }
+}

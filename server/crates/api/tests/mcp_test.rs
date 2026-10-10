@@ -9,7 +9,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
-use support::{app, create_key, expect_result, login_token, mcp_rpc, rpc};
+use support::{app, create_key, expect_result, login_token, mcp_call_json, mcp_rpc, rpc};
 use tower::util::ServiceExt;
 
 /// 域工具调用：action + 平铺参数（渐进式发现语法）。
@@ -104,10 +104,11 @@ async fn mcp_initialize_and_list_tools() {
     let mut names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
     names.sort_unstable();
     // memory-only key 看到 memory 域工具 + 跨域 search_all（按任一 scope 可见）；
-    // circles 共享 memory scope（registry.rs circles→memory），一并可见
+    // circles 共享 memory scope（registry.rs circles→memory），一并可见。
+    // P019-M2：study 不再錯挂 memory scope——不可见（看到的=能调的）
     assert_eq!(
         names,
-        vec!["circles", "jobs", "logs", "memory", "search_all", "study"],
+        vec!["circles", "jobs", "logs", "memory", "search_all"],
         "memory-only key 应见 memory 域工具 + circles（共享 memory scope）、search_all 与 jobs/logs（均无域 scope——任何合法凭证可见）"
     );
     let memory = tools
@@ -580,8 +581,8 @@ async fn mcp_tool_toggle_hides_and_rejects() {
     sorted.sort();
     assert_eq!(
         sorted,
-        vec!["circles", "jobs", "logs", "memory", "search_all", "study"],
-        "域工具应保留（+跨域 search_all；jobs/logs 无域 scope 恒可见；circles 共享 memory scope）：{names:?}"
+        vec!["circles", "jobs", "logs", "memory", "search_all"],
+        "域工具应保留（+跨域 search_all；jobs/logs 无域 scope 恒可见；circles 共享 memory scope；study 不再錯挂 memory，P019-M2 后不可见）：{names:?}"
     );
     // 描述目录里 write_session 应隐身
     let domain = result["tools"]
@@ -675,7 +676,11 @@ async fn mcp_progressive_discovery_help_and_unknown_action() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
-    assert_eq!(names, vec!["jobs", "search_all", "tickets", "todos"]);
+    // P019-M2：logs 对任何合法凭证可见（不再錯挂 memory 被藏住）
+    assert_eq!(
+        names,
+        vec!["jobs", "logs", "search_all", "tickets", "todos"]
+    );
 
     // help：一轮取回全域操作手册（含参数 schema）
     let (_, v) = mcp_rpc(&app, &key, call(2, "todos", "help", json!({}))).await;
@@ -727,8 +732,8 @@ async fn wiki_mcp_tools_listed() {
     names.sort_unstable();
     assert_eq!(
         names,
-        vec!["jobs", "search_all", "wiki"],
-        "wiki-only key 应见 wiki 域工具与 search_all（jobs 对任何合法凭证可见）"
+        vec!["jobs", "logs", "search_all", "wiki"],
+        "wiki-only key 应见 wiki 域工具与 search_all（jobs/logs 对任何合法凭证可见，P019-M2）"
     );
     // 描述目录：操作齐备
     let description = tools
@@ -1081,10 +1086,11 @@ async fn wiki_mcp_tool_toggle_hides_and_rejects() {
         sorted,
         vec![
             "jobs".to_string(),
+            "logs".to_string(),
             "search_all".to_string(),
             "wiki".to_string()
         ],
-        "域工具应保留（+跨域 search_all；jobs 无域 scope 恒可见）：{names:?}"
+        "域工具应保留（+跨域 search_all；jobs/logs 无域 scope 恒可见，P019-M2）：{names:?}"
     );
     let description = result["tools"]
         .as_array()
@@ -1400,6 +1406,91 @@ async fn study_readonly_key_write_rejected() {
     assert!(
         msg.contains("只读") || msg.contains("study scope"),
         ":ro 写应拒: {msg}"
+    );
+
+    // P019-M2：study:ro 读类动作放行（旧行为：入口守卫对 ReadOnly 全拒，连 help 都不可用）
+    for (id, action, args) in [
+        (2, "help", json!({})),
+        (3, "list", json!({})),
+        (4, "reviews_due", json!({})),
+        (5, "get", json!({"id": uuid::Uuid::now_v7().to_string()})), // 不存在也行——防伪的是授权而非数据
+    ] {
+        let (_, v) = mcp_rpc(&app, &ro, call(id, "study", action, args)).await;
+        let err = v["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            !err.contains("scope") && !err.contains("只读"),
+            ":ro 读动作 {action} 不应被权限拦截: {err}"
+        );
+    }
+}
+
+/// P019-M2：original:ro 不旁路 KV 写——六动词入口的 kv 模式最终落到
+/// memory_kv_* handler，handler 内 ReadOnly 守卫应拒绝 kv_put（original 全量 key 正常）。
+#[tokio::test]
+async fn original_ro_key_kv_write_rejected_full_key_ok() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+
+    // original:ro：写拒
+    let ro = create_key(&app, &admin, &["original:ro"]).await;
+    let (_, v) = mcp_rpc(
+        &app,
+        &ro,
+        call(
+            1,
+            "memory",
+            "remember",
+            json!({"mode": "kv", "key": "sn", "value": "ABC-123"}),
+        ),
+    )
+    .await;
+    let msg = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("只读") || msg.contains("original scope"),
+        "original:ro 的 KV 写应拒: {msg}"
+    );
+
+    // original 全量：写读闭环正常
+    let full = create_key(&app, &admin, &["original"]).await;
+    let out = mcp_call_json(
+        &app,
+        &full,
+        "memory",
+        json!({"action": "remember", "mode": "kv", "key": "sn", "value": "ABC-123"}),
+    )
+    .await;
+    assert_eq!(out["key"], "sn", "KV 写应成功: {out}");
+    let out = mcp_call_json(
+        &app,
+        &full,
+        "memory",
+        json!({"action": "recall", "mode": "kv_get", "key": "sn"}),
+    )
+    .await;
+    assert_eq!(out["value"], "ABC-123", "KV 值应原样透传: {out}");
+}
+
+/// P019-M2：action 非字符串不再静默跳过动作级检查——显式 400（旧实现 as_str()→None
+/// 让停用开关与 :ro 动作级检查整体旁路，靠 handler 内 from_args 兑底）。
+#[tokio::test]
+async fn non_string_action_rejected_explicitly() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let key = create_key(&app, &admin, &["todos"]).await;
+    let (_, v) = mcp_rpc(
+        &app,
+        &key,
+        rpc(
+            1,
+            "tools/call",
+            json!({"name": "todos", "arguments": {"action": 123}}),
+        ),
+    )
+    .await;
+    let msg = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("action 必须是字符串"),
+        "非字符串 action 应显式报错: {msg}"
     );
 }
 

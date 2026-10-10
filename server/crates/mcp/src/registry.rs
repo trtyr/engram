@@ -2,35 +2,20 @@
 
 use super::*;
 
-/// 工具名 → 所需 scope（域名前缀即 scope 名；管理台按同一前缀分域）。
-/// 渐进式发现后常规工具就是 9 个域工具 + 跨域 search_all（scope 检查在 list_tools/
-/// handler 内按"任一域"特判，不进本表；projects 的 scope 叫 project）；
-/// 下面的平铺分支保留兜底（防御未来再加非域工具）。
-pub(crate) fn tool_scope(name: &str) -> &'static str {
+/// 工具名 → 所需 scope 域（P019-M2：显式登记，删除 `_ => "memory"` 兜底——/// 旧兜底把 study/logs 错挂 memory，产生发现面与 :ro 判定错位：study:ro 全拒、
+/// study-only key 看不到 study 工具）。None = 非域工具：search_all 跨域分域检查、
+/// jobs/logs 任何合法凭证可读（写面 handler 内 Admin 拦）、未知名交 router 报错。
+pub(crate) fn tool_scope(name: &str) -> Option<&'static str> {
     match name {
-        "projects" => "project",
-        "assets" => "assets", // 资产台账域：独立一等对象（2026-09-21 新增）
-        "credentials" => "credentials", // 凭据域：机密值一等台账（EN-234，2026-09-26 新增）
-        "circles" => "memory", // 圈子域：实体坐标系读写（EN-229）——底座 memory 同表，scope 不分家（todos/tickets 先例）
-        "memory" => "memory",
-        "wiki" => "wiki",
-        "todos" | "tickets" => "todos", // 工单域与待办同 scope（同表同底座，权限不分家）
-        "codegraph" => "codegraph",
-        other => flat_tool_scope(other),
-    }
-}
-
-/// 平铺名兜底（防御未来再加非域工具）：按前缀归域。
-pub(crate) fn flat_tool_scope(other: &str) -> &'static str {
-    match other.split('_').next() {
-        Some("project") => "project",
-        Some("credentials") => "credentials",
-        Some("circles") => "memory",
-        Some("wiki") => "wiki",
-        Some("codegraph") => "codegraph",
-        Some("llm") => "llm",
-        Some("todos") | Some("todo") => "todos",
-        _ => "memory",
+        "projects" => Some("project"),
+        "assets" => Some("assets"), // 资产台账域：独立一等对象（2026-09-21 新增）
+        "credentials" => Some("credentials"), // 凭据域：机密值一等台账（EN-234，2026-09-26 新增）
+        "circles" | "memory" => Some("memory"), // 圈子域：实体坐标系读写（EN-229）——底座 memory 同表，scope 不分家（todos/tickets 先例）
+        "wiki" => Some("wiki"),
+        "todos" | "tickets" => Some("todos"), // 工单域与待办同 scope（同表同底座，权限不分家）
+        "codegraph" => Some("codegraph"),
+        "study" => Some("study"),
+        _ => None,
     }
 }
 
@@ -344,5 +329,25 @@ pub async fn build_info(pool: &engram_storage::PgPool) -> McpInfo {
         disabled_tools: cfg.disabled_tools,
         instructions: SERVER_INSTRUCTIONS.into(),
         tools,
+    }
+}
+
+#[cfg(test)]
+mod tool_scope_tests {
+    use super::*;
+
+    /// P019-M2：显式登记，无兜底——study 归 study，非域工具返回 None（不再错挂 memory）。
+    #[test]
+    fn domain_tools_map_explicitly_no_fallback() {
+        assert_eq!(tool_scope("study"), Some("study"));
+        assert_eq!(tool_scope("memory"), Some("memory"));
+        assert_eq!(tool_scope("tickets"), Some("todos"));
+        assert_eq!(tool_scope("projects"), Some("project"));
+        assert_eq!(tool_scope("codegraph"), Some("codegraph"));
+        // 非域工具：jobs/logs 任何合法凭证可读，search_all 跨域分域检查，未知名交 router
+        assert_eq!(tool_scope("jobs"), None);
+        assert_eq!(tool_scope("logs"), None);
+        assert_eq!(tool_scope("search_all"), None);
+        assert_eq!(tool_scope("bogus_tool"), None);
     }
 }
