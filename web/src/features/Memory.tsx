@@ -1,7 +1,7 @@
 /** Memory 域：会话 / 原子 / 场景 / 画像 / 检索。 */
 import { useEffect, useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { api, type Atom, type Job, type Session } from '@/lib/api'
+import { api, type Atom, type Session } from '@/lib/api'
 import {
   Card,
   Checkbox,
@@ -441,9 +441,18 @@ function DistillBar() {
           setBusy(true)
           setMsg('')
           try {
-            // 202 返回入队的 Job[]——空数组 = 没有待蒸馏会话
-            const jobs = await api.post<Job[]>('/memory/distill', { full: false })
-            setMsg(jobs.length > 0 ? `已入队 ${jobs.length} 个蒸馏（可在日志页看进度）` : '没有待蒸馏的会话')
+            // P019-M3：旧 POST /memory/distill 已在 P015 退役（幽灵接口）——
+            // 改用手动触发离线整理 POST /memory/maintain（Admin 会话过 cron 闸）。
+            // 返回 { already_running, jobs? }：巡逻已在跑时给提示而非重复入队。
+            const res = await api.post<{
+              already_running: boolean
+              jobs?: { id: string; kind: string }[]
+            }>('/memory/maintain', {})
+            setMsg(
+              res.already_running
+                ? '整理巡逻进行中——等它完成看效果'
+                : '已入队整理任务（可在日志页看进度）',
+            )
             count()
           } catch (e) {
             setMsg(e instanceof Error ? `触发失败：${e.message}` : '触发失败')

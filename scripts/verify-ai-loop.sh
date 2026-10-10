@@ -47,21 +47,22 @@ echo "== 2. 写入会话（含可蒸馏事实）"
 curl -fsS -X POST "$API/memory/sessions" -H "$AUTH" -H 'content-type: application/json' \
   -d '{"agent":"ai-loop-test","distill":"off","turns":[{"speaker":"user","text":"记住：我的生产环境数据库是 PostgreSQL 17，部署在上海区"},{"speaker":"assistant","text":"已记录"}]}' | jq -c '{id, distill_status}'
 
-echo "== 3. 触发蒸馏并等待（四阶段）"
-curl -fsS -X POST "$API/memory/distill" -H "$AUTH" -H 'content-type: application/json' -d '{"full":false}' >/dev/null
+echo "== 3. 触发整理巡逻并等待"
+# P015 后手动触发统一 /memory/maintain（cron scope）；旧 /memory/distill 四阶段链已退役
+curl -fsS -X POST "$API/memory/maintain" -H "$AUTH" -H 'content-type: application/json' -d '{}' >/dev/null
 for _ in $(seq 1 180); do
   P=$(curl -fsS "$API/jobs?limit=50" -H "$AUTH" | jq '[.[] | select(.status=="pending" or .status=="running")] | length')
   [ "$P" -eq 0 ] && break
   sleep 1
 done
-curl -fsS "$API/jobs?kind=extract_atoms,arbitrate_atoms,organize_scenarios,distill_persona&limit=10" -H "$AUTH" | jq -r '.[] | "   \(.kind): \(.status)"'
-DISTILL_OK=$(curl -fsS "$API/jobs?kind=extract_atoms,arbitrate_atoms,organize_scenarios,distill_persona&limit=10" -H "$AUTH" | jq '[.[] | select(.status=="succeeded")] | length')
-if [ "$DISTILL_OK" -lt 4 ]; then
-  echo "   蒸馏未全成（$DISTILL_OK/4）："
-  curl -fsS "$API/jobs?kind=extract_atoms,arbitrate_atoms,organize_scenarios,distill_persona&limit=10" -H "$AUTH" | jq -r '.[] | select(.status!="succeeded") | "   \(.kind): \(.error)"'
+curl -fsS "$API/jobs?kind=maintain_memory&limit=10" -H "$AUTH" | jq -r '.[] | "   \(.kind): \(.status)"'
+DISTILL_OK=$(curl -fsS "$API/jobs?kind=maintain_memory&limit=10" -H "$AUTH" | jq '[.[] | select(.status=="succeeded")] | length')
+if [ "$DISTILL_OK" -lt 1 ]; then
+  echo "   整理未成："
+  curl -fsS "$API/jobs?kind=maintain_memory&limit=10" -H "$AUTH" | jq -r '.[] | select(.status!="succeeded") | "   \(.kind): \(.error)"'
   exit 1
 fi
-echo "   蒸馏四阶段全部 succeeded"
+echo "   整理巡逻 succeeded"
 
 echo "== 4. 检索验证（语义命中）"
 L1=$(curl -fsS -X POST "$API/memory/search" -H "$AUTH" -H 'content-type: application/json' -d '{"query":"生产环境 数据库","max_items":5}')

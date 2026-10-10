@@ -70,7 +70,7 @@ async function req<T>(method: string, path: string, body?: unknown, raw = false)
   }
   if (raw) return (await resp.blob()) as T
   if (resp.status === 204) return undefined as T
-  // 202 Accepted 常带实体 body（如 /memory/distill 返回入队的 Job[]）——有则解析，无则 undefined
+  // 202 Accepted 常带实体 body（如入队的 Job[]）——有则解析，无则 undefined
   if (resp.status === 202) {
     try {
       return (await resp.json()) as T

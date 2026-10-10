@@ -43,6 +43,8 @@ interface ProjectBrief {
 export default function Tickets() {
   const nav = useNavigate()
   const [rows, setRows] = useState<Ticket[] | null>(null)
+  // P019-M3：服务端 total（单页鲉 200，超出时提示未全显示）
+  const [total, setTotal] = useState<number | null>(null)
   const [projects, setProjects] = useState<ProjectBrief[]>([])
   const [severity, setSeverity] = useState('')
   const [err, setErr] = useState('')
@@ -58,11 +60,13 @@ export default function Tickets() {
 
   const load = () =>
     Promise.all([
-      api.get<{ items: Ticket[] }>(`/tickets?${query}`),
+      api.get<{ items: Ticket[]; total: number }>(`/tickets?${query}`),
       api.get<{ topics?: unknown[] } | unknown[]>('/projects').catch(() => null),
     ])
       .then(([r, pj]) => {
         setRows(r.items)
+        // P019-M3：记录服务端 total——单页钳 200，超出时给「未全显示」提示（旧实现静默藏）
+        setTotal(typeof r.total === 'number' ? r.total : null)
         // 项目名录（分组标题 + 跳转链接显示名）
         const list = Array.isArray(pj) ? pj : ((pj as { projects?: ProjectBrief[] })?.projects ?? [])
         setProjects(
@@ -196,6 +200,13 @@ export default function Tickets() {
       </PageHeader>
 
       {err && <ErrorBox msg={err} />}
+
+      {/* P019-M3：服务端单页鲉 200 条——超出时提示未全显示（旧实现静默截断） */}
+      {total != null && rows.length < total && (
+        <p className="text-xs text-warning" role="status">
+          当前显示 {rows.length} 条，共 {total} 条——超出单页上限，请用筛选（severity/搜索）缩小范围，或走 AI/导出通道查看全量
+        </p>
+      )}
 
       {rows.length === 0 ? (
         <Empty text="暂无工单——让 AI 通过 tickets 域（必须绑定项目）帮你记，填上症状更好用" />

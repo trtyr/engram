@@ -33,17 +33,31 @@ let current: Request | null = null
 
 export function appConfirm(opts: ConfirmOptions): Promise<boolean> {
   return new Promise((resolve) => {
-    // 理论上单弹窗串行；真重叠时前一个按取消结算，不挂死调用方
+    // 真重叠时前一个按取消结算，不挂死调用方
     current?.resolve(false)
     current = { opts, resolve }
-    subscriber?.(current)
+    // P019-M3：无订阅者（GlobalConfirm 未挂载）时立即取消结算——
+    // 旧实现 subscriber?.(current) 变空操作，await 永久挂起。
+    if (!subscriber) {
+      current = null
+      resolve(false)
+      return
+    }
+    subscriber(current)
   })
 }
 
-function settle(v: boolean) {
-  current?.resolve(v)
-  current = null
-  subscriber?.(null)
+/// P019-M3：settle 绑定触发它的 Request 实例——旧实现结算模块级 current，
+/// 重叠弹窗在 React 重渲染窗口内点击旧 UI 的确认/取消会误结算【新】请求。
+function settle(r: Request | null, v: boolean) {
+  if (!r) return
+  if (current === r) {
+    // 当前弹窗的正常结算：清状态 + 收起 UI
+    current = null
+    subscriber?.(null)
+  }
+  // 陈旧 UI（已被新请求替换）：只结算它自己的 Promise，不碰 current
+  r.resolve(v)
 }
 
 /** 全站挂一次（App 根部）；无确认请求时渲染 null。 */
@@ -60,7 +74,7 @@ export function GlobalConfirm() {
     setTyped('')
     if (!req) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') settle(false)
+      if (e.key === 'Escape') settle(req, false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -73,7 +87,7 @@ export function GlobalConfirm() {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) settle(false)
+        if (e.target === e.currentTarget) settle(req, false)
       }}
     >
       <div
@@ -92,7 +106,7 @@ export function GlobalConfirm() {
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && phraseOk) settle(true)
+              if (e.key === 'Enter' && phraseOk) settle(req, true)
             }}
             placeholder={`输入「${opts.inputMatch}」以确认`}
             className={cn(
@@ -106,7 +120,7 @@ export function GlobalConfirm() {
             variant="ghost"
             size="sm"
             autoFocus={!needPhrase}
-            onClick={() => settle(false)}
+            onClick={() => settle(req, false)}
           >
             {opts.cancelLabel ?? '取消'}
           </Button>
@@ -114,7 +128,7 @@ export function GlobalConfirm() {
             variant={opts.destructive ? 'destructive' : 'default'}
             size="sm"
             disabled={!phraseOk}
-            onClick={() => settle(true)}
+            onClick={() => settle(req, true)}
           >
             {opts.confirmLabel ?? '确认'}
           </Button>

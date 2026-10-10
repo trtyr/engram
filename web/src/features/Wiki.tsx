@@ -287,6 +287,7 @@ export default function Wiki() {
               hasPages={!!pages && pages.length > 0}
               libSlug={lib}
               onSaved={load}
+              onPageUpdated={setOpen}
               onNavigateSlug={onSelect}
             />
           </div>
@@ -504,6 +505,7 @@ function PageReader({
   hasPages,
   libSlug,
   onSaved,
+  onPageUpdated,
   onNavigateSlug,
 }: {
   page: WikiPage | null
@@ -512,6 +514,7 @@ function PageReader({
   hasPages: boolean
   libSlug: string
   onSaved: () => void
+  onPageUpdated: (p: WikiPage) => void
   onNavigateSlug: (slug: string) => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -584,6 +587,7 @@ function PageReader({
             currentContent={page.content}
             onClose={() => setShowVersions(false)}
             onRestored={onSaved}
+            onPageUpdated={onPageUpdated}
           />
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable] md:p-6">
@@ -631,12 +635,19 @@ function PageReader({
               setSaving(true)
               setSaveErr('')
               try {
-                await api.put(withLib(`/wiki/pages/${encodeURIComponent(page.slug)}`, libSlug), {
-                  title,
-                  content: draft,
-                  folder: folder.trim() || undefined,
-                })
+                // P019-M3：folder 恒传字符串——空串 = 回根目录（后端 COALESCE 只对 null 保持原值，
+                // 旧实现 || undefined 使清空无效，placeholder 承诺无法兑现）
+                const updated = await api.put<WikiPage>(
+                  withLib(`/wiki/pages/${encodeURIComponent(page.slug)}`, libSlug),
+                  {
+                    title,
+                    content: draft,
+                    folder: folder.trim(),
+                  },
+                )
                 setEditing(false)
+                // P019-M3：保存后用返回的新页刷新阅读区（旧实现只刷目录树，正文/版本号停在旧内容）
+                onPageUpdated(updated)
                 onSaved()
               } catch (e) {
                 setSaveErr(e instanceof Error ? e.message : '保存失败')
@@ -670,11 +681,13 @@ function VersionsPanel({
   currentContent,
   onClose,
   onRestored,
+  onPageUpdated,
 }: {
   slug: string
   currentContent: string
   onClose: () => void
   onRestored: () => void
+  onPageUpdated: (p: WikiPage) => void
 }) {
   const [rows, setRows] = useState<PageVersionRow[] | null>(null)
   const [sel, setSel] = useState<number | null>(null)
@@ -710,6 +723,9 @@ function VersionsPanel({
     setErr('')
     try {
       await api.post(`/wiki/pages/${encodeURIComponent(slug)}/restore`, { version: v })
+      // P019-M3：回滚后重取当前页刷新阅读区（旧实现只刷目录树，正文/版本号停在旧快照）
+      const p = await api.get<WikiPage>(`/wiki/pages/${encodeURIComponent(slug)}`)
+      onPageUpdated(p)
       onRestored()
       onClose()
     } catch (e) {

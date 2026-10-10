@@ -57,8 +57,10 @@ post_session() {
     -H 'content-type: application/json' -d "$1" | jq -c '{id,distill_status}'
 }
 trigger_and_wait() {
-  curl -fsS -X POST "$API/memory/distill" -H "authorization: Bearer $MKEY" \
-    -H 'content-type: application/json' -d '{"full":false}' >/dev/null
+  # P015 后手动触发统一 /memory/maintain（cron scope）；旧 /memory/distill 已退役。
+  # memory scope key 调不了 maintain——用 admin TOKEN 触发；jobs 查询任意凭证可见。
+  curl -fsS -X POST "$API/memory/maintain" -H "authorization: Bearer $TOKEN" \
+    -H 'content-type: application/json' -d '{}' >/dev/null
   for i in $(seq 1 120); do
     P=$(curl -fsS "$API/jobs?limit=50" -H "authorization: Bearer $MKEY" | jq '[.[] | select(.status=="pending" or .status=="running")] | length')
     [ "$P" -eq 0 ] && break
@@ -75,15 +77,14 @@ post_session '{"agent":"pi","distill":"off","turns":[{"speaker":"user","text":"�
 echo "轮2 蒸馏（矛盾消解）..."; trigger_and_wait
 
 echo "== 4. 链完成断言"
-curl -fsS -X POST "$API/memory/distill" -H "authorization: Bearer $MKEY" \
-  -H 'content-type: application/json' -d '{"full":false}' | jq -c '[.[] | {id,kind,status}]'
+curl -fsS "$API/jobs?kind=maintain_memory&limit=10" -H "authorization: Bearer $MKEY" | jq -c '[.[] | {id,kind,status}]'
 
 echo "== 5. 等链完成（真 LLM，最多 240s）"
 DONE=1
 for i in $(seq 1 240); do
-  P=$(curl -fsS "$API/jobs?kind=extract_atoms,arbitrate_atoms,organize_scenarios,distill_persona&limit=50" \
+  P=$(curl -fsS "$API/jobs?kind=maintain_memory&limit=50" \
     -H "authorization: Bearer $MKEY" | jq '[.[] | select(.status=="succeeded" or .status=="failed" or .status=="dead")] | length')
-  if [ "$P" -ge 4 ]; then DONE=0; break; fi
+  if [ "$P" -ge 1 ]; then DONE=0; break; fi
   sleep 1
 done
 [ $DONE -eq 0 ] || { echo "   ✗ 链超时"; exit 1; }

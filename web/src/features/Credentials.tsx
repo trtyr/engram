@@ -682,9 +682,15 @@ function DangerZone({
   async function del() {
     if (!match) return
     setBusy(true)
-    await api.del(`/credentials/${encodeURIComponent(name)}`).catch((e) => onError(String(e)))
-    setBusy(false)
-    onDeleted()
+    // P019-M3：旧实现 catch 后仍无条件 onDeleted()——删除失败也弹「已删除」成功提示
+    try {
+      await api.del(`/credentials/${encodeURIComponent(name)}`)
+      onDeleted()
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (

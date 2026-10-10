@@ -96,6 +96,19 @@ export function ProgressRing({ pct, size = 52 }: { pct: number; size?: number })
 // ---------- 活动热力图（近 12 周）+ 连击 ----------
 export const DAY = 86400_000
 
+/// P019-M3：热力图日期源——journal 成功用其记录，失败（null）回退该领域已学节点 learned_at；
+/// 空值一律过滤（旧实现 learned_at ?? '' 产生空串 → dayKey('') → RangeError 整页崩溃）。
+export function heatmapDatesFrom(
+  js: ({ journal: StudyJournalRow[] } | null)[],
+  fs: (TopicFull | null)[],
+): string[] {
+  return js.flatMap((j, i) =>
+    j
+      ? j.journal.map((r) => r.created_at)
+      : (fs[i]?.items ?? []).map((it) => it.learned_at ?? '').filter(Boolean),
+  )
+}
+
 export function dayKey(ts: number | string): string {
   return new Date(ts).toISOString().slice(0, 10)
 }
@@ -172,9 +185,10 @@ export default function Study() {
           ),
         ])
         setFulls(fs.filter((x): x is TopicFull => x !== null))
-        setJournalDates(
-          js.flatMap((j, i) => (j ? j.journal.map((r) => r.created_at) : fs[i]?.items.map((it) => it.learned_at ?? '') ?? [])),
-        )
+        // P019-M3：热力图日期源——journal 失败（null）回退到该领域已学节点的 learned_at，
+        // 空值一律过滤（旧实现 learned_at ?? '' 产生空串，buildHeatmap→dayKey('')→
+        // new Date('').toISOString() 抛 RangeError 整页崩溃；且 fs 未过滤，索引本就对齐）。
+        setJournalDates(heatmapDatesFrom(js, fs))
       })
       .catch((e) => setErr(String(e)))
 

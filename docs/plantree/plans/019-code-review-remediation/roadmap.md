@@ -2,6 +2,7 @@
 
 > **M1 已收官（2026-10-09 晚，commit 02126f8）**：T001 五条 P1 全部落地 + 各配回归测试，门禁三件套全绿。
 > **M2 已收官（2026-10-10 午）**：T002 鉴权族七条全部落地 + 各配回归测试，门禁三件套全绿。
+> **M3 已收官（2026-10-10 午后）**：T003 前端可用性族八条全部落地 + 各配测试，web 四件套全绿（tsc/lint/test 105/build）。
 > 迁移：migrate:ro 归 Q004 拍板（不在本批）。
 
 来源：docs/review/ 38 篇检查项（2026-10-09 审查，errors/config 补跑后定稿），逐条发现以各篇 `features/<slug>.md` / `global/<dim>.md` 为详细依据（含 file:line 证据）。此处只登记任务级条目。
@@ -27,7 +28,7 @@
 - admin 登录把 DB 不可用计入爆破失败（5 次抖动锁 15 分钟；按错误类别豁免）— features/admin-pbkdf2-login.md #1
 - MCP call_tool 的 action 非字符串时动作级检查整体跳过（疑似：遍历 handler 确认或强制走 unknown_action）— features/scope-system-13.md #2
 
-## T003 前端可用性/正确性族
+## T003 前端可用性/正确性族——✅ done（M3）
 
 - 幽灵接口：Memory.tsx 调已退役 POST /memory/distill（改 /memory/maintain）；同退役端点残留 verify 脚本与 e2e — global/fullstack.md #1/#2
 - Wiki 保存/回滚后阅读区不刷新（重取 page 后 setOpen）— features/wiki-domain.md #1/#2

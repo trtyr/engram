@@ -22,6 +22,12 @@ export default function Todos() {
   const [due, setDue] = useState('') // overdue=已过期 today=今天到期
   const [tag, setTag] = useState('')
   const [q, setQ] = useState('')
+  // P019-M3：搜索输入 300ms 防抖——旧实现每击键立即发一次请求
+  const [qDebounced, setQDebounced] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setQDebounced(q), 300)
+    return () => clearTimeout(t)
+  }, [q])
   const [err, setErr] = useState('')
   const [selected, setSelected] = useState<Todo | null>(null)
   const [busy, setBusy] = useState(false)
@@ -38,9 +44,9 @@ export default function Todos() {
     if (priority) parts.push(`priority=${priority}`)
     if (due) parts.push(`due=${due}`)
     if (tag.trim()) parts.push(`tag=${encodeURIComponent(tag.trim())}`)
-    if (q.trim()) parts.push(`q=${encodeURIComponent(q.trim())}`)
+    if (qDebounced.trim()) parts.push(`q=${encodeURIComponent(qDebounced.trim())}`)
     return parts.join('&')
-  }, [view, priority, due, tag, q])
+  }, [view, priority, due, tag, qDebounced])
 
   const load = () =>
     api

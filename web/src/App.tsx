@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/ui-bits'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { CommandPalette } from '@/components/CommandPalette'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { GlobalConfirm } from './components/confirm'
 import Login from '@/features/Login'
 
@@ -324,8 +325,9 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         {/* 1440 封顶 + 24px 边距：常用屏幕（≤1512）两种侧栏状态下内容都撑满可用宽，
             收缩释放的宽度交给内容而非空白；超大屏居中封顶防表格无限拉伸 */}
         <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-6">
-          <Suspense fallback={<div className="min-h-40" />}>
-            <Routes>
+          <ErrorBoundary>
+            <Suspense fallback={<div className="min-h-40" />}>
+              <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/memory" element={<Memory />} />
               <Route path="/circle" element={<Circle />} />
@@ -345,8 +347,19 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               <Route path="/mcp" element={<Mcp />} />
               <Route path="/account" element={<Account />} />
         <Route path="/settings" element={<Settings />} />
+        {/* P019-M3：catch-all 404 兑底——旧实现未匹配路径渲染空白主区 */}
+        <Route
+          path="*"
+          element={
+            <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3">
+              <p className="text-4xl font-semibold text-muted-foreground/40">404</p>
+              <p className="text-sm text-muted-foreground">页面不存在或已被移除</p>
+            </div>
+          }
+        />
             </Routes>
           </Suspense>
+          </ErrorBoundary>
         </div>
       </main>
       {paletteOpen && <CommandPalette onClose={() => setOpenedAt(null)} />}
@@ -405,8 +418,21 @@ export default function App() {
         path="/login"
         element={authed ? <Navigate to="/" replace /> : <Login onAuthed={onAuthed} />}
       />
-      {/* 独立全屏文件查看页——顶层路由绕开 Shell 侧边栏，新标签页专用 */}
-      <Route path="/file-view" element={authed ? <FileView /> : <Navigate to="/login" replace />} />
+      {/* 独立全屏文件查看页——顶层路由绕开 Shell 侧边栏，新标签页专用。
+          P019-M3：探活期间（authed=null）不跳 /login——旧实现在新标签页冷启动时
+          先 Navigate /login，探活成功后 /login 又跳 /，用户被吞到概览页而非文件页。 */}
+      <Route
+        path="/file-view"
+        element={
+          authed === false ? (
+            <Navigate to="/login" replace />
+          ) : authed ? (
+            <FileView />
+          ) : (
+            <div className="min-h-screen" aria-busy="true" />
+          )
+        }
+      />
       <Route path="/*" element={authed ? <Shell onLogout={onLogout} /> : <Navigate to="/login" replace />} />
     </Routes>
   )

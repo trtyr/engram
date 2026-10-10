@@ -180,4 +180,47 @@ describe('Wiki 编辑器保存', () => {
       )
     })
   })
+
+  it('保存后阅读区刷新为新内容与新版本号（P019-M3）', async () => {
+    mockState.pages = [
+      { id: 'w1', slug: '刷新页', title: '刷新页', page_type: 'concept', folder: '', content: '# 旧内容', frontmatter: {}, origin: 'llm', version: 1, updated_at: '2026-08-20T00:00:00Z' },
+    ]
+    mockState.wikiPage = mockState.pages[0]
+    mockState.draftContent = '# 人工编辑后的新内容'
+    render(wrap(<Wiki />))
+    await screen.findByText('刷新页')
+    fireEvent.click(screen.getByText('刷新页'))
+    await screen.findByText(/v1 ·/)
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const tas = await screen.findAllByRole('textbox')
+    const ta = tas.find((el) => (el as HTMLTextAreaElement).value.includes('旧内容')) as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: mockState.draftContent } })
+    fireEvent.click(screen.getByRole('button', { name: /保存（人工版）/ }))
+    // 保存成功后阅读区立即展示新正文与新版本号（旧实现停在旧快照）
+    await waitFor(() => {
+      expect(screen.getByText(/v2 ·/)).toBeInTheDocument()
+      expect(screen.getByText(/人工编辑后的新内容/)).toBeInTheDocument()
+    })
+  })
+
+  it('清空 folder 保存：PUT 携带空串（回根目录语义，P019-M3）', async () => {
+    mockState.pages = [
+      { id: 'w2', slug: '搬页', title: '搬页', page_type: 'concept', folder: '概念', content: '# 内容', frontmatter: {}, origin: 'llm', version: 1, updated_at: '2026-08-20T00:00:00Z' },
+    ]
+    mockState.wikiPage = mockState.pages[0]
+    render(wrap(<Wiki />))
+    await screen.findByText('搬页')
+    fireEvent.click(screen.getByText('搬页'))
+    await screen.findByText(/v1 ·/)
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const folderInput = await screen.findByLabelText('文件夹')
+    fireEvent.change(folderInput, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: /保存（人工版）/ }))
+    await waitFor(() => {
+      expect(api.put).toHaveBeenCalledWith(
+        expect.stringContaining('/wiki/pages/'),
+        expect.objectContaining({ folder: '' }),
+      )
+    })
+  })
 })
