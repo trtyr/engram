@@ -399,3 +399,24 @@ async fn large_visibility_timeout_prevents_reap() {
         JobStatus::Running
     );
 }
+
+/// P019-M4：token 阶段二原子抢占 armed deep_purge——首次 Some，二次 None
+/// （旧实现纯 SELECT，token 请求与 runner 冷却到期执行可并发双清）。
+#[tokio::test]
+async fn armed_deep_purge_claim_is_atomic() {
+    let (_c, queue, _pool, _url) = setup().await;
+    let job = queue
+        .enqueue(JobTemplate::new("deep_purge").with_payload(serde_json::json!({"phase": "armed"})))
+        .await
+        .unwrap();
+
+    let first = engram_jobs::admin::claim_armed_deep_purge(queue.pool(), job.id)
+        .await
+        .unwrap();
+    assert!(first.is_some(), "首次抢占应拿到行");
+
+    let second = engram_jobs::admin::claim_armed_deep_purge(queue.pool(), job.id)
+        .await
+        .unwrap();
+    assert!(second.is_none(), "二次抢占不得拿到行（已 running）");
+}

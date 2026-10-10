@@ -116,15 +116,23 @@ pub async fn append_session_update(
     turns: &Value,
     agent: Option<&str>,
 ) -> StoreResult<SessionDto> {
+    // P019-M4：distill_status 守卫——检查-后-行动竞态下蒸馏 worker 可能把状态推到
+    // processing/done，追加照样落库且永不再被蒸馏（割裂 L1 溯源）。对齐 void_session
+    // 的竞态兑底：UPDATE 带 pending 守卫，0 行即拒绝。
     let row = sqlx::query_as::<_, SessionDto>(
-        "UPDATE raw_sessions SET content = content || $2, agent = COALESCE($3, agent) WHERE id = $1 RETURNING *",
+        "UPDATE raw_sessions SET content = content || $2, agent = COALESCE($3, agent) \
+         WHERE id = $1 AND distill_status = 'pending' RETURNING *",
     )
     .bind(id)
     .bind(sqlx::types::Json(turns))
     .bind(agent)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?;
-    Ok(row)
+    row.ok_or_else(|| {
+        crate::StoreError::Conflict(format!(
+            "会话 {id} 已不处于 pending（蒸馏竞态）——追加被拒，新内容请开新会话"
+        ))
+    })
 }
 
 pub async fn delete_session(pool: &PgPool, id: Uuid) -> StoreResult<u64> {

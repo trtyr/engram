@@ -214,6 +214,37 @@ fn eprintln_no_cli() {
 /// EN-48 验收链路：索引产物消失（目录被重新 clone / 清理）之后，
 /// list 不能再报「可用」，查询必须给「索引产物已丢失」这个具体病因，gc 能把幽灵落账。
 /// 不依赖真 codegraph CLI——直接造出「已 ready」的项目状态，专测产物丢失这一层。
+/// P019-M4：client_upload 项目拒绝 index/sync——旧实现会建空 codegraph.db
+/// 并把投递者盖成 cloud_index，静默摧毁上传产物。
+#[tokio::test]
+async fn client_upload_rejects_index_and_sync() {
+    let (pool, bridge, _pg) = setup().await;
+    let proj_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO cg_projects (id, name, path, source_uri, status, source_kind) \
+         VALUES ($1, 'upload', $2, 'upload://x', 'ready', 'client_upload')",
+    )
+    .bind(proj_id)
+    .bind("/tmp/nowhere")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let e = bridge.index(proj_id).await.unwrap_err();
+    assert!(
+        e.to_string().contains("client_upload"),
+        "index 应拒 client_upload: {e}"
+    );
+    let e = bridge.sync(proj_id).await.unwrap_err();
+    assert!(
+        e.to_string().contains("client_upload"),
+        "sync 应拒 client_upload: {e}"
+    );
+    // 产物未被覆盖：source_kind 保持 client_upload
+    let proj = bridge.get(proj_id).await.unwrap();
+    assert_eq!(proj.source_kind, "client_upload");
+}
+
 #[tokio::test]
 async fn lost_artifact_detected_by_list_query_and_gc() {
     let (pool, bridge, _pg) = setup().await;

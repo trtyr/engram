@@ -55,8 +55,17 @@ pub async fn insert(pool: &PgPool, t: &NewTodo<'_>) -> StoreResult<()> {
 }
 
 /// 列表：open 优先，其余按 updated_at 降序；status/priority/tag/q 过滤。
-/// cursor（D29 keyset 分页）：(open 标记, updated_at, id) 三元组行比较——排序键
-/// 含 open 优先旗标，纯时间游标会在 open/done 分界处丢行。ORDER BY 带 id 决稳。
+/// cursor（D29 keyset 分页）：标准序用 (open 旗标, updated_at, id) 三元组行比较——
+/// 排序键含 open 优先旗标，纯时间游标会在 open/done 分界处丢行。ORDER BY 带 id 决稳。
+/// P019-M4：due 过滤页排序键统一——旧实现首页按 due_at 升序、翻页按
+/// (open,updated_at,id) 降序且游标缺 due_at，跨页丢行/重行。
+/// due 游标 = (due_at, id) 纯 ASC 同向行比较；标准游标 = (open 旗标, updated_at, id)。
+#[derive(Clone, Copy, Debug)]
+pub enum TodoCursor {
+    Standard(i32, DateTime<Utc>, Uuid),
+    Due(DateTime<Utc>, Uuid),
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn list(
     pool: &PgPool,
@@ -65,7 +74,7 @@ pub async fn list(
     tag: Option<&str>,
     q: Option<&str>,
     due: Option<&str>,
-    cursor: Option<(i32, DateTime<Utc>, Uuid)>,
+    cursor: Option<TodoCursor>,
     limit: i64,
 ) -> StoreResult<Vec<TodoRow>> {
     // due 过滤（白名单，无注入面）：overdue=未完成且已过期；today=今天到期。
@@ -79,39 +88,48 @@ pub async fn list(
              AND due_at < date_trunc('day', now()) + interval '1 day'))"
         )
     };
-    let order = if due.is_some() && cursor.is_none() {
-        "ORDER BY due_at ASC, updated_at DESC, id DESC"
+    let order = if due.is_some() {
+        // due 过滤只命中 open 且 due_at 非空行；纯 ASC 序（id 唯一决稳），
+        // 游标行比较同向合法
+        "ORDER BY due_at ASC, id ASC"
     } else {
         "ORDER BY (status = 'open') DESC, updated_at DESC, id DESC"
     };
-    if let Some((flag, ts, id)) = cursor {
-        Ok(sqlx::query_as::<_, TodoRow>(
-            format!(
-                "SELECT {COLS} FROM todos \
-                 WHERE ($1::text IS NULL OR status = $1) \
-                 AND ($2::text IS NULL OR priority = $2) \
-                 AND ($3::text IS NULL OR tags @> ARRAY[$3::text]) \
-                 AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%') \
-                 {} \
-                 AND (CASE WHEN status = 'open' THEN 1 ELSE 0 END, updated_at, id) < ($6::int, $7::timestamptz, $8::uuid) \
-                 {order} \
-                 LIMIT $5",
-                due_clause(9),
-                order = order
-            )
-            .as_str(),
-        )
-        .bind(status)
-        .bind(priority)
-        .bind(tag)
-        .bind(q)
-        .bind(limit)
-        .bind(flag)
-        .bind(ts)
-        .bind(id)
-        .bind(due)
-        .fetch_all(pool)
-        .await?)
+    if let Some(cur) = cursor {
+        // 游标谓词与排序键同构（P019-M4）
+        let pred = match cur {
+            TodoCursor::Due(..) => "AND (due_at, id) > ($7::timestamptz, $8::uuid)",
+            TodoCursor::Standard(..) => {
+                "AND (CASE WHEN status = 'open' THEN 1 ELSE 0 END, updated_at, id) < ($7::int, $8::timestamptz, $9::uuid)"
+            }
+        };
+        let sql = format!(
+            "SELECT {COLS} FROM todos \
+             WHERE ($1::text IS NULL OR status = $1) \
+             AND ($2::text IS NULL OR priority = $2) \
+             AND ($3::text IS NULL OR tags @> ARRAY[$3::text]) \
+             AND ($4::text IS NULL OR title ILIKE '%' || $4 || '%' OR body ILIKE '%' || $4 || '%') \
+             {} \
+             {pred} \
+             {order} \
+             LIMIT $5",
+            due_clause(6),
+            pred = pred,
+            order = order
+        );
+        let bq = sqlx::query_as::<_, TodoRow>(sql.as_str());
+        let bq = bq
+            .bind(status)
+            .bind(priority)
+            .bind(tag)
+            .bind(q)
+            .bind(limit)
+            .bind(due);
+        let bq = match cur {
+            TodoCursor::Standard(flag, ts, id) => bq.bind(flag).bind(ts).bind(id),
+            TodoCursor::Due(due_at, id) => bq.bind(due_at).bind(id),
+        };
+        Ok(bq.fetch_all(pool).await?)
     } else {
         Ok(sqlx::query_as::<_, TodoRow>(
             format!(
@@ -229,14 +247,14 @@ pub async fn search_open(
     Ok(rows)
 }
 
-/// 按短号取 todo（EN-<n> 引用直达）。
-pub async fn find_by_short_no(pool: &sqlx::PgPool, short_no: i32) -> Option<TodoRow> {
-    sqlx::query_as::<_, TodoRow>("SELECT * FROM todos WHERE short_no = $1")
-        .bind(short_no)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
+/// 按短号取 todo（EN-<n> 引用直达）。P019-M4：返 StoreResult——DB 故障报错而非吞成 404。
+pub async fn find_by_short_no(pool: &sqlx::PgPool, short_no: i32) -> StoreResult<Option<TodoRow>> {
+    Ok(
+        sqlx::query_as::<_, TodoRow>("SELECT * FROM todos WHERE short_no = $1")
+            .bind(short_no)
+            .fetch_optional(pool)
+            .await?,
+    )
 }
 
 // ---------- 关联关系（blocked_by / relates_to / parent；行动项之间） ----------

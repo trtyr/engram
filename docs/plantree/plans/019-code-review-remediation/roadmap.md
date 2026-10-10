@@ -39,31 +39,33 @@
 - Todos 搜索防抖；Tickets >200 条前端不可见（total 未用）；Tickets >500 导出截断归 T001-5 — global/frontend.md #6 + features/tickets-domain.md #3
 - App 无 ErrorBoundary / Shell 无 catch-all / /file-view 探活竞态 — features/lazy-route-pages-17.md #2/#3/#4
 
-## T004 数据保真族（storage/transfer + 域写路径）
+## T004 数据保真族（storage/transfer + 域写路径）✅ done（M4）
 
-- import_atom 补 strength/source_kind 两列 — features/storage-crate.md #1（已确证）
-- import_session/import_kv_entries 缺字段绑 NULL → NOT NULL 中断（对齐 import_entity 的兜底模式）— features/storage-crate.md #2
-- import_wiki_promotions library_id 硬编码 main — features/storage-crate.md #3
-- export_memory atoms 不过滤 sensitive（口径与 list_atoms_all 相反，待拍板）— features/storage-crate.md #4
-- assets 别名唯一性补 DB 约束；web fields String() 类型篡改 — features/assets-domain.md #1/#2
-- project upsert_file 读-改-写非原子（对齐 update_doc 乐观锁模式）— features/project-domain.md #2
-- project related 双向重复（反向查重）— features/project-domain.md #1
+- import_atom 补 strength/source_kind 两列 — features/storage-crate.md #1（已确证）✅
+- import_session/import_kv_entries 缺字段绑 NULL → NOT NULL 中断（对齐 import_entity 的兜底模式）— features/storage-crate.md #2 ✅
+- import_wiki_promotions library_id 硬编码 main — features/storage-crate.md #3 ✅（lib_map 穿线 + v1 包 main 回退）
+- export_memory atoms 不过滤 sensitive（口径与 list_atoms_all 相反，待拍板）— features/storage-crate.md #4 ⏸ 挂 Q005 拍板
+- assets 别名唯一性补 DB 约束（0076）；web fields String() 类型篡改 — features/assets-domain.md #1/#2 ✅
+- project upsert_file 读-改-写非原子（事务 + FOR UPDATE 行锁）— features/project-domain.md #2 ✅
+- project related 双向重复（反向查重）— features/project-domain.md #1 ✅
+- 回归：transfer_test 4/4 / assets_alias_test 3/3 / Assets.fields.test 3/3 / project_write_test 2/2
 
-## T005 并发/竞态族
+## T005 并发/竞态族 ✅ done（M4）
 
-- append_session 缺 distill_status 守卫 — features/memory-domain.md #1
-- circles create_entity 竞态 500（改 ON CONFLICT 幂等）— features/circles-domain.md #3
-- deep_purge token 路径与到期 handler 双跑窗口 — features/jobs-logs-domain.md #1
-- delete_provider is_default 竞态（并入删除 SQL）— features/settings-platform-domain.md #1
-- credentials read_count 本地拼装 / 审计「谁」失真（MCP 记凭据名、HTTP 恒 console）— features/credentials-domain.md #1/#2
-- tickets update 状态机无迁移校验（注释承诺未实现）— features/tickets-domain.md #4
-- todos/tickets find_by_short_no 吞存储错误→DB 故障误报「不存在」（errors 宏观维确证为系统性断点）— features/todos-domain.md B2 + features/tickets-domain.md #2 + global/errors.md #5
-- todos due 过滤 × cursor 翻页排序键不一致（首页 due_at ASC / 翻页切 updated_at DESC）丢行重行 — features/todos-domain.md B1
-- study delete_item 越层直调 repo（不存在也 204、错误映 503，对照同文件 topic_delete 走 svc）— features/study-domain.md #2 + global/coupling.md #5
-- distill atom_merge 不校验 keep_id 存在/active，victims 归档指向虚无不可逆 — features/distill-crate.md #2
-- distill maintain_agent 工具错误 `?` 打死整个 job（对照 project_maintain 的 error 注入自纠模式）— features/distill-crate.md #3
-- cg-bridge index()/sync() 对 client_upload 无守卫→上传产物被建空索引静默摧毁且来源翻 cloud_index — features/cg-bridge-crate.md #2
-- change_credentials 改密+吊销其他会话两步独立写无事务，中间失败旧会话仍有效 — features/session-revocation.md #3 + features/auth-platform-domain.md #3
+- append_session 缺 distill_status 守卫（repo 层 pending 守卫 + Conflict）— features/memory-domain.md #1 ✅
+- circles create_entity 竞态 500（改 ON CONFLICT 幂等）— features/circles-domain.md #3 ✅
+- deep_purge token 路径与到期 handler 双跑窗口（claim_armed_deep_purge 原子抢占）— features/jobs-logs-domain.md #1 ✅
+- delete_provider is_default 竞态（守卫并入删除 SQL）— features/settings-platform-domain.md #1 ✅
+- credentials read_count 本地拼装 / 审计「谁」失真（record_read 返库值；reader 记 admin/真实 key 名）— features/credentials-domain.md #1/#2 ✅
+- tickets update 状态机无迁移校验（六态线性主链 + 回退面，archived 终态）— features/tickets-domain.md #4 ✅
+- todos/tickets find_by_short_no 吞存储错误→返 StoreResult — features/todos-domain.md B2 + features/tickets-domain.md #2 + global/errors.md #5 ✅
+- todos due 过滤 × cursor 翻页排序键统一（due 页 (due_at,id) ASC 同构游标）— features/todos-domain.md B1 ✅
+- study delete_item 走 svc（404 语义）— features/study-domain.md #2 + global/coupling.md #5 ✅
+- distill atom_merge 校验 keep_id 存在/active — features/distill-crate.md #2 ✅
+- distill maintain_agent 工具错误注入 history 自纠 — features/distill-crate.md #3 ✅
+- cg-bridge index()/sync() 拒绝 client_upload — features/cg-bridge-crate.md #2 ✅
+- change_credentials 改密+吊销其他会话同事务（_conn 变体穿线）— features/session-revocation.md #3 + features/auth-platform-domain.md #3 ✅
+- 回归：memory_concurrency_test 2/2 / todos_test 7/7 / tickets_test 8/8 / job_lifecycle armed 抢占 / study_api 5/5 / credentials_test 3/3 / cg_test client_upload
 
 ## T006 检索质量族
 

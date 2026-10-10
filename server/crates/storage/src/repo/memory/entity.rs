@@ -137,15 +137,21 @@ pub async fn insert_entity(
     name: &str,
     kind: &str,
     summary: &str,
-) -> StoreResult<()> {
-    sqlx::query("INSERT INTO entities (id, name, kind, summary) VALUES ($1, $2, $3, $4)")
-        .bind(id)
-        .bind(name)
-        .bind(kind)
-        .bind(summary)
-        .execute(pool)
-        .await?;
-    Ok(())
+) -> StoreResult<bool> {
+    // P019-M4：ON CONFLICT DO NOTHING——并发同名同类型创建时败方不报 23505
+    // （旧实现检查-后-插入竞态下撞 0059 部分唯一索引 → INTERNAL_ERROR 破坏幂等承诺），
+    // 调用方回查统一返回已有实体。
+    let res = sqlx::query(
+        "INSERT INTO entities (id, name, kind, summary) VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (lower(btrim(name)), kind) WHERE merged_into IS NULL AND archived_at IS NULL DO NOTHING",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(kind)
+    .bind(summary)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() > 0)
 }
 
 /// 当前摘要（版本链写旧值用）。

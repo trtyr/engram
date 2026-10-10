@@ -125,6 +125,15 @@ impl StudyService {
         Ok(())
     }
 
+    pub async fn item_delete(&self, id: Uuid) -> Result<(), StudyError> {
+        // P019-M4：走 svc 语义（旧实现 api 直调 repo，不存在也 204 且错误映射错位）
+        if repo::study::item_get(&self.pool, id).await?.is_none() {
+            return Err(StudyError::NotFound(format!("item {id}")));
+        }
+        repo::study::item_delete(&self.pool, id).await?;
+        Ok(())
+    }
+
     pub async fn topic_delete(&self, id: Uuid) -> Result<(), StudyError> {
         let exists = self.exists_track(id).await?;
         if !exists {

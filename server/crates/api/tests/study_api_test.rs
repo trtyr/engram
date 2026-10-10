@@ -50,6 +50,16 @@ async fn req_empty(
     req_json(app, method, uri, token, None).await
 }
 
+/// P019-M4：删除不存在的知识点 → 404（旧实现直调 repo，不存在也 204 且错误映射错位）。
+#[tokio::test]
+async fn delete_nonexistent_item_is_404() {
+    let (app, _pg) = app().await;
+    let admin = login_token(&app).await;
+    let ghost = uuid::Uuid::now_v7();
+    let (st, v) = req_empty(&app, "DELETE", &format!("/study/items/{ghost}"), &admin).await;
+    assert_eq!(st, StatusCode::NOT_FOUND, "{v}");
+}
+
 #[tokio::test]
 async fn study_http_crud_full_flow() {
     let (app, _pg) = app().await;

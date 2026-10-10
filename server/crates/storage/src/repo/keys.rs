@@ -164,6 +164,18 @@ pub async fn upsert_admin_account(
     username: &str,
     password_hash: &str,
 ) -> StoreResult<()> {
+    let mut tx = pool.begin().await?;
+    upsert_admin_account_conn(&mut tx, username, password_hash).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// 事务内变体（P019-M4：change_credentials 改密+吊销会话同事务）。
+pub async fn upsert_admin_account_conn(
+    conn: &mut sqlx::PgConnection,
+    username: &str,
+    password_hash: &str,
+) -> StoreResult<()> {
     sqlx::query(
         "INSERT INTO admin_account (id, username, password_hash, updated_at) \
          VALUES (1, $1, $2, now()) \
@@ -171,7 +183,7 @@ pub async fn upsert_admin_account(
     )
     .bind(username)
     .bind(password_hash)
-    .execute(pool)
+    .execute(conn)
     .await?;
     Ok(())
 }
@@ -211,9 +223,20 @@ pub async fn delete_admin_session(pool: &PgPool, token_hash: &str) -> StoreResul
 
 /// 吊销除指定会话外的全部会话（改密码后/「登出其他设备」）。
 pub async fn delete_other_admin_sessions(pool: &PgPool, keep_token_hash: &str) -> StoreResult<u64> {
+    let mut tx = pool.begin().await?;
+    let n = delete_other_admin_sessions_conn(&mut tx, keep_token_hash).await?;
+    tx.commit().await?;
+    Ok(n)
+}
+
+/// 事务内变体（P019-M4）。
+pub async fn delete_other_admin_sessions_conn(
+    conn: &mut sqlx::PgConnection,
+    keep_token_hash: &str,
+) -> StoreResult<u64> {
     let res = sqlx::query("DELETE FROM admin_sessions WHERE token_hash <> $1")
         .bind(keep_token_hash)
-        .execute(pool)
+        .execute(conn)
         .await?;
     Ok(res.rows_affected())
 }

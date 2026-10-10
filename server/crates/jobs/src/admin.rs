@@ -20,14 +20,17 @@ pub async fn cancel_pending_deep_purge(pool: &PgPool, job_id: Uuid) -> Result<u6
     Ok(res.rows_affected())
 }
 
-/// 校验 armed 状态的 deep_purge job（阶段二 token 校验）。
-pub async fn find_armed_deep_purge(
+/// 原子抢占 armed 状态的 deep_purge job（阶段二 token 校验，P019-M4）：
+/// 旧实现纯 SELECT 后另行执行/收尾，token 请求可与 runner 冷却到期执行并发双清。
+/// 改条件 UPDATE pending→running 原子抢占，败方拿不到行即报 token 无效。
+pub async fn claim_armed_deep_purge(
     pool: &PgPool,
     job_id: Uuid,
 ) -> Result<Option<(Uuid, Value)>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT id, payload FROM jobs \
-         WHERE id = $1 AND kind = 'deep_purge' AND status = 'pending' AND payload->>'phase' = 'armed'",
+        "UPDATE jobs SET status = 'running', started_at = now() \
+         WHERE id = $1 AND kind = 'deep_purge' AND status = 'pending' AND payload->>'phase' = 'armed' \
+         RETURNING id, payload",
     )
     .bind(job_id)
     .fetch_optional(pool)

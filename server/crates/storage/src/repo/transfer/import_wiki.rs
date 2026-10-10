@@ -65,18 +65,24 @@ pub async fn import_wiki_page(
 }
 
 /// promotions 导入（UNIQUE(project_id, doc_id, page_slug) 冲突跳过）。
-/// library_id 统一映射目标库 main 库——多库 promotions 随 wiki 多库缺口记欠账（t9）。
-pub async fn import_wiki_promotions(pool: &PgPool, items: &[Value]) -> StoreResult<(usize, usize)> {
-    let Some(target_library_id): Option<Uuid> =
-        sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
-            .fetch_optional(pool)
-            .await?
-    else {
-        return Ok((0, items.len())); // 无 main 库（不该发生，0046 幂等保证）
-    };
+/// P019-M4：library_id 按包内库映射挂原库——旧实现硬编码 main，非 main 库晋升登记被改挂；
+/// v1 旧包无 library_id 时回 main。
+pub async fn import_wiki_promotions(
+    pool: &PgPool,
+    items: &[Value],
+    lib_map: &std::collections::HashMap<String, Uuid>,
+    main_lib: Uuid,
+) -> StoreResult<(usize, usize)> {
     let mut imported = 0usize;
     let mut skipped = 0usize;
     for v in items {
+        let source_lib = v
+            .get("library_id")
+            .and_then(|x| x.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok());
+        let target_library_id = source_lib
+            .and_then(|s| lib_map.get(&s.to_string()).copied())
+            .unwrap_or(main_lib);
         let res = sqlx::query(
             "INSERT INTO wiki_promotions (id, library_id, page_slug, project_id, doc_id, anchor, created_at) \
              VALUES ($1, $2, $3, $4, $5, $6, $7) \

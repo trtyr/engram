@@ -15,6 +15,22 @@ import { inputCls, selectCls } from '@/lib/ui'
 import { Button } from '@/components/ui/button'
 import { Box, Cloud, Globe, IdCard, Server, Smartphone } from 'lucide-react'
 
+/// P019-M4：fields 保真——编辑器是字符串模型：未改动（字符串形式与原值一致）的键
+/// 保存时回传原值（数字/布尔/嵌套对象类型不变）；新增/改动的键用用户输入的字符串。
+export function buildFields(
+  eFields: [string, string][],
+  orig: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, sv] of eFields) {
+    const key = k.trim()
+    if (!key) continue
+    const raw = orig[key]
+    out[key] = raw !== undefined && String(raw) === sv ? raw : sv
+  }
+  return out
+}
+
 /** 类型色点（标签文字由 `/assets/types` 提供——值域单一事实源在后端 ASSET_KINDS 常量）。 */
 const KIND_DOT: Record<string, string> = {
   host: '#3b82f6', // 主机
@@ -71,6 +87,9 @@ export default function Assets() {
   const [rbShowVersions, setRbShowVersions] = useState(false)
   // fields 运维字段编辑态（键值对；保存整体替换）
   const [eFields, setEFields] = useState<[string, string][]>([])
+  // P019-M4：编辑入口的原值快照——未触碰的键保存时原样回传（旧实现 String(v)
+  // 把数字/布尔/嵌套对象钉死成字符串，只改 note 也会静默篡改 fields）
+  const [fieldsOrig, setFieldsOrig] = useState<Record<string, unknown>>({})
   const [eKind, setEKind] = useState('host')
   const [eName, setEName] = useState('')
   const [eAliases, setEAliases] = useState('')
@@ -135,7 +154,7 @@ export default function Assets() {
         ip: eIp.trim(),
         os: eOs.trim(),
         note: eNote.trim(),
-        fields: Object.fromEntries(eFields.filter(([k]) => k.trim())),
+        fields: buildFields(eFields, fieldsOrig),
       })
       setEditing(false)
       await load()
@@ -341,6 +360,7 @@ export default function Assets() {
                                 (detail.fields ?? {}) as Record<string, unknown>,
                               ).map(([k, v]) => [k, v == null ? '' : String(v)]),
                             )
+                            setFieldsOrig((detail.fields ?? {}) as Record<string, unknown>)
                           }}
                         >
                           编辑

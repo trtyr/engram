@@ -300,12 +300,15 @@ pub async fn change_credentials(
         Some(pw) => hash_password(pw),
         None => hash,
     };
-    keys_repo::upsert_admin_account(pool, username, &hash)
+    // P019-M4：改密+吊销其他会话同事务——旧实现两步独立写，第二步失败则旧会话仍有效最长 7 天
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    keys_repo::upsert_admin_account_conn(&mut tx, username, &hash)
         .await
         .map_err(|e| e.to_string())?;
-    let revoked = keys_repo::delete_other_admin_sessions(pool, current_token_hash)
+    let revoked = keys_repo::delete_other_admin_sessions_conn(&mut tx, current_token_hash)
         .await
         .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
     Ok((
         true,
         json!({ "username": username, "revoked_sessions": revoked }),

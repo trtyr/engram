@@ -78,9 +78,9 @@
 
 0. **规划工作面**：本地 `docs/plantree/`（P001 风险债整改线进行中，待拍板问题见其 open-questions.md）——分工约定：Mia 整理决策点并执行，trtyr 只拍板（P009 frontend-ia-observability 已 done：前端 IA 重构 + 生产 codegraph 数据根修复；P010 logs-unify 已 done：日志统一为系统唯一时间线 + MCP logs 域）
 
-1. **门禁**：server `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`；web `pnpm run lint && pnpm exec tsc --noEmit && pnpm test && pnpm run build`
+1. **门禁**（2026-10-10 拍板瘦身）：日常只跑**受影响 crate 的定向测试**（`cargo test -p X --test Y` 或 `cargo nextest run -p X`）+ web `pnpm exec tsc --noEmit && pnpm test`——保证改动能跑即可；**全量门禁只在上生产/发布前跑一次**：server `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo nextest run --workspace`（nextest 配置见 `server/.config/nextest.toml`，retries=1 防 flake）；web `pnpm run lint && pnpm exec tsc --noEmit && pnpm test && pnpm run build`
 2. **本地 journey 唯一合法入口 `scripts/e2e-local.sh`**——spec 缺 `E2E_ADMIN_PW` 直接 throw，`E2E_BASE` 缺省回落本地栈口 `127.0.0.1:19180`（真防线是入口脚本锁死本地地址；勿信「无 E2E_BASE 会 throw」——三次误删生产库的教训）
 3. 改 MCP 工具面必须过 `tests/golden/mcp_surface.json` 快照；新增 action 必须登记读写分类（dispatch.rs:718 护栏）
 4. 前端产物 `web/dist` 被 rust-embed 编译期嵌入——前端改动生效必须重建 dist；`assetsDir` 必须是 `'static'`（与 /assets API 前缀相撞事故）
-5. 迁移只增不改（sqlx 单向）；加迁移必同步 `migrations_test.rs` 的版本断言（当前 75）与 AGENTS.md 本条版本号（P018-T007：曾漂移 12 个版本未被发现）
+5. 迁移只增不改（sqlx 单向）；加迁移必同步 `migrations_test.rs` 的版本断言（当前 76）与 AGENTS.md 本条版本号（P018-T007：曾漂移 12 个版本未被发现）
 6. 凭据红线：token/密码只写变量名；credentials 值永不进日志/文档/记忆

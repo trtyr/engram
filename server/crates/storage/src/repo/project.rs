@@ -352,7 +352,9 @@ pub async fn get_file_by_name(
     Ok(row)
 }
 
-/// 覆盖式写入：存在则 version+1 并把旧内容存版本快照，不存在则插入 v1
+/// 覆盖式写入：存在则 version+1 并把旧内容存版本快照，不存在则插入 v1。
+/// P019-M4：事务 + FOR UPDATE 行锁——旧实现读-改-写三步无锁，并发覆盖写丢更新、
+/// 快照重复、部分失败孤儿快照。
 pub async fn upsert_file(
     pool: &PgPool,
     project_id: Uuid,
@@ -360,8 +362,15 @@ pub async fn upsert_file(
     mime: &str,
     content: &str,
 ) -> StoreResult<ProjectFileDto> {
-    let existing = get_file_by_name(pool, project_id, name).await?;
-    if let Some(prev) = existing {
+    let mut tx = pool.begin().await?;
+    let prev: Option<ProjectFileDto> = sqlx::query_as(&format!(
+        "SELECT {FILE_COLS} FROM project_files WHERE project_id = $1 AND name = $2 FOR UPDATE"
+    ))
+    .bind(project_id)
+    .bind(name)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let row = if let Some(prev) = prev {
         let new_version = prev.version + 1;
         sqlx::query(
             "INSERT INTO project_file_versions (file_id, version, content) VALUES ($1, $2, $3)",
@@ -369,9 +378,9 @@ pub async fn upsert_file(
         .bind(prev.id)
         .bind(prev.version)
         .bind(&prev.content)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-        let row = sqlx::query_as::<_, ProjectFileDto>(&format!(
+        sqlx::query_as::<_, ProjectFileDto>(&format!(
             "UPDATE project_files SET mime = $3, content = $4, version = $5, updated_at = now() \
                  WHERE id = $1 AND project_id = $2 RETURNING {FILE_COLS}"
         ))
@@ -380,11 +389,10 @@ pub async fn upsert_file(
         .bind(mime)
         .bind(content)
         .bind(new_version)
-        .fetch_one(pool)
-        .await?;
-        Ok(row)
+        .fetch_one(&mut *tx)
+        .await?
     } else {
-        let row = sqlx::query_as::<_, ProjectFileDto>(&format!(
+        sqlx::query_as::<_, ProjectFileDto>(&format!(
             "INSERT INTO project_files (project_id, name, mime, content) \
                  VALUES ($1, $2, $3, $4) RETURNING {FILE_COLS}"
         ))
@@ -392,10 +400,11 @@ pub async fn upsert_file(
         .bind(name)
         .bind(mime)
         .bind(content)
-        .fetch_one(pool)
-        .await?;
-        Ok(row)
-    }
+        .fetch_one(&mut *tx)
+        .await?
+    };
+    tx.commit().await?;
+    Ok(row)
 }
 
 pub async fn delete_file(pool: &PgPool, project_id: Uuid, name: &str) -> StoreResult<u64> {

@@ -112,6 +112,20 @@ async fn tool_atom_merge(
     if victims.is_empty() {
         return Ok(json!({"merged": 0, "note": "merge_ids 为空或与 keep 相同"}));
     }
+    // P019-M4：keep_id 必须存在且 active——旧实现只验 UUID 格式，LLM 幻觉的
+    // keep_id 会归档 victims 并把取代指针指向不存在的原子（证据链不可逆丢失）。
+    let keep_alive: Option<uuid::Uuid> =
+        sqlx::query_scalar("SELECT id FROM atoms WHERE id = $1 AND status = 'active'")
+            .bind(keep_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| JobError::Retryable(e.to_string()))?;
+    if keep_alive.is_none() {
+        return Ok(json!({
+            "error": format!("keep_id {keep_id} 不存在或非 active——请从 atoms_search/atoms_recent 结果中选真实 id"),
+            "merged": 0
+        }));
+    }
     let mut tx = pool
         .begin()
         .await
@@ -214,11 +228,17 @@ pub async fn run_maintain(ctx: &JobContext, llm: &dyn DistillLlm) -> Result<Valu
                     .unwrap_or("")
                     .to_string();
                 let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
-                tool_atoms_search(pool, llm, ctx.job.id, &q, limit).await?
+                tool_atoms_search(pool, llm, ctx.job.id, &q, limit)
+                    .await
+                    .unwrap_or_else(
+                        |e| json!({"error": e.to_string(), "note": "瞬时错误——可重试本工具"}),
+                    )
             }
             "atoms_recent" => {
                 let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
-                tool_atoms_recent(pool, limit).await?
+                tool_atoms_recent(pool, limit).await.unwrap_or_else(
+                    |e| json!({"error": e.to_string(), "note": "瞬时错误——可重试本工具"}),
+                )
             }
             "atom_merge" => {
                 let keep = args
@@ -236,7 +256,9 @@ pub async fn run_maintain(ctx: &JobContext, llm: &dyn DistillLlm) -> Result<Valu
                     .unwrap_or_default();
                 match keep {
                     Some(k) if !merges.is_empty() => {
-                        let r = tool_atom_merge(pool, k, &merges).await?;
+                        let r = tool_atom_merge(pool, k, &merges)
+                            .await
+                            .unwrap_or_else(|e| json!({"error": e.to_string(), "merged": 0, "note": "瞬时错误——可重试本工具"}));
                         if let Some(n) = r.get("merged").and_then(|v| v.as_u64()) {
                             merged += n as usize;
                         }
@@ -252,7 +274,9 @@ pub async fn run_maintain(ctx: &JobContext, llm: &dyn DistillLlm) -> Result<Valu
                     .and_then(|s| uuid::Uuid::parse_str(s).ok());
                 match id {
                     Some(id) => {
-                        let r = tool_atom_archive(pool, id).await?;
+                        let r = tool_atom_archive(pool, id)
+                            .await
+                            .unwrap_or_else(|e| json!({"error": e.to_string(), "archived": false, "note": "瞬时错误——可重试本工具"}));
                         if r.get("archived").and_then(|v| v.as_bool()).unwrap_or(false) {
                             archived += 1;
                         }
@@ -261,17 +285,14 @@ pub async fn run_maintain(ctx: &JobContext, llm: &dyn DistillLlm) -> Result<Valu
                     None => json!({"error": "需要 id"}),
                 }
             }
-            "persona_doc_read" => {
-                let doc = engram_storage::repo::memory::persona_doc_get(pool)
-                    .await
-                    .map_err(|e| JobError::Retryable(e.to_string()))?;
-                match doc {
-                    Some(d) => json!({"version": d.version, "content": d.content}),
-                    None => {
-                        json!({"version": 0, "content": "", "note": "画像文档尚未建立——首次巡逻请依据查到的原子初建"})
-                    }
-                }
-            }
+            "persona_doc_read" => match engram_storage::repo::memory::persona_doc_get(pool).await {
+                Ok(Some(d)) => json!({"version": d.version, "content": d.content}),
+                Ok(None) => json!({
+                    "version": 0, "content": "",
+                    "note": "画像文档尚未建立——首次巡逻请依据查到的原子初建"
+                }),
+                Err(e) => json!({"error": e.to_string(), "note": "瞬时错误——可重试本工具"}),
+            },
             "persona_doc_edit" => {
                 let content = args
                     .get("content")
@@ -285,9 +306,13 @@ pub async fn run_maintain(ctx: &JobContext, llm: &dyn DistillLlm) -> Result<Valu
                     let ver =
                         engram_storage::repo::memory::persona_doc_save(pool, &content, summary)
                             .await
-                            .map_err(|e| JobError::Retryable(e.to_string()))?;
-                    persona_edited = true;
-                    json!({"saved_version": ver})
+                            .unwrap_or(-1);
+                    if ver < 0 {
+                        json!({"error": "画像保存失败（瞬时错误）——可重试本工具"})
+                    } else {
+                        persona_edited = true;
+                        json!({"saved_version": ver})
+                    }
                 }
             }
             "finish" => {

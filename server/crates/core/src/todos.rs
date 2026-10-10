@@ -88,6 +88,35 @@ fn parse_todo_cursor(raw: Option<&str>) -> Result<Option<(i32, DateTime<Utc>, Uu
     Ok(cursor)
 }
 
+/// due 过滤页游标（P019-M4）：`{due_at RFC3339}|{id}`——due 序为 due_at ASC, id ASC，
+/// 游标与排序键同构（旧实现复用标准游标但排序键不同构，跨页丢行/重行）。
+fn parse_todo_due_cursor(raw: Option<&str>) -> Result<Option<(DateTime<Utc>, Uuid)>, TodoError> {
+    let cursor = match raw {
+        None | Some("") => None,
+        Some(raw) => {
+            let parts: Vec<&str> = raw.split('|').collect();
+            if parts.len() != 2 {
+                return Err(TodoError::BadRequest(format!(
+                    "due 游标非法（收到 {raw:?}）——期望 {{due_at ISO8601}}|{{id}}，取上一页最后一条构造"
+                )));
+            }
+            let due_at = chrono::DateTime::parse_from_rfc3339(parts[0].trim())
+                .map(|d| d.with_timezone(&Utc))
+                .ok();
+            let id = Uuid::parse_str(parts[1].trim()).ok();
+            match (due_at, id) {
+                (Some(due_at), Some(id)) => Some((due_at, id)),
+                _ => {
+                    return Err(TodoError::BadRequest(format!(
+                        "due 游标非法（收到 {raw:?}）——期望 {{due_at ISO8601}}|{{id}}"
+                    )));
+                }
+            }
+        }
+    };
+    Ok(cursor)
+}
+
 pub struct TodoService {
     pool: engram_storage::PgPool,
 }
@@ -139,7 +168,7 @@ impl TodoService {
             .ok_or_else(|| {
                 TodoError::BadRequest(format!("引用格式非法：{r}（应为 UUID 或 EN-<短号>）"))
             })?;
-        Ok(repo::find_by_short_no(&self.pool, n).await.map(to_dto))
+        Ok(repo::find_by_short_no(&self.pool, n).await?.map(to_dto))
     }
 
     // ---------- 关联关系（blocked_by / relates_to / parent） ----------
@@ -219,8 +248,9 @@ impl TodoService {
     }
 
     /// 列表：open 优先；status/priority/tag/q/due 过滤。
-    /// cursor（D29 keyset 分页，单页上限 500）：上一页最后一条的
-    /// `{1|0}|{updated_at ISO8601}|{id}`——1 表示该条 status=open。首查不传。
+    /// cursor（D29 keyset 分页，单页上限 500）：标准页为上一页最后一条的
+    /// `{1|0}|{updated_at ISO8601}|{id}`——1 表示该条 status=open；due 页（due=overdue/today）
+    /// 为 `{due_at ISO8601}|{id}`（P019-M4：due 序为 due_at ASC, id ASC）。首查不传。
     #[allow(clippy::too_many_arguments)]
     pub async fn list(
         &self,
@@ -258,7 +288,12 @@ impl TodoService {
                 PRIORITIES.join("/")
             )));
         }
-        let cursor = parse_todo_cursor(cursor)?;
+        // P019-M4：due 页与标准页游标格式不同（排序键同构）
+        let cursor = if due.is_some() {
+            parse_todo_due_cursor(cursor)?.map(|(d, id)| repo::TodoCursor::Due(d, id))
+        } else {
+            parse_todo_cursor(cursor)?.map(|(f, ts, id)| repo::TodoCursor::Standard(f, ts, id))
+        };
         Ok(repo::list(
             &self.pool,
             status,

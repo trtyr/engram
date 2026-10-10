@@ -276,7 +276,7 @@ impl TicketService {
             .ok_or_else(|| {
                 TicketError::BadRequest(format!("引用格式非法：{r}（应为 UUID 或 EN-<短号>）"))
             })?;
-        Ok(repo::find_by_short_no(&self.pool, n).await.map(to_dto))
+        Ok(repo::find_by_short_no(&self.pool, n).await?.map(to_dto))
     }
 
     /// 更新：部分更新；status 迁移校验 + resolved/verified 必须带解决记录
@@ -324,6 +324,31 @@ impl TicketService {
             && !STATUSES.contains(&s)
         {
             return Err(status_error(s));
+        }
+        // P019-M4：状态机迁移校验（0041 自述「状态迁移」实装——旧实现任意跳转）。
+        // 线性主链 + 回退面；archived 终态不可出。
+        if let Some(st) = status
+            && st != cur.status
+        {
+            let allowed: &[&str] = match cur.status.as_str() {
+                "open" => &["confirmed", "in_progress", "resolved", "archived"],
+                "confirmed" => &["open", "in_progress", "resolved", "archived"],
+                "in_progress" => &["open", "resolved", "archived"],
+                "resolved" => &["open", "in_progress", "verified", "archived"],
+                "verified" => &["open", "resolved", "archived"],
+                _ => &[],
+            };
+            if !allowed.contains(&st) {
+                return Err(TicketError::BadRequest(format!(
+                    "非法状态迁移：{} → {st}（允许：{}）——归档为终态，重启问题请另开新单",
+                    cur.status,
+                    if allowed.is_empty() {
+                        "无（终态）".to_string()
+                    } else {
+                        allowed.join("/")
+                    }
+                )));
+            }
         }
         if let Some(Some(sv)) = severity
             && !SEVERITIES.contains(&sv)
@@ -374,7 +399,6 @@ impl TicketService {
             )
             .await?;
         }
-        let _ = cur;
         let row = repo::get(&self.pool, id)
             .await?
             .ok_or_else(|| TicketError::NotFound(format!("工单 {id}")))?;

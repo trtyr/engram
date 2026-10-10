@@ -149,14 +149,14 @@ impl CredentialsService {
                 ))
             })?;
         let value = self.dec(&row.value_enc)?;
-        repo::record_read(&self.pool, row.id, reader).await?;
+        let (read_count, last_read_at) = repo::record_read(&self.pool, row.id, reader).await?;
         Ok(CredentialValueDto {
             name: row.name,
             value,
             sensitive: row.sensitive,
             description: row.description,
-            last_read_at: Some(chrono::Utc::now()),
-            read_count: row.read_count + 1,
+            last_read_at: Some(last_read_at),
+            read_count,
             tags: row.tags,
             expires_at: row.expires_at,
         })

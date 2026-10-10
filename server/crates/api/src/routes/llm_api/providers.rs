@@ -203,16 +203,26 @@ pub async fn delete_provider(
 ) -> Result<StatusCode, ApiError> {
     require_llm(&principal)?;
 
-    let Some((_, is_default)) = repo::get_provider_name_default(&state.pool, id).await? else {
-        return Err(ApiError::NotFound(format!("provider {id} 不存在")));
-    };
-    if is_default {
-        return Err(ApiError::BadRequest(
-            "默认 provider 不可删除：请先将其他 provider 设为默认（PUT is_default=true）".into(),
-        ));
+    // P019-M4：原子化——is_default 守卫并入 DELETE，消除检查-后-删除窗口
+    // （并发 PUT is_default=true 后旧序仍可物理删除默认 provider）。
+    let deleted = sqlx::query("DELETE FROM llm_providers WHERE id = $1 AND NOT is_default")
+        .bind(id)
+        .execute(&state.pool)
+        .await
+        .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+    if deleted.rows_affected() > 0 {
+        return Ok(StatusCode::NO_CONTENT);
     }
-    repo::delete_provider(&state.pool, id).await?;
-    Ok(StatusCode::NO_CONTENT)
+    // 0 行：不存在，或已是默认——回查区分
+    match repo::get_provider_name_default(&state.pool, id).await? {
+        Some((_, true)) => Err(ApiError::BadRequest(
+            "默认 provider 不可删除：请先将其他 provider 设为默认（PUT is_default=true）".into(),
+        )),
+        Some(_) => Err(ApiError::Internal(anyhow::anyhow!(
+            "provider 非默认但删除未生效（并发状态变化），请重试"
+        ))),
+        None => Err(ApiError::NotFound(format!("provider {id} 不存在"))),
+    }
 }
 
 #[derive(Deserialize, ToSchema)]

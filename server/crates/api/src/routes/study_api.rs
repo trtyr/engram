@@ -207,9 +207,7 @@ pub async fn delete_item(
     Path(id): Path<Uuid>,
 ) -> Result<axum::http::StatusCode, ApiError> {
     require_scope(&principal, "study")?;
-    engram_storage::repo::study::item_delete(&state.pool, id)
-        .await
-        .map_err(|e| ApiError::Unavailable(e.to_string()))?;
+    svc(&state).item_delete(id).await.map_err(se)?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 

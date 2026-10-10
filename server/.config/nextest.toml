@@ -1,0 +1,6 @@
+# P019-M4 起测试门禁改用 nextest（每测试独立进程并行，替代 cargo test --workspace）
+# retries=1：偶发 flake（workspace 并发下 PG 容器/端口类测试）自动重试一次，重试仍挂才算真挂
+[profile.default]
+retries = 1
+# 集成测试起 PG 容器偏慢，放宽单测上限
+slow-timeout = { period = "120s", terminate-after = 2 }

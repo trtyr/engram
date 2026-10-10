@@ -259,8 +259,9 @@ async fn purge_deep_flow(
     // P-C 两阶段（两次真数据事故教训）：arm → 5 分钟冷却 → 到期执行。
     // token = 立即执行；cancel = 后悔药。job 本身就是审计链。
     if let Some(token) = req.token {
-        // 阶段二：确认执行——校验 armed job 存在且未执行，跳过剩余冷却
-        let armed = engram_jobs::admin::find_armed_deep_purge(&state.pool, token)
+        // 阶段二：确认执行——P019-M4：原子抢占（pending→running），runner 冷却到期
+        // 执行与 token 请求并发时只有一方拿到行，双清根除
+        let armed = engram_jobs::admin::claim_armed_deep_purge(&state.pool, token)
             .await
             .map_err(|e| ApiError::Internal(anyhow::anyhow!(e.to_string())))?;
         let Some((job_id, mut payload)) = armed else {

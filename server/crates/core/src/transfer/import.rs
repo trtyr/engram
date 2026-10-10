@@ -6,6 +6,7 @@
 //! （格式校验后）调用。
 
 use super::*;
+use uuid::Uuid;
 
 /// 分域导入计数（imported, skipped）。
 #[derive(Default)]
@@ -73,7 +74,10 @@ pub(super) async fn run_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
     let c_link = import_project_links(pool, data).await?;
     // 工单（0074 独立表）：project_id 须已在库——projects 之后导入
     let (tk_imp, tk_skip) = import_tickets_domain(pool, data).await?;
-    let (t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip) = import_tail_domains(pool, data).await?;
+    // P019-M4：promotions 按包内库映射挂原库——主库作 v1 旧包回退
+    let main_lib = repo::main_library_id(pool).await?;
+    let (t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip) =
+        import_tail_domains(pool, data, &lib_map, main_lib).await?;
     // 工单/待办关联须在 todos 之后（两端 id 都要在库）
     let c_todo_link = import_todo_links_domain(pool, data).await?;
     let (c_session, c_atom, c_entity, c_relation) =
@@ -352,8 +356,10 @@ async fn import_project_links(pool: &PgPool, data: &Value) -> Result<DomainCount
 async fn import_tail_domains(
     pool: &PgPool,
     data: &Value,
+    lib_map: &LibMap,
+    main_lib: Uuid,
 ) -> Result<(usize, usize, usize, usize, usize, usize)> {
-    // todos / kv / promotions 域（t9 补齐 v1 覆盖缺口；promotions 的 library 映射目标 main 库）
+    // todos / kv / promotions 域（t9 补齐 v1 覆盖缺口）
     let todo_items = data
         .get("todos")
         .and_then(|x| x.as_array())
@@ -373,7 +379,8 @@ async fn import_tail_domains(
         .and_then(|x| x.as_array())
         .cloned()
         .unwrap_or_default();
-    let (p_imp, p_skip) = repo::import_wiki_promotions(pool, &promo_items).await?;
+    let (p_imp, p_skip) =
+        repo::import_wiki_promotions(pool, &promo_items, lib_map, main_lib).await?;
     Ok((t_imp, t_skip, kv_imp, kv_skip, p_imp, p_skip))
 }
 

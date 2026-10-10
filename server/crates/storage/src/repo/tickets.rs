@@ -232,14 +232,14 @@ pub async fn search_open(
     Ok(rows)
 }
 
-/// 按短号取工单（EN-<n> 引用直达）。
-pub async fn find_by_short_no(pool: &PgPool, short_no: i32) -> Option<TicketRow> {
-    sqlx::query_as::<_, TicketRow>("SELECT * FROM tickets WHERE short_no = $1")
-        .bind(short_no)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
+/// 按短号取工单（EN-<n> 引用直达）。P019-M4：返 StoreResult——DB 故障报错而非吞成 404。
+pub async fn find_by_short_no(pool: &PgPool, short_no: i32) -> StoreResult<Option<TicketRow>> {
+    Ok(
+        sqlx::query_as::<_, TicketRow>("SELECT * FROM tickets WHERE short_no = $1")
+            .bind(short_no)
+            .fetch_optional(pool)
+            .await?,
+    )
 }
 
 // ---------- 工单活动时间线（ticket_events，0063 建表；0074 外键重挂 → tickets） ----------

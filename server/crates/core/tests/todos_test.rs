@@ -4,6 +4,7 @@
 
 mod support;
 
+use chrono::Utc;
 use engram_core::todos::TodoService;
 use sqlx::PgPool;
 
@@ -197,4 +198,65 @@ async fn invalid_status_and_priority_rejected() {
         .await
         .unwrap_err();
     assert!(e.to_string().contains("priority 仅接受"), "{e}");
+}
+
+/// P019-M4：due 过滤×cursor 翻页排序键统一——旧实现首页 due_at 升序、
+/// 翻页按 (open,updated_at,id) 降序且游标缺 due_at，跨页丢行/重行。
+#[tokio::test]
+async fn due_filter_pagination_no_loss_no_dup() {
+    let (_pool, svc, _pg) = setup().await;
+    // 5 条已过期待办（due_at 递增错开）
+    let mut ids = Vec::new();
+    for i in 0..5 {
+        let t = svc
+            .create(
+                &format!("过期待办{i}"),
+                "",
+                "normal",
+                &[],
+                Some(Utc::now() - chrono::Duration::hours(48 - i)),
+            )
+            .await
+            .unwrap();
+        ids.push(t.id);
+    }
+
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let rows = svc
+            .list(
+                None,
+                None,
+                None,
+                None,
+                Some("overdue"),
+                cursor.as_deref(),
+                2,
+            )
+            .await
+            .unwrap();
+        let last = rows.last().cloned();
+        seen.extend(rows.iter().map(|t| t.id));
+        match last {
+            Some(t) => {
+                let due = t.due_at.expect("overdue 行必有 due_at");
+                cursor = Some(format!("{}|{}", due.to_rfc3339(), t.id));
+                if rows.len() < 2 {
+                    break;
+                }
+            }
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), 5, "五条过期待办应全部命中: {seen:?}");
+    let mut sorted = seen.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 5, "翻页不得重复: {seen:?}");
+    let mut expected = ids.clone();
+    expected.sort();
+    let mut got = seen.clone();
+    got.sort();
+    assert_eq!(got, expected, "无丢行");
 }

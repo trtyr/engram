@@ -273,3 +273,77 @@ async fn export_all_pages_past_single_page_limit() {
     ids.dedup();
     assert_eq!(ids.len(), 501, "导出不得重复");
 }
+
+/// P019-M4：非法状态跳转 400——open→verified 跳级拒绝；archived 终态不可出；
+/// 合法链 open→resolved→archived 走通（0041 自述「状态迁移」实装）。
+#[tokio::test]
+async fn illegal_status_jump_rejected() {
+    let (_pool, svc, pid, _pg) = setup().await;
+    let t = svc
+        .create(pid, "非法跳转", "", None, "", "", "")
+        .await
+        .unwrap();
+
+    let e = svc
+        .update(
+            t.id,
+            None,
+            None,
+            Some("verified"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "t",
+        )
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("非法状态迁移"), "{e}");
+
+    // 合法链走通
+    svc.update(
+        t.id,
+        None,
+        None,
+        Some("resolved"),
+        None,
+        None,
+        None,
+        None,
+        Some("修了"),
+        "t",
+    )
+    .await
+    .unwrap();
+    svc.update(
+        t.id,
+        None,
+        None,
+        Some("archived"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        "t",
+    )
+    .await
+    .unwrap();
+    let e2 = svc
+        .update(
+            t.id,
+            None,
+            None,
+            Some("open"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "t",
+        )
+        .await
+        .unwrap_err();
+    assert!(e2.to_string().contains("非法状态迁移"), "{e2}");
+}

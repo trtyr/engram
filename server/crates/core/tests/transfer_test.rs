@@ -23,7 +23,7 @@ async fn transfer_roundtrip_and_idempotency() {
     .await
     .unwrap();
     let aid = uuid::Uuid::now_v7();
-    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs) VALUES ($1,'fact','用户喜欢 Rust',0.95,'active',$2)")
+    sqlx::query("INSERT INTO atoms (id, kind, content, confidence, status, source_refs, strength, source_kind) VALUES ($1,'fact','用户喜欢 Rust',0.95,'active',$2,'inference','agent_inferred')")
         .bind(aid)
         .bind(serde_json::json!([{"session_id": sid.to_string()}]))
         .execute(&pool).await.unwrap();
@@ -258,6 +258,18 @@ async fn transfer_roundtrip_and_idempotency() {
             .await
             .unwrap();
     assert_eq!(content, "用户喜欢 Rust");
+    // P019-M4：断言强度两列随包保真（旧实现漏列静默回落 fact）
+    let (strength, source_kind): (String, String) =
+        sqlx::query_as("SELECT strength, source_kind FROM atoms WHERE id = $1")
+            .bind(aid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (strength.as_str(), source_kind.as_str()),
+        ("inference", "agent_inferred"),
+        "断言强度应随迁移保真，不得回落 DDL 默认 fact"
+    );
     assert_eq!(
         refs[0]["session_id"],
         sid.to_string(),
@@ -450,4 +462,107 @@ async fn location_asset_ref_self_heals_by_name() {
         Some(real_asset),
         "asset_id 落空时应按别名回落到目标库同名资产"
     );
+}
+
+/// P019-M4：promotions 按包内库映射挂原库——非 main 库的晋升登记导入后归属不变
+/// （旧实现硬编码 main，全部改挂主库）；缺 created_at 的会话行不中断导入（now 兑底）。
+#[tokio::test]
+async fn import_promotions_follow_library_mapping_and_tolerate_missing_ts() {
+    let pg = support::start_pgvector().await.expect("测试库");
+    let url = support::connection_url(&pg).await.expect("连接串");
+    let pool = support::connect_with_retry(&url).await.expect("连接");
+    engram_storage::run_migrations(&pool).await.expect("迁移");
+
+    let main_lib: uuid::Uuid =
+        sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'main'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    // 非 main 库
+    let alt_lib = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO wiki_libraries (id, slug, name) VALUES ($1, 'alt', '备用库')")
+        .bind(alt_lib)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let prj = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO projects (id, name, type, status) VALUES ($1,'晋升项目','dev','active')",
+    )
+    .bind(prj)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let doc = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO project_docs (id, project_id, category, title, content) VALUES ($1,$2,'规划','晋升源文档','内容')")
+        .bind(doc)
+        .bind(prj)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // 晋升登记挂在 alt 库
+    sqlx::query("INSERT INTO wiki_promotions (id, library_id, page_slug, project_id, doc_id) VALUES ($1,$2,'alt-page',$3,$4)")
+        .bind(uuid::Uuid::now_v7())
+        .bind(alt_lib)
+        .bind(prj)
+        .bind(doc)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // 缺 created_at 的会话行（旧行为：NOT NULL 23502 中断整个导入域）
+    sqlx::query("INSERT INTO raw_sessions (id, agent, content) VALUES ($1,'demo',$2)")
+        .bind(uuid::Uuid::now_v7())
+        .bind(serde_json::json!([{"speaker":"user","text":"缺时间戳"}]))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let bundle = engram_core::transfer::export_bundle(&pool)
+        .await
+        .expect("导出");
+    assert_eq!(
+        bundle["wiki_promotions"].as_array().map(|a| a.len()),
+        Some(1),
+        "bundle 应含 1 条 promotions: {}",
+        bundle["wiki_promotions"]
+    );
+    // 清库模拟目标机
+    sqlx::query(
+        "TRUNCATE wiki_promotions, wiki_libraries, project_docs, projects, raw_sessions CASCADE",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let report = engram_core::transfer::import_bundle(&pool, &bundle)
+        .await
+        .expect("导入应成功（缺 created_at 不再中断）");
+
+    let imported = |path: &[&str]| -> usize {
+        path.iter()
+            .fold(&report, |acc, k| &acc[*k])
+            .get("imported")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0) as usize
+    };
+    assert_eq!(
+        imported(&["memory", "sessions"]),
+        1,
+        "缺 created_at 会话应导入"
+    );
+    assert_eq!(imported(&["wiki_promotions"]), 1, "晋升登记应导入");
+
+    // 库映射：transfer 保留原 id——alt 库导入后 id 不变，晋升登记应挂回 alt（非 main）
+    let new_alt: uuid::Uuid =
+        sqlx::query_scalar("SELECT id FROM wiki_libraries WHERE slug = 'alt'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(new_alt, alt_lib, "transfer 保留原库 id");
+    let promo_lib: uuid::Uuid =
+        sqlx::query_scalar("SELECT library_id FROM wiki_promotions WHERE page_slug = 'alt-page'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(promo_lib, new_alt, "晋升登记应随包内库映射挂回 alt 库");
+    assert_ne!(promo_lib, main_lib, "不得硬编码改挂 main");
 }

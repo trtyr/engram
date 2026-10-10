@@ -103,8 +103,14 @@ pub async fn reveal_credential(
     Path(name): Path<String>,
 ) -> Result<Json<engram_storage::models::credential::CredentialValueDto>, ApiError> {
     require_credentials(&principal)?;
-    let reader = "console";
-    let v = svc(&state).get(&name, reader).await.map_err(ce)?;
+    // P019-M4：审计记真实取用者（旧实现恒记 console——匿名痕）
+    let reader = match &*principal {
+        engram_core::auth::Principal::Admin => "console:admin".to_string(),
+        engram_core::auth::Principal::ApiKey { name, key_id, .. } => {
+            format!("console:key:{name}({key_id})")
+        }
+    };
+    let v = svc(&state).get(&name, &reader).await.map_err(ce)?;
     Ok(Json(v))
 }
 

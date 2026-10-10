@@ -461,6 +461,13 @@ impl CgBridge {
     /// 建索引（registered → indexing → ready/error）。超时 10min。
     pub async fn index(&self, id: Uuid) -> Result<CgProjectDto, CgError> {
         let proj = self.get(id).await?;
+        // P019-M4：client_upload（无本地源码）不得 index/init——旧实现会建空 codegraph.db
+        // 并把投递者盖成 cloud_index，静默摧毁上传产物
+        if proj.source_kind == "client_upload" {
+            return Err(CgError::BadRequest(
+                "client_upload 项目无本地源码，不能建索引/增量同步——产物由客户端上传，如需云端索引请重新 register git 地址".into(),
+            ));
+        }
         self.ensure_version().await?;
 
         self.set_status(id, "indexing", None, None).await?;
@@ -495,6 +502,12 @@ impl CgBridge {
     /// 增量同步。超时 60s。
     pub async fn sync(&self, id: Uuid) -> Result<CgProjectDto, CgError> {
         let proj = self.get(id).await?;
+        // P019-M4：同 index——client_upload 无本地源码可同步
+        if proj.source_kind == "client_upload" {
+            return Err(CgError::BadRequest(
+                "client_upload 项目无本地源码，不能增量同步——产物由客户端上传".into(),
+            ));
+        }
         self.ensure_version().await?;
         match run_cli(&["sync"], Some(Path::new(&proj.path)), TIMEOUT_SYNC).await {
             Ok(_) => {

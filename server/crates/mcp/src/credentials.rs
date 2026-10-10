@@ -157,12 +157,18 @@ impl EngramMcpServer {
                 }))
             }
             "get" => {
-                let p: CredentialGetParams = dispatch::from_args("credentials", "get", call.args)?;
-                let reader = format!("mcp:{}", p.name);
+                let gp: CredentialGetParams = dispatch::from_args("credentials", "get", call.args)?;
+                // P019-M4：审计记真实取用者（旧实现记被取对象名——对象冒充了访问者）
+                let reader = match &p {
+                    Principal::Admin => "mcp:admin".to_string(),
+                    Principal::ApiKey { name, key_id, .. } => {
+                        format!("mcp:key:{name}({key_id})")
+                    }
+                };
                 let v = self
                     .state
                     .credentials()
-                    .get(&p.name, &reader)
+                    .get(&gp.name, &reader)
                     .await
                     .map_err(credential_err)?;
                 ok_json(json!({

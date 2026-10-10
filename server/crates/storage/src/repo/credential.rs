@@ -152,11 +152,12 @@ pub async fn delete(pool: &sqlx::PgPool, name: &str) -> StoreResult<u64> {
 }
 
 /// 记一笔取用审计 + 更新计数器（get 的副作用；与取用同事务语义由服务层保证）。
+/// P019-M4：返库值 (read_count, last_read_at)——旧实现服务层本地 +1/本地时钟，并发读漂移。
 pub async fn record_read(
     pool: &sqlx::PgPool,
     credential_id: Uuid,
     reader: &str,
-) -> StoreResult<()> {
+) -> StoreResult<(i32, chrono::DateTime<chrono::Utc>)> {
     let mut tx = pool.begin().await?;
     sqlx::query("INSERT INTO credential_reads (id, credential_id, reader) VALUES ($1, $2, $3)")
         .bind(Uuid::now_v7())
@@ -164,14 +165,14 @@ pub async fn record_read(
         .bind(reader)
         .execute(&mut *tx)
         .await?;
-    sqlx::query(
-        "UPDATE credentials SET read_count = read_count + 1, last_read_at = now() WHERE id = $1",
+    let (count, at): (i32, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
+        "UPDATE credentials SET read_count = read_count + 1, last_read_at = now() WHERE id = $1 RETURNING read_count, last_read_at",
     )
     .bind(credential_id)
-    .execute(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(())
+    Ok((count, at))
 }
 
 /// 取用审计流水（最近在前，封顶 50）。

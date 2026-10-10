@@ -278,6 +278,17 @@ impl ProjectService {
                 "这两条工作线之间已有 {kind} 关联——先 links 看现状，要改就 unlink 再建"
             )));
         }
+        // P019-M4：related 语义无向（0058 自述「存一行，查询两向合并」）——
+        // 反向同 kind 已存在时等价于重复，拒绝（旧实现反向可再建一行，list_links 返回两条）。
+        if kind == "related"
+            && repo::find_link(&self.pool, to_project, from_project, kind)
+                .await?
+                .is_some()
+        {
+            return Err(ProjectError::Conflict(
+                "这两条工作线之间已有 related 关联（语义无向，反向等价）——先 links 看现状".into(),
+            ));
+        }
         let id = Uuid::now_v7();
         let n =
             repo::insert_link(&self.pool, id, from_project, to_project, kind, note.trim()).await?;
