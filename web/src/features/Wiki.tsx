@@ -20,9 +20,6 @@ type Panel = 'none' | 'ops'
 const TREE_W_MIN = 220
 const TREE_W_MAX = 480
 
-/** /wiki/* 请求路径恒等——单库终局（RJ-19 清理）：HTTP 面已删 ?lib=（ADR-16），保留调用点形状。 */
-const withLib = (path: string, _lib: string) => path
-
 /** localStorage 守卫读写——Node 26 实验性 localStorage / 隐私模式下静默降级。 */
 function lsGet<T>(key: string, fallback: T): T {
   try {
@@ -69,8 +66,8 @@ export default function Wiki() {
   // 子 folder 在展开时按需拉取——万页下从 18MB/3.2s 降到几 KB 起步。
   const load = useCallback(() => {
     return Promise.all([
-      api.get<[string, number][]>(withLib('/wiki/folders', lib)),
-      api.get<WikiPageMeta[]>(withLib('/wiki/pages?folder=', lib)),
+      api.get<[string, number][]>('/wiki/folders'),
+      api.get<WikiPageMeta[]>('/wiki/pages?folder='),
     ])
       .then(([idx, rootPages]) => {
         setFolderIndex(Object.fromEntries(idx))
@@ -89,7 +86,7 @@ export default function Wiki() {
       loadedRef.current.add(path)
       try {
         const rows = await api.get<WikiPageMeta[]>(
-          withLib(`/wiki/pages?folder=${encodeURIComponent(path)}`, lib),
+          `/wiki/pages?folder=${encodeURIComponent(path)}`,
         )
         const seen = new Set(pagesRef.current.map((p) => p.slug))
         const add = rows.filter((r) => !seen.has(r.slug))
@@ -119,7 +116,7 @@ export default function Wiki() {
     setOpening(true)
     let stale = false
     api
-      .get<WikiPage>(withLib(`/wiki/pages/${encodeURIComponent(slug)}`, lib))
+      .get<WikiPage>(`/wiki/pages/${encodeURIComponent(slug)}`)
       .then((p) => {
         if (stale) return
         setOpen(p)
@@ -162,7 +159,7 @@ export default function Wiki() {
       setOpenErr('')
       try {
         const page = await api.get<WikiPage>(
-          withLib(`/wiki/pages/${encodeURIComponent(targetSlug)}`, lib),
+          `/wiki/pages/${encodeURIComponent(targetSlug)}`,
         )
         setOpen(page)
         const next = new URLSearchParams(params)
@@ -180,7 +177,7 @@ export default function Wiki() {
     setOpenErr('')
     requestedRef.current = slug
     try {
-      const page = await api.get<WikiPage>(withLib(`/wiki/pages/${encodeURIComponent(slug)}`, lib))
+      const page = await api.get<WikiPage>(`/wiki/pages/${encodeURIComponent(slug)}`)
       setOpen(page)
       if (page.folder) void ensureFolder(page.folder)
       const next = new URLSearchParams(params)
@@ -638,7 +635,7 @@ function PageReader({
                 // P019-M3：folder 恒传字符串——空串 = 回根目录（后端 COALESCE 只对 null 保持原值，
                 // 旧实现 || undefined 使清空无效，placeholder 承诺无法兑现）
                 const updated = await api.put<WikiPage>(
-                  withLib(`/wiki/pages/${encodeURIComponent(page.slug)}`, libSlug),
+                  `/wiki/pages/${encodeURIComponent(page.slug)}`,
                   {
                     title,
                     content: draft,

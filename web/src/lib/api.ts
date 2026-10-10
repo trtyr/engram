@@ -136,10 +136,6 @@ export const api = {
     }
     return (await resp.json()) as T
   },
-  // 覆盖 BASE（测试注入）
-  setBase(b: string) {
-    ;(req as unknown as { base: string }).base = b
-  },
 }
 
 // ---- 域类型（与后端 DTO 对齐；OpenAPI 生成流水线在 Phase 6a CI 落地后切换） ----

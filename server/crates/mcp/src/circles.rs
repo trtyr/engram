@@ -55,14 +55,6 @@ pub struct CirclesAtomLinkParams {
     pub atom_id: String,
 }
 
-/// T021：实体详情全量开关。
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct CirclesEntityFullParams {
-    /// 实体 id
-    #[schemars(description = "实体 id（UUID）。")]
-    pub entity_id: String,
-}
-
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct CirclesCreateParams {
     /// 实体名（唯一，同名同类型幂等返回已有实体）

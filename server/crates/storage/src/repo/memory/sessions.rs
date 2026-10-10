@@ -2,27 +2,6 @@
 
 use super::*;
 
-pub async fn insert_session(
-    pool: &PgPool,
-    id: Uuid,
-    agent: &str,
-    turns: &Value,
-    sensitive: bool,
-    metadata: &Value,
-) -> StoreResult<SessionDto> {
-    let row = sqlx::query_as::<_, SessionDto>(
-        "INSERT INTO raw_sessions (id, agent, content, sensitive, metadata) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-    )
-    .bind(id)
-    .bind(agent)
-    .bind(sqlx::types::Json(turns))
-    .bind(sensitive)
-    .bind(sqlx::types::Json(metadata))
-    .fetch_one(pool)
-    .await?;
-    Ok(row)
-}
-
 /// 幂等写入（公网多Agent P001 步骤1）：client_ref 命中唯一索引时返回既有会话，不新建。
 /// api_key_id/key_name_snapshot 为写者归因；key 删除后 api_key_id 置 NULL、快照名保留。
 #[allow(clippy::too_many_arguments)] // 归因三参为可选直通位——重构收益低于可读性损失

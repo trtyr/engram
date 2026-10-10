@@ -232,7 +232,7 @@ impl EngramError {
 impl std::fmt::Display for EngramError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}]", self.code)?;
-        if !self.context.is_null() && self.context != serde_json::Value::Null {
+        if !self.context.is_null() {
             write!(f, " {}", self.context)?;
         }
         write!(f, " {}", self.message)?;

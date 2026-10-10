@@ -73,21 +73,6 @@ pub async fn backlinks(
     .await
 }
 
-/// lint 用：跨库目标是否存在（库 slug + 页面 slug 均命中）。
-pub async fn target_exists(pool: &PgPool, to_lib_slug: &str, to_slug: &str) -> bool {
-    sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (\
-         SELECT 1 FROM wiki_libraries l \
-         JOIN wiki_pages p ON p.library_id = l.id \
-         WHERE l.slug = $1 AND p.slug = $2)",
-    )
-    .bind(to_lib_slug)
-    .bind(to_slug)
-    .fetch_one(pool)
-    .await
-    .unwrap_or(false)
-}
-
 /// 批量存在性（lint 一次查多个）：返回存在集合。
 pub async fn filter_existing(
     pool: &PgPool,

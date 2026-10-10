@@ -9,21 +9,14 @@ use chrono::{Duration, Utc};
 use engram_storage::PgPool;
 use engram_storage::repo::keys as repo;
 use rand::RngCore;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::error::{ApiError, ErrorBody, ErrorEnvelope};
 
 pub use engram_core::auth::{
-    DomainAccess, Principal, SCOPES, normalize_scope, unknown_scope_message,
+    DomainAccess, Principal, SCOPES, normalize_scope, sha256_hex, unknown_scope_message,
     validate_scopes_issuable,
 };
-
-fn sha256_hex(input: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(input.as_bytes());
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
-}
 
 /// 登录：校验用户名 + 密码（账号表；空表回退 env 密码）→ 颁发 opaque 会话 token。
 /// 返回 (明文 token, token_hash)——token_hash 供「会话管理」标记当前会话。

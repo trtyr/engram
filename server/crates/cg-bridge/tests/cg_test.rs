@@ -82,7 +82,8 @@ async fn version_guard_rejects_mismatch() {
         Err(other) => panic!("探测应成功或报不可用: {other:?}"),
     }
 
-    // mark_all_version_mismatch DB 路径
+    // version_mismatch DB 路径：直接置状态（原 mark_all_version_mismatch API 已判死代码删除，
+    // 查询拒绝语义保留）
     sqlx::query(
         "INSERT INTO cg_projects (id, name, path, source_uri) VALUES ($1,'t','/tmp','/tmp')",
     )
@@ -90,8 +91,10 @@ async fn version_guard_rejects_mismatch() {
     .execute(&pool)
     .await
     .unwrap();
-    let n = bridge.mark_all_version_mismatch("9.9.9").await.unwrap();
-    assert_eq!(n, 1);
+    sqlx::query("UPDATE cg_projects SET status = 'version_mismatch', error = 'CLI 版本 9.9.9 != pin' WHERE status != 'version_mismatch'")
+        .execute(&pool)
+        .await
+        .unwrap();
     let st: String = sqlx::query_scalar("SELECT status FROM cg_projects LIMIT 1")
         .fetch_one(&pool)
         .await

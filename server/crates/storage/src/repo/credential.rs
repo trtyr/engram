@@ -105,19 +105,6 @@ pub async fn get_enc_by_name(pool: &sqlx::PgPool, name: &str) -> StoreResult<Opt
     .map_err(StoreError::from)
 }
 
-/// 元数据（不含值）。
-pub async fn get_meta(pool: &sqlx::PgPool, id: Uuid) -> StoreResult<Option<Row_>> {
-    sqlx::query_as::<_, Row_>(
-        "SELECT id, name, sensitive, description, created_by, created_at, updated_at, \
-                last_read_at, read_count, tags, expires_at, kind, project_id \
-         FROM credentials WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
-    .map_err(StoreError::from)
-}
-
 /// 台账列表（不含值；按 updated_at 倒序；tag/q 过滤——q 命中 name/description/tags）。
 pub async fn list(
     pool: &sqlx::PgPool,

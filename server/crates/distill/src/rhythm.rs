@@ -193,7 +193,6 @@ pub async fn bootstrap(queue: &JobQueue, pool: &PgPool) -> Result<usize, JobErro
 /// 下一期（cron 语义）。停用时跳过续期与工作（已排的下一期跑完即自然停）。
 pub fn register_rhythm(runner: Runner, llm: LlmRef) -> Runner {
     let l_extract = llm.clone();
-    let l_consolidate = llm.clone();
     runner
         .register(KIND_EXTRACT, move |ctx| {
             let llm = l_extract.clone();
@@ -209,7 +208,6 @@ pub fn register_rhythm(runner: Runner, llm: LlmRef) -> Runner {
             }
         })
         .register(KIND_CONSOLIDATE, move |ctx| {
-            let _l_consolidate = l_consolidate.clone();
             async move {
                 let cfg = load_config(ctx.pool()).await;
                 if !cfg.enabled {

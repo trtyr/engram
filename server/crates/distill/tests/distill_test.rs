@@ -894,6 +894,21 @@ async fn maintain_agent_merges_and_edits_persona_doc() {
         .unwrap();
     let j = wait_done(&env.queue, "maintain_memory").await;
     assert_eq!(j.status, JobStatus::Succeeded, "{:?}", j.error);
+    // P019-M6 恢复（M1-4 complete() running 守卫落地时误删的两条回执断言）：
+    // ① progress 应回收巡逻结果回执（merged/persona_edited 计入）；② 起止时间应落库
+    let progress = j
+        .progress
+        .as_ref()
+        .map(|p| p.0.to_string())
+        .unwrap_or_default();
+    assert!(
+        progress.contains("merged") && progress.contains("persona_edited"),
+        "progress 应回收巡逻结果回执: {progress}"
+    );
+    assert!(
+        j.started_at.is_some() && j.finished_at.is_some(),
+        "起止时间应落库"
+    );
 
     // B 被归档并指向 A；A 保持 active
     assert_eq!(j.attempts, 1, "不应有重试: {:?}", j.error);

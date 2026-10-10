@@ -153,15 +153,4 @@ impl CgBridge {
             },
         }
     }
-
-    /// 标记全部项目版本不匹配（CLI 升级后调用）。
-    pub async fn mark_all_version_mismatch(&self, actual: &str) -> Result<u64, CgError> {
-        let r = sqlx::query(
-        "UPDATE cg_projects SET status = 'version_mismatch', error = $1, updated_at = now() WHERE status != 'version_mismatch'",
-    )
-    .bind(format!("CLI 版本 {actual} != pin {CG_VERSION_PIN}"))
-    .execute(&self.pool)
-    .await?;
-        Ok(r.rows_affected())
-    }
 }

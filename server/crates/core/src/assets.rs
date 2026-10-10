@@ -33,15 +33,6 @@ pub fn supported_kinds() -> String {
         .join("/")
 }
 
-/// 类型显示名（Web 与 MCP 共用）。
-pub fn kind_label(kind: &str) -> String {
-    ASSET_KINDS
-        .iter()
-        .find(|(k, _)| *k == kind)
-        .map(|(_, l)| (*l).to_string())
-        .unwrap_or_else(|| kind.to_string())
-}
-
 pub fn is_valid_kind(kind: &str) -> bool {
     ASSET_KINDS.iter().any(|(k, _)| *k == kind)
 }

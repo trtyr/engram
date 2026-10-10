@@ -78,13 +78,14 @@
 - Circles graph 悬空引用（edges/relations 未过滤归档实体）— features/circles-domain.md #2 ✅（JOIN 活体过滤对齐 nodes）
 - 回归：entity_test graph_edges_and_relations_filter_archived_endpoints / tickets_test negative_limit / wiki_test search_negative_limit + punctuation_query_without_embedding_short_circuits + rerank_duplicate_order_degrades_to_original / wiki-engine k7_guard_tests 3（qv 守卫纯函数锁定）/ threshold_tests 1（阈值 < 单通道 rank-1）/ mcp top_candidates_tests 3（降序截取 + order 守卫复用）
 
-## T007 死代码/残余清理批（一批清）
+## T007 死代码/残余清理批（一批清）✅ done（M6；Q006 挂拍板）
 
-- repo::insert_session、repo::count_running_extract、repo::credential::get_meta — features/storage-crate.md #5/#6
-- llm::crypto::sha256_hex（孤儿导出；api 两份本地拷贝收编 core）— features/llm-crate.md #7
-- cross_links::target_exists、GatewayLlm::budget_tokens、JobContext::llm_calls_made、assets::kind_label、mark_all_version_mismatch（疑似级逐个判）— 各 crate 篇
-- CirclesEntityFullParams、api.setBase、withLib、parsing head 分支 + 重复断言、core/errors.rs Display 冗余条件、rhythm 无用 clone、transfer.rs 空注释占位
-- api_keys.revoked_at 恒 NULL（删列或真软删除，待拍板）— features/auth-platform-domain.md #4
+- repo::insert_session、repo::count_running_extract、repo::credential::get_meta — features/storage-crate.md #5/#6 ✅（逐个 grep 零调用后删）
+- llm::crypto::sha256_hex（孤儿导出；api 两份本地拷贝收编 core）— features/llm-crate.md #7 ✅（真源 core::auth::sha256_hex，连带头 hex_encode/sha2 孤儿 import 一并清）
+- cross_links::target_exists、GatewayLlm::budget_tokens、JobContext::llm_calls_made、assets::kind_label、mark_all_version_mismatch（疑似级逐个判）— 各 crate 篇 ✅（全数判定为真死代码删除；mark_all_version_mismatch 删 API 但测试改直写 SQL 保留查询拒绝语义覆盖；parsing head 过滤分支判防御性保留）
+- CirclesEntityFullParams、api.setBase、withLib、parsing head 分支 + 重复断言、core/errors.rs Display 冗余条件、rhythm 无用 clone、transfer.rs 空注释占位 ✅（head 分支保留，其余全清）
+- api_keys.revoked_at 恒 NULL（删列或真软删除，待拍板）— features/auth-platform-domain.md #4 ⏸ 挂 Q006 拍板
+- 遗留：maintain_agent 测试补回 progress 回执断言（M1-4 误删，回执内容对准最终结果 JSON）✅
 - dispatch 读写分类表幽灵条目（wiki.folders/purpose_set）+ circles help/hint 指向不存在的 delete — features/mcp-crate.md #4 + features/circles-domain.md #1
 - codegraph register 工具文档仍称支持本地路径（AI 可见文案与实现矛盾）— features/codegraph-domain.md #2
 - rrf_merge 疑似死（crate 公共导出零生产引用，判生死）— features/search-crate.md #8

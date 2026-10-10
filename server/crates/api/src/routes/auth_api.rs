@@ -6,18 +6,12 @@ use axum::http::StatusCode;
 use chrono::{DateTime, Utc};
 use engram_storage::repo::keys as keys_repo;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
 use crate::auth::Principal;
 use crate::error::ApiError;
 use crate::state::AppState;
-
-fn sha256_hex(s: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(s.as_bytes());
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
-}
+use engram_core::auth::sha256_hex;
 
 fn default_username() -> String {
     "admin".into()

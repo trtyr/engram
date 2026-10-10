@@ -118,17 +118,6 @@ pub async fn correct_atom(
     Ok(Some(new_row))
 }
 
-/// distill 触发撞车检测：是否存在 running 的 extract_atoms（手动触发防重复投递——
-/// 收录哲学线：撞车时只提示不投递，任务列表不留空跑记录）。
-pub async fn count_running_extract(pool: &PgPool) -> StoreResult<i64> {
-    let n: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM jobs WHERE kind = 'extract_atoms' AND status = 'running'",
-    )
-    .fetch_one(pool)
-    .await?;
-    Ok(n)
-}
-
 /// P015：maintain_memory 运行计数（撞车守卫）。
 pub async fn count_running_maintain(pool: &PgPool) -> StoreResult<i64> {
     sqlx::query_scalar(

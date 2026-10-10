@@ -116,12 +116,10 @@ pub async fn import_bundle(pool: &PgPool, data: &Value) -> Result<Value> {
 }
 
 // ---------- 远程拉取（A → B 一键迁移） ----------
-//
 // B 机管理员提供 A 机地址 + A 的 admin 密码：登录 A → 拉迁移包 → 落地本机。
 // A 的密码只在本次请求内使用（登录换 ams_ token），不落库不缓存。
 
 // ---------- 双向同步转发（2026-09-18 数据同步线：CLI sync 的服务端形态） ----------
-//
 // 浏览器跨域无法直调目标实例，由本机服务端转发：push = 本地 export → POST 目标 import；
 // pull = GET 目标 export → 灌本地 import。目标凭证用 migrate scope key（Bearer 直连），
 // admin 密码不过目标网络。目标非 loopback 强制 https（allow_insecure 逃生）。

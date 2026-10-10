@@ -247,10 +247,5 @@ mod tests {
     fn pdf_and_docx_by_extension_untouched() {
         // K5：显式格式仍走各自解析器（默认分支守卫不拦已知格式）
         assert!(parse_bytes("x.pdf", None, b"PK\x00\x03").is_err()); // PDF 解析失败而非 Unsupported 拦截
-        assert!(
-            parse_bytes("x.pdf", None, b"PK\x00\x03")
-                .map(|_| ())
-                .is_err()
-        );
     }
 }

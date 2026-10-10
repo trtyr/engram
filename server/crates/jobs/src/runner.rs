@@ -33,11 +33,6 @@ impl JobContext {
         Ok(())
     }
 
-    /// 本任务已发生的 LLM 调用次数（事件流/审计用）。
-    pub fn llm_calls_made(&self) -> u64 {
-        self.llm_calls.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
     /// 域表连接池（与队列同池）。
     pub fn pool(&self) -> &sqlx::PgPool {
         self.queue.pool()

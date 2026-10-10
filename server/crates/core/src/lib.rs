@@ -26,7 +26,7 @@ pub mod wiki_docs;
 
 pub use assets::{
     ASSET_KINDS, AssetDetailDto, AssetDto, AssetError, AssetKindDto, AssetService, AssetUsageRow,
-    kind_label, supported_kinds,
+    supported_kinds,
 };
 pub use auth::{Principal, SCOPES};
 pub use codegraph::{CgBridge, CgError, CgProjectDto, QueryKind};

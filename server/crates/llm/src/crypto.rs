@@ -3,7 +3,6 @@
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use rand::RngCore;
-use sha2::{Digest, Sha256};
 
 use crate::types::LlmError;
 
@@ -70,13 +69,6 @@ impl KeyCipher {
     }
 }
 
-/// sha256 hex（API key / 会话 token 哈希共用）。
-pub fn sha256_hex(input: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    hex_encode(&hasher.finalize())
-}
-
 fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
     if !hex.len().is_multiple_of(2) {
         return None;
@@ -85,10 +77,6 @@ fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
         .collect()
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]

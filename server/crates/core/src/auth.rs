@@ -5,6 +5,15 @@
 
 use uuid::Uuid;
 
+/// SHA-256 hex 摘要（API key / 会话 token 哈希单一真源——P019-M6：api 两份本地拷贝与
+/// llm::crypto 孤儿导出收编至此）。
+pub fn sha256_hex(input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(input.as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// 全部合法 scope（13 个；study 学习路线图 P007 新增 2026-10-02）。
 pub const SCOPES: [&str; 13] = [
     "memory",

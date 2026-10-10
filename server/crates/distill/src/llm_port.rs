@@ -230,15 +230,12 @@ pub fn embedding_dimensions() -> u32 {
 
 pub struct GatewayLlm {
     registry: ProviderRegistry,
-    /// 单 job token 预算（熔断）
-    pub budget_tokens: i64,
 }
 
 impl GatewayLlm {
     pub fn new(pool: sqlx::PgPool, cipher: KeyCipher) -> Self {
         Self {
             registry: ProviderRegistry::new(pool, cipher),
-            budget_tokens: 400_000,
         }
     }
 
