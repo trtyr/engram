@@ -67,15 +67,16 @@
 - change_credentials 改密+吊销其他会话同事务（_conn 变体穿线）— features/session-revocation.md #3 + features/auth-platform-domain.md #3 ✅
 - 回归：memory_concurrency_test 2/2 / todos_test 7/7 / tickets_test 8/8 / job_lifecycle armed 抢占 / study_api 5/5 / credentials_test 3/3 / cg_test client_upload
 
-## T006 检索质量族
+## T006 检索质量族 ✅ done（M5）
 
-- wiki-engine search_opts 判空短路误杀向量通道（对照 core 修复补齐）— features/search-crate.md #2
-- rerank 索引校验补查重（wiki-engine apply_llm_rerank + mcp search_all 两处）— features/search-crate.md #3 + features/llm-platform-domain.md #2
-- search_all rerank 候选无排序取前 10 — features/llm-platform-domain.md #3
-- QUERY_LOG_LOW_SCORE=0.017 阈值高于单通道 rank-1 满分 — features/search-crate.md #5
-- wiki 检索 limit 负值守卫 — features/search-crate.md #4
-- tickets list 负 limit 无守卫（对照 todos 同款补齐）— features/core-crate.md #1
-- Circles graph 悬空引用（edges/relations 未过滤归档实体）— features/circles-domain.md #2
+- wiki-engine search_opts 判空短路误杀向量通道 — features/search-crate.md #2 ✅（对齐 core K7：无 token 且无 qv 才短路）
+- rerank 索引校验补查重（wiki-engine apply_llm_rerank + mcp search_all 两处）— features/search-crate.md #3 + features/llm-platform-domain.md #2 ✅（wiki-engine HashSet 查重；mcp 复用 unified::is_valid_order）
+- search_all rerank 候选无排序取前 10 — features/llm-platform-domain.md #3 ✅（读真实 score 降序后再取 top-10）
+- QUERY_LOG_LOW_SCORE=0.017 阈值高于单通道 rank-1 满分 — features/search-crate.md #5 ✅（重校准 0.016 < 1/61≈0.01639）
+- wiki 检索 limit 负值守卫 — features/search-crate.md #4 ✅
+- tickets list 负 limit 无守卫（对照 todos 同款补齐）— features/core-crate.md #1 ✅
+- Circles graph 悬空引用（edges/relations 未过滤归档实体）— features/circles-domain.md #2 ✅（JOIN 活体过滤对齐 nodes）
+- 回归：entity_test graph_edges_and_relations_filter_archived_endpoints / tickets_test negative_limit / wiki_test search_negative_limit / unified rerank_order_guard 单测（既有）
 
 ## T007 死代码/残余清理批（一批清）
 

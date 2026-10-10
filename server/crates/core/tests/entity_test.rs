@@ -34,6 +34,36 @@ async fn insert_atom(pool: &PgPool, content: &str) -> Uuid {
     id
 }
 
+/// P019-M5：图边/关系过滤已归档端点——合并后不残留悬空引用（对齐 nodes 过滤）
+#[tokio::test]
+async fn graph_edges_and_relations_filter_archived_endpoints() {
+    let (pool, svc, _container) = setup().await;
+    let loser = svc.create_entity("输家", "person", "").await.unwrap();
+    let winner = svc.create_entity("赢家", "person", "").await.unwrap();
+
+    // 共现：同原子挂双方 → 一条边
+    let a1 = insert_atom(&pool, "双方共现").await;
+    svc.attach_atom(loser.id, a1).await.unwrap();
+    svc.attach_atom(winner.id, a1).await.unwrap();
+    svc.create_relation(loser.id, winner.id, "member_of", "manual")
+        .await
+        .unwrap();
+
+    let graph = svc.entity_graph().await.unwrap();
+    assert_eq!(graph.edges.len(), 1, "合并前应有共现边");
+
+    // 合并 → loser 墓碑化，边与关系必须消失（旧实现 nodes 过滤而 edges/relations 不过滤）
+    svc.merge_entities(loser.id, winner.id).await.unwrap();
+    let graph = svc.entity_graph().await.unwrap();
+    assert!(
+        graph.edges.is_empty(),
+        "合并后共现边不得残留: {:?}",
+        graph.edges
+    );
+    let rels = svc.list_relations(None).await.unwrap();
+    assert!(rels.is_empty(), "合并后关系不得残留: {rels:?}");
+}
+
 #[tokio::test]
 async fn entity_lifecycle_create_attach_graph_merge() {
     let (pool, svc, _container) = setup().await;

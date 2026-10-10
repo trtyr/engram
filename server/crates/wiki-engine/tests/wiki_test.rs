@@ -1430,6 +1430,14 @@ async fn write_page_auto_ingest_enqueues_source() {
     assert_eq!(v2["state"], "in_flight");
 }
 
+/// P019-M5：负 limit 400（对照 todos 同款）——旧实现 min(50) 无下界，负数穿透 SQL LIMIT 报 5xx
+#[tokio::test]
+async fn search_negative_limit_is_rejected() {
+    let (_pool, svc, _handle, _pg, lib) = setup(vec![]).await;
+    let e = svc.search(lib, "任意词", -3).await.unwrap_err();
+    assert!(e.to_string().contains("limit 不能为负"), "{e}");
+}
+
 /// EN-63：tsv 口径三断言——① backfill 重刷不碰系统页（index/log/overview 不参与 FTS，
 /// 否则 overview 关键词汤霸榜——audit 实证回归）；② slug 复合词归一后可命中
 /// （搜 ai-passthrough-principle / 「透传」）；③ import_wiki_page 导入页 tsv 同口径。

@@ -111,9 +111,10 @@ pub struct QueryGapDto {
     pub last_queried_at: DateTime<Utc>,
 }
 
-/// 批次② 查询日志低分阈值：≈单通道首位 RRF 水平（1/61≈0.0164）。
-/// top_score 低于它 = 只靠单通道勉强命中，召回质量存疑。
-const QUERY_LOG_LOW_SCORE: f64 = 0.017;
+/// 批次② 查询日志低分阈值。P019-M5 重校准：权重路由（BONUS_SCALE=0.0）后单通道
+/// rank-1 理论分 = 1/61 ≈ 0.01639，旧阈值 0.017 高于它——合法的单通道首位命中全部被误记
+/// low_calls，污染 query_gaps。降到 0.016：单通道 rank-1 不再误标，rank≥2 的勉强命中仍能被逮住。
+const QUERY_LOG_LOW_SCORE: f64 = 0.016;
 
 /// 审计缺陷④（2026-09-20）：存量页向量回填——embedding IS NULL 的非系统页批量补嵌。
 /// 织入尾部（自愈）与 repair job（手动触发）调用；cap 50/次防热路径长尾。返回补嵌页数。

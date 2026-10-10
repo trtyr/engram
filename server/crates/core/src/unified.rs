@@ -303,7 +303,7 @@ fn merge_domain_hits(
 /// R6：LLM 精排——top 候选交模型输出目标顺序（越界/重复/长度不符/失败一律降级原序）。
 /// P018-T003：order 含重复索引时旧守卫仍放行，重复槽位 take() 得 None，
 /// 最高相关候选之一被静默降位——守卫必须同时查重。
-fn is_valid_order(order: &[usize], top: usize) -> bool {
+pub fn is_valid_order(order: &[usize], top: usize) -> bool {
     if order.len() != top {
         return false;
     }

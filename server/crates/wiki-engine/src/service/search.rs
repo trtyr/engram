@@ -127,15 +127,17 @@ impl WikiService {
         limit: i64,
         rerank: bool,
     ) -> Result<Vec<WikiPageDto>, WikiError> {
-        // K7：单字/纯标点无 token → 短路空结果（不再空跑 to_tsquery）
-        if !engram_search::tokenize::has_query_tokens(query) {
-            return Ok(vec![]);
-        }
         // 规模化 task-3：查询类型路由——零成本规则分类决定 FTS/向量通道权重
         let kind = classify_query(query);
         let (w_fts, w_vec) = kind.rrf_weights();
         tracing::info!(kind = ?kind, query = %query, w_fts, w_vec, "wiki 检索路由");
         let tsq = tsv_query_smart_wiki(query, 3);
+        // P019-M5：负 limit 守卫（对照 todos 同款）——旧实现 min(50) 无下界，负数穿透到 SQL LIMIT 报 500
+        if limit < 0 {
+            return Err(WikiError::BadRequest(format!(
+                "limit 不能为负（收到 {limit}）"
+            )));
+        }
         let limit = limit.min(50);
 
         // W2：查询向量（无 provider / 嵌入失败 → None → 纯 FTS）；L6：经记账门面
@@ -150,6 +152,12 @@ impl WikiService {
             .await
             .ok()
             .and_then(|r| r.embeddings.first().cloned());
+
+        // K7（P019-M5 对齐 core wiki_docs 同款修法）：无 token 且无查询向量才短路——
+        // 旧序先短路再算 qv，单 CJK/单字母有语义嵌入却被误杀返回空
+        if qv.is_none() && !engram_search::tokenize::has_query_tokens(query) {
+            return Ok(vec![]);
+        }
 
         // 批次⑤：初召回扩到 2×limit（给图扩展留空间），召回后沿双链 2-hop 带衰减重排
         let fetch_n = (limit * 2).min(100);
@@ -502,7 +510,14 @@ async fn apply_llm_rerank(llm: &crate::service::LlmRef, query: &str, pages: &mut
                 })
                 .unwrap_or_default();
             let n = top.len();
-            if idx.len() == n && idx.iter().all(|&i| i < n) {
+            // P019-M5：补重复索引校验（旧实现 [0,0,1,…] 通过长度+越界检查，重复候选且回填丢行）
+            let no_dup = idx
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == n;
+            if idx.len() == n && no_dup && idx.iter().all(|&i| i < n) {
                 let mut reordered: Vec<WikiPageDto> = idx.iter().map(|&i| top[i].clone()).collect();
                 if pages.len() > n {
                     reordered.extend(pages.drain(n..));

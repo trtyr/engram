@@ -274,6 +274,17 @@ async fn export_all_pages_past_single_page_limit() {
     assert_eq!(ids.len(), 501, "导出不得重复");
 }
 
+/// P019-M5：负 limit 400（对照 todos 同款）——旧实现穿透到 SQL LIMIT 报 5xx
+#[tokio::test]
+async fn negative_limit_is_rejected() {
+    let (_pool, svc, pid, _pg) = setup().await;
+    let e = svc
+        .list(None, None, Some(pid), None, None, -1)
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("limit 不能为负"), "{e}");
+}
+
 /// P019-M4：非法状态跳转 400——open→verified 跳级拒绝；archived 终态不可出；
 /// 合法链 open→resolved→archived 走通（0041 自述「状态迁移」实装）。
 #[tokio::test]

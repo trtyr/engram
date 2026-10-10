@@ -10,9 +10,9 @@ pub struct SearchAllParams {
         description = "检索词。对 key 有 scope 的域并发检索（memory/wiki/todos/projects）。"
     )]
     pub query: String,
-    /// R6：可选 LLM 精排（默认关）——开时五域命中合并 top-10 交 LLM 重排，响应附 reranked 视图
+    /// R6：可选 LLM 精排（默认关）——开时四域命中合并 top-10 交 LLM 重排，响应附 reranked 视图
     #[schemars(
-        description = "可选：LLM 精排（默认关）。开时五域命中合并 top-10 交 LLM 重排，响应附 reranked 视图（LLM 失败降级原分组）。"
+        description = "可选：LLM 精排（默认关）。开时四域命中合并 top-10 交 LLM 重排，响应附 reranked 视图（LLM 失败降级原分组）。"
     )]
     pub rerank: Option<bool>,
     /// 每域返回条数（默认 3）
@@ -209,7 +209,8 @@ impl EngramMcpServer {
                                 id: uuid::Uuid::now_v7(),
                                 title,
                                 snippet,
-                                score: 0.0,
+                                // P019-M5：读真实分数（旧实现恒 0.0——rerank 候选集成了拼接顺序，「top-10」实为「任意 10」）
+                                score: it.get("score").and_then(|x| x.as_f64()).unwrap_or(0.0),
                                 extra: serde_json::json!({}),
                             });
                         }
@@ -233,27 +234,39 @@ impl EngramMcpServer {
                 push_arr("projects", v, &mut candidates);
             }
 
+            // P019-M5：候选按分数降序后再取前 10——「top-10」名副其实
+            candidates.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             let top = candidates.len().min(10);
             if top > 1 {
                 match engram_core::unified::rerank_hits(&self.state.llm(), &q, &candidates[..top])
                     .await
                 {
                     Ok(order) => {
-                        let reranked: Vec<serde_json::Value> = order
-                            .into_iter()
-                            .filter_map(|i| candidates.get(i))
-                            .map(|h| {
-                                json!({
-                                    "domain": h.domain,
-                                    "title": h.title,
-                                    "snippet": h.snippet,
+                        // P019-M5：order 合法性校验（对齐 unified.rs P018-T003：长度+越界+查重），
+                        // 不合法丢弃 reranked 视图（out 里只剩分组摘要）
+                        if engram_core::unified::is_valid_order(&order, top) {
+                            let reranked: Vec<serde_json::Value> = order
+                                .into_iter()
+                                .filter_map(|i| candidates.get(i))
+                                .map(|h| {
+                                    json!({
+                                        "domain": h.domain,
+                                        "title": h.title,
+                                        "snippet": h.snippet,
+                                    })
                                 })
-                            })
-                            .collect();
-                        out["reranked"] = json!(reranked);
-                        out["note"] = json!(
-                            "各域 top-k 摘要 + reranked=LLM 精排序（跨域）；精确检索用单域工具"
-                        );
+                                .collect();
+                            out["reranked"] = json!(reranked);
+                            out["note"] = json!(
+                                "各域 top-k 摘要 + reranked=LLM 精排序（跨域）；精确检索用单域工具"
+                            );
+                        } else {
+                            tracing::warn!("search_all rerank：order 长度/越界/重复，降级分组摘要");
+                        }
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "search_all rerank 失败——仅返回分组摘要");

@@ -208,6 +208,12 @@ impl TicketService {
         cursor: Option<&str>,
         limit: i64,
     ) -> Result<(Vec<TicketDto>, i64), TicketError> {
+        // P019-M5：负 limit 守卫（对照 todos 同款）——旧实现穿透到 SQL LIMIT 报 5xx
+        if limit < 0 {
+            return Err(TicketError::BadRequest(format!(
+                "limit 不能为负（收到 {limit}）"
+            )));
+        }
         if let Some(s) = status
             && !STATUSES.contains(&s)
         {
