@@ -500,7 +500,6 @@ function PageReader({
   opening,
   openErr,
   hasPages,
-  libSlug,
   onSaved,
   onPageUpdated,
   onNavigateSlug,
