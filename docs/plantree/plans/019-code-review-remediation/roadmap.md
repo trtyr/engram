@@ -93,6 +93,7 @@
 - errors/config 两宏观维补跑完成后通读排查（**2026-10-09 已完成，下两条为新增**）
 - 错误注册表收编未完成：From<域错误>→EngramError 桥仅 WikiDocumentError 一批，Memory/Todo/Ticket 等域错误经 String 传出口丢结构化码（P006 Deferred 同源，并入该线跟进）— global/errors.md #9；LLM 用量记账失败仅 WARN 无监控信号 — global/errors.md #8；read_stats 连环吞错（.ok()?）静默降级 — global/errors.md #6（并入 T002 cg 线复核）
 - config 面：散点 env 旋钮（≥8 个）绕过 Config 无总表、.env.example 死参数 AGENT_MEMORY_EMBEDDING_DIMENSIONS（P018 已登记待 docs-sync）+ 未收录散点变量、DSN 变量名三方不一、config.rs 过时 WARN 文案 — global/config.md #7-#11
+- M1 审计遗留：`maintain_agent_merges_and_edits_persona_doc` 删了两条 job progress 回执断言（complete 守卫改造时同步删除，DB 效果断言全保留）——补记原因或恢复断言
 - wiki-engine lint_deep 汇总明细被丢弃（report 只有计数，与模块文档承诺不符）— features/wiki-engine-crate.md #3
 - promote.rs 第⑤步 mark_doc_promoted 失败留半态且幂等闸门挡死重试补写 — features/core-crate.md #2
 
